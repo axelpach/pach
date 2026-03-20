@@ -25,7 +25,7 @@ export function CTASlide({ width, height, theme }: { width: number; height: numb
 
         {/* Subtitle */}
         <p className="text-[24px] text-white/50 text-center mt-4 max-w-[700px] leading-relaxed">
-          Configuramos tu primer proyecto en menos de una semana. Sin costo por 1 mes.
+          Configuramos tu primer proyecto en menos de una semana. Sin costo por 60 días.
         </p>
 
         {/* CTA button */}

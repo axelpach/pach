@@ -27,7 +27,7 @@ export function PricingSlide({ width, height, theme }: { width: number; height: 
       <div className="relative z-10 px-20 pt-8">
         <h2 className={`text-[60px] font-bold leading-[1.08] tracking-tight ${theme.textPrimary}`}>
           Piloto sin costo{' '}
-          <span style={{ color: theme.accent }}>por 1 mes.</span>
+          <span style={{ color: theme.accent }}>por 60 días.</span>
         </h2>
         <p className="text-[26px] text-white/50 leading-relaxed mt-4 max-w-[70%]">
           Prueba Ardia con un proyecto real antes de comprometerte.
@@ -43,7 +43,7 @@ export function PricingSlide({ width, height, theme }: { width: number; height: 
               <div className="w-12 h-12 rounded-xl bg-emerald-400/10 border border-emerald-400/20 flex items-center justify-center">
                 <Gift size={24} className="text-emerald-400" />
               </div>
-              <div className={`text-[28px] font-semibold ${theme.textPrimary}`}>Piloto gratuito — 1 mes</div>
+              <div className={`text-[28px] font-semibold ${theme.textPrimary}`}>Piloto gratuito — 60 días</div>
             </div>
             <div className="space-y-4">
               {pilotFeatures.map((item, i) => (

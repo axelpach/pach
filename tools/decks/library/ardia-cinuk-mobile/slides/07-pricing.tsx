@@ -27,7 +27,7 @@ export function PricingSlide({ width, height, theme }: { width: number; height: 
         {/* Heading */}
         <h1 className="text-[52px] font-bold tracking-tight leading-tight text-white m-0">
           Piloto sin costo{'\n'}
-          <span style={{ color: theme.accent }}>por 1 mes.</span>
+          <span style={{ color: theme.accent }}>por 60 días.</span>
         </h1>
 
         {/* Subtitle */}
@@ -40,7 +40,7 @@ export function PricingSlide({ width, height, theme }: { width: number; height: 
           <div className="flex items-center gap-3 mb-5">
             <Gift size={28} color="#22c55e" />
             <p className="text-[24px] font-bold text-emerald-400 m-0">
-              Piloto gratuito — 1 mes
+              Piloto gratuito — 60 días
             </p>
           </div>
           <div className="flex flex-col gap-3">
