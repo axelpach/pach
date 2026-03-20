@@ -5,11 +5,13 @@ import { getTheme } from '@decks/engine/themes'
 // Deck registry — maps slugs to their slide components + config.
 // Later this will be dynamic (filesystem scan or DB lookup).
 import { slides, config } from '@decks/library/ardia-one-pager/deck'
-import { slides as cinukSlides, config as cinukConfig } from '@decks/library/ardia-cinuk/deck'
+import { slides as cinukDesktopSlides, config as cinukDesktopConfig } from '@decks/library/ardia-cinuk-desktop/deck'
+import { slides as cinukMobileSlides, config as cinukMobileConfig } from '@decks/library/ardia-cinuk-mobile/deck'
 
 const deckRegistry: Record<string, { slides: typeof slides; config: typeof config }> = {
   'ardia-one-pager': { slides, config },
-  'ardia-cinuk': { slides: cinukSlides, config: cinukConfig },
+  'ardia-cinuk-desktop': { slides: cinukDesktopSlides, config: cinukDesktopConfig },
+  'ardia-cinuk-mobile': { slides: cinukMobileSlides, config: cinukMobileConfig },
 }
 
 export default function DeckViewer() {

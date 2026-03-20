@@ -1,7 +1,61 @@
-import { useCallback, useRef } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { Download, FileText } from 'lucide-react'
 import { exportAsPdf, exportAsPng } from './export'
 import type { Theme } from './types'
+
+/**
+ * ScaledSlide — renders the slide at full pixel dimensions but scales it down
+ * visually to fit the available width. The DOM stays at full size so exports
+ * capture at native resolution.
+ */
+import { forwardRef } from 'react'
+
+const ScaledSlide = forwardRef<
+  HTMLDivElement,
+  { width: number; height: number; children: React.ReactNode }
+>(function ScaledSlide({ width, height, children }, ref) {
+  const containerRef = useRef<HTMLDivElement>(null)
+  const [scale, setScale] = useState(1)
+
+  useEffect(() => {
+    const container = containerRef.current
+    if (!container) return
+
+    const observer = new ResizeObserver((entries) => {
+      for (const entry of entries) {
+        const availableWidth = entry.contentRect.width
+        setScale(Math.min(1, availableWidth / width))
+      }
+    })
+
+    observer.observe(container)
+    return () => observer.disconnect()
+  }, [width])
+
+  return (
+    <div ref={containerRef} className="w-full">
+      <div
+        className="border border-white/[0.08] rounded-xl overflow-hidden origin-top-left"
+        style={{
+          width: width * scale,
+          height: height * scale,
+        }}
+      >
+        <div
+          ref={ref}
+          style={{
+            width,
+            height,
+            transform: `scale(${scale})`,
+            transformOrigin: 'top left',
+          }}
+        >
+          {children}
+        </div>
+      </div>
+    </div>
+  )
+})
 
 /**
  * SlideRenderer — renders an array of slide components with export controls.
@@ -46,7 +100,7 @@ export function SlideRenderer({
   }, [filename, width, height, theme.bg])
 
   return (
-    <div className="min-h-screen bg-[#050505] text-white">
+    <div className="min-h-screen bg-[#050505] text-white overflow-y-auto overflow-x-hidden">
       {/* Header */}
       <div className="sticky top-0 z-50 bg-[#050505]/90 backdrop-blur-sm border-b border-white/[0.08] px-8 py-4">
         <div className="flex items-center justify-between max-w-[1200px] mx-auto">
@@ -76,20 +130,16 @@ export function SlideRenderer({
       </div>
 
       {/* Slides preview */}
-      <div className="max-w-[1200px] mx-auto py-12 px-8 space-y-8">
+      <div className="py-12 px-8 space-y-8">
         {slides.map((SlideComponent, i) => (
-          <div
+          <ScaledSlide
             key={i}
-            className="overflow-auto border border-white/[0.08] rounded-xl w-fit"
-            style={{ maxWidth: '100%' }}
+            width={width}
+            height={height}
+            ref={(el) => { slideRefs.current[i] = el }}
           >
-            <div
-              ref={(el) => { slideRefs.current[i] = el }}
-              style={{ width, height, flexShrink: 0 }}
-            >
-              <SlideComponent width={width} height={height} theme={theme} />
-            </div>
-          </div>
+            <SlideComponent width={width} height={height} theme={theme} />
+          </ScaledSlide>
         ))}
       </div>
     </div>

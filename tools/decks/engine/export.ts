@@ -3,6 +3,29 @@ import { jsPDF } from 'jspdf'
 import type { ExportOptions } from './types'
 
 /**
+ * Temporarily reset CSS transform on an element for capture,
+ * then restore it. This is needed because slides are displayed
+ * with transform: scale() for preview but must be captured at
+ * full native resolution.
+ */
+async function captureAtFullSize<T>(
+  el: HTMLElement,
+  captureFn: (el: HTMLElement) => Promise<T>
+): Promise<T> {
+  const savedTransform = el.style.transform
+  const savedTransformOrigin = el.style.transformOrigin
+  el.style.transform = 'none'
+  el.style.transformOrigin = ''
+
+  try {
+    return await captureFn(el)
+  } finally {
+    el.style.transform = savedTransform
+    el.style.transformOrigin = savedTransformOrigin
+  }
+}
+
+/**
  * Export slide elements as PNG files (one per slide).
  * Triggers browser downloads.
  */
@@ -22,12 +45,9 @@ export async function exportAsPng(
     const el = elements[i]
     if (!el) continue
 
-    const dataUrl = await toPng(el, {
-      width,
-      height,
-      pixelRatio,
-      backgroundColor: bg,
-    })
+    const dataUrl = await captureAtFullSize(el, (e) =>
+      toPng(e, { width, height, pixelRatio, backgroundColor: bg })
+    )
 
     const link = document.createElement('a')
     link.download = elements.length === 1
@@ -79,18 +99,14 @@ export async function exportAsPdf(
 
     if (i > 0) pdf.addPage([width, height], width > height ? 'landscape' : 'portrait')
 
-    const dataUrl = await toJpeg(el, {
-      width,
-      height,
-      pixelRatio,
-      quality,
-      backgroundColor: bg,
-    })
+    const dataUrl = await captureAtFullSize(el, (e) =>
+      toJpeg(e, { width, height, pixelRatio, quality, backgroundColor: bg })
+    )
 
     pdf.addImage(dataUrl, 'JPEG', 0, 0, width, height)
   }
 
-  // Add clickable links
+  // Add clickable links — also need to temporarily un-scale for correct coordinates
   for (const link of links) {
     const pageEl = elements[link.page]
     if (!pageEl) continue
@@ -98,6 +114,8 @@ export async function exportAsPdf(
     const targetEl = pageEl.querySelector(link.selector)
     if (!targetEl) continue
 
+    // Link coordinates are based on the native dimensions, not scaled
+    // Since we pass width/height explicitly, just compute relative position
     const pageRect = pageEl.getBoundingClientRect()
     const targetRect = targetEl.getBoundingClientRect()
 

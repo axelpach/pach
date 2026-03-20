@@ -58,7 +58,7 @@ export default function App() {
   return (
     <div className="flex min-h-screen bg-[#050505] text-white">
       <Sidebar />
-      <div className="flex-1 flex flex-col">
+      <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
         <Routes>
           <Route path="/" element={<Dashboard />} />
           <Route path="/decks" element={<Decks />} />

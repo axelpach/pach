@@ -9,23 +9,17 @@ import { PricingSlide } from './slides/07-pricing'
 import { CTASlide } from './slides/08-cta'
 
 export const config = {
-  title: 'Ardia × CINUK',
+  title: 'Ardia × CINUK (Desktop)',
   project: 'ardia',
-  description: 'Propuesta de cobranza automatizada para CINUK',
+  description: 'Propuesta de cobranza automatizada para CINUK — desktop',
   theme: 'dark',
   dimensions: { width: 1920, height: 1080 },
   ctaLinks: [
-    { selector: '[data-cta="true"]', url: 'https://calendly.com/axel-ardia/15-min-ardia-demo', page: 8 },
+    { selector: '[data-cta="true"]', url: 'https://calendly.com/axel-ardia/15-min-ardia-demo', page: 7 },
   ],
 }
 
 export const slides: React.ComponentType<{ width: number; height: number; theme: Theme }>[] = [
-  CoverSlide,
-  ProblemSlide,
-  CobranzaEngineSlide,
-  CobranzaDetailSlide,
-  PlatformSlide,
-  ResultsSlide,
-  PricingSlide,
-  CTASlide,
+  CoverSlide, ProblemSlide, CobranzaEngineSlide, CobranzaDetailSlide,
+  PlatformSlide, ResultsSlide, PricingSlide, CTASlide,
 ]
