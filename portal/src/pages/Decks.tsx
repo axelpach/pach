@@ -12,6 +12,15 @@ const decks = [
     dimensions: '1080 x 1528',
     createdAt: '2026-03-20',
   },
+  {
+    slug: 'ardia-cinuk',
+    title: 'Ardia × CINUK',
+    project: 'ardia',
+    description: 'Propuesta de cobranza automatizada para CINUK — 8 slides',
+    slideCount: 8,
+    dimensions: '1920 x 1080',
+    createdAt: '2026-03-20',
+  },
 ]
 
 export default function Decks() {
