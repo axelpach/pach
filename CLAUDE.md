@@ -8,7 +8,16 @@ Pachi is a personal operations platform that uses AI agents and tools to automat
 
 ```
 pachi/
-├── portal/                      # Web UI (Vite + React 19 + Tailwind)
+├── portal/                      # Web UI (Vite + React 19 + Tailwind + Zero)
+├── server/                      # Backend API (Express + TypeScript)
+│   ├── src/
+│   │   ├── app.ts               # Express app, port 3002
+│   │   ├── db.ts                # Drizzle DB connection
+│   │   └── zero/
+│   │       ├── push-route.ts    # POST /zero/push — mutation endpoint
+│   │       └── mutators.ts      # Server-side CRM mutators
+│   ├── schema.ts                # Zero schema (server copy, keep in sync with portal)
+│   └── drizzle-zero.config.ts   # Schema generation config
 ├── tools/
 │   └── decks/
 │       ├── assets/              # Shared assets (logos, icons) used across decks
@@ -22,20 +31,114 @@ pachi/
 ├── projects/                    # Project contexts (NOT source code)
 │   └── ardia/
 │       └── context.md           # Value prop, ICP, pain points, brand, tone
-├── db/                          # Postgres via Drizzle ORM
+├── db/                          # Drizzle schema (shared between server + portal)
+│   ├── schema.ts                # Source of truth for all tables
+│   └── drizzle/                 # Generated migrations
 ├── pachi.config.ts              # Project registry + global config
-└── docker-compose.yml           # Postgres 16 on port 5433
+└── docker-compose.yml           # Postgres 16 on port 5435
 ```
 
 ## Commands
 
 ```bash
-pnpm dev              # Start portal on localhost:5174
-pnpm docker:up        # Start Postgres
+# Full stack startup (run in separate terminals)
+pnpm docker:up        # Start Postgres (port 5435)
+pnpm dev:server       # Start Express API (port 3002)
+pnpm dev:zero         # Start Zero cache server (port 4848)
+pnpm dev              # Start portal (port 5174)
+
+# Database
+pnpm db:generate      # Generate Drizzle migration from schema changes
+pnpm db:migrate       # Apply pending migrations
+pnpm db:studio        # Open Drizzle Studio UI
 pnpm docker:down      # Stop Postgres
-pnpm db:generate      # Generate Drizzle migration
-pnpm db:migrate       # Apply migrations
 ```
+
+## Database
+
+- **Postgres 16** on `localhost:5435` (different from Ardia on 5433)
+- **Connection string:** `postgres://pachi:pachi@localhost:5435/pachi`
+- **Drizzle ORM** for migrations + schema
+- **Logical replication** enabled for Zero sync
+
+### CRM Tables
+
+| Table | Purpose |
+|-------|---------|
+| `companies` | Companies in the pipeline |
+| `contacts` | People at companies |
+| `deals` | Pipeline deals with stages |
+| `crm_notes` | Notes on deals/contacts (manual, call, email, whatsapp) |
+| `decks` | Deck metadata (for future portal listing from DB) |
+
+### Deal Stages
+
+`prospecto` → `contactado` → `propuesta` → `negociacion` → `cerrado_ganado` / `cerrado_perdido`
+
+## Real-time Data (Rocicorp Zero)
+
+Zero provides instant sync between Postgres and the portal UI.
+
+### Architecture
+
+```
+Portal (React)  ←──  Zero cache (port 4848)  ←──  Postgres (port 5435)
+       │                                                ↑
+       └── mutations → POST /zero/push (port 3002) ────┘
+```
+
+### Zero Schema
+
+Defined in two places (keep in sync):
+- **Portal:** `portal/src/zero-schema.ts` — used by `ZeroProvider` + `useQuery`
+- **Server:** `server/schema.ts` — used by `PushProcessor`
+
+Column type mapping (Postgres → Zero):
+- `uuid` → `string()`
+- `text` → `string()`
+- `timestamp` → `number()` (milliseconds via `Date.now()`)
+- `integer` → `number()`
+- `nullable` → `.optional()`
+- snake_case columns → `.from('snake_case')`
+
+### Mutators
+
+Defined in two places (keep in sync):
+- **Portal:** `portal/src/mutators/index.ts` — optimistic client-side mutations
+- **Server:** `server/src/zero/mutators.ts` — authoritative server-side mutations
+
+Pattern:
+```typescript
+const z = useZero<Schema, Mutators>()
+// Create
+z.mutate.deals.create({ id: crypto.randomUUID(), title: 'New deal', companyId: '...' })
+// Update
+z.mutate.deals.update({ id: '...', stage: 'propuesta' })
+// Delete
+z.mutate.deals.delete({ id: '...' })
+```
+
+### Querying Data
+
+```typescript
+import { useZero } from '@rocicorp/zero/react'
+import { useQuery } from '@rocicorp/zero/react'
+import type { Schema } from './zero-schema'
+import type { Mutators } from './mutators'
+
+const z = useZero<Schema, Mutators>()
+const [deals] = useQuery(z.query.deals.where('stage', 'propuesta'))
+const [companies] = useQuery(z.query.companies.orderBy('name', 'asc'))
+```
+
+### Adding a New Table
+
+1. Add table to `db/schema.ts` (Drizzle)
+2. Run `pnpm db:generate` + `pnpm db:migrate`
+3. Add table to `portal/src/zero-schema.ts` (Zero DSL)
+4. Add table to `server/schema.ts` (Zero DSL, same as portal)
+5. Add mutators to both `portal/src/mutators/index.ts` and `server/src/zero/mutators.ts`
+6. Restart Zero dev server
 
 ## Creating a New Deck
 
@@ -145,6 +248,7 @@ export const slides: React.ComponentType<{ width: number; height: number; theme:
 - **Projects have context + code access** — `projects/ardia/context.md` has high-level context (playbook, ICP, tone). For deeper detail, read the actual codebase via the `local` path in `pachi.config.ts` (e.g. `~/Desktop/Developer/ardia/`). Always check context.md first, then dive into the codebase for specifics like copy, UI patterns, feature details, or mockup inspiration
 - **Themes are reusable** — use `theme.accent`, `theme.textPrimary`, `theme.cardBg` etc. instead of hardcoding colors, so decks can be re-themed for different projects
 - **Primitives are building blocks** — use them for standard layouts, drop down to `ContentSlide`/`SlideWrapper` for custom ones
+- **Zero for reads, REST for operations** — Use Zero sync for data displayed in the portal (CRM, content). Keep heavy one-off operations (imports, PDF export, integrations) as plain server routes.
 
 ## Naming Conventions
 
@@ -157,6 +261,8 @@ export const slides: React.ComponentType<{ width: number; height: number; theme:
 | Layer | Technology |
 |-------|------------|
 | Portal | Vite + React 19 + React Router 7 + Tailwind |
+| Server | Express + TypeScript |
+| Real-time sync | Rocicorp Zero |
 | DB | PostgreSQL 16 + Drizzle ORM |
 | Deck export | html-to-image + jsPDF |
 | Icons | Lucide React |

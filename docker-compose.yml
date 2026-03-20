@@ -4,11 +4,19 @@ services:
     container_name: pachi-postgres
     restart: unless-stopped
     ports:
-      - '5433:5432'
+      - '5435:5432'
     environment:
       POSTGRES_USER: pachi
       POSTGRES_PASSWORD: pachi
       POSTGRES_DB: pachi
+    command:
+      - postgres
+      - -c
+      - wal_level=logical
+      - -c
+      - max_wal_senders=10
+      - -c
+      - max_replication_slots=10
     volumes:
       - pachi_pgdata:/var/lib/postgresql/data
 

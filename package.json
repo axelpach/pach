@@ -4,6 +4,8 @@
   "version": "0.1.0",
   "scripts": {
     "dev": "pnpm --filter portal dev",
+    "dev:server": "pnpm --filter server dev",
+    "dev:zero": "pnpm --filter server dev:zero",
     "build": "pnpm --filter portal build",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",

@@ -22,7 +22,7 @@ export const projects: Record<string, ProjectConfig> = {
 }
 
 export const config = {
-  databaseUrl: process.env.DATABASE_URL || 'postgres://pachi:pachi@localhost:5433/pachi',
+  databaseUrl: process.env.DATABASE_URL || 'postgres://pachi:pachi@localhost:5435/pachi',
   portal: {
     port: 5174,
   },

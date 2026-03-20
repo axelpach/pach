@@ -1,5 +1,9 @@
 import { Routes, Route, NavLink } from 'react-router-dom'
-import { Presentation, LayoutDashboard } from 'lucide-react'
+import { Presentation, LayoutDashboard, Users } from 'lucide-react'
+import { ZeroProvider } from '@rocicorp/zero/react'
+import { schema } from './zero-schema'
+import { mutators } from './mutators'
+import { config } from './config'
 import Decks from './pages/Decks'
 import DeckViewer from './pages/DeckViewer'
 
@@ -24,6 +28,19 @@ function Sidebar() {
         >
           <LayoutDashboard className="w-4 h-4" />
           Dashboard
+        </NavLink>
+        <NavLink
+          to="/crm"
+          className={({ isActive }) =>
+            `flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors ${
+              isActive
+                ? 'bg-white/[0.08] text-white'
+                : 'text-white/50 hover:text-white hover:bg-white/[0.04]'
+            }`
+          }
+        >
+          <Users className="w-4 h-4" />
+          CRM
         </NavLink>
         <NavLink
           to="/decks"
@@ -54,17 +71,44 @@ function Dashboard() {
   )
 }
 
-export default function App() {
+function CRMPlaceholder() {
+  return (
+    <div className="flex-1 flex items-center justify-center">
+      <div className="text-center">
+        <Users className="w-12 h-12 text-white/20 mx-auto mb-4" />
+        <h2 className="text-xl font-bold text-white mb-2">CRM</h2>
+        <p className="text-white/40 text-sm">Coming soon — companies, contacts, and deals.</p>
+      </div>
+    </div>
+  )
+}
+
+function AppShell() {
   return (
     <div className="flex min-h-screen bg-[#050505] text-white">
       <Sidebar />
       <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
         <Routes>
           <Route path="/" element={<Dashboard />} />
+          <Route path="/crm/*" element={<CRMPlaceholder />} />
           <Route path="/decks" element={<Decks />} />
           <Route path="/decks/:slug" element={<DeckViewer />} />
         </Routes>
       </div>
     </div>
+  )
+}
+
+export default function App() {
+  return (
+    <ZeroProvider
+      userID="pachi-user"
+      server={config.zeroServerUrl}
+      schema={schema}
+      mutators={mutators}
+      mutateURL={`${config.apiUrl}/zero/push`}
+    >
+      <AppShell />
+    </ZeroProvider>
   )
 }
