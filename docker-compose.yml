@@ -1,0 +1,16 @@
+services:
+  postgres:
+    image: postgres:16
+    container_name: pachi-postgres
+    restart: unless-stopped
+    ports:
+      - '5433:5432'
+    environment:
+      POSTGRES_USER: pachi
+      POSTGRES_PASSWORD: pachi
+      POSTGRES_DB: pachi
+    volumes:
+      - pachi_pgdata:/var/lib/postgresql/data
+
+volumes:
+  pachi_pgdata:
