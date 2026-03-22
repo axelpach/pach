@@ -8,6 +8,48 @@
       "when": 1774050636905,
       "tag": "0000_uneven_iceman",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1774051495619,
+      "tag": "0001_volatile_mikhail_rasputin",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1774310400000,
+      "tag": "0002_rename_crm_tables",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1774310500000,
+      "tag": "0003_rename_crm_boards",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1774310600000,
+      "tag": "0004_add_instagram_phone",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1774310700000,
+      "tag": "0005_add_city",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1774310800000,
+      "tag": "0006_deal_contacts_join",
+      "breakpoints": true
     }
   ]
 }

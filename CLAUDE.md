@@ -44,7 +44,7 @@ pachi/
 # Full stack startup (run in separate terminals)
 pnpm docker:up        # Start Postgres (port 5435)
 pnpm dev:server       # Start Express API (port 3002)
-pnpm dev:zero         # Start Zero cache server (port 4848)
+pnpm dev:zero         # Start Zero cache server (port 4850)
 pnpm dev              # Start portal (port 5174)
 
 # Database
@@ -61,15 +61,21 @@ pnpm docker:down      # Stop Postgres
 - **Drizzle ORM** for migrations + schema
 - **Logical replication** enabled for Zero sync
 
+### Pachi Tables
+
+| Table | Purpose |
+|-------|---------|
+| `companies` | Own companies/ventures (Ardia, etc.) — RFC, razón social, legal docs |
+| `decks` | Deck metadata (for future portal listing from DB) |
+
 ### CRM Tables
 
 | Table | Purpose |
 |-------|---------|
-| `companies` | Companies in the pipeline |
-| `contacts` | People at companies |
-| `deals` | Pipeline deals with stages |
+| `crm_companies` | Prospect/client companies in the pipeline |
+| `crm_contacts` | People at prospect/client companies |
+| `crm_deals` | Pipeline deals with stages |
 | `crm_notes` | Notes on deals/contacts (manual, call, email, whatsapp) |
-| `decks` | Deck metadata (for future portal listing from DB) |
 
 ### Deal Stages
 
@@ -82,7 +88,7 @@ Zero provides instant sync between Postgres and the portal UI.
 ### Architecture
 
 ```
-Portal (React)  ←──  Zero cache (port 4848)  ←──  Postgres (port 5435)
+Portal (React)  ←──  Zero cache (port 4850)  ←──  Postgres (port 5435)
        │                                                ↑
        └── mutations → POST /zero/push (port 3002) ────┘
 ```

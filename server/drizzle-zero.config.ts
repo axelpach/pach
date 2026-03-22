@@ -4,8 +4,10 @@ export default {
   zeroImportPath: '@rocicorp/zero',
   permissions: {
     companies: { row: { select: ['true'], insert: ['true'], update: ['true'], delete: ['true'] } },
-    contacts: { row: { select: ['true'], insert: ['true'], update: ['true'], delete: ['true'] } },
-    deals: { row: { select: ['true'], insert: ['true'], update: ['true'], delete: ['true'] } },
+    crm_companies: { row: { select: ['true'], insert: ['true'], update: ['true'], delete: ['true'] } },
+    crm_contacts: { row: { select: ['true'], insert: ['true'], update: ['true'], delete: ['true'] } },
+    crm_deal_contacts: { row: { select: ['true'], insert: ['true'], update: ['true'], delete: ['true'] } },
+    crm_deals: { row: { select: ['true'], insert: ['true'], update: ['true'], delete: ['true'] } },
     crm_notes: { row: { select: ['true'], insert: ['true'], update: ['true'], delete: ['true'] } },
     decks: { row: { select: ['true'], insert: ['true'], update: ['true'], delete: ['true'] } },
   },
