@@ -1,203 +1,207 @@
-import {
-  Globe,
-  MessageCircle,
-  LayoutDashboard,
-  Send,
-  Timer,
-  MousePointerClick,
-  Calendar,
-  History,
-  CheckCircle2,
-  Building2,
-  Clock,
-} from 'lucide-react'
-import { SlideWrapper, BackgroundGlow, SlideFooter } from '../../../engine/primitives'
 import type { Theme } from '../../../engine/types'
+import ardiaLogo from '../../../assets/ardia-iso-light.png'
 
-function ArdiaLogo({ size = 30 }: { size?: number }) {
+const QM = {
+  bg: '#14110f',
+  fg: '#ede6db',
+  fg2: 'rgba(237, 230, 219, 0.78)',
+  fgDim: 'rgba(237, 230, 219, 0.42)',
+  fgFaint: 'rgba(237, 230, 219, 0.22)',
+  accent: '#E43F3F',
+  hair: 'rgba(237, 230, 219, 0.10)',
+  hair2: 'rgba(237, 230, 219, 0.06)',
+}
+
+const sans = "'Inter Tight', 'Inter', system-ui, sans-serif"
+const serif = "'Instrument Serif', Georgia, serif"
+
+function Brand({ size = 30 }: { size?: number }) {
   return (
-    <div className="flex items-center gap-2">
-      <div
-        className="rounded-lg bg-[#F13D43] flex items-center justify-center font-bold text-white"
-        style={{ width: size, height: size, fontSize: size * 0.45 }}
-      >
-        A
-      </div>
-      <span className="font-bold tracking-[0.2em] text-white" style={{ fontSize: size * 0.5 }}>
-        ARDIA
+    <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+      <img src={ardiaLogo} alt="Ardia" style={{ width: size, height: size, objectFit: 'contain' }} />
+      <span style={{ fontFamily: serif, fontStyle: 'italic', fontSize: size, letterSpacing: '-0.01em', color: QM.fg, lineHeight: 1 }}>
+        Ardia
       </span>
     </div>
   )
 }
 
-function BuyerPortalMockup() {
-  const payments = [
-    { concept: 'Apartado', date: '15 ene 2026', amount: '$35,000', status: 'paid' as const },
-    { concept: 'Anticipo', date: '1 feb 2026', amount: '$250,000', status: 'paid' as const },
-    { concept: 'Mensualidad #1', date: '1 mar 2026', amount: '$45,000', status: 'current' as const },
-    { concept: 'Mensualidad #2', date: '1 abr 2026', amount: '$45,000', status: 'upcoming' as const },
-  ]
-
+function Eyebrow({ children }: { children: React.ReactNode }) {
   return (
-    <div className="rounded-2xl border border-white/[0.08] bg-[#141417] overflow-hidden">
-      <div className="px-6 pt-5 pb-4">
-        <div className="flex items-center gap-3 mb-4">
-          <div className="w-10 h-10 rounded-xl bg-[#F13D43]/15 flex items-center justify-center shrink-0">
-            <Building2 className="w-5 h-5 text-[#F13D43]" />
-          </div>
-          <div>
-            <div className="text-[12px] text-white/40">Desarrollos Alamos</div>
-            <div className="text-[15px] font-semibold text-white">Torre Alamos — A-101</div>
-          </div>
-        </div>
-        <div className="grid grid-cols-3 gap-2.5">
-          {[
-            { label: 'Pagado', value: '$285,000', sub: '12%', color: 'text-emerald-400' },
-            { label: 'Pendiente', value: '$2.1M', sub: '88%', color: 'text-white/30' },
-            { label: 'Proximo', value: '$45,000', sub: '1 mar', color: 'text-white/30' },
-          ].map((card, i) => (
-            <div key={i} className="rounded-lg bg-white/[0.04] border border-white/[0.06] px-3 py-2.5 text-center">
-              <div className="text-[10px] text-white/35 mb-0.5">{card.label}</div>
-              <div className="text-[15px] font-bold text-white">{card.value}</div>
-              <div className={`text-[10px] ${card.color} mt-0.5`}>{card.sub}</div>
-            </div>
-          ))}
-        </div>
+    <span style={{ fontFamily: sans, fontSize: 11, fontWeight: 500, letterSpacing: '0.18em', textTransform: 'uppercase', color: QM.fgDim }}>
+      {children}
+    </span>
+  )
+}
+
+function PaymentRow({ concept, date, amount, status }: { concept: string; date: string; amount: string; status: 'paid' | 'current' | 'upcoming' }) {
+  const isPaid = status === 'paid'
+  const isCurrent = status === 'current'
+  return (
+    <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', padding: '14px 0', borderTop: `1px solid ${QM.hair2}` }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+        <span
+          style={{
+            width: 6,
+            height: 6,
+            display: 'inline-block',
+            background: isPaid ? QM.fgDim : isCurrent ? QM.accent : 'transparent',
+            border: isCurrent || isPaid ? 'none' : `1px solid ${QM.hair}`,
+          }}
+        />
+        <span style={{ fontFamily: sans, fontSize: 14, fontWeight: 400, color: isPaid ? QM.fgDim : QM.fg, letterSpacing: '-0.005em' }}>
+          {concept}
+        </span>
+        <span style={{ fontFamily: sans, fontSize: 12, fontWeight: 300, color: QM.fgFaint }}>
+          {date}
+        </span>
       </div>
-      <div className="px-6 pb-4">
-        {payments.map((p, i) => (
-          <div key={i} className="flex items-center py-3 border-b border-white/[0.04] last:border-b-0">
-            <div className="w-6 h-6 rounded-full flex items-center justify-center shrink-0 mr-3">
-              {p.status === 'paid' ? (
-                <div className="w-6 h-6 rounded-full bg-emerald-500/15 flex items-center justify-center">
-                  <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
-                </div>
-              ) : (
-                <div className="w-6 h-6 rounded-full bg-white/[0.04] flex items-center justify-center">
-                  <Clock className="w-3.5 h-3.5 text-white/25" />
-                </div>
-              )}
-            </div>
-            <div className="flex-1">
-              <span className="text-[13px] font-semibold text-white">{p.concept}</span>
-              <div className="text-[11px] text-white/30">{p.date}</div>
-            </div>
-            <span className="text-[14px] font-semibold text-white">{p.amount}</span>
-          </div>
-        ))}
+      <span style={{ fontFamily: sans, fontSize: 14, fontWeight: 400, color: isPaid ? QM.fgDim : QM.fg, letterSpacing: '-0.01em' }}>
+        {amount}
+      </span>
+    </div>
+  )
+}
+
+function Stat({ label, value, sub, accent }: { label: string; value: string; sub?: string; accent?: boolean }) {
+  return (
+    <div style={{ flex: 1, padding: '20px 24px', borderLeft: `1px solid ${QM.hair2}` }}>
+      <div style={{ fontFamily: sans, fontSize: 10, fontWeight: 500, letterSpacing: '0.18em', textTransform: 'uppercase', color: QM.fgDim, marginBottom: 8 }}>
+        {label}
+      </div>
+      <div style={{ fontFamily: sans, fontSize: 22, fontWeight: 300, color: QM.fg, letterSpacing: '-0.03em', lineHeight: 1 }}>
+        {value}
+      </div>
+      {sub && (
+        <div style={{ fontFamily: serif, fontStyle: 'italic', fontSize: 14, color: accent ? QM.accent : QM.fgDim, marginTop: 6, letterSpacing: '-0.015em' }}>
+          {sub}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function FeatureRow({ label, title, description, accentWord }: { label: string; title: string; description: string; accentWord?: string }) {
+  return (
+    <div style={{ borderTop: `1px solid ${QM.hair}`, padding: '28px 0', display: 'grid', gridTemplateColumns: '160px 1fr', gap: 32 }}>
+      <Eyebrow>{label}</Eyebrow>
+      <div>
+        <h3 style={{ fontFamily: sans, fontSize: 26, fontWeight: 300, color: QM.fg, letterSpacing: '-0.025em', lineHeight: 1.15, margin: 0 }}>
+          {title}
+          {accentWord && (
+            <>
+              {' '}
+              <span style={{ fontFamily: serif, fontStyle: 'italic', fontWeight: 400, color: QM.accent, letterSpacing: '-0.02em' }}>
+                {accentWord}
+              </span>
+            </>
+          )}
+        </h3>
+        <p style={{ fontFamily: sans, fontSize: 15, fontWeight: 300, color: QM.fg2, lineHeight: 1.55, margin: '10px 0 0', letterSpacing: '-0.005em', maxWidth: 620 }}>
+          {description}
+        </p>
       </div>
     </div>
   )
 }
 
-function FeatureBlock({
-  icon: Icon,
-  iconColor,
-  iconBg,
-  title,
-  description,
-  children,
-}: {
-  icon: React.ElementType
-  iconColor: string
-  iconBg: string
-  title: string
-  description: string
-  children?: React.ReactNode
-}) {
+export function FeaturesSlide({ width, height, theme: _theme }: { width: number; height: number; theme: Theme }) {
   return (
-    <div className="rounded-2xl border border-white/[0.06] bg-white/[0.02] overflow-hidden">
-      <div className="p-6">
-        <div className="flex items-center gap-3 mb-2">
-          <div className={`w-9 h-9 rounded-xl ${iconBg} flex items-center justify-center`}>
-            <Icon className={`w-4.5 h-4.5 ${iconColor}`} />
-          </div>
-          <h3 className="text-[20px] font-bold text-white">{title}</h3>
-        </div>
-        <p className="text-[15px] text-white/50 leading-relaxed">{description}</p>
-      </div>
-      {children && <div className="px-6 pb-6">{children}</div>}
-    </div>
-  )
-}
-
-export function FeaturesSlide({ width, height, theme }: { width: number; height: number; theme: Theme }) {
-  return (
-    <SlideWrapper width={width} height={height} theme={theme}>
-      <BackgroundGlow theme={theme} position="50%" />
-
-      <div className="relative z-10 px-16 pt-14 flex items-center justify-between">
-        <ArdiaLogo />
-        <span className="text-[14px] text-white/30 tracking-wide uppercase">Funcionalidades</span>
+    <div
+      style={{
+        width,
+        height,
+        backgroundColor: QM.bg,
+        position: 'relative',
+        overflow: 'hidden',
+        display: 'flex',
+        flexDirection: 'column',
+        fontFamily: sans,
+      }}
+    >
+      {/* Top bar */}
+      <div style={{ padding: '56px 64px 0', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+        <Brand />
+        <Eyebrow>Funcionalidades</Eyebrow>
       </div>
 
-      <div className="relative z-10 px-16 pt-8">
-        <h2 className="text-[40px] font-bold text-white tracking-tight leading-tight">
-          Todo lo que necesitas para
+      {/* Headline */}
+      <div style={{ padding: '64px 64px 0' }}>
+        <h2 style={{ fontFamily: sans, fontSize: 52, fontWeight: 200, color: QM.fg, letterSpacing: '-0.045em', lineHeight: 1.0, margin: 0 }}>
+          Todo para cobrar
           <br />
-          <span style={{ color: theme.accent }}>cobrar sin perseguir.</span>
+          <span style={{ fontFamily: serif, fontStyle: 'italic', fontWeight: 400, color: QM.accent, letterSpacing: '-0.02em' }}>
+            sin perseguir
+          </span>
+          .
         </h2>
       </div>
 
-      {/* Feature 1: Buyer Portal */}
-      <div className="relative z-10 px-16 pt-8">
-        <FeatureBlock
-          icon={Globe}
-          iconColor="text-blue-400"
-          iconBg="bg-blue-400/10"
-          title="Portal de Clientes 24/7"
-          description="Tus compradores ven su calendario de pagos, historial y estatus en tiempo real."
-        >
-          <BuyerPortalMockup />
-        </FeatureBlock>
+      {/* Buyer portal mockup — hairline only, no card bg */}
+      <div style={{ padding: '56px 64px 0' }}>
+        <div style={{ border: `1px solid ${QM.hair}`, padding: '24px 28px 16px' }}>
+          <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', paddingBottom: 16, borderBottom: `1px solid ${QM.hair2}` }}>
+            <div>
+              <div style={{ fontFamily: sans, fontSize: 11, fontWeight: 500, letterSpacing: '0.18em', textTransform: 'uppercase', color: QM.fgDim }}>
+                Portal del comprador
+              </div>
+              <div style={{ fontFamily: sans, fontSize: 18, fontWeight: 400, color: QM.fg, marginTop: 6, letterSpacing: '-0.015em' }}>
+                Torre Álamos · A-101
+              </div>
+            </div>
+            <span style={{ fontFamily: serif, fontStyle: 'italic', fontSize: 18, color: QM.accent, letterSpacing: '-0.02em' }}>
+              en vivo
+            </span>
+          </div>
+
+          <div style={{ display: 'flex', margin: '0 -24px' }}>
+            <Stat label="Pagado" value="$285k" sub="12%" />
+            <Stat label="Pendiente" value="$2.1M" sub="88%" />
+            <Stat label="Próximo" value="$45k" sub="1 mar" accent />
+          </div>
+
+          <div style={{ marginTop: 8 }}>
+            <PaymentRow concept="Apartado" date="15 ene 2026" amount="$35,000" status="paid" />
+            <PaymentRow concept="Anticipo" date="1 feb 2026" amount="$250,000" status="paid" />
+            <PaymentRow concept="Mensualidad #1" date="1 mar 2026" amount="$45,000" status="current" />
+            <PaymentRow concept="Mensualidad #2" date="1 abr 2026" amount="$45,000" status="upcoming" />
+          </div>
+        </div>
       </div>
 
-      {/* Feature 2 & 3 */}
-      <div className="relative z-10 px-16 pt-6 grid grid-cols-2 gap-5">
-        <FeatureBlock
-          icon={MessageCircle}
-          iconColor="text-emerald-400"
-          iconBg="bg-emerald-400/10"
-          title="Cobranza WhatsApp"
-          description="Recordatorios automaticos. Conciliacion en un clic."
-        >
-          <div className="flex flex-col gap-2">
-            {[
-              { icon: Send, text: 'Recordatorio antes del vencimiento' },
-              { icon: Timer, text: 'Seguimiento automatico' },
-              { icon: MousePointerClick, text: 'Conciliacion en un clic' },
-            ].map((item, i) => (
-              <div key={i} className="flex items-center gap-2.5">
-                <item.icon className="w-3.5 h-3.5 text-emerald-400/60 shrink-0" />
-                <span className="text-[13px] text-white/40">{item.text}</span>
-              </div>
-            ))}
-          </div>
-        </FeatureBlock>
-
-        <FeatureBlock
-          icon={LayoutDashboard}
-          iconColor="text-yellow-400"
-          iconBg="bg-yellow-400/10"
-          title="Gestion de Unidades"
-          description="Ciclo de vida completo de cada unidad."
-        >
-          <div className="flex flex-col gap-2">
-            {[
-              { icon: Calendar, text: 'Esquemas de pago flexibles' },
-              { icon: History, text: 'Historial por unidad' },
-              { icon: CheckCircle2, text: 'Cotizador integrado' },
-            ].map((item, i) => (
-              <div key={i} className="flex items-center gap-2.5">
-                <item.icon className="w-3.5 h-3.5 text-yellow-400/60 shrink-0" />
-                <span className="text-[13px] text-white/40">{item.text}</span>
-              </div>
-            ))}
-          </div>
-        </FeatureBlock>
+      {/* Features as hairline rows */}
+      <div style={{ padding: '48px 64px 0' }}>
+        <FeatureRow
+          label="01 · Portal"
+          title="Calendario de pagos visible 24/7."
+          description="Tus compradores ven su historial, próximo vencimiento y suben comprobantes sin llamar a tu equipo."
+          accentWord="para todos"
+        />
+        <FeatureRow
+          label="02 · WhatsApp"
+          title="Recordatorios y conciliación"
+          accentWord="automáticos."
+          description="Mensajes antes del vencimiento, seguimiento sin intervención y conciliación de comprobantes en un clic."
+        />
+        <FeatureRow
+          label="03 · Unidades"
+          title="Inventario único, esquemas flexibles."
+          description="Apartados, anticipos, mensualidades, escalación, IVA. Un solo lugar, sin Excel V3 final final."
+        />
+        <div style={{ borderTop: `1px solid ${QM.hair}` }} />
       </div>
 
-      <SlideFooter theme={theme} pageNum={2} totalPages={3} label="ardia.mx" />
-    </SlideWrapper>
+      {/* Footer */}
+      <div style={{ marginTop: 'auto' }}>
+        <div style={{ borderTop: `1px solid ${QM.hair}`, padding: '20px 64px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+          <span style={{ fontFamily: sans, fontSize: 11, fontWeight: 400, letterSpacing: '0.18em', textTransform: 'uppercase', color: QM.fgDim }}>
+            ardia.mx
+          </span>
+          <span style={{ fontFamily: sans, fontSize: 11, fontWeight: 400, letterSpacing: '0.18em', color: QM.fgDim }}>
+            02 / 03
+          </span>
+        </div>
+      </div>
+    </div>
   )
 }

@@ -30,11 +30,47 @@ const decks = [
     dimensions: '1080 x 1528',
     createdAt: '2026-03-20',
   },
+  {
+    slug: 'ardia-onboarding-rental',
+    title: 'Onboarding — Renta Comercial',
+    project: 'ardia',
+    description: 'Checklist de información para implementar cuenta de renta comercial',
+    slideCount: 1,
+    dimensions: '1080 x 1528',
+    createdAt: '2026-04-01',
+  },
+  {
+    slug: 'ardia-universo-abanza-desktop',
+    title: 'Ardia × Universo aBanza (Desktop)',
+    project: 'ardia',
+    description: 'Propuesta para Universo aBanza — 16:9 landscape, texto grande',
+    slideCount: 8,
+    dimensions: '1920 x 1080',
+    createdAt: '2026-04-10',
+  },
+  {
+    slug: 'ardia-universo-abanza-mobile',
+    title: 'Ardia × Universo aBanza (Mobile)',
+    project: 'ardia',
+    description: 'Propuesta para Universo aBanza — formato vertical para móvil',
+    slideCount: 8,
+    dimensions: '1080 x 1528',
+    createdAt: '2026-04-10',
+  },
+  {
+    slug: 'ardia-universo-abanza-onboarding',
+    title: 'Onboarding — Universo aBanza',
+    project: 'ardia',
+    description: 'Carga inicial del piloto — locales, contratos y cobranza',
+    slideCount: 1,
+    dimensions: '1080 x 1528',
+    createdAt: '2026-04-30',
+  },
 ]
 
 export default function Decks() {
   return (
-    <div className="flex-1 p-8">
+    <div className="flex-1 min-h-0 overflow-y-auto p-8">
       <div className="max-w-4xl">
         <div className="mb-8">
           <h1 className="text-2xl font-bold text-white">Decks</h1>

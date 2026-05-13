@@ -100,7 +100,7 @@ export function SlideRenderer({
   }, [filename, width, height, theme.bg])
 
   return (
-    <div className="min-h-screen bg-[#050505] text-white overflow-y-auto overflow-x-hidden">
+    <div className="flex-1 min-h-0 bg-[#050505] text-white overflow-y-auto overflow-x-hidden">
       {/* Header */}
       <div className="sticky top-0 z-50 bg-[#050505]/90 backdrop-blur-sm border-b border-white/[0.08] px-8 py-4">
         <div className="flex items-center justify-between max-w-[1200px] mx-auto">

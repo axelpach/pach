@@ -104,6 +104,27 @@ export const mutators = {
       await tx.mutate.crm_board_columns.delete({ id: args.id })
     },
   },
+
+  whatsapp_campaigns: {
+    async create(tx: Tx, args: { id: string; companyId: string; templateId: string; name: string; recipientFilter?: Record<string, unknown>; variableValues?: Record<string, string>; mediaId?: string }) {
+      const now = Date.now()
+      await tx.mutate.whatsapp_campaigns.insert({
+        status: 'draft',
+        recipientFilter: {},
+        variableValues: {},
+        ...args,
+        createdAt: now,
+        updatedAt: now,
+      })
+    },
+    async update(tx: Tx, args: { id: string; name?: string; recipientFilter?: Record<string, unknown>; variableValues?: Record<string, string>; mediaId?: string; status?: string }) {
+      const { id, ...updates } = args
+      await tx.mutate.whatsapp_campaigns.update({ id, ...updates, updatedAt: Date.now() })
+    },
+    async delete(tx: Tx, args: { id: string }) {
+      await tx.mutate.whatsapp_campaigns.delete({ id: args.id })
+    },
+  },
 }
 
 export type Mutators = typeof mutators

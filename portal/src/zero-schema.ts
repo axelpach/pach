@@ -121,8 +121,64 @@ const crmBoardColumns = table('crm_board_columns')
   })
   .primaryKey('id')
 
+const whatsappTemplates = table('whatsapp_templates')
+  .columns({
+    id: string(),
+    companyId: string().from('company_id'),
+    metaId: string().from('meta_id'),
+    name: string(),
+    language: string(),
+    status: string(),
+    category: string(),
+    headerFormat: string().optional().from('header_format'),
+    headerText: string().optional().from('header_text'),
+    headerSampleUrl: string().optional().from('header_sample_url'),
+    bodyText: string().optional().from('body_text'),
+    footerText: string().optional().from('footer_text'),
+    components: json<unknown[]>().optional(),
+    variables: json<string[]>(),
+    lastSyncedAt: number().from('last_synced_at'),
+    createdAt: number().from('created_at'),
+    updatedAt: number().from('updated_at'),
+  })
+  .primaryKey('id')
+
+const whatsappCampaigns = table('whatsapp_campaigns')
+  .columns({
+    id: string(),
+    companyId: string().from('company_id'),
+    templateId: string().from('template_id'),
+    name: string(),
+    status: string(),
+    recipientFilter: json<Record<string, unknown>>().from('recipient_filter'),
+    variableValues: json<Record<string, string>>().from('variable_values'),
+    mediaId: string().optional().from('media_id'),
+    firedAt: number().optional().from('fired_at'),
+    createdAt: number().from('created_at'),
+    updatedAt: number().from('updated_at'),
+  })
+  .primaryKey('id')
+
+const whatsappMessages = table('whatsapp_messages')
+  .columns({
+    id: string(),
+    companyId: string().from('company_id'),
+    campaignId: string().optional().from('campaign_id'),
+    contactId: string().optional().from('contact_id'),
+    phone: string(),
+    templateName: string().from('template_name'),
+    status: string(),
+    metaMessageId: string().optional().from('meta_message_id'),
+    error: string().optional(),
+    sentAt: number().optional().from('sent_at'),
+    deliveredAt: number().optional().from('delivered_at'),
+    readAt: number().optional().from('read_at'),
+    createdAt: number().from('created_at'),
+  })
+  .primaryKey('id')
+
 export const schema = createSchema({
-  tables: [decks, companies, crmCompanies, crmContacts, crmDealContacts, crmDeals, crmNotes, crmBoards, crmBoardColumns],
+  tables: [decks, companies, crmCompanies, crmContacts, crmDealContacts, crmDeals, crmNotes, crmBoards, crmBoardColumns, whatsappTemplates, whatsappCampaigns, whatsappMessages],
 })
 
 export type Schema = typeof schema

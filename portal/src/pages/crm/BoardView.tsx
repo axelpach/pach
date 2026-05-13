@@ -29,6 +29,8 @@ export default function BoardView({ boardId, search, onDealClick }: BoardViewPro
   const [hoveredDealId, setHoveredDealId] = useState<string | null>(null)
   const [tempPickerDealId, setTempPickerDealId] = useState<string | null>(null)
   const [tempPickerPos, setTempPickerPos] = useState<{ x: number; y: number } | null>(null)
+  const [draggedColumnId, setDraggedColumnId] = useState<string | null>(null)
+  const [dropTargetColumnId, setDropTargetColumnId] = useState<string | null>(null)
 
   // Shift+T shortcut to open temperature picker on hovered card
   useEffect(() => {
@@ -110,6 +112,43 @@ export default function BoardView({ boardId, search, onDealClick }: BoardViewPro
     onDealClick(id)
   }
 
+  const handleColumnDragStart = (columnId: string) => {
+    setDraggedColumnId(columnId)
+  }
+
+  const handleColumnDragOver = (columnId: string) => {
+    if (draggedColumnId && draggedColumnId !== columnId) {
+      setDropTargetColumnId(columnId)
+    }
+  }
+
+  const handleColumnDragEnd = () => {
+    setDraggedColumnId(null)
+    setDropTargetColumnId(null)
+  }
+
+  const handleColumnDrop = (targetColumnId: string) => {
+    if (!draggedColumnId || draggedColumnId === targetColumnId) return
+
+    const oldIndex = columns.findIndex((c) => c.id === draggedColumnId)
+    const newIndex = columns.findIndex((c) => c.id === targetColumnId)
+    if (oldIndex === -1 || newIndex === -1) return
+
+    // Build reordered list and assign new positions
+    const reordered = [...columns]
+    const [moved] = reordered.splice(oldIndex, 1)
+    reordered.splice(newIndex, 0, moved)
+
+    for (let i = 0; i < reordered.length; i++) {
+      if (reordered[i].position !== i) {
+        z.mutate.crm_board_columns.update({ id: reordered[i].id, position: i })
+      }
+    }
+
+    setDraggedColumnId(null)
+    setDropTargetColumnId(null)
+  }
+
   return (
     <div className="flex gap-4 overflow-x-auto pb-4 h-full min-h-0">
       {columns.map((col) => {
@@ -117,6 +156,7 @@ export default function BoardView({ boardId, search, onDealClick }: BoardViewPro
         return (
           <KanbanColumn
             key={col.id}
+            columnId={col.id}
             label={col.label}
             color={col.color || '#6B7280'}
             value={col.value}
@@ -126,6 +166,12 @@ export default function BoardView({ boardId, search, onDealClick }: BoardViewPro
             onAddDeal={handleAddDeal}
             onDealClick={onDealClick}
             onDealHover={setHoveredDealId}
+            isDragging={draggedColumnId === col.id}
+            isDropTarget={dropTargetColumnId === col.id}
+            onColumnDragStart={handleColumnDragStart}
+            onColumnDragOver={handleColumnDragOver}
+            onColumnDrop={handleColumnDrop}
+            onColumnDragEnd={handleColumnDragEnd}
           />
         )
       })}
@@ -189,6 +235,7 @@ function TemperaturePicker({
 }
 
 function KanbanColumn({
+  columnId,
   label,
   color,
   value,
@@ -198,7 +245,14 @@ function KanbanColumn({
   onAddDeal,
   onDealClick,
   onDealHover,
+  isDragging,
+  isDropTarget,
+  onColumnDragStart,
+  onColumnDragOver,
+  onColumnDrop,
+  onColumnDragEnd,
 }: {
+  columnId: string
   label: string
   color: string
   value: string
@@ -208,10 +262,19 @@ function KanbanColumn({
   onAddDeal: (value: string) => void
   onDealClick: (dealId: string) => void
   onDealHover: (dealId: string | null) => void
+  isDragging: boolean
+  isDropTarget: boolean
+  onColumnDragStart: (columnId: string) => void
+  onColumnDragOver: (columnId: string) => void
+  onColumnDrop: (columnId: string) => void
+  onColumnDragEnd: () => void
 }) {
   const handleDragOver = (e: React.DragEvent) => {
     e.preventDefault()
-    e.currentTarget.classList.add('bg-white/[0.04]')
+    // Only highlight for deal drops (not column drops)
+    if (e.dataTransfer.types.includes('application/deal-id')) {
+      e.currentTarget.classList.add('bg-white/[0.04]')
+    }
   }
 
   const handleDragLeave = (e: React.DragEvent) => {
@@ -221,18 +284,47 @@ function KanbanColumn({
   const handleDrop = (e: React.DragEvent) => {
     e.preventDefault()
     e.currentTarget.classList.remove('bg-white/[0.04]')
-    const dealId = e.dataTransfer.getData('text/plain')
+    const dealId = e.dataTransfer.getData('application/deal-id')
     if (dealId) onDrop(dealId, value)
+  }
+
+  const handleHeaderDragStart = (e: React.DragEvent) => {
+    e.dataTransfer.setData('application/column-id', columnId)
+    e.dataTransfer.effectAllowed = 'move'
+    onColumnDragStart(columnId)
+  }
+
+  const handleHeaderDragOver = (e: React.DragEvent) => {
+    if (e.dataTransfer.types.includes('application/column-id')) {
+      e.preventDefault()
+      onColumnDragOver(columnId)
+    }
+  }
+
+  const handleHeaderDrop = (e: React.DragEvent) => {
+    if (e.dataTransfer.types.includes('application/column-id')) {
+      e.preventDefault()
+      onColumnDrop(columnId)
+    }
   }
 
   return (
     <div
-      className="flex flex-col min-w-[280px] w-[280px] max-h-full rounded-xl border border-white/[0.06] bg-white/[0.01] transition-colors"
+      className={`flex flex-col min-w-[280px] w-[280px] max-h-full rounded-xl border transition-all ${
+        isDragging ? 'opacity-40 border-white/[0.15]' : isDropTarget ? 'border-white/[0.25] bg-white/[0.03]' : 'border-white/[0.06] bg-white/[0.01]'
+      }`}
       onDragOver={handleDragOver}
       onDragLeave={handleDragLeave}
       onDrop={handleDrop}
     >
-      <div className="px-4 py-3 border-b border-white/[0.06] flex items-center justify-between">
+      <div
+        draggable
+        onDragStart={handleHeaderDragStart}
+        onDragOver={handleHeaderDragOver}
+        onDrop={handleHeaderDrop}
+        onDragEnd={onColumnDragEnd}
+        className="px-4 py-3 border-b border-white/[0.06] flex items-center justify-between cursor-grab active:cursor-grabbing"
+      >
         <div className="flex items-center gap-2.5">
           <div className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: color }} />
           <span className="text-sm font-medium text-white">{label}</span>
@@ -277,7 +369,7 @@ function DealCard({
   const company = deal.companyId ? companyMap.get(deal.companyId) : null
 
   const handleDragStart = (e: React.DragEvent) => {
-    e.dataTransfer.setData('text/plain', deal.id)
+    e.dataTransfer.setData('application/deal-id', deal.id)
     e.dataTransfer.effectAllowed = 'move'
   }
 

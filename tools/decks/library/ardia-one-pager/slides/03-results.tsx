@@ -1,123 +1,207 @@
-import { Zap, TrendingUp, Users, CheckCircle2 } from 'lucide-react'
-import { SlideWrapper, BackgroundGlow, SlideFooter } from '../../../engine/primitives'
 import type { Theme } from '../../../engine/types'
+import ardiaLogo from '../../../assets/ardia-iso-light.png'
 
-function ArdiaLogo({ size = 30 }: { size?: number }) {
+const QM = {
+  bg: '#14110f',
+  fg: '#ede6db',
+  fg2: 'rgba(237, 230, 219, 0.78)',
+  fgDim: 'rgba(237, 230, 219, 0.42)',
+  fgFaint: 'rgba(237, 230, 219, 0.22)',
+  accent: '#E43F3F',
+  hair: 'rgba(237, 230, 219, 0.10)',
+  hair2: 'rgba(237, 230, 219, 0.06)',
+}
+
+const sans = "'Inter Tight', 'Inter', system-ui, sans-serif"
+const serif = "'Instrument Serif', Georgia, serif"
+
+function Brand({ size = 30 }: { size?: number }) {
   return (
-    <div className="flex items-center gap-2">
-      <div
-        className="rounded-lg bg-[#F13D43] flex items-center justify-center font-bold text-white"
-        style={{ width: size, height: size, fontSize: size * 0.45 }}
-      >
-        A
-      </div>
-      <span className="font-bold tracking-[0.2em] text-white" style={{ fontSize: size * 0.5 }}>
-        ARDIA
+    <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+      <img src={ardiaLogo} alt="Ardia" style={{ width: size, height: size, objectFit: 'contain' }} />
+      <span style={{ fontFamily: serif, fontStyle: 'italic', fontSize: size, letterSpacing: '-0.01em', color: QM.fg, lineHeight: 1 }}>
+        Ardia
       </span>
     </div>
   )
 }
 
-export function ResultsSlide({ width, height, theme }: { width: number; height: number; theme: Theme }) {
+function Eyebrow({ children }: { children: React.ReactNode }) {
   return (
-    <SlideWrapper width={width} height={height} theme={theme}>
-      <BackgroundGlow theme={theme} position="30%" />
+    <span style={{ fontFamily: sans, fontSize: 11, fontWeight: 500, letterSpacing: '0.18em', textTransform: 'uppercase', color: QM.fgDim }}>
+      {children}
+    </span>
+  )
+}
 
-      <div className="relative z-10 px-16 pt-14 flex items-center justify-between">
-        <ArdiaLogo />
-        <span className="text-[14px] text-white/30 tracking-wide uppercase">Resultados</span>
+function BigStat({ value, unit, label, detail, isFirst }: { value: string; unit?: string; label: string; detail: string; isFirst?: boolean }) {
+  return (
+    <div style={{ flex: 1, padding: '0 32px', borderLeft: isFirst ? 'none' : `1px solid ${QM.hair2}` }}>
+      <div style={{ display: 'flex', alignItems: 'baseline', gap: 6 }}>
+        <span style={{ fontFamily: sans, fontSize: 72, fontWeight: 200, color: QM.fg, letterSpacing: '-0.05em', lineHeight: 0.95 }}>
+          {value}
+        </span>
+        {unit && (
+          <span style={{ fontFamily: serif, fontStyle: 'italic', fontSize: 32, color: QM.accent, letterSpacing: '-0.02em' }}>
+            {unit}
+          </span>
+        )}
+      </div>
+      <div style={{ fontFamily: sans, fontSize: 15, fontWeight: 400, color: QM.fg, marginTop: 14, letterSpacing: '-0.01em', lineHeight: 1.3 }}>
+        {label}
+      </div>
+      <div style={{ fontFamily: sans, fontSize: 13, fontWeight: 300, color: QM.fgDim, marginTop: 8, lineHeight: 1.5, letterSpacing: '-0.005em' }}>
+        {detail}
+      </div>
+    </div>
+  )
+}
+
+function ChecklistItem({ text }: { text: string }) {
+  return (
+    <div style={{ display: 'flex', alignItems: 'baseline', gap: 14, padding: '14px 0', borderTop: `1px solid ${QM.hair2}` }}>
+      <span style={{ width: 6, height: 6, background: QM.accent, display: 'inline-block', flexShrink: 0, transform: 'translateY(-2px)' }} />
+      <span style={{ fontFamily: sans, fontSize: 15, fontWeight: 300, color: QM.fg2, letterSpacing: '-0.005em', lineHeight: 1.5 }}>
+        {text}
+      </span>
+    </div>
+  )
+}
+
+export function ResultsSlide({ width, height, theme: _theme }: { width: number; height: number; theme: Theme }) {
+  return (
+    <div
+      style={{
+        width,
+        height,
+        backgroundColor: QM.bg,
+        position: 'relative',
+        overflow: 'hidden',
+        display: 'flex',
+        flexDirection: 'column',
+        fontFamily: sans,
+      }}
+    >
+      {/* Subtle radial glow */}
+      <div
+        style={{
+          position: 'absolute',
+          bottom: -250,
+          left: -150,
+          width: 800,
+          height: 800,
+          background: `radial-gradient(circle, rgba(228, 63, 63, 0.10) 0%, rgba(228, 63, 63, 0) 60%)`,
+          pointerEvents: 'none',
+        }}
+      />
+
+      {/* Top bar */}
+      <div style={{ padding: '56px 64px 0', display: 'flex', alignItems: 'center', justifyContent: 'space-between', position: 'relative', zIndex: 10 }}>
+        <Brand />
+        <Eyebrow>Resultados</Eyebrow>
       </div>
 
-      <div className="relative z-10 px-16 pt-8">
-        <h2 className="text-[40px] font-bold text-white tracking-tight leading-tight">
-          Lo que puedes esperar
+      {/* Headline */}
+      <div style={{ padding: '64px 64px 0', position: 'relative', zIndex: 10 }}>
+        <h2 style={{ fontFamily: sans, fontSize: 52, fontWeight: 200, color: QM.fg, letterSpacing: '-0.045em', lineHeight: 1.0, margin: 0 }}>
+          Lo que cambia
           <br />
-          <span style={{ color: theme.accent }}>desde el primer mes.</span>
+          <span style={{ fontFamily: serif, fontStyle: 'italic', fontWeight: 400, color: QM.accent, letterSpacing: '-0.02em' }}>
+            desde el primer mes
+          </span>
+          .
         </h2>
-        <p className="text-[18px] text-white/40 mt-4 leading-relaxed max-w-[85%]">
-          Basado en la operacion con desarrolladores inmobiliarios que ya usan la plataforma.
+        <p style={{ fontFamily: sans, fontSize: 17, fontWeight: 300, color: QM.fg2, lineHeight: 1.55, marginTop: 24, maxWidth: 720, letterSpacing: '-0.005em' }}>
+          Métricas observadas con desarrolladores que ya operan sobre Ardia.
         </p>
       </div>
 
-      {/* Metrics */}
-      <div className="relative z-10 px-16 pt-10 grid grid-cols-3 gap-5">
-        {[
-          {
-            icon: Zap,
-            value: '~70%',
-            label: 'menos tiempo en seguimiento de cobranza',
-            color: 'text-yellow-400',
-            bg: 'bg-yellow-400/10',
-            detail: 'Recordatorios automaticos reemplazan llamadas manuales',
-          },
-          {
-            icon: TrendingUp,
-            value: '~30%',
-            label: 'mas pagos a tiempo',
-            color: 'text-emerald-400',
-            bg: 'bg-emerald-400/10',
-            detail: 'Los recordatorios por WhatsApp tienen mayor tasa de respuesta',
-          },
-          {
-            icon: Users,
-            value: '24/7',
-            label: 'autoservicio para compradores',
-            color: 'text-blue-400',
-            bg: 'bg-blue-400/10',
-            detail: 'Tus clientes resuelven sus dudas sin llamar a tu equipo',
-          },
-        ].map((stat, i) => (
+      {/* Stats — vertical hairline dividers */}
+      <div style={{ padding: '64px 32px 0', display: 'flex', position: 'relative', zIndex: 10 }}>
+        <BigStat
+          value="70"
+          unit="%"
+          label="menos tiempo en seguimiento."
+          detail="Recordatorios automáticos reemplazan llamadas manuales."
+          isFirst
+        />
+        <BigStat
+          value="30"
+          unit="%"
+          label="más pagos a tiempo."
+          detail="WhatsApp tiene mayor tasa de respuesta que el correo."
+        />
+        <BigStat
+          value="24"
+          unit="/7"
+          label="autoservicio para clientes."
+          detail="Resuelven dudas sin marcar a tu equipo."
+        />
+      </div>
+
+      {/* Implementation */}
+      <div style={{ padding: '72px 64px 0', position: 'relative', zIndex: 10 }}>
+        <div style={{ marginBottom: 20 }}>
+          <Eyebrow>Implementación · menos de una semana</Eyebrow>
+        </div>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', columnGap: 56 }}>
+          <div>
+            <ChecklistItem text="Cargamos tu inventario de unidades." />
+            <ChecklistItem text="Configuramos tus esquemas de pago." />
+            <ChecklistItem text="Damos de alta a tus compradores actuales." />
+            <div style={{ borderTop: `1px solid ${QM.hair2}` }} />
+          </div>
+          <div>
+            <ChecklistItem text="Activamos recordatorios por WhatsApp." />
+            <ChecklistItem text="Tus clientes acceden a su portal el día uno." />
+            <ChecklistItem text="Sin costo de implementación." />
+            <div style={{ borderTop: `1px solid ${QM.hair2}` }} />
+          </div>
+        </div>
+      </div>
+
+      {/* CTA — text + hairline underline, no filled button */}
+      <div style={{ marginTop: 'auto', padding: '0 64px 64px', position: 'relative', zIndex: 10 }}>
+        <div style={{ borderTop: `1px solid ${QM.hair}`, paddingTop: 56, display: 'flex', flexDirection: 'column', gap: 18 }}>
+          <span style={{ fontFamily: serif, fontStyle: 'italic', fontSize: 22, color: QM.accent, letterSpacing: '-0.02em' }}>
+            Empieza este mes.
+          </span>
+          <h3 style={{ fontFamily: sans, fontSize: 40, fontWeight: 200, color: QM.fg, letterSpacing: '-0.04em', lineHeight: 1.05, margin: 0 }}>
+            Agenda una demo de 15 minutos.
+          </h3>
           <div
-            key={i}
-            className="rounded-xl bg-white/[0.03] border border-white/[0.06] p-6 text-center"
+            data-cta="true"
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 12,
+              alignSelf: 'flex-start',
+              marginTop: 12,
+              padding: '10px 0',
+              fontFamily: sans,
+              fontSize: 16,
+              fontWeight: 400,
+              color: QM.fg,
+              letterSpacing: '-0.005em',
+              borderBottom: `1px solid ${QM.accent}`,
+              cursor: 'pointer',
+            }}
           >
-            <div className={`w-10 h-10 rounded-lg ${stat.bg} flex items-center justify-center mx-auto mb-3`}>
-              <stat.icon className={`w-5 h-5 ${stat.color}`} />
-            </div>
-            <div className="text-[36px] font-bold text-white">{stat.value}</div>
-            <div className="text-[15px] text-white/50 mt-1 leading-snug">{stat.label}</div>
-            <div className="text-[12px] text-white/30 mt-2 leading-snug">{stat.detail}</div>
-          </div>
-        ))}
-      </div>
-
-      {/* Benefits */}
-      <div className="relative z-10 px-16 pt-10">
-        <div className="rounded-2xl border border-white/[0.06] bg-white/[0.02] p-8">
-          <h3 className="text-[20px] font-bold text-white mb-5">Implementacion en menos de una semana</h3>
-          <div className="grid grid-cols-2 gap-x-8 gap-y-4">
-            {[
-              'Cargamos tu inventario de unidades',
-              'Configuramos tus esquemas de pago',
-              'Damos de alta a tus compradores actuales',
-              'Activamos recordatorios automaticos por WhatsApp',
-              'Tus clientes acceden a su portal desde dia uno',
-              'Sin costo de implementacion',
-            ].map((item, i) => (
-              <div key={i} className="flex items-start gap-3">
-                <CheckCircle2 className="w-4 h-4 text-emerald-400 mt-0.5 shrink-0" />
-                <span className="text-[15px] text-white/50 leading-snug">{item}</span>
-              </div>
-            ))}
+            calendly.com/axel-ardia
+            <span style={{ color: QM.accent, fontFamily: serif, fontStyle: 'italic', fontSize: 18 }}>→</span>
           </div>
         </div>
       </div>
 
-      {/* CTA */}
-      <div className="flex-1" />
-      <div className="relative z-10 flex flex-col items-center gap-5 pb-16">
-        <div
-          data-cta="true"
-          className="px-12 py-5 rounded-xl bg-[#F13D43] text-white text-[24px] font-semibold tracking-wide text-center cursor-pointer"
-        >
-          Agenda una demo de 15 minutos →
-        </div>
-        <span className="text-white/30 text-[15px]">
-          La plataforma de cobranza para desarrolladores inmobiliarios
+      {/* Footer */}
+      <div style={{ borderTop: `1px solid ${QM.hair}`, padding: '20px 64px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', position: 'relative', zIndex: 10 }}>
+        <span style={{ fontFamily: sans, fontSize: 11, fontWeight: 400, letterSpacing: '0.18em', textTransform: 'uppercase', color: QM.fgDim }}>
+          ardia.mx
+        </span>
+        <span style={{ fontFamily: sans, fontSize: 11, fontWeight: 400, letterSpacing: '0.18em', color: QM.fgDim }}>
+          03 / 03
         </span>
       </div>
-
-      <SlideFooter theme={theme} pageNum={3} totalPages={3} label="ardia.mx" />
-    </SlideWrapper>
+    </div>
   )
 }

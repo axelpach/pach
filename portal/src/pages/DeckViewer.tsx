@@ -7,11 +7,19 @@ import { getTheme } from '@decks/engine/themes'
 import { slides, config } from '@decks/library/ardia-one-pager/deck'
 import { slides as cinukDesktopSlides, config as cinukDesktopConfig } from '@decks/library/ardia-cinuk-desktop/deck'
 import { slides as cinukMobileSlides, config as cinukMobileConfig } from '@decks/library/ardia-cinuk-mobile/deck'
+import { slides as onboardingRentalSlides, config as onboardingRentalConfig } from '@decks/library/ardia-onboarding-rental/deck'
+import { slides as abanzaDesktopSlides, config as abanzaDesktopConfig } from '@decks/library/ardia-universo-abanza-desktop/deck'
+import { slides as abanzaMobileSlides, config as abanzaMobileConfig } from '@decks/library/ardia-universo-abanza-mobile/deck'
+import { slides as abanzaOnboardingSlides, config as abanzaOnboardingConfig } from '@decks/library/ardia-universo-abanza-onboarding/deck'
 
 const deckRegistry: Record<string, { slides: typeof slides; config: typeof config }> = {
   'ardia-one-pager': { slides, config },
   'ardia-cinuk-desktop': { slides: cinukDesktopSlides, config: cinukDesktopConfig },
   'ardia-cinuk-mobile': { slides: cinukMobileSlides, config: cinukMobileConfig },
+  'ardia-onboarding-rental': { slides: onboardingRentalSlides, config: onboardingRentalConfig },
+  'ardia-universo-abanza-desktop': { slides: abanzaDesktopSlides, config: abanzaDesktopConfig },
+  'ardia-universo-abanza-mobile': { slides: abanzaMobileSlides, config: abanzaMobileConfig },
+  'ardia-universo-abanza-onboarding': { slides: abanzaOnboardingSlides, config: abanzaOnboardingConfig },
 }
 
 export default function DeckViewer() {

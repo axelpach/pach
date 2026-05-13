@@ -118,6 +118,72 @@ export const crmBoardColumns = pgTable('crm_board_columns', {
   color: text('color'),
 })
 
+/* ─────────────────────── WHATSAPP ─────────────────────── */
+
+export const whatsappTemplates = pgTable('whatsapp_templates', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  companyId: uuid('company_id').notNull().references(() => companies.id),
+  /** Meta's template id */
+  metaId: text('meta_id').notNull(),
+  name: text('name').notNull(),
+  language: text('language').notNull(),
+  /** APPROVED | PENDING | REJECTED | PAUSED | DISABLED */
+  status: text('status').notNull(),
+  /** MARKETING | UTILITY | AUTHENTICATION */
+  category: text('category').notNull(),
+  /** TEXT | IMAGE | VIDEO | DOCUMENT | LOCATION | NONE */
+  headerFormat: text('header_format'),
+  headerText: text('header_text'),
+  /** URL of sample media submitted at template creation (for preview) */
+  headerSampleUrl: text('header_sample_url'),
+  bodyText: text('body_text'),
+  footerText: text('footer_text'),
+  /** Full template components payload from Meta (header/body/footer/buttons) */
+  components: jsonb('components').$type<unknown[]>(),
+  /** Extracted variables, e.g. ['{{1}}','{{2}}'] */
+  variables: jsonb('variables').$type<string[]>().notNull().default([]),
+  lastSyncedAt: timestamp('last_synced_at', { withTimezone: true }).notNull().defaultNow(),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+})
+
+export const whatsappCampaigns = pgTable('whatsapp_campaigns', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  companyId: uuid('company_id').notNull().references(() => companies.id),
+  templateId: uuid('template_id').notNull().references(() => whatsappTemplates.id),
+  name: text('name').notNull(),
+  /** draft | sending | sent | failed */
+  status: text('status').notNull().default('draft'),
+  /** Recipient selection: { contactIds: [...] } or { filter: {...} } */
+  recipientFilter: jsonb('recipient_filter').$type<Record<string, unknown>>().notNull().default({}),
+  /** Per-variable values used to render the template at send time */
+  variableValues: jsonb('variable_values').$type<Record<string, string>>().notNull().default({}),
+  /** Meta media id for the header video/image, set after upload */
+  mediaId: text('media_id'),
+  firedAt: timestamp('fired_at', { withTimezone: true }),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+})
+
+export const whatsappMessages = pgTable('whatsapp_messages', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  companyId: uuid('company_id').notNull().references(() => companies.id),
+  /** Null for manual one-off sends */
+  campaignId: uuid('campaign_id').references(() => whatsappCampaigns.id),
+  contactId: uuid('contact_id').references(() => crmContacts.id),
+  phone: text('phone').notNull(),
+  templateName: text('template_name').notNull(),
+  /** queued | sent | delivered | read | failed */
+  status: text('status').notNull().default('queued'),
+  /** Meta's message id, returned after a successful send */
+  metaMessageId: text('meta_message_id'),
+  error: text('error'),
+  sentAt: timestamp('sent_at', { withTimezone: true }),
+  deliveredAt: timestamp('delivered_at', { withTimezone: true }),
+  readAt: timestamp('read_at', { withTimezone: true }),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+})
+
 /* ─────────────────────────── NOTES ─────────────────────────── */
 
 export const crmNotes = pgTable('crm_notes', {

@@ -2,6 +2,7 @@
   "name": "pachi",
   "private": true,
   "version": "0.1.0",
+  "type": "module",
   "scripts": {
     "dev": "pnpm --filter portal dev",
     "dev:server": "pnpm --filter server dev",

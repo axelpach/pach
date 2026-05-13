@@ -50,6 +50,13 @@
       "when": 1774310800000,
       "tag": "0006_deal_contacts_join",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1774310900000,
+      "tag": "0007_whatsapp",
+      "breakpoints": true
     }
   ]
 }

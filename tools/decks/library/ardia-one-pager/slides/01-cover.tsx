@@ -1,105 +1,195 @@
-import { PhoneOff, Search, AlertTriangle, MessageCircle } from 'lucide-react'
-import { SlideWrapper, BackgroundGlow, SlideFooter } from '../../../engine/primitives'
 import type { Theme } from '../../../engine/types'
+import ardiaLogo from '../../../assets/ardia-iso-light.png'
 
-function ArdiaLogo({ size = 36 }: { size?: number }) {
+const QM = {
+  bg: '#14110f',
+  fg: '#ede6db',
+  fg2: 'rgba(237, 230, 219, 0.78)',
+  fgDim: 'rgba(237, 230, 219, 0.42)',
+  fgFaint: 'rgba(237, 230, 219, 0.22)',
+  accent: '#E43F3F',
+  hair: 'rgba(237, 230, 219, 0.10)',
+  hair2: 'rgba(237, 230, 219, 0.06)',
+}
+
+const sans = "'Inter Tight', 'Inter', system-ui, sans-serif"
+const serif = "'Instrument Serif', Georgia, serif"
+
+function Brand({ size = 30 }: { size?: number }) {
   return (
-    <div className="flex items-center gap-2">
-      <div
-        className="rounded-lg bg-[#F13D43] flex items-center justify-center font-bold text-white"
-        style={{ width: size, height: size, fontSize: size * 0.45 }}
-      >
-        A
-      </div>
-      <span className="font-bold tracking-[0.2em] text-white" style={{ fontSize: size * 0.5 }}>
-        ARDIA
+    <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+      <img src={ardiaLogo} alt="Ardia" style={{ width: size, height: size, objectFit: 'contain' }} />
+      <span style={{ fontFamily: serif, fontStyle: 'italic', fontSize: size, letterSpacing: '-0.01em', color: QM.fg, lineHeight: 1 }}>
+        Ardia
       </span>
     </div>
   )
 }
 
-function WhatsAppMiniChat() {
-  const messages = [
-    { from: 'bot', text: 'Hola Ana. Tu pago de $45,000 por la unidad A-101 vence manana. Necesitas ayuda?' },
-    { from: 'user', text: 'Ya lo transferi, te envio el comprobante' },
-    { from: 'user', text: 'comprobante_pago.pdf', isFile: true },
-    { from: 'bot', text: 'Pago recibido. Ve tu estado de cuenta en ardia.mx' },
-  ]
-
+function Eyebrow({ children }: { children: React.ReactNode }) {
   return (
-    <div className="space-y-3">
-      {messages.map((msg, i) => (
-        <div key={i} className={`flex ${msg.from === 'user' ? 'justify-end' : 'justify-start'}`}>
-          <div
-            className={`max-w-[85%] px-4 py-2.5 rounded-2xl text-[16px] leading-relaxed ${
-              msg.from === 'user'
-                ? 'bg-emerald-600/20 text-white rounded-br-sm'
-                : 'bg-white/[0.06] text-white/70 rounded-bl-sm'
-            }`}
-          >
-            {msg.text}
-          </div>
-        </div>
-      ))}
+    <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+      <span style={{ width: 6, height: 6, background: QM.accent, display: 'inline-block' }} />
+      <span style={{ fontFamily: sans, fontSize: 11, fontWeight: 500, letterSpacing: '0.18em', textTransform: 'uppercase', color: QM.fgDim }}>
+        {children}
+      </span>
     </div>
   )
 }
 
-export function CoverSlide({ width, height, theme }: { width: number; height: number; theme: Theme }) {
+function Pain({ text }: { text: string }) {
   return (
-    <SlideWrapper width={width} height={height} theme={theme}>
-      <BackgroundGlow theme={theme} position="20%" />
+    <div style={{ borderTop: `1px solid ${QM.hair}`, paddingTop: 22, paddingBottom: 22, display: 'flex', alignItems: 'baseline', gap: 24 }}>
+      <span style={{ fontFamily: sans, fontSize: 13, fontWeight: 400, color: QM.fgFaint, letterSpacing: '0.06em', minWidth: 28 }}>—</span>
+      <span style={{ fontFamily: sans, fontSize: 22, fontWeight: 300, color: QM.fg2, lineHeight: 1.4, letterSpacing: '-0.01em' }}>
+        {text}
+      </span>
+    </div>
+  )
+}
 
-      {/* Logo */}
-      <div className="relative z-10 px-16 pt-14">
-        <ArdiaLogo />
+function ChatBubble({ from, children }: { from: 'in' | 'out'; children: React.ReactNode }) {
+  const isOut = from === 'out'
+  return (
+    <div style={{ display: 'flex', justifyContent: isOut ? 'flex-end' : 'flex-start', marginBottom: 8 }}>
+      <div
+        style={{
+          maxWidth: '78%',
+          padding: '10px 14px',
+          fontFamily: sans,
+          fontSize: 14,
+          fontWeight: 300,
+          lineHeight: 1.5,
+          letterSpacing: '-0.005em',
+          color: isOut ? QM.fg : QM.fg2,
+          border: `1px solid ${QM.hair}`,
+          background: 'transparent',
+        }}
+      >
+        {children}
+      </div>
+    </div>
+  )
+}
+
+export function CoverSlide({ width, height, theme: _theme }: { width: number; height: number; theme: Theme }) {
+  return (
+    <div
+      style={{
+        width,
+        height,
+        backgroundColor: QM.bg,
+        position: 'relative',
+        overflow: 'hidden',
+        display: 'flex',
+        flexDirection: 'column',
+        fontFamily: sans,
+      }}
+    >
+      {/* Subtle radial glow, top right */}
+      <div
+        style={{
+          position: 'absolute',
+          top: -200,
+          right: -200,
+          width: 800,
+          height: 800,
+          background: `radial-gradient(circle, rgba(228, 63, 63, 0.10) 0%, rgba(228, 63, 63, 0) 60%)`,
+          pointerEvents: 'none',
+        }}
+      />
+
+      {/* Top bar */}
+      <div style={{ padding: '56px 64px 0', display: 'flex', alignItems: 'center', justifyContent: 'space-between', position: 'relative', zIndex: 10 }}>
+        <Brand />
+        <span style={{ fontFamily: sans, fontSize: 11, fontWeight: 500, letterSpacing: '0.18em', textTransform: 'uppercase', color: QM.fgDim }}>
+          One-Pager · 2026
+        </span>
       </div>
 
-      {/* Headline */}
-      <div className="relative z-10 px-16 pt-10">
-        <h1 className="text-white text-[56px] font-bold leading-[1.1] tracking-tight">
-          Cientos de unidades
+      {/* Hero */}
+      <div style={{ padding: '72px 64px 0', position: 'relative', zIndex: 10 }}>
+        <div style={{ marginBottom: 28 }}>
+          <Eyebrow>El problema</Eyebrow>
+        </div>
+        <h1
+          style={{
+            fontFamily: sans,
+            fontSize: 64,
+            fontWeight: 200,
+            lineHeight: 1.0,
+            letterSpacing: '-0.045em',
+            color: QM.fg,
+            margin: 0,
+          }}
+        >
+          Cientos de unidades.
           <br />
-          y tu equipo sigue
+          Tu equipo aún{' '}
+          <span style={{ fontFamily: serif, fontStyle: 'italic', fontWeight: 400, color: QM.accent, letterSpacing: '-0.02em' }}>
+            persiguiendo pagos
+          </span>
           <br />
-          <span style={{ color: theme.accent }}>persiguiendo pagos a mano?</span>
+          a mano.
         </h1>
-        <p className="text-[22px] text-white/50 mt-6 leading-relaxed max-w-[85%]">
+        <p
+          style={{
+            fontFamily: sans,
+            fontSize: 19,
+            fontWeight: 300,
+            color: QM.fg2,
+            lineHeight: 1.55,
+            maxWidth: 780,
+            marginTop: 32,
+            letterSpacing: '-0.005em',
+          }}
+        >
           Ardia automatiza la cobranza de tu desarrollo inmobiliario para que tu equipo se enfoque en vender.
         </p>
       </div>
 
-      {/* Pain points */}
-      <div className="relative z-10 px-16 pt-10 space-y-5">
-        {[
-          { icon: PhoneOff, text: 'Horas al telefono persiguiendo pagos atrasados' },
-          { icon: Search, text: 'Comprobantes perdidos en chats de WhatsApp' },
-          { icon: AlertTriangle, text: 'Sin visibilidad de quien pago y quien no' },
-        ].map((pain, i) => (
-          <div key={i} className="flex items-center gap-5">
-            <div className="w-11 h-11 rounded-xl bg-white/[0.04] border border-white/[0.08] flex items-center justify-center shrink-0">
-              <pain.icon className="w-5 h-5" style={{ color: `${theme.accent}cc` }} />
+      {/* Pain points — hairline rows */}
+      <div style={{ padding: '64px 64px 0', position: 'relative', zIndex: 10 }}>
+        <Pain text="Horas al teléfono persiguiendo pagos atrasados." />
+        <Pain text="Comprobantes perdidos en chats de WhatsApp." />
+        <Pain text="Sin visibilidad de quién pagó y quién no." />
+        <div style={{ borderTop: `1px solid ${QM.hair}` }} />
+      </div>
+
+      {/* WhatsApp preview — hairline frame, no bg */}
+      <div style={{ padding: '48px 64px 0', position: 'relative', zIndex: 10 }}>
+        <div style={{ border: `1px solid ${QM.hair}`, padding: '24px 28px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', paddingBottom: 18, marginBottom: 18, borderBottom: `1px solid ${QM.hair2}` }}>
+            <div>
+              <div style={{ fontFamily: sans, fontSize: 14, fontWeight: 400, color: QM.fg, letterSpacing: '-0.005em' }}>
+                Cobranza por WhatsApp
+              </div>
+              <div style={{ fontFamily: sans, fontSize: 12, fontWeight: 300, color: QM.fgDim, marginTop: 2 }}>
+                Recordatorio + conciliación · automático
+              </div>
             </div>
-            <span className="text-[22px] text-white/60 leading-snug">{pain.text}</span>
+            <span style={{ fontFamily: serif, fontStyle: 'italic', fontSize: 18, color: QM.accent, letterSpacing: '-0.02em' }}>
+              en tiempo real
+            </span>
           </div>
-        ))}
-      </div>
-
-      {/* WhatsApp preview */}
-      <div className="relative z-10 mx-16 mt-10 rounded-2xl border border-white/[0.06] bg-white/[0.02] p-7">
-        <div className="flex items-center gap-3 pb-4 mb-4 border-b border-white/[0.06]">
-          <div className="w-9 h-9 rounded-full bg-emerald-500/10 flex items-center justify-center">
-            <MessageCircle className="w-4 h-4 text-emerald-400" />
-          </div>
-          <div>
-            <div className="text-[16px] font-semibold text-white">Cobranza automatizada por WhatsApp</div>
-            <div className="text-[13px] text-white/40">Recordatorio + conciliacion en un clic</div>
-          </div>
+          <ChatBubble from="in">Hola Ana. Tu pago de $45,000 por A-101 vence mañana. ¿Necesitas ayuda?</ChatBubble>
+          <ChatBubble from="out">Ya lo transferí, te envío el comprobante</ChatBubble>
+          <ChatBubble from="out">comprobante_pago.pdf</ChatBubble>
+          <ChatBubble from="in">Pago recibido. Ve tu estado de cuenta en ardia.mx</ChatBubble>
         </div>
-        <WhatsAppMiniChat />
       </div>
 
-      <SlideFooter theme={theme} pageNum={1} totalPages={3} label="ardia.mx" />
-    </SlideWrapper>
+      {/* Footer */}
+      <div style={{ marginTop: 'auto' }}>
+        <div style={{ borderTop: `1px solid ${QM.hair}`, padding: '20px 64px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', position: 'relative', zIndex: 10 }}>
+          <span style={{ fontFamily: sans, fontSize: 11, fontWeight: 400, letterSpacing: '0.18em', textTransform: 'uppercase', color: QM.fgDim }}>
+            ardia.mx
+          </span>
+          <span style={{ fontFamily: sans, fontSize: 11, fontWeight: 400, letterSpacing: '0.18em', color: QM.fgDim }}>
+            01 / 03
+          </span>
+        </div>
+      </div>
+    </div>
   )
 }
