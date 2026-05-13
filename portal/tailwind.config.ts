@@ -12,7 +12,7 @@ export default {
         sans: ['Inter', 'system-ui', 'sans-serif'],
       },
       colors: {
-        'pachi': {
+        'pach': {
           red: '#F13D43',
         },
         'ardia-red': '#F13D43',

@@ -1,5 +1,5 @@
 import { WhatsAppClient } from '@kapso/whatsapp-cloud-api'
-import { projects, type WhatsAppConfig } from '../../../../pachi.config.js'
+import { projects, type WhatsAppConfig } from '../../../../pach.config.js'
 
 export interface ResolvedWhatsApp {
   client: WhatsAppClient

@@ -18,5 +18,5 @@ app.use('/whatsapp', whatsappRoute)
 app.use((_req, res) => res.status(404).json({ error: 'Not found' }))
 
 app.listen(PORT, () => {
-  console.log(`Pachi server running on http://localhost:${PORT}`)
+  console.log(`Pach server running on http://localhost:${PORT}`)
 })

@@ -16,13 +16,13 @@ export interface ProjectConfig {
   github?: string
   /** Branch to track */
   branch?: string
-  /** Pachi-specific context directory (relative to pachi root) */
+  /** Pach-specific context directory (relative to pach root) */
   contextDir: string
   /** Tools this project uses */
   tools: string[]
   /**
    * WhatsApp config. Template definitions + sync are owned by the project's
-   * own repo (e.g. ardia). Pachi only sends — it does not create or clean up
+   * own repo (e.g. ardia). Pach only sends — it does not create or clean up
    * templates on the WABA.
    */
   whatsapp?: WhatsAppConfig
@@ -45,7 +45,7 @@ export const projects: Record<string, ProjectConfig> = {
 }
 
 export const config = {
-  databaseUrl: process.env.DATABASE_URL || 'postgres://pachi:pachi@localhost:5435/pachi',
+  databaseUrl: process.env.DATABASE_URL || 'postgres://pach:pach@localhost:5435/pach',
   portal: {
     port: 5174,
   },

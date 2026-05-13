@@ -26,7 +26,7 @@ export const companies = pgTable('companies', {
   taxId: text('tax_id'),
   /** Régimen fiscal */
   taxRegime: text('tax_regime'),
-  /** Link to project key in pachi.config.ts */
+  /** Link to project key in pach.config.ts */
   project: text('project'),
   description: text('description'),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),

@@ -4,7 +4,7 @@ import type { Schema } from '../../schema.js'
 
 type Tx = ServerTransaction<Schema, PostgresJsTransaction>
 
-// Pachi is a single-user personal tool — no complex auth needed.
+// Pach is a single-user personal tool — no complex auth needed.
 export function createServerMutators() {
   return {
     companies: {

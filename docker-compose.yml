@@ -1,14 +1,14 @@
 services:
   postgres:
     image: postgres:16
-    container_name: pachi-postgres
+    container_name: pach-postgres
     restart: unless-stopped
     ports:
       - '5435:5432'
     environment:
-      POSTGRES_USER: pachi
-      POSTGRES_PASSWORD: pachi
-      POSTGRES_DB: pachi
+      POSTGRES_USER: pach
+      POSTGRES_PASSWORD: pach
+      POSTGRES_DB: pach
     command:
       - postgres
       - -c

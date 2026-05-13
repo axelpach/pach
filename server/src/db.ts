@@ -3,7 +3,7 @@ import { drizzle } from 'drizzle-orm/postgres-js'
 import postgres from 'postgres'
 import * as schema from '../../db/schema.js'
 
-const connectionString = process.env.DATABASE_URL || 'postgres://pachi:pachi@localhost:5435/pachi'
+const connectionString = process.env.DATABASE_URL || 'postgres://pach:pach@localhost:5435/pach'
 
 let _client: ReturnType<typeof postgres> | null = null
 let _db: ReturnType<typeof drizzle> | null = null

@@ -1,13 +1,13 @@
-# Pachi — The Machine That Builds the Machine
+# Pach — The Machine That Builds the Machine
 
 ## Overview
 
-Pachi is a personal operations platform that uses AI agents and tools to automate business activities (sales, ops, marketing, product) across multiple projects. It starts local-first with Claude Code as the agent runner, with architecture ready for cloud deployment.
+Pach is a personal operations platform that uses AI agents and tools to automate business activities (sales, ops, marketing, product) across multiple projects. It starts local-first with Claude Code as the agent runner, with architecture ready for cloud deployment.
 
 ## Project Structure
 
 ```
-pachi/
+pach/
 ├── portal/                      # Web UI (Vite + React 19 + Tailwind + Zero)
 ├── server/                      # Backend API (Express + TypeScript)
 │   ├── src/
@@ -34,7 +34,7 @@ pachi/
 ├── db/                          # Drizzle schema (shared between server + portal)
 │   ├── schema.ts                # Source of truth for all tables
 │   └── drizzle/                 # Generated migrations
-├── pachi.config.ts              # Project registry + global config
+├── pach.config.ts               # Project registry + global config
 └── docker-compose.yml           # Postgres 16 on port 5435
 ```
 
@@ -57,11 +57,11 @@ pnpm docker:down      # Stop Postgres
 ## Database
 
 - **Postgres 16** on `localhost:5435` (different from Ardia on 5433)
-- **Connection string:** `postgres://pachi:pachi@localhost:5435/pachi`
+- **Connection string:** `postgres://pach:pach@localhost:5435/pach`
 - **Drizzle ORM** for migrations + schema
 - **Logical replication** enabled for Zero sync
 
-### Pachi Tables
+### Pach Tables
 
 | Table | Purpose |
 |-------|---------|
@@ -151,7 +151,7 @@ const [companies] = useQuery(z.query.companies.orderBy('name', 'asc'))
 ### Step 1: Gather context
 
 1. **Read project context:** `projects/{project}/context.md` for brand, tone, ICP, and value props
-2. **Read the project's actual codebase** for deeper context. Check `pachi.config.ts` for the project's `local` path, then go read relevant files from that codebase. For example, for Ardia:
+2. **Read the project's actual codebase** for deeper context. Check `pach.config.ts` for the project's `local` path, then go read relevant files from that codebase. For example, for Ardia:
    - Marketing content & copy: `~/Desktop/Developer/ardia/apps/buyers-ardia/app/marketing/` (existing decks, messaging, mockups)
    - Buyer portal UI: `~/Desktop/Developer/ardia/apps/buyers-ardia/app/portal/` (to understand product features for slides)
    - Developer portal components: `~/Desktop/Developer/ardia/apps/developers-ardia/src/components/` (for product screenshots/mockup inspiration)
@@ -251,7 +251,7 @@ export const slides: React.ComponentType<{ width: number; height: number; theme:
 ## Key Patterns
 
 - **Decks are code** — React components stored in `tools/decks/library/`, rendered in the browser, exported as PDF/PNG via `html-to-image` + `jsPDF`
-- **Projects have context + code access** — `projects/ardia/context.md` has high-level context (playbook, ICP, tone). For deeper detail, read the actual codebase via the `local` path in `pachi.config.ts` (e.g. `~/Desktop/Developer/ardia/`). Always check context.md first, then dive into the codebase for specifics like copy, UI patterns, feature details, or mockup inspiration
+- **Projects have context + code access** — `projects/ardia/context.md` has high-level context (playbook, ICP, tone). For deeper detail, read the actual codebase via the `local` path in `pach.config.ts` (e.g. `~/Desktop/Developer/ardia/`). Always check context.md first, then dive into the codebase for specifics like copy, UI patterns, feature details, or mockup inspiration
 - **Themes are reusable** — use `theme.accent`, `theme.textPrimary`, `theme.cardBg` etc. instead of hardcoding colors, so decks can be re-themed for different projects
 - **Primitives are building blocks** — use them for standard layouts, drop down to `ContentSlide`/`SlideWrapper` for custom ones
 - **Zero for reads, REST for operations** — Use Zero sync for data displayed in the portal (CRM, content). Keep heavy one-off operations (imports, PDF export, integrations) as plain server routes.

@@ -54,7 +54,7 @@ async function importData() {
     console.log(`  [${imported}/${records.length}] ${record.name}`)
   }
 
-  console.log(`\nImported ${imported} deals into Pachi CRM`)
+  console.log(`\nImported ${imported} deals into Pach CRM`)
   process.exit(0)
 }
 

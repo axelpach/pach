@@ -16,7 +16,7 @@ function Sidebar() {
   return (
     <div className="w-56 bg-[#0A0A0D] border-r border-white/[0.06] flex flex-col h-screen sticky top-0">
       <div className="px-5 py-5 border-b border-white/[0.06]">
-        <h1 className="text-xl font-bold text-white tracking-wide">Pachi</h1>
+        <h1 className="text-xl font-bold text-white tracking-wide">Pach</h1>
         <p className="text-[11px] text-white/30 mt-0.5">the machine that builds the machine</p>
       </div>
       <nav className="flex-1 px-3 py-4 space-y-1">
@@ -89,7 +89,7 @@ function AppShell() {
 export default function App() {
   return (
     <ZeroProvider
-      userID="pachi-user"
+      userID="pach-user"
       server={config.zeroServerUrl}
       schema={schema}
       mutators={mutators}
