@@ -1,5 +1,4 @@
-import { useZero } from '@rocicorp/zero/react'
-import { useQuery } from '@rocicorp/zero/react'
+import { useZero, useQuery } from '@rocicorp/zero/react'
 import { useState } from 'react'
 import { X, Building2, User, DollarSign, Thermometer, StickyNote, Plus, Trash2, Instagram, Phone, ExternalLink, Mail } from 'lucide-react'
 import type { Schema } from '../../zero-schema'
@@ -16,11 +15,16 @@ const STAGES = [
 
 const TEMPERATURES = [
   { value: '', label: 'None' },
-  { value: 'hot', label: 'Hot', color: '#EF4444' },
-  { value: 'warm', label: 'Warm', color: '#F59E0B' },
-  { value: 'cold', label: 'Cold', color: '#3B82F6' },
-  { value: 'ghosted', label: 'Ghosted', color: '#6B7280' },
+  { value: 'hot', label: 'Hot', color: '#ff4d6d' },
+  { value: 'warm', label: 'Warm', color: '#ffb547' },
+  { value: 'cold', label: 'Cold', color: '#5ad6ff' },
+  { value: 'ghosted', label: 'Ghosted', color: '#5a8a72' },
 ]
+
+const INPUT_CLS =
+  'w-full bg-rim border border-[rgba(0,255,140,0.15)] px-3 py-2 text-sm text-fg-1 outline-none focus:border-accent focus:shadow-glow-xs placeholder:text-fg-4'
+
+const LABEL_CLS = 'text-[10px] uppercase tracking-label text-fg-3 mb-1.5 flex items-center gap-1.5'
 
 interface DealSidebarProps {
   dealId: string
@@ -56,30 +60,19 @@ export default function DealSidebar({ dealId, onClose }: DealSidebarProps) {
 
   const handleAddNote = () => {
     if (!newNote.trim()) return
-    z.mutate.crm_notes.create({
-      id: crypto.randomUUID(),
-      dealId,
-      body: newNote.trim(),
-      type: 'manual',
-    })
+    z.mutate.crm_notes.create({ id: crypto.randomUUID(), dealId, body: newNote.trim(), type: 'manual' })
     setNewNote('')
   }
 
-  const handleDeleteNote = (noteId: string) => {
-    z.mutate.crm_notes.delete({ id: noteId })
-  }
+  const handleDeleteNote = (noteId: string) => z.mutate.crm_notes.delete({ id: noteId })
 
   const handleTitleSave = () => {
-    if (titleDraft.trim() && titleDraft !== deal.title) {
-      handleUpdateField('title', titleDraft.trim())
-    }
+    if (titleDraft.trim() && titleDraft !== deal.title) handleUpdateField('title', titleDraft.trim())
     setEditingTitle(false)
   }
 
   const handleDeleteDeal = () => {
-    for (const note of notes) {
-      z.mutate.crm_notes.delete({ id: note.id })
-    }
+    for (const note of notes) z.mutate.crm_notes.delete({ id: note.id })
     z.mutate.crm_deals.delete({ id: dealId })
     onClose()
   }
@@ -89,7 +82,6 @@ export default function DealSidebar({ dealId, onClose }: DealSidebarProps) {
     setShowCompanyPicker(false)
     setCompanySearch('')
   }
-
   const handleCreateCompany = (name: string) => {
     const id = crypto.randomUUID()
     z.mutate.crm_companies.create({ id, name })
@@ -97,10 +89,7 @@ export default function DealSidebar({ dealId, onClose }: DealSidebarProps) {
     setShowCompanyPicker(false)
     setCompanySearch('')
   }
-
-  const handleUnlinkCompany = () => {
-    z.mutate.crm_deals.update({ id: dealId, companyId: undefined } as any)
-  }
+  const handleUnlinkCompany = () => z.mutate.crm_deals.update({ id: dealId, companyId: undefined } as any)
 
   const handleLinkContact = (contactId: string) => {
     if (linkedContactIds.has(contactId)) return
@@ -108,7 +97,6 @@ export default function DealSidebar({ dealId, onClose }: DealSidebarProps) {
     setShowContactPicker(false)
     setContactSearch('')
   }
-
   const handleCreateContact = (name: string) => {
     const contactId = crypto.randomUUID()
     z.mutate.crm_contacts.create({ id: contactId, name, companyId: deal.companyId || undefined })
@@ -116,29 +104,27 @@ export default function DealSidebar({ dealId, onClose }: DealSidebarProps) {
     setShowContactPicker(false)
     setContactSearch('')
   }
-
   const handleUnlinkContact = (contactId: string) => {
     const link = dealContactLinks.find((dc) => dc.contactId === contactId)
     if (link) z.mutate.crm_deal_contacts.delete({ id: link.id })
   }
 
   const filteredCompanies = allCompanies.filter((c) =>
-    c.name.toLowerCase().includes(companySearch.toLowerCase())
+    c.name.toLowerCase().includes(companySearch.toLowerCase()),
   )
-
-  const filteredContacts = (deal.companyId ? companyContacts : allContacts).filter((c) =>
-    !linkedContactIds.has(c.id) && c.name.toLowerCase().includes(contactSearch.toLowerCase())
+  const filteredContacts = (deal.companyId ? companyContacts : allContacts).filter(
+    (c) => !linkedContactIds.has(c.id) && c.name.toLowerCase().includes(contactSearch.toLowerCase()),
   )
 
   return (
     <div className="fixed inset-0 z-50 flex justify-end" onClick={onClose}>
-      <div className="absolute inset-0 bg-black/40" />
+      <div className="absolute inset-0 bg-black/70 backdrop-blur-sm" />
       <div
-        className="relative w-[480px] h-full bg-[#0C0C0F] border-l border-white/[0.08] overflow-y-auto"
+        className="relative w-[480px] h-full bg-bg-2 border-l border-[rgba(0,255,140,0.35)] overflow-y-auto font-mono"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
-        <div className="sticky top-0 bg-[#0C0C0F] border-b border-white/[0.06] px-6 py-4 flex items-center justify-between z-10">
+        <div className="sticky top-0 bg-bg-2 border-b border-[rgba(0,255,140,0.15)] px-6 py-4 flex items-center justify-between z-10">
           <div className="flex items-center gap-3 flex-1 min-w-0">
             {editingTitle ? (
               <input
@@ -147,11 +133,11 @@ export default function DealSidebar({ dealId, onClose }: DealSidebarProps) {
                 onChange={(e) => setTitleDraft(e.target.value)}
                 onBlur={handleTitleSave}
                 onKeyDown={(e) => e.key === 'Enter' && handleTitleSave()}
-                className="text-lg font-bold text-white bg-transparent border-b border-white/20 outline-none w-full"
+                className="text-base font-bold text-accent bg-transparent border-b border-accent outline-none w-full"
               />
             ) : (
               <h2
-                className="text-lg font-bold text-white truncate cursor-pointer hover:text-white/80"
+                className="text-base font-bold text-fg-1 lowercase truncate cursor-pointer hover:text-accent"
                 onClick={() => { setTitleDraft(deal.title); setEditingTitle(true) }}
               >
                 {deal.title}
@@ -159,77 +145,82 @@ export default function DealSidebar({ dealId, onClose }: DealSidebarProps) {
             )}
           </div>
           <div className="flex items-center gap-2 ml-3">
-            <button onClick={handleDeleteDeal} className="text-white/30 hover:text-red-400 transition-colors p-1">
+            <button onClick={handleDeleteDeal} className="text-fg-4 hover:text-fail transition-colors p-1">
               <Trash2 className="w-4 h-4" />
             </button>
-            <button onClick={onClose} className="text-white/30 hover:text-white transition-colors p-1">
-              <X className="w-5 h-5" />
+            <button onClick={onClose} className="text-fg-4 hover:text-accent transition-colors p-1">
+              <X className="w-4 h-4" />
             </button>
           </div>
         </div>
 
-        <div className="px-6 py-5 space-y-6">
+        <div className="px-6 py-5 space-y-5">
           {/* Stage */}
           <div>
-            <label className="text-xs text-white/40 uppercase tracking-wide mb-2 block">Stage</label>
+            <label className={LABEL_CLS}>◊ stage</label>
             <select
               value={deal.stage}
               onChange={(e) => handleUpdateField('stage', e.target.value)}
-              className="w-full bg-white/[0.04] border border-white/[0.08] rounded-lg px-3 py-2 text-sm text-white outline-none focus:border-white/20"
+              className={INPUT_CLS}
             >
               {STAGES.map((s) => (
-                <option key={s.value} value={s.value}>{s.label}</option>
+                <option key={s.value} value={s.value} className="bg-bg-2">
+                  {s.label}
+                </option>
               ))}
             </select>
           </div>
 
           {/* Temperature */}
           <div>
-            <label className="text-xs text-white/40 uppercase tracking-wide mb-2 flex items-center gap-1.5">
-              <Thermometer className="w-3 h-3" /> Temperature
+            <label className={LABEL_CLS}>
+              <Thermometer className="w-3 h-3" /> temperature
             </label>
-            <div className="flex gap-2">
-              {TEMPERATURES.map((t) => (
-                <button
-                  key={t.value}
-                  onClick={() => handleUpdateField('temperature', t.value || undefined)}
-                  className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors border ${
-                    deal.temperature === t.value || (!deal.temperature && !t.value)
-                      ? 'border-white/20 bg-white/[0.08] text-white'
-                      : 'border-white/[0.06] text-white/40 hover:text-white/60'
-                  }`}
-                >
-                  {t.color && <span className="inline-block w-1.5 h-1.5 rounded-full mr-1.5" style={{ backgroundColor: t.color }} />}
-                  {t.label}
-                </button>
-              ))}
+            <div className="flex flex-wrap gap-1.5">
+              {TEMPERATURES.map((t) => {
+                const active = deal.temperature === t.value || (!deal.temperature && !t.value)
+                return (
+                  <button
+                    key={t.value}
+                    onClick={() => handleUpdateField('temperature', t.value || undefined)}
+                    className={`px-2.5 py-1 text-[10px] uppercase tracking-label transition-colors border ${
+                      active
+                        ? 'border-accent text-accent bg-[rgba(0,255,136,0.06)]'
+                        : 'border-[rgba(0,255,140,0.15)] text-fg-3 hover:text-fg-1'
+                    }`}
+                  >
+                    {t.color && <span className="inline-block w-1.5 h-1.5 rounded-full mr-1.5 align-middle" style={{ backgroundColor: t.color }} />}
+                    {t.label}
+                  </button>
+                )
+              })}
             </div>
           </div>
 
           {/* Value */}
           <div>
-            <label className="text-xs text-white/40 uppercase tracking-wide mb-2 flex items-center gap-1.5">
-              <DollarSign className="w-3 h-3" /> Value (MXN)
+            <label className={LABEL_CLS}>
+              <DollarSign className="w-3 h-3" /> value (MXN)
             </label>
             <input
               type="number"
               value={deal.value || ''}
               onChange={(e) => handleUpdateField('value', e.target.value ? parseInt(e.target.value) : undefined)}
               placeholder="0"
-              className="w-full bg-white/[0.04] border border-white/[0.08] rounded-lg px-3 py-2 text-sm text-white outline-none focus:border-white/20 placeholder:text-white/20"
+              className={INPUT_CLS}
             />
           </div>
 
           {/* Company */}
           <div>
-            <label className="text-xs text-white/40 uppercase tracking-wide mb-2 flex items-center gap-1.5">
-              <Building2 className="w-3 h-3" /> Company
+            <label className={LABEL_CLS}>
+              <Building2 className="w-3 h-3" /> company
             </label>
             {company ? (
-              <div className="rounded-lg bg-white/[0.03] border border-white/[0.06] p-3 space-y-2">
+              <div className="border border-[rgba(0,255,140,0.15)] bg-[rgba(5,6,5,0.6)] p-3 space-y-2">
                 <div className="flex items-center justify-between">
-                  <div className="text-sm font-medium text-white">{company.name}</div>
-                  <button onClick={handleUnlinkCompany} className="text-white/20 hover:text-white/50 transition-colors">
+                  <div className="text-sm text-fg-1">▸ {company.name}</div>
+                  <button onClick={handleUnlinkCompany} className="text-fg-4 hover:text-fail transition-colors">
                     <X className="w-3.5 h-3.5" />
                   </button>
                 </div>
@@ -243,24 +234,24 @@ export default function DealSidebar({ dealId, onClose }: DealSidebarProps) {
                 <InlineField
                   icon={<Phone className="w-3 h-3" />}
                   value={company.phone || ''}
-                  placeholder="+52..."
+                  placeholder="+52…"
                   onSave={(v) => z.mutate.crm_companies.update({ id: company.id, phone: v || undefined } as any)}
                 />
                 <InlineField
                   icon={<Building2 className="w-3 h-3" />}
                   value={company.city || ''}
-                  placeholder="City"
+                  placeholder="city"
                   onSave={(v) => z.mutate.crm_companies.update({ id: company.id, city: v || undefined } as any)}
                 />
               </div>
             ) : showCompanyPicker ? (
-              <div className="rounded-lg bg-white/[0.03] border border-white/[0.06] overflow-hidden">
+              <div className="border border-[rgba(0,255,140,0.15)] bg-[rgba(5,6,5,0.6)]">
                 <input
                   autoFocus
                   value={companySearch}
                   onChange={(e) => setCompanySearch(e.target.value)}
-                  placeholder="Search or create company..."
-                  className="w-full bg-transparent px-3 py-2 text-sm text-white outline-none placeholder:text-white/25 border-b border-white/[0.06]"
+                  placeholder="$ search or create company…"
+                  className="w-full bg-transparent px-3 py-2 text-sm text-fg-1 outline-none placeholder:text-fg-4 border-b border-[rgba(0,255,140,0.15)]"
                   onKeyDown={(e) => {
                     if (e.key === 'Escape') { setShowCompanyPicker(false); setCompanySearch('') }
                     if (e.key === 'Enter' && companySearch.trim() && filteredCompanies.length === 0) {
@@ -273,19 +264,19 @@ export default function DealSidebar({ dealId, onClose }: DealSidebarProps) {
                     <button
                       key={c.id}
                       onClick={() => handleLinkCompany(c.id)}
-                      className="w-full text-left px-3 py-2 text-sm text-white/70 hover:bg-white/[0.06] transition-colors flex items-center gap-2"
+                      className="w-full text-left px-3 py-2 text-sm text-fg-2 hover:bg-[rgba(0,255,136,0.06)] hover:text-fg-1 transition-colors flex items-center gap-2"
                     >
-                      <Building2 className="w-3.5 h-3.5 text-white/30" />
+                      <span className="text-fg-4">▸</span>
                       {c.name}
                     </button>
                   ))}
                   {companySearch.trim() && (
                     <button
                       onClick={() => handleCreateCompany(companySearch.trim())}
-                      className="w-full text-left px-3 py-2 text-sm text-white/50 hover:bg-white/[0.06] transition-colors flex items-center gap-2"
+                      className="w-full text-left px-3 py-2 text-sm text-accent hover:bg-[rgba(0,255,136,0.06)] transition-colors flex items-center gap-2"
                     >
                       <Plus className="w-3.5 h-3.5" />
-                      Create "{companySearch.trim()}"
+                      create "{companySearch.trim()}"
                     </button>
                   )}
                 </div>
@@ -293,43 +284,43 @@ export default function DealSidebar({ dealId, onClose }: DealSidebarProps) {
             ) : (
               <button
                 onClick={() => setShowCompanyPicker(true)}
-                className="text-sm text-white/25 hover:text-white/50 transition-colors flex items-center gap-1.5"
+                className="text-xs text-fg-3 hover:text-accent transition-colors flex items-center gap-1.5"
               >
-                <Plus className="w-3.5 h-3.5" /> Link company
+                <Plus className="w-3 h-3" /> link company
               </button>
             )}
           </div>
 
           {/* Contacts */}
           <div>
-            <label className="text-xs text-white/40 uppercase tracking-wide mb-2 flex items-center gap-1.5">
-              <User className="w-3 h-3" /> Contacts ({linkedContacts.length})
+            <label className={LABEL_CLS}>
+              <User className="w-3 h-3" /> contacts ({linkedContacts.length})
             </label>
             <div className="space-y-2">
               {linkedContacts.map((ct) => (
-                <div key={ct.id} className="rounded-lg bg-white/[0.03] border border-white/[0.06] p-3 space-y-2">
+                <div key={ct.id} className="border border-[rgba(0,255,140,0.15)] bg-[rgba(5,6,5,0.6)] p-3 space-y-2">
                   <div className="flex items-center justify-between">
-                    <div className="text-sm font-medium text-white">{ct.name}</div>
-                    <button onClick={() => handleUnlinkContact(ct.id)} className="text-white/20 hover:text-white/50 transition-colors">
+                    <div className="text-sm text-fg-1">▸ {ct.name}</div>
+                    <button onClick={() => handleUnlinkContact(ct.id)} className="text-fg-4 hover:text-fail transition-colors">
                       <X className="w-3.5 h-3.5" />
                     </button>
                   </div>
                   <InlineField
                     icon={<User className="w-3 h-3" />}
                     value={ct.role || ''}
-                    placeholder="Role"
+                    placeholder="role"
                     onSave={(v) => z.mutate.crm_contacts.update({ id: ct.id, role: v || undefined } as any)}
                   />
                   <InlineField
                     icon={<Mail className="w-3 h-3" />}
                     value={ct.email || ''}
-                    placeholder="Email"
+                    placeholder="email"
                     onSave={(v) => z.mutate.crm_contacts.update({ id: ct.id, email: v || undefined } as any)}
                   />
                   <InlineField
                     icon={<Phone className="w-3 h-3" />}
                     value={ct.phone || ''}
-                    placeholder="+52..."
+                    placeholder="+52…"
                     onSave={(v) => z.mutate.crm_contacts.update({ id: ct.id, phone: v || undefined } as any)}
                   />
                   <InlineField
@@ -343,13 +334,13 @@ export default function DealSidebar({ dealId, onClose }: DealSidebarProps) {
               ))}
 
               {showContactPicker ? (
-                <div className="rounded-lg bg-white/[0.03] border border-white/[0.06] overflow-hidden">
+                <div className="border border-[rgba(0,255,140,0.15)] bg-[rgba(5,6,5,0.6)]">
                   <input
                     autoFocus
                     value={contactSearch}
                     onChange={(e) => setContactSearch(e.target.value)}
-                    placeholder="Search or create contact..."
-                    className="w-full bg-transparent px-3 py-2 text-sm text-white outline-none placeholder:text-white/25 border-b border-white/[0.06]"
+                    placeholder="$ search or create contact…"
+                    className="w-full bg-transparent px-3 py-2 text-sm text-fg-1 outline-none placeholder:text-fg-4 border-b border-[rgba(0,255,140,0.15)]"
                     onKeyDown={(e) => {
                       if (e.key === 'Escape') { setShowContactPicker(false); setContactSearch('') }
                       if (e.key === 'Enter' && contactSearch.trim() && filteredContacts.length === 0) {
@@ -362,20 +353,20 @@ export default function DealSidebar({ dealId, onClose }: DealSidebarProps) {
                       <button
                         key={c.id}
                         onClick={() => handleLinkContact(c.id)}
-                        className="w-full text-left px-3 py-2 text-sm text-white/70 hover:bg-white/[0.06] transition-colors flex items-center gap-2"
+                        className="w-full text-left px-3 py-2 text-sm text-fg-2 hover:bg-[rgba(0,255,136,0.06)] hover:text-fg-1 transition-colors flex items-center gap-2"
                       >
-                        <User className="w-3.5 h-3.5 text-white/30" />
+                        <span className="text-fg-4">▸</span>
                         <span>{c.name}</span>
-                        {c.role && <span className="text-white/25 text-xs ml-auto">{c.role}</span>}
+                        {c.role && <span className="text-fg-4 text-xs ml-auto">{c.role}</span>}
                       </button>
                     ))}
                     {contactSearch.trim() && (
                       <button
                         onClick={() => handleCreateContact(contactSearch.trim())}
-                        className="w-full text-left px-3 py-2 text-sm text-white/50 hover:bg-white/[0.06] transition-colors flex items-center gap-2"
+                        className="w-full text-left px-3 py-2 text-sm text-accent hover:bg-[rgba(0,255,136,0.06)] transition-colors flex items-center gap-2"
                       >
                         <Plus className="w-3.5 h-3.5" />
-                        Create "{contactSearch.trim()}"
+                        create "{contactSearch.trim()}"
                       </button>
                     )}
                   </div>
@@ -383,9 +374,9 @@ export default function DealSidebar({ dealId, onClose }: DealSidebarProps) {
               ) : (
                 <button
                   onClick={() => setShowContactPicker(true)}
-                  className="text-sm text-white/25 hover:text-white/50 transition-colors flex items-center gap-1.5"
+                  className="text-xs text-fg-3 hover:text-accent transition-colors flex items-center gap-1.5"
                 >
-                  <Plus className="w-3.5 h-3.5" /> Add contact
+                  <Plus className="w-3 h-3" /> add contact
                 </button>
               )}
             </div>
@@ -393,67 +384,64 @@ export default function DealSidebar({ dealId, onClose }: DealSidebarProps) {
 
           {/* Description */}
           <div>
-            <label className="text-xs text-white/40 uppercase tracking-wide mb-2 block">Description</label>
+            <label className={LABEL_CLS}>◊ description</label>
             <textarea
               value={deal.description || ''}
               onChange={(e) => handleUpdateField('description', e.target.value)}
-              placeholder="Add a description..."
+              placeholder="// add a description…"
               rows={3}
-              className="w-full bg-white/[0.04] border border-white/[0.08] rounded-lg px-3 py-2 text-sm text-white outline-none focus:border-white/20 placeholder:text-white/20 resize-none"
+              className={`${INPUT_CLS} resize-none`}
             />
           </div>
 
           {/* Notes */}
           <div>
-            <label className="text-xs text-white/40 uppercase tracking-wide mb-3 flex items-center gap-1.5">
-              <StickyNote className="w-3 h-3" /> Notes ({notes.length})
+            <label className={LABEL_CLS}>
+              <StickyNote className="w-3 h-3" /> notes ({notes.length})
             </label>
 
-            {/* Add note */}
-            <div className="flex gap-2 mb-4">
+            <div className="flex gap-2 mb-3">
               <input
                 value={newNote}
                 onChange={(e) => setNewNote(e.target.value)}
                 onKeyDown={(e) => e.key === 'Enter' && handleAddNote()}
-                placeholder="Add a note..."
-                className="flex-1 bg-white/[0.04] border border-white/[0.08] rounded-lg px-3 py-2 text-sm text-white outline-none focus:border-white/20 placeholder:text-white/20"
+                placeholder="$ add a note…"
+                className={INPUT_CLS}
               />
               <button
                 onClick={handleAddNote}
                 disabled={!newNote.trim()}
-                className="px-3 py-2 bg-white/[0.06] border border-white/[0.08] rounded-lg text-white/60 hover:text-white hover:bg-white/[0.1] transition-colors disabled:opacity-30"
+                className="px-3 py-2 border border-[rgba(0,255,140,0.35)] text-accent hover:bg-[rgba(0,255,136,0.06)] hover:shadow-glow-xs transition-all disabled:opacity-30"
               >
-                <Plus className="w-4 h-4" />
+                <Plus className="w-3.5 h-3.5" />
               </button>
             </div>
 
-            {/* Notes list */}
-            <div className="space-y-3">
+            <div className="space-y-2">
               {notes.map((note) => (
-                <div key={note.id} className="group rounded-lg bg-white/[0.02] border border-white/[0.06] px-4 py-3">
+                <div key={note.id} className="group border border-[rgba(0,255,140,0.15)] bg-[rgba(5,6,5,0.6)] px-3 py-2.5">
                   <div className="flex items-start justify-between gap-2">
-                    <p className="text-sm text-white/70 leading-relaxed">{note.body}</p>
+                    <p className="text-sm text-fg-2 leading-relaxed">
+                      <span className="text-fg-4">› </span>{note.body}
+                    </p>
                     <button
                       onClick={() => handleDeleteNote(note.id)}
-                      className="text-white/0 group-hover:text-white/30 hover:!text-red-400 transition-colors shrink-0 mt-0.5"
+                      className="opacity-0 group-hover:opacity-100 text-fg-4 hover:text-fail transition-all shrink-0 mt-0.5"
                     >
                       <X className="w-3.5 h-3.5" />
                     </button>
                   </div>
-                  <div className="flex items-center gap-2 mt-2">
-                    <span className="text-[11px] text-white/25">
-                      {note.type !== 'manual' && <span className="capitalize">{note.type} · </span>}
-                      {new Date(note.createdAt).toLocaleDateString('es-MX', { day: 'numeric', month: 'short', year: 'numeric' })}
-                    </span>
+                  <div className="mt-1.5 text-[10px] uppercase tracking-label text-fg-4">
+                    {note.type !== 'manual' && <span>{note.type} · </span>}
+                    {new Date(note.createdAt).toLocaleDateString('es-MX', { day: 'numeric', month: 'short', year: 'numeric' })}
                   </div>
                 </div>
               ))}
             </div>
           </div>
 
-          {/* Meta */}
-          <div className="text-[11px] text-white/20 pt-2 border-t border-white/[0.04]">
-            Created {new Date(deal.createdAt).toLocaleDateString('es-MX', { day: 'numeric', month: 'short', year: 'numeric' })}
+          <div className="text-[10px] uppercase tracking-label text-fg-4 pt-3 border-t border-[rgba(0,255,140,0.10)]">
+            // created {new Date(deal.createdAt).toLocaleDateString('es-MX', { day: 'numeric', month: 'short', year: 'numeric' })}
           </div>
         </div>
       </div>
@@ -485,7 +473,7 @@ function InlineField({
   if (editing) {
     return (
       <div className="flex items-center gap-2">
-        <span className="text-white/30 shrink-0">{icon}</span>
+        <span className="text-fg-4 shrink-0">{icon}</span>
         <input
           autoFocus
           value={draft}
@@ -493,7 +481,7 @@ function InlineField({
           onBlur={handleSave}
           onKeyDown={(e) => { if (e.key === 'Enter') handleSave(); if (e.key === 'Escape') setEditing(false) }}
           placeholder={placeholder}
-          className="flex-1 bg-transparent text-xs text-white outline-none border-b border-white/20 py-0.5 placeholder:text-white/20"
+          className="flex-1 bg-transparent text-xs text-fg-1 outline-none border-b border-accent py-0.5 placeholder:text-fg-4"
         />
       </div>
     )
@@ -503,10 +491,10 @@ function InlineField({
     <div className="flex items-center gap-1 w-full">
       <button
         onClick={() => { setDraft(value); setEditing(true) }}
-        className="flex items-center gap-2 text-xs text-white/40 hover:text-white/60 transition-colors flex-1 min-w-0"
+        className="flex items-center gap-2 text-xs text-fg-3 hover:text-fg-1 transition-colors flex-1 min-w-0"
       >
-        <span className="text-white/30 shrink-0">{icon}</span>
-        <span className="truncate">{value || <span className="text-white/20">{placeholder}</span>}</span>
+        <span className="text-fg-4 shrink-0">{icon}</span>
+        <span className="truncate">{value || <span className="text-fg-4">{placeholder}</span>}</span>
       </button>
       {linkUrl && value && (
         <a
@@ -514,7 +502,7 @@ function InlineField({
           target="_blank"
           rel="noopener noreferrer"
           onClick={(e) => e.stopPropagation()}
-          className="text-white/20 hover:text-white/50 transition-colors shrink-0 p-0.5"
+          className="text-fg-4 hover:text-accent transition-colors shrink-0 p-0.5"
         >
           <ExternalLink className="w-3 h-3" />
         </a>

@@ -1,4 +1,5 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200" width="200" height="200">
-  <rect width="200" height="200" rx="32" fill="#000000"/>
-  <text x="100" y="138" text-anchor="middle" font-family="system-ui, -apple-system, 'Helvetica Neue', sans-serif" font-size="140" font-weight="700" fill="#FFFFFF">P</text>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <rect width="32" height="32" fill="#000"></rect>
+  <text x="16" y="24" text-anchor="middle" font-family="JetBrains Mono, monospace" font-weight="700" font-size="22" fill="#00ff88">p</text>
+  <rect x="22" y="9" width="3" height="13" fill="#00ff88"></rect>
 </svg>

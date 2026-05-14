@@ -5,6 +5,7 @@ import { ArrowLeft, Send, Trash2, Search, Check, CheckCircle2, AlertCircle, Cloc
 import type { Schema } from '../../zero-schema'
 import type { Mutators } from '../../mutators'
 import { config } from '../../config'
+import { Button } from '../../components/pach'
 
 export default function CampaignDetail() {
   const { id } = useParams<{ id: string }>()
@@ -35,15 +36,15 @@ export default function CampaignDetail() {
 
   if (!campaign) {
     return (
-      <div className="flex-1 flex items-center justify-center text-white/40">
-        Campaña no encontrada.
+      <div className="flex-1 flex items-center justify-center text-fg-3 font-mono text-sm">
+        <span className="text-fg-4">// </span>campaña no encontrada
       </div>
     )
   }
   if (!template) {
     return (
-      <div className="flex-1 flex items-center justify-center text-white/40">
-        Plantilla eliminada.
+      <div className="flex-1 flex items-center justify-center text-fg-3 font-mono text-sm">
+        <span className="text-fg-4">// </span>plantilla eliminada
       </div>
     )
   }
@@ -80,9 +81,7 @@ export default function CampaignDetail() {
     setFiring(true)
     setFireError(null)
     try {
-      const res = await fetch(`${config.apiUrl}/whatsapp/campaigns/${campaign!.id}/fire`, {
-        method: 'POST',
-      })
+      const res = await fetch(`${config.apiUrl}/whatsapp/campaigns/${campaign!.id}/fire`, { method: 'POST' })
       const data = await res.json()
       if (!res.ok) throw new Error(data.error || 'fire failed')
     } catch (e) {
@@ -105,49 +104,46 @@ export default function CampaignDetail() {
 
   return (
     <div className="flex-1 flex overflow-hidden">
-      {/* Main column */}
       <div className="flex-1 flex flex-col overflow-hidden">
-        <div className="px-8 py-4 border-b border-white/[0.06] flex items-center justify-between">
+        <div className="px-8 py-3 border-b border-[rgba(0,255,140,0.15)] flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <Link to="/whatsapp/campaigns" className="text-white/40 hover:text-white">
+            <Link to="/whatsapp/campaigns" className="text-fg-3 hover:text-accent transition-colors">
               <ArrowLeft className="w-4 h-4" />
             </Link>
             <div>
-              <div className="text-base font-semibold text-white">{campaign.name}</div>
-              <div className="text-xs text-white/40 font-mono mt-0.5">{template.name}</div>
+              <div className="text-sm font-mono text-fg-1">▸ {campaign.name}</div>
+              <div className="text-[10px] uppercase tracking-label text-fg-3 mt-0.5">{template.name}</div>
             </div>
           </div>
           <div className="flex items-center gap-2">
-            <button
-              onClick={handleDelete}
-              className="p-2 rounded-lg text-white/50 hover:text-red-400 hover:bg-white/[0.04]"
-              title="Eliminar"
-            >
+            <button onClick={handleDelete} className="p-2 text-fg-4 hover:text-fail transition-colors" title="Eliminar">
               <Trash2 className="w-4 h-4" />
             </button>
-            <button
+            <Button
+              kind="primary"
+              icon={<Send className="w-3.5 h-3.5" />}
               onClick={handleFire}
               disabled={firing || !isDraft || selectedIds.size === 0}
-              className="flex items-center gap-2 px-4 py-2 rounded-lg bg-white text-black text-sm font-medium hover:bg-white/90 disabled:opacity-40"
             >
-              <Send className="w-4 h-4" />
-              {firing ? 'Enviando…' : isDraft ? `Enviar a ${selectedIds.size}` : 'Ya enviada'}
-            </button>
+              {firing ? 'enviando…' : isDraft ? `enviar a ${selectedIds.size}` : 'ya enviada'}
+            </Button>
           </div>
         </div>
 
         {fireError && (
-          <div className="px-8 py-2 text-sm text-red-400 bg-red-500/[0.05] border-b border-white/[0.06]">{fireError}</div>
+          <div className="px-8 py-2 text-xs font-mono text-fail bg-[rgba(255,77,109,0.05)] border-b border-[rgba(255,77,109,0.25)]">
+            ✕ {fireError}
+          </div>
         )}
 
         <div className="flex-1 overflow-auto p-6 grid grid-cols-1 xl:grid-cols-2 gap-6">
           {/* Preview */}
           <section>
-            <div className="text-xs uppercase tracking-wider text-white/40 mb-2 flex items-center gap-2">
-              <Eye className="w-3 h-3" /> Vista previa
+            <div className="text-[10px] uppercase tracking-label text-fg-3 mb-2 flex items-center gap-2">
+              <Eye className="w-3 h-3" /> ◊ vista previa
             </div>
-            <div className="bg-[#0B141A] rounded-xl p-3 max-w-sm border border-white/[0.04]">
-              <div className="bg-[#1F2C33] rounded-lg overflow-hidden">
+            <div className="bg-[#0B141A] p-3 max-w-sm border border-[rgba(0,255,140,0.10)]">
+              <div className="bg-[#1F2C33] overflow-hidden">
                 {template.headerSampleUrl && template.headerFormat === 'IMAGE' && (
                   <img src={template.headerSampleUrl} alt="" className="w-full h-48 object-cover" />
                 )}
@@ -155,13 +151,13 @@ export default function CampaignDetail() {
                   <video src={template.headerSampleUrl} className="w-full h-48 object-cover" controls />
                 )}
                 {template.headerText && template.headerFormat === 'TEXT' && (
-                  <div className="px-3 pt-3 text-sm font-semibold text-white">{template.headerText}</div>
+                  <div className="px-3 pt-3 text-sm font-semibold text-white font-sans">{template.headerText}</div>
                 )}
-                <div className="px-3 py-2 text-sm text-white/90 whitespace-pre-wrap leading-relaxed">
+                <div className="px-3 py-2 text-sm text-white/90 whitespace-pre-wrap leading-relaxed font-sans">
                   {renderBody(template.bodyText)}
                 </div>
                 {template.footerText && (
-                  <div className="px-3 pb-2 text-xs text-white/40">{template.footerText}</div>
+                  <div className="px-3 pb-2 text-xs text-white/40 font-sans">{template.footerText}</div>
                 )}
                 <div className="px-3 pb-2 text-[10px] text-white/30 text-right">12:34 PM</div>
               </div>
@@ -169,17 +165,17 @@ export default function CampaignDetail() {
 
             {template.variables && template.variables.length > 0 && (
               <div className="mt-4 space-y-2">
-                <div className="text-xs uppercase tracking-wider text-white/40">Variables</div>
+                <div className="text-[10px] uppercase tracking-label text-fg-3">◊ variables</div>
                 {template.variables.map((v: string) => (
                   <div key={v} className="flex items-center gap-2">
-                    <span className="text-xs font-mono text-white/50 w-12">{v}</span>
+                    <span className="text-xs font-mono text-accent w-12">{v}</span>
                     <input
                       type="text"
                       value={variableValues[v] || ''}
                       onChange={e => updateVariable(v, e.target.value)}
                       disabled={!isDraft}
                       placeholder="valor…"
-                      className="flex-1 px-2 py-1 bg-white/[0.04] border border-white/[0.08] rounded text-white text-sm placeholder:text-white/30 focus:outline-none focus:border-white/30 disabled:opacity-50"
+                      className="flex-1 px-2 py-1 bg-rim border border-[rgba(0,255,140,0.15)] text-fg-1 text-sm placeholder:text-fg-4 outline-none focus:border-accent focus:shadow-glow-xs disabled:opacity-50"
                     />
                   </div>
                 ))}
@@ -189,52 +185,55 @@ export default function CampaignDetail() {
 
           {/* Recipients */}
           <section className="flex flex-col min-h-0">
-            <div className="text-xs uppercase tracking-wider text-white/40 mb-2 flex items-center justify-between">
-              <span>Destinatarios ({selectedIds.size} seleccionados)</span>
-              {!isDraft && <span className="text-white/30">(bloqueado)</span>}
+            <div className="text-[10px] uppercase tracking-label text-fg-3 mb-2 flex items-center justify-between">
+              <span>◊ destinatarios ({selectedIds.size} sel)</span>
+              {!isDraft && <span className="text-fg-4">(locked)</span>}
             </div>
             <div className="relative mb-2">
-              <Search className="w-3.5 h-3.5 absolute left-2.5 top-2.5 text-white/40" />
+              <Search className="w-3.5 h-3.5 absolute left-2.5 top-2.5 text-fg-4" />
               <input
                 type="text"
                 value={search}
                 onChange={e => setSearch(e.target.value)}
-                placeholder="Buscar por nombre o teléfono"
-                className="w-full pl-8 pr-3 py-1.5 bg-white/[0.04] border border-white/[0.08] rounded-lg text-white text-sm placeholder:text-white/30 focus:outline-none focus:border-white/30"
+                placeholder="$ search…"
+                className="w-full pl-8 pr-3 py-1.5 bg-rim border border-[rgba(0,255,140,0.15)] text-fg-1 text-sm placeholder:text-fg-4 outline-none focus:border-accent focus:shadow-glow-xs"
               />
             </div>
-            <div className="flex-1 overflow-auto border border-white/[0.06] rounded-lg divide-y divide-white/[0.04] min-h-0">
+            <div className="flex-1 overflow-auto border border-[rgba(0,255,140,0.15)] min-h-0">
               {filteredContacts.length === 0 && (
-                <div className="text-sm text-white/40 px-3 py-6 text-center">Sin contactos con teléfono.</div>
+                <div className="text-sm text-fg-3 px-3 py-6 text-center font-mono">
+                  <span className="text-fg-4">// </span>sin contactos con teléfono
+                </div>
               )}
-              {filteredContacts.map(c => (
-                <button
-                  key={c.id}
-                  onClick={() => toggleContact(c.id)}
-                  disabled={!isDraft}
-                  className={`w-full text-left px-3 py-2 flex items-center gap-3 hover:bg-white/[0.04] disabled:opacity-60 ${
-                    selectedIds.has(c.id) ? 'bg-white/[0.04]' : ''
-                  }`}
-                >
-                  <div className={`w-4 h-4 rounded border ${selectedIds.has(c.id) ? 'bg-white border-white' : 'border-white/30'} flex items-center justify-center shrink-0`}>
-                    {selectedIds.has(c.id) && <Check className="w-3 h-3 text-black" />}
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <div className="text-sm text-white truncate">{c.name}</div>
-                    <div className="text-xs text-white/40 font-mono">{c.phone}</div>
-                  </div>
-                </button>
-              ))}
+              {filteredContacts.map(c => {
+                const sel = selectedIds.has(c.id)
+                return (
+                  <button
+                    key={c.id}
+                    onClick={() => toggleContact(c.id)}
+                    disabled={!isDraft}
+                    className={`w-full text-left px-3 py-2 flex items-center gap-3 border-b border-[rgba(0,255,140,0.08)] last:border-b-0 hover:bg-[rgba(0,255,136,0.04)] disabled:opacity-60 ${
+                      sel ? 'bg-[rgba(0,255,136,0.05)]' : ''
+                    }`}
+                  >
+                    <div className={`w-3.5 h-3.5 border flex items-center justify-center shrink-0 ${sel ? 'bg-accent border-accent' : 'border-[rgba(0,255,140,0.35)]'}`}>
+                      {sel && <Check className="w-2.5 h-2.5 text-bg-0" strokeWidth={3} />}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="text-sm font-mono text-fg-1 truncate">{c.name}</div>
+                      <div className="text-[10px] text-fg-3 font-mono">{c.phone}</div>
+                    </div>
+                  </button>
+                )
+              })}
             </div>
           </section>
 
           {/* Logs */}
           {messages.length > 0 && (
             <section className="xl:col-span-2">
-              <div className="text-xs uppercase tracking-wider text-white/40 mb-2">
-                Logs ({messages.length})
-              </div>
-              <div className="border border-white/[0.06] rounded-lg divide-y divide-white/[0.04]">
+              <div className="text-[10px] uppercase tracking-label text-fg-3 mb-2">◊ logs · trace ({messages.length})</div>
+              <div className="border border-[rgba(0,255,140,0.15)] bg-void font-mono">
                 {messages.map(m => {
                   const status = m.status
                   const Icon =
@@ -243,18 +242,18 @@ export default function CampaignDetail() {
                     status === 'sent' ? CheckCircle2 :
                     Clock
                   const color =
-                    status === 'failed' ? 'text-red-400' :
-                    status === 'read' ? 'text-blue-400' :
-                    status === 'delivered' ? 'text-emerald-400' :
-                    status === 'sent' ? 'text-white/70' :
-                    'text-white/40'
+                    status === 'failed' ? 'text-fail' :
+                    status === 'read' ? 'text-pach-info' :
+                    status === 'delivered' ? 'text-ok' :
+                    status === 'sent' ? 'text-fg-1' :
+                    'text-fg-3'
                   return (
-                    <div key={m.id} className="px-3 py-2 flex items-center gap-3 text-sm">
-                      <Icon className={`w-4 h-4 shrink-0 ${color}`} />
-                      <div className="font-mono text-white/70 w-36 truncate">{m.phone}</div>
-                      <div className={`text-xs ${color} w-20`}>{status}</div>
-                      <div className="flex-1 text-xs text-white/40 truncate">{m.error || m.metaMessageId || ''}</div>
-                      <div className="text-[11px] text-white/30">
+                    <div key={m.id} className="px-3 py-2 flex items-center gap-3 text-xs border-b border-[rgba(0,255,140,0.08)] last:border-b-0">
+                      <Icon className={`w-3.5 h-3.5 shrink-0 ${color}`} />
+                      <div className="text-fg-2 w-36 truncate">{m.phone}</div>
+                      <div className={`text-[10px] uppercase tracking-label ${color} w-24`}>{status}</div>
+                      <div className="flex-1 text-[10px] text-fg-3 truncate">{m.error || m.metaMessageId || ''}</div>
+                      <div className="text-[10px] text-fg-4">
                         {m.sentAt ? new Date(m.sentAt).toLocaleTimeString() : new Date(m.createdAt).toLocaleTimeString()}
                       </div>
                     </div>

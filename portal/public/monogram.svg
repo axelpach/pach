@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96 96" role="img" aria-label="Pach monogram">
+  <defs>
+    <filter id="g" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur stdDeviation="1.5" result="b"></feGaussianBlur>
+      <feMerge><feMergeNode in="b"></feMergeNode><feMergeNode in="SourceGraphic"></feMergeNode></feMerge>
+    </filter>
+  </defs>
+  <rect width="96" height="96" fill="#000"></rect>
+  
+  <g stroke="#00ff88" stroke-width="2" fill="none" filter="url(#g)">
+    <path d="M 8 22 L 8 8 L 22 8"></path>
+    <path d="M 74 8 L 88 8 L 88 22"></path>
+    <path d="M 8 74 L 8 88 L 22 88"></path>
+    <path d="M 88 74 L 88 88 L 74 88"></path>
+  </g>
+  
+  <text x="48" y="64" text-anchor="middle" font-family="JetBrains Mono, ui-monospace, monospace" font-weight="700" font-size="56" fill="#00ff88" filter="url(#g)">p</text>
+  
+  <rect x="58" y="28" width="8" height="32" fill="#00ff88" filter="url(#g)">
+    
+  </rect>
+</svg>

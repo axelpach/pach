@@ -28,8 +28,8 @@ export default function DeckViewer() {
 
   if (!deck) {
     return (
-      <div className="flex-1 flex items-center justify-center">
-        <p className="text-white/40">Deck not found.</p>
+      <div className="flex-1 flex items-center justify-center text-fg-3 font-mono text-sm">
+        <span className="text-fg-4">// </span>deck not found
       </div>
     )
   }

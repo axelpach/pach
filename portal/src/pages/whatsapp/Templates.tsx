@@ -4,15 +4,16 @@ import { RefreshCw, CheckCircle2, Clock, XCircle, Pause, Image, Video, FileText,
 import type { Schema } from '../../zero-schema'
 import type { Mutators } from '../../mutators'
 import { config } from '../../config'
+import { StatusPill, Button } from '../../components/pach'
 
 const PROJECT_ID = 'ardia'
 
-const STATUS_STYLES: Record<string, { icon: typeof CheckCircle2; color: string; label: string }> = {
-  APPROVED: { icon: CheckCircle2, color: 'text-emerald-400 bg-emerald-400/10', label: 'Aprobada' },
-  PENDING: { icon: Clock, color: 'text-amber-400 bg-amber-400/10', label: 'Pendiente' },
-  REJECTED: { icon: XCircle, color: 'text-red-400 bg-red-400/10', label: 'Rechazada' },
-  PAUSED: { icon: Pause, color: 'text-white/50 bg-white/10', label: 'Pausada' },
-  DISABLED: { icon: XCircle, color: 'text-white/40 bg-white/5', label: 'Deshabilitada' },
+const STATUS_STYLES: Record<string, { icon: typeof CheckCircle2; kind: 'ok' | 'warn' | 'fail' | 'idle'; label: string }> = {
+  APPROVED: { icon: CheckCircle2, kind: 'ok', label: 'aprobada' },
+  PENDING: { icon: Clock, kind: 'warn', label: 'pendiente' },
+  REJECTED: { icon: XCircle, kind: 'fail', label: 'rechazada' },
+  PAUSED: { icon: Pause, kind: 'idle', label: 'pausada' },
+  DISABLED: { icon: XCircle, kind: 'idle', label: 'deshabilitada' },
 }
 
 const HEADER_ICON: Record<string, typeof Image> = {
@@ -42,9 +43,9 @@ export default function WhatsAppTemplates() {
       })
       const data = await res.json()
       if (!res.ok) throw new Error(data.error || 'sync failed')
-      setSyncMessage(`Sincronizado: ${data.created} nuevas, ${data.updated} actualizadas, ${data.unchanged} sin cambios`)
+      setSyncMessage(`› sincronizado · ${data.created} nuevas · ${data.updated} actualizadas · ${data.unchanged} sin cambios`)
     } catch (e) {
-      setSyncMessage(e instanceof Error ? e.message : String(e))
+      setSyncMessage(`✕ ${e instanceof Error ? e.message : String(e)}`)
     } finally {
       setSyncing(false)
     }
@@ -52,57 +53,50 @@ export default function WhatsAppTemplates() {
 
   return (
     <div className="flex-1 flex flex-col overflow-hidden">
-      <div className="px-8 py-4 border-b border-white/[0.06] flex items-center justify-between">
-        <p className="text-sm text-white/40">
-          {templates.length} {templates.length === 1 ? 'plantilla' : 'plantillas'} sincronizadas desde Meta
+      <div className="px-8 py-3 border-b border-[rgba(0,255,140,0.15)] flex items-center justify-between">
+        <p className="text-xs text-fg-3 uppercase tracking-label">
+          › {templates.length} {templates.length === 1 ? 'plantilla' : 'plantillas'} · synced desde meta
         </p>
-        <button
-          onClick={handleSync}
-          disabled={syncing}
-          className="flex items-center gap-2 px-4 py-2 rounded-lg bg-white/[0.08] hover:bg-white/[0.12] text-white text-sm font-medium disabled:opacity-50"
-        >
-          <RefreshCw className={`w-4 h-4 ${syncing ? 'animate-spin' : ''}`} />
-          {syncing ? 'Sincronizando…' : 'Sincronizar con Meta'}
-        </button>
+        <Button kind="primary" icon={<RefreshCw className={`w-3.5 h-3.5 ${syncing ? 'animate-spin' : ''}`} />} onClick={handleSync} disabled={syncing}>
+          {syncing ? 'sync…' : 'sync con meta'}
+        </Button>
       </div>
 
       {syncMessage && (
-        <div className="px-8 py-3 text-sm text-white/70 border-b border-white/[0.06] bg-white/[0.02]">{syncMessage}</div>
+        <div className="px-8 py-2 text-xs text-fg-2 border-b border-[rgba(0,255,140,0.10)] bg-[rgba(0,255,136,0.03)] font-mono">
+          {syncMessage}
+        </div>
       )}
 
       <div className="flex-1 overflow-auto">
         {templates.length === 0 ? (
-          <div className="text-center text-white/40 py-12">
-            No hay plantillas. Haz clic en <span className="text-white/70">Sincronizar con Meta</span> para traerlas.
+          <div className="text-center text-fg-3 py-12 font-mono text-sm">
+            <span className="text-fg-4">// </span>no hay plantillas · click <span className="text-accent">sync con meta</span> para traerlas
           </div>
         ) : (
-          <div className="divide-y divide-white/[0.04]">
+          <div>
             {templates.map(t => {
               const statusInfo = STATUS_STYLES[t.status] || STATUS_STYLES.PENDING
-              const StatusIcon = statusInfo.icon
               const HeaderIcon = t.headerFormat ? HEADER_ICON[t.headerFormat] || null : null
               const isActive = t.id === selectedId
               return (
                 <button
                   key={t.id}
                   onClick={() => setSelectedId(t.id)}
-                  className={`w-full text-left px-8 py-3 flex items-center gap-4 hover:bg-white/[0.03] transition-colors ${
-                    isActive ? 'bg-white/[0.05]' : ''
+                  className={`w-full text-left px-8 py-3 flex items-center gap-4 border-b border-[rgba(0,255,140,0.08)] hover:bg-[rgba(0,255,136,0.03)] transition-colors ${
+                    isActive ? 'bg-[rgba(0,255,136,0.05)] border-l-2 border-l-accent' : ''
                   }`}
                 >
-                  <div className={`shrink-0 inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-xs font-medium ${statusInfo.color}`}>
-                    <StatusIcon className="w-3 h-3" />
-                    {statusInfo.label}
-                  </div>
+                  <StatusPill kind={statusInfo.kind}>{statusInfo.label}</StatusPill>
                   <div className="flex-1 min-w-0">
-                    <div className="font-mono text-sm text-white truncate">{t.name}</div>
-                    <div className="text-xs text-white/40 mt-0.5 flex items-center gap-2">
+                    <div className="font-mono text-sm text-fg-1 truncate">{t.name}</div>
+                    <div className="text-[11px] text-fg-3 mt-0.5 flex items-center gap-2 uppercase tracking-label">
                       <span>{t.language}</span>
-                      <span>·</span>
+                      <span className="text-fg-4">·</span>
                       <span>{t.category}</span>
                       {HeaderIcon && (
                         <>
-                          <span>·</span>
+                          <span className="text-fg-4">·</span>
                           <span className="inline-flex items-center gap-1">
                             <HeaderIcon className="w-3 h-3" /> {t.headerFormat}
                           </span>
@@ -110,8 +104,8 @@ export default function WhatsAppTemplates() {
                       )}
                       {t.variables && t.variables.length > 0 && (
                         <>
-                          <span>·</span>
-                          <span>{t.variables.length} {t.variables.length === 1 ? 'variable' : 'variables'}</span>
+                          <span className="text-fg-4">·</span>
+                          <span>{t.variables.length} {t.variables.length === 1 ? 'var' : 'vars'}</span>
                         </>
                       )}
                     </div>
@@ -146,36 +140,32 @@ interface Template {
 
 function TemplateDetail({ template: t, onClose }: { template: Template; onClose: () => void }) {
   const statusInfo = STATUS_STYLES[t.status] || STATUS_STYLES.PENDING
-  const StatusIcon = statusInfo.icon
 
   return (
     <>
-      <div className="fixed inset-0 bg-black/60 z-40" onClick={onClose} />
-      <div className="fixed right-0 top-0 bottom-0 w-full max-w-xl bg-[#0A0A0D] border-l border-white/[0.06] z-50 flex flex-col">
-        <div className="px-6 py-5 border-b border-white/[0.06] flex items-start justify-between gap-4">
+      <div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-40" onClick={onClose} />
+      <div className="fixed right-0 top-0 bottom-0 w-full max-w-xl bg-bg-2 border-l border-[rgba(0,255,140,0.35)] z-50 flex flex-col font-mono">
+        <div className="px-6 py-4 border-b border-[rgba(0,255,140,0.15)] flex items-start justify-between gap-4">
           <div className="min-w-0">
-            <div className="font-mono text-base text-white truncate">{t.name}</div>
-            <div className="text-xs text-white/40 mt-1">
+            <div className="text-base text-fg-1 truncate">▸ {t.name}</div>
+            <div className="text-[10px] uppercase tracking-label text-fg-3 mt-1">
               {t.language} · {t.category} {t.headerFormat ? `· ${t.headerFormat}` : ''}
             </div>
           </div>
           <div className="flex items-center gap-2">
-            <div className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-xs font-medium ${statusInfo.color}`}>
-              <StatusIcon className="w-3 h-3" />
-              {statusInfo.label}
-            </div>
-            <button onClick={onClose} className="p-1 rounded hover:bg-white/[0.08] text-white/50">
+            <StatusPill kind={statusInfo.kind}>{statusInfo.label}</StatusPill>
+            <button onClick={onClose} className="p-1 text-fg-4 hover:text-accent">
               <X className="w-4 h-4" />
             </button>
           </div>
         </div>
 
         <div className="flex-1 overflow-auto p-6 space-y-5">
-          {/* WhatsApp-style preview */}
+          {/* WhatsApp-style preview — kept native to read like WhatsApp */}
           <div>
-            <div className="text-xs uppercase tracking-wider text-white/40 mb-2">Vista previa</div>
-            <div className="bg-[#0B141A] rounded-xl p-3 max-w-sm border border-white/[0.04]">
-              <div className="bg-[#1F2C33] rounded-lg overflow-hidden">
+            <div className="text-[10px] uppercase tracking-label text-fg-3 mb-2">◊ vista previa</div>
+            <div className="bg-[#0B141A] p-3 max-w-sm border border-[rgba(0,255,140,0.10)]">
+              <div className="bg-[#1F2C33] overflow-hidden">
                 {t.headerSampleUrl && t.headerFormat === 'IMAGE' && (
                   <img src={t.headerSampleUrl} alt="" className="w-full h-48 object-cover" />
                 )}
@@ -185,12 +175,10 @@ function TemplateDetail({ template: t, onClose }: { template: Template; onClose:
                 {t.headerText && t.headerFormat === 'TEXT' && (
                   <div className="px-3 pt-3 text-sm font-semibold text-white">{t.headerText}</div>
                 )}
-                <div className="px-3 py-2 text-sm text-white/90 whitespace-pre-wrap leading-relaxed">
+                <div className="px-3 py-2 text-sm text-white/90 whitespace-pre-wrap leading-relaxed font-sans">
                   {t.bodyText || '—'}
                 </div>
-                {t.footerText && (
-                  <div className="px-3 pb-2 text-xs text-white/40">{t.footerText}</div>
-                )}
+                {t.footerText && <div className="px-3 pb-2 text-xs text-white/40 font-sans">{t.footerText}</div>}
                 <div className="px-3 pb-2 text-[10px] text-white/30 text-right">12:34 PM</div>
               </div>
             </div>
@@ -198,28 +186,28 @@ function TemplateDetail({ template: t, onClose }: { template: Template; onClose:
 
           {t.variables && t.variables.length > 0 && (
             <div>
-              <div className="text-xs uppercase tracking-wider text-white/40 mb-2">Variables</div>
+              <div className="text-[10px] uppercase tracking-label text-fg-3 mb-2">◊ variables</div>
               <div className="flex flex-wrap gap-1.5">
                 {t.variables.map((v: string) => (
-                  <span key={v} className="text-xs font-mono px-2 py-1 rounded bg-white/[0.06] text-white/70">{v}</span>
+                  <span key={v} className="text-xs px-2 py-1 border border-[rgba(0,255,140,0.15)] text-accent">{v}</span>
                 ))}
               </div>
             </div>
           )}
 
           <div>
-            <div className="text-xs uppercase tracking-wider text-white/40 mb-2">Metadata</div>
+            <div className="text-[10px] uppercase tracking-label text-fg-3 mb-2">◊ metadata</div>
             <dl className="text-sm space-y-1">
-              <Row label="Categoría" value={t.category} />
-              <Row label="Idioma" value={t.language} />
-              <Row label="Header" value={t.headerFormat || '—'} />
-              <Row label="Última sincronización" value={new Date(t.lastSyncedAt).toLocaleString()} />
+              <Row label="categoría" value={t.category} />
+              <Row label="idioma" value={t.language} />
+              <Row label="header" value={t.headerFormat || '—'} />
+              <Row label="last sync" value={new Date(t.lastSyncedAt).toLocaleString()} />
             </dl>
           </div>
 
           <div>
-            <div className="text-xs uppercase tracking-wider text-white/40 mb-2">Componentes (raw)</div>
-            <pre className="text-[11px] font-mono text-white/50 bg-black/30 rounded-lg p-3 overflow-auto max-h-64">
+            <div className="text-[10px] uppercase tracking-label text-fg-3 mb-2">◊ components (raw)</div>
+            <pre className="text-[11px] text-fg-3 bg-void border border-[rgba(0,255,140,0.10)] p-3 overflow-auto max-h-64">
               {JSON.stringify(t.components ?? [], null, 2)}
             </pre>
           </div>
@@ -231,9 +219,9 @@ function TemplateDetail({ template: t, onClose }: { template: Template; onClose:
 
 function Row({ label, value }: { label: string; value: string }) {
   return (
-    <div className="flex justify-between gap-4">
-      <dt className="text-white/40">{label}</dt>
-      <dd className="text-white/80 text-right">{value}</dd>
+    <div className="flex justify-between gap-4 text-[11px] uppercase tracking-label">
+      <dt className="text-fg-3">{label}</dt>
+      <dd className="text-fg-1 text-right normal-case tracking-normal">{value}</dd>
     </div>
   )
 }

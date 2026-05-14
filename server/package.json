@@ -7,7 +7,7 @@
     "dev": "tsx watch src/app.ts",
     "dev:zero": "npx zero-cache-dev",
     "build": "tsc",
-    "start": "node dist/app.js"
+    "start": "tsx src/app.ts"
   },
   "dependencies": {
     "@kapso/whatsapp-cloud-api": "^0.1.1",
