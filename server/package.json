@@ -7,7 +7,9 @@
     "dev": "tsx watch src/app.ts",
     "dev:zero": "npx zero-cache-dev",
     "build": "tsc",
-    "start": "tsx src/app.ts"
+    "start": "tsx src/app.ts",
+    "zero:generate": "drizzle-zero generate -c ./drizzle-zero.config.ts",
+    "zero:push": "zero-deploy-permissions --schema-path=./schema.ts"
   },
   "dependencies": {
     "@kapso/whatsapp-cloud-api": "^0.1.1",
