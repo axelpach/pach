@@ -1,5 +1,16 @@
 import { pgTable, uuid, text, timestamp, integer, jsonb } from 'drizzle-orm/pg-core'
 
+/* ─────────────────────────── USERS ─────────────────────────── */
+
+export const users = pgTable('users', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  email: text('email').notNull().unique(),
+  passwordHash: text('password_hash').notNull(),
+  name: text('name'),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+})
+
 /* ─────────────────────────── DECKS ─────────────────────────── */
 
 export const decks = pgTable('decks', {

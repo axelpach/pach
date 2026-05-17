@@ -4,6 +4,7 @@ import { RefreshCw, CheckCircle2, Clock, XCircle, Pause, Image, Video, FileText,
 import type { Schema } from '../../zero-schema'
 import type { Mutators } from '../../mutators'
 import { config } from '../../config'
+import { authFetch } from '../../lib/auth'
 import { StatusPill, Button } from '../../components/pach'
 
 const PROJECT_ID = 'ardia'
@@ -36,7 +37,7 @@ export default function WhatsAppTemplates() {
     setSyncing(true)
     setSyncMessage(null)
     try {
-      const res = await fetch(`${config.apiUrl}/whatsapp/templates/sync`, {
+      const res = await authFetch(`${config.apiUrl}/whatsapp/templates/sync`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ projectId: PROJECT_ID }),

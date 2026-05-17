@@ -14,15 +14,19 @@
   "dependencies": {
     "@kapso/whatsapp-cloud-api": "^0.1.1",
     "@rocicorp/zero": "^0.24.3000000000",
+    "bcryptjs": "^3.0.2",
     "cors": "^2.8.5",
     "dotenv": "^16.4.7",
     "drizzle-orm": "^0.38.4",
     "express": "^4.21.2",
+    "jsonwebtoken": "^9.0.2",
     "postgres": "^3.4.5"
   },
   "devDependencies": {
+    "@types/bcryptjs": "^3.0.0",
     "@types/cors": "^2.8.17",
     "@types/express": "^5.0.0",
+    "@types/jsonwebtoken": "^9.0.10",
     "@types/node": "^22.0.0",
     "drizzle-zero": "^0.16.1",
     "tsx": "^4.19.2",

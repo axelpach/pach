@@ -1,11 +1,13 @@
-import { Routes, Route, NavLink } from 'react-router-dom'
+import { Routes, Route, NavLink, Navigate, useLocation } from 'react-router-dom'
 import { ZeroProvider } from '@rocicorp/zero/react'
 import { schema } from './zero-schema'
 import { mutators } from './mutators'
 import { config } from './config'
+import { AuthProvider, useAuth } from './lib/auth'
 import Decks from './pages/Decks'
 import DeckViewer from './pages/DeckViewer'
 import CRM from './pages/crm/CRM'
+import Login from './pages/Login'
 import WhatsAppLayout from './pages/whatsapp/WhatsAppLayout'
 import WhatsAppTemplates from './pages/whatsapp/Templates'
 import Campaigns from './pages/whatsapp/Campaigns'
@@ -14,6 +16,7 @@ import { GlyphRain, Scanlines, LiveClock } from './components/pach'
 
 /* ---------------- Topbar ---------------- */
 function Topbar() {
+  const { user, logout } = useAuth()
   return (
     <div
       className="flex items-center justify-between flex-shrink-0 px-5 py-2.5 border-b border-[rgba(0,255,140,0.15)] bg-void text-[10px] uppercase tracking-label text-fg-3 relative z-20"
@@ -21,7 +24,7 @@ function Topbar() {
       <span className="flex items-center gap-3.5">
         <span className="text-accent [text-shadow:0_0_6px_rgba(0,255,136,0.5)] tracking-wide-2">P@CH</span>
         <span>// operator terminal</span>
-        <span>· op: <span className="text-fg-1">a.pach</span></span>
+        <span>· op: <span className="text-fg-1">{user?.name?.toLowerCase() || user?.email || 'unknown'}</span></span>
       </span>
       <span className="flex items-center gap-4">
         <span className="flex items-center gap-1.5">
@@ -29,6 +32,12 @@ function Topbar() {
         </span>
         <span className="hidden md:inline">uplink 14.3kb/s</span>
         <span className="hidden md:inline"><LiveClock /></span>
+        <button
+          onClick={logout}
+          className="text-fg-4 hover:text-accent uppercase tracking-label"
+        >
+          [logout]
+        </button>
       </span>
     </div>
   )
@@ -120,10 +129,22 @@ function AppShell() {
   )
 }
 
-export default function App() {
+/* ---------------- Gated app ---------------- */
+function GatedApp() {
+  const { user, token } = useAuth()
+  const location = useLocation()
+
+  if (!token || !user) {
+    if (location.pathname === '/login') return <Login />
+    return <Navigate to="/login" replace />
+  }
+
+  if (location.pathname === '/login') return <Navigate to="/" replace />
+
   return (
     <ZeroProvider
-      userID="pach-user"
+      userID={user.id}
+      auth={token}
       server={config.zeroServerUrl}
       schema={schema}
       mutators={mutators}
@@ -131,5 +152,16 @@ export default function App() {
     >
       <AppShell />
     </ZeroProvider>
+  )
+}
+
+export default function App() {
+  return (
+    <AuthProvider>
+      <Routes>
+        <Route path="/login" element={<Login />} />
+        <Route path="*" element={<GatedApp />} />
+      </Routes>
+    </AuthProvider>
   )
 }

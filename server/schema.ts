@@ -2,7 +2,7 @@
 // Keep in sync with portal/src/zero-schema.ts
 // Generated via: pnpm --filter server zero:generate
 
-import { createSchema, definePermissions, json, number, string, table, ANYONE_CAN, NOBODY_CAN } from '@rocicorp/zero'
+import { createSchema, definePermissions, json, number, string, table, ANYONE_CAN, NOBODY_CAN, type ExpressionBuilder, type PermissionsConfig } from '@rocicorp/zero'
 
 const decks = table('decks')
   .columns({
@@ -184,28 +184,44 @@ export const schema = createSchema({
 
 export type Schema = typeof schema
 
-const ANYONE_CAN_DO_ANYTHING = {
-  row: {
-    select: ANYONE_CAN,
-    insert: ANYONE_CAN,
-    update: ANYONE_CAN,
-    delete: ANYONE_CAN,
-  },
+/**
+ * JWT payload shape (issued by server/src/lib/auth.ts).
+ * Zero verifies the JWT signature against ZERO_AUTH_SECRET and exposes
+ * the payload as AuthData in permission rules.
+ */
+type AuthData = {
+  sub: string
+  email: string
+  name: string | null
 }
 
-export const permissions = definePermissions<{}, Schema>(schema, () => {
+const allowIfAuthenticated = (
+  authData: AuthData,
+  { cmpLit }: ExpressionBuilder<Schema, keyof Schema['tables']>,
+) => cmpLit(authData.sub, 'IS NOT', null)
+
+const AUTHENTICATED_CAN_DO_ANYTHING = {
+  row: {
+    select: [allowIfAuthenticated],
+    insert: [allowIfAuthenticated],
+    update: { preMutation: [allowIfAuthenticated], postMutation: [allowIfAuthenticated] },
+    delete: [allowIfAuthenticated],
+  },
+} as const
+
+export const permissions = definePermissions<AuthData, Schema>(schema, () => {
   return {
-    decks: ANYONE_CAN_DO_ANYTHING,
-    companies: ANYONE_CAN_DO_ANYTHING,
-    crm_companies: ANYONE_CAN_DO_ANYTHING,
-    crm_contacts: ANYONE_CAN_DO_ANYTHING,
-    crm_deal_contacts: ANYONE_CAN_DO_ANYTHING,
-    crm_deals: ANYONE_CAN_DO_ANYTHING,
-    crm_notes: ANYONE_CAN_DO_ANYTHING,
-    crm_boards: ANYONE_CAN_DO_ANYTHING,
-    crm_board_columns: ANYONE_CAN_DO_ANYTHING,
-    whatsapp_templates: ANYONE_CAN_DO_ANYTHING,
-    whatsapp_campaigns: ANYONE_CAN_DO_ANYTHING,
-    whatsapp_messages: ANYONE_CAN_DO_ANYTHING,
-  }
+    decks: AUTHENTICATED_CAN_DO_ANYTHING,
+    companies: AUTHENTICATED_CAN_DO_ANYTHING,
+    crm_companies: AUTHENTICATED_CAN_DO_ANYTHING,
+    crm_contacts: AUTHENTICATED_CAN_DO_ANYTHING,
+    crm_deal_contacts: AUTHENTICATED_CAN_DO_ANYTHING,
+    crm_deals: AUTHENTICATED_CAN_DO_ANYTHING,
+    crm_notes: AUTHENTICATED_CAN_DO_ANYTHING,
+    crm_boards: AUTHENTICATED_CAN_DO_ANYTHING,
+    crm_board_columns: AUTHENTICATED_CAN_DO_ANYTHING,
+    whatsapp_templates: AUTHENTICATED_CAN_DO_ANYTHING,
+    whatsapp_campaigns: AUTHENTICATED_CAN_DO_ANYTHING,
+    whatsapp_messages: AUTHENTICATED_CAN_DO_ANYTHING,
+  } satisfies PermissionsConfig<AuthData, Schema>
 })

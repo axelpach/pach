@@ -5,6 +5,7 @@ import { ArrowLeft, Send, Trash2, Search, Check, CheckCircle2, AlertCircle, Cloc
 import type { Schema } from '../../zero-schema'
 import type { Mutators } from '../../mutators'
 import { config } from '../../config'
+import { authFetch } from '../../lib/auth'
 import { Button } from '../../components/pach'
 
 export default function CampaignDetail() {
@@ -81,7 +82,7 @@ export default function CampaignDetail() {
     setFiring(true)
     setFireError(null)
     try {
-      const res = await fetch(`${config.apiUrl}/whatsapp/campaigns/${campaign!.id}/fire`, { method: 'POST' })
+      const res = await authFetch(`${config.apiUrl}/whatsapp/campaigns/${campaign!.id}/fire`, { method: 'POST' })
       const data = await res.json()
       if (!res.ok) throw new Error(data.error || 'fire failed')
     } catch (e) {
