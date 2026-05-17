@@ -84,12 +84,21 @@ Mirrors how Ardia deploys Zero — no files in the repo, configured in Railway U
 
 ## 4. Service: `server`
 
-NIXPACKS via `server/nixpacks.toml` (already in repo). The toml escapes to
-the monorepo root for `pnpm install` and uses `pnpm db:migrate && start`.
+DOCKERFILE at `server/Dockerfile` (the original NIXPACKS attempt didn't give
+us monorepo build context, so we switched). Repo-root build context lets the
+Dockerfile `COPY` workspace files (db/, pach.config.ts, etc.).
 
 1. **New service → Deploy from GitHub** → select `axelpach/pach`.
-2. **Settings → Source → Root Directory** → `server`.
-3. Railway picks up `server/railway.json` + `server/nixpacks.toml` automatically.
+2. **Settings → Source → Root Directory** → **leave empty** (NOT `/server`).
+3. **Settings → Config-as-code** → Path = `server/railway.json`.
+4. **Settings → Deploy → Pre-deploy step** → `pnpm db:migrate`
+   - This runs migrations in a separate ephemeral container before the main
+     container takes over. Drizzle tracks applied migrations in
+     `__drizzle_migrations`, so it's idempotent — keep this on permanently.
+5. **Settings → Deploy → Custom Start Command** → `pnpm --filter server start`
+   - The Dockerfile CMD includes `db:migrate && start` but Railway's start
+     command field strips the `&&` (no shell). Pre-deploy handles migrations
+     instead; start command just starts the app.
 4. **Variables** (sync via the Railway ↔ Doppler integration; pull from
    `pach-server / prd`):
    ```
@@ -107,9 +116,8 @@ the monorepo root for `pnpm install` and uses `pnpm db:migrate && start`.
 6. **Settings → Deploy → Healthcheck Path** is `/health` (already in
    `railway.json`).
 
-**Migration runs on every deploy** (`pnpm db:migrate && pnpm --filter server start`).
-For the very first deploy, point migrations at the prod DB and let the boot
-take care of it.
+**Migration runs on every deploy via the pre-deploy step.** Idempotent —
+drizzle-kit skips already-applied migrations.
 
 ---
 
