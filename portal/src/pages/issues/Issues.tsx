@@ -1,23 +1,24 @@
 import { useDeferredValue, useEffect, useState } from 'react'
-import { AlertTriangle, Building2, CheckCircle2, ChevronDown, ChevronRight, Circle, FolderKanban, Pencil, Plus, Search } from 'lucide-react'
+import { AlertTriangle, Building2, CheckCircle2, ChevronDown, ChevronRight, Circle, FolderKanban, Plus, Search } from 'lucide-react'
+import { useNavigate } from 'react-router-dom'
+import { PachSelect } from './PachSelect'
+import { StatusIcon } from './StatusIcon'
+import { PRIORITY_META, PriorityIcon } from './PriorityIcon'
 import { useQuery, useZero } from '@rocicorp/zero/react'
 import type { Schema } from '../../zero-schema'
 import type { Mutators } from '../../mutators'
 import { useAuth } from '../../lib/auth'
+import { useTrackerContext } from './IssuesLayout'
 
 const PRIORITY_GROUPS = [
-  { value: 1, label: 'urgent', accent: 'text-fail' },
-  { value: 2, label: 'high', accent: 'text-amber' },
-  { value: 3, label: 'medium', accent: 'text-pach-info' },
-  { value: 4, label: 'low', accent: 'text-accent' },
+  { value: 1, label: 'urgent', accent: 'text-amber' },
+  { value: 2, label: 'high', accent: 'text-fg-2' },
+  { value: 3, label: 'medium', accent: 'text-fg-2' },
+  { value: 4, label: 'low', accent: 'text-fg-2' },
   { value: 0, label: 'unprioritized', accent: 'text-fg-3' },
 ] as const
 
 const ESTIMATES = [2, 4, 8, 16]
-
-type TrackerSection =
-  | { kind: 'all' }
-  | { kind: 'team'; teamId: string; tab: 'issues' | 'projects' }
 
 type Foundation = {
   defaultTeamId: string
@@ -25,14 +26,10 @@ type Foundation = {
   defaultProjectId?: string
 }
 
-type TeamModalState =
-  | { mode: 'create' }
-  | { mode: 'edit'; teamId: string }
-  | null
-
 export default function Issues() {
   const z = useZero<Schema, Mutators>()
   const { user } = useAuth()
+  const { section, setSection } = useTrackerContext()
 
   const [companies] = useQuery(z.query.companies.orderBy('name', 'asc'))
   const [users] = useQuery(z.query.users.orderBy('email', 'asc'))
@@ -41,7 +38,6 @@ export default function Issues() {
   const [statuses] = useQuery(z.query.pm_statuses.orderBy('position', 'asc'))
   const [issues] = useQuery(z.query.pm_issues.orderBy('updatedAt', 'desc'))
 
-  const [section, setSection] = useState<TrackerSection>({ kind: 'all' })
   const [search, setSearch] = useState('')
   const [composerOpen, setComposerOpen] = useState(false)
   const [composerTitle, setComposerTitle] = useState('')
@@ -51,12 +47,8 @@ export default function Issues() {
   const [composerPriority, setComposerPriority] = useState<number>(2)
   const [composerEstimate, setComposerEstimate] = useState<number>(4)
   const [creatingIssue, setCreatingIssue] = useState(false)
-  const [teamModal, setTeamModal] = useState<TeamModalState>(null)
-  const [teamDraftName, setTeamDraftName] = useState('')
-  const [savingTeam, setSavingTeam] = useState(false)
   const [collapsedPriorities, setCollapsedPriorities] = useState<Set<number>>(new Set())
-  const [teamsSectionCollapsed, setTeamsSectionCollapsed] = useState(false)
-  const [collapsedTeams, setCollapsedTeams] = useState<Set<string>>(new Set())
+  const [collapsedStatuses, setCollapsedStatuses] = useState<Set<string>>(new Set())
   const deferredSearch = useDeferredValue(search)
 
   function togglePriority(value: number) {
@@ -68,11 +60,11 @@ export default function Issues() {
     })
   }
 
-  function toggleTeam(teamId: string) {
-    setCollapsedTeams((prev) => {
+  function toggleStatusGroup(key: string) {
+    setCollapsedStatuses((prev) => {
       const next = new Set(prev)
-      if (next.has(teamId)) next.delete(teamId)
-      else next.add(teamId)
+      if (next.has(key)) next.delete(key)
+      else next.add(key)
       return next
     })
   }
@@ -122,14 +114,8 @@ export default function Issues() {
   }, [composerCompanyId, contextCompanies])
 
   useEffect(() => {
-    if (section.kind !== 'team') return
-    if (teams.some((team) => team.id === section.teamId)) return
-    setSection({ kind: 'all' })
-  }, [section, teams])
-
-  useEffect(() => {
     function handleKeyDown(event: KeyboardEvent) {
-      if (composerOpen || teamModal) return
+      if (composerOpen) return
       if (event.key !== 'c' || event.ctrlKey || event.metaKey || event.altKey) return
 
       const target = event.target
@@ -148,7 +134,7 @@ export default function Issues() {
 
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [composerOpen, teamModal])
+  }, [composerOpen])
 
   useEffect(() => {
     if (!composerOpen) return
@@ -162,19 +148,6 @@ export default function Issues() {
     window.addEventListener('keydown', handleEscape)
     return () => window.removeEventListener('keydown', handleEscape)
   }, [composerOpen])
-
-  useEffect(() => {
-    if (!teamModal) return
-
-    function handleEscape(event: KeyboardEvent) {
-      if (event.key !== 'Escape') return
-      event.preventDefault()
-      closeTeamModal()
-    }
-
-    window.addEventListener('keydown', handleEscape)
-    return () => window.removeEventListener('keydown', handleEscape)
-  }, [teamModal])
 
   const normalizedSearch = deferredSearch.trim().toLowerCase()
   const filteredIssues = issues.filter((issue) => {
@@ -225,6 +198,98 @@ export default function Issues() {
       type,
       summary,
     })
+  }
+
+  async function changeIssuePriority(issueId: string, nextRaw: string) {
+    const issue = issues.find((entry) => entry.id === issueId)
+    if (!issue) return
+    const next = Number(nextRaw)
+    if (next === issue.priority) return
+    await z.mutate.pm_issues.update({ id: issueId, priority: next })
+    await logActivity(
+      issueId,
+      `priority ${PRIORITY_META[issue.priority]?.label ?? '—'} → ${PRIORITY_META[next]?.label ?? '—'}`,
+      'updated',
+    )
+  }
+
+  async function changeIssueEstimate(issueId: string, nextRaw: string) {
+    const issue = issues.find((entry) => entry.id === issueId)
+    if (!issue) return
+    const next = nextRaw === '' ? undefined : Number(nextRaw)
+    if (next === issue.estimate) return
+    await z.mutate.pm_issues.update({ id: issueId, estimate: next })
+    await logActivity(
+      issueId,
+      next ? `estimate set to ${next} pts` : 'cleared estimate',
+      'updated',
+    )
+  }
+
+  async function changeIssueProject(issueId: string, nextProjectId: string) {
+    const issue = issues.find((entry) => entry.id === issueId)
+    if (!issue) return
+    const target = nextProjectId || undefined
+    if (target === issue.projectId) return
+    const project = nextProjectId ? projects.find((p) => p.id === nextProjectId) : null
+    await z.mutate.pm_issues.update({ id: issueId, projectId: target })
+    await logActivity(
+      issueId,
+      target ? `moved to project ${project?.name ?? '—'}` : 'removed from project',
+      'updated',
+    )
+  }
+
+  async function changeIssueTeam(issueId: string, nextTeamId: string) {
+    const issue = issues.find((entry) => entry.id === issueId)
+    if (!issue || issue.teamId === nextTeamId) return
+    const fromTeam = teams.find((t) => t.id === issue.teamId)
+    const toTeam = teams.find((t) => t.id === nextTeamId)
+    if (!toTeam) return
+
+    const toStatuses = statuses.filter((s) => s.teamId === nextTeamId)
+    const newStatusId =
+      toStatuses.find((s) => s.type !== 'completed' && s.type !== 'canceled')?.id ??
+      toStatuses[0]?.id
+    if (!newStatusId) return
+
+    const nextNumber =
+      issues
+        .filter((entry) => entry.teamId === nextTeamId)
+        .reduce((max, entry) => Math.max(max, entry.number), 0) + 1
+
+    await z.mutate.pm_issues.update({
+      id: issueId,
+      teamId: nextTeamId,
+      statusId: newStatusId,
+      projectId: undefined,
+      number: nextNumber,
+      identifier: `${toTeam.key}-${nextNumber}`,
+    })
+    await logActivity(
+      issueId,
+      `moved from team ${fromTeam?.name ?? '—'} to ${toTeam.name}`,
+      'updated',
+    )
+  }
+
+  async function changeIssueStatus(issueId: string, nextStatusId: string) {
+    const issue = issues.find((entry) => entry.id === issueId)
+    if (!issue || issue.statusId === nextStatusId) return
+    const current = statusMap.get(issue.statusId)
+    const next = statusMap.get(nextStatusId)
+    if (!next) return
+    const patch: Record<string, unknown> = { statusId: nextStatusId }
+    const now = Date.now()
+    if (next.type === 'started' && !issue.startedAt) patch.startedAt = now
+    if (next.type === 'completed') patch.completedAt = now
+    if (next.type === 'canceled') patch.canceledAt = now
+    await z.mutate.pm_issues.update({ id: issueId, ...patch })
+    await logActivity(
+      issueId,
+      `moved from ${current?.name ?? '—'} to ${next.name}`,
+      'updated',
+    )
   }
 
   async function ensureWorkspaceFoundation(): Promise<Foundation> {
@@ -290,112 +355,6 @@ export default function Issues() {
     }
   }
 
-  function deriveTeamKey(name: string, teamIdToIgnore?: string) {
-    const cleanedWords = name
-      .trim()
-      .toUpperCase()
-      .replace(/[^A-Z0-9\s]/g, ' ')
-      .split(/\s+/)
-      .filter(Boolean)
-
-    let base =
-      cleanedWords.length > 1
-        ? cleanedWords.map((word) => word[0]).join('').slice(0, 4)
-        : (cleanedWords[0] ?? 'TEAM').slice(0, 4)
-
-    if (!base) base = 'TEAM'
-
-    const existingKeys = new Set(
-      teams
-        .filter((team) => team.id !== teamIdToIgnore)
-        .map((team) => team.key.toUpperCase()),
-    )
-
-    if (!existingKeys.has(base)) return base
-
-    let counter = 2
-    while (existingKeys.has(`${base}${counter}`)) {
-      counter += 1
-    }
-
-    return `${base}${counter}`
-  }
-
-  function openCreateTeamModal() {
-    setTeamDraftName('')
-    setTeamModal({ mode: 'create' })
-  }
-
-  function openEditTeamModal(team: Schema['tables']['pm_teams']['row']) {
-    setTeamDraftName(team.name)
-    setTeamModal({ mode: 'edit', teamId: team.id })
-  }
-
-  function closeTeamModal() {
-    setTeamModal(null)
-    setTeamDraftName('')
-    setSavingTeam(false)
-  }
-
-  async function submitTeamModal() {
-    const trimmedName = teamDraftName.trim()
-    if (!trimmedName) return
-
-    setSavingTeam(true)
-    try {
-      if (teamModal?.mode === 'create') {
-        const teamId = crypto.randomUUID()
-        const projectId = crypto.randomUUID()
-        const teamKey = deriveTeamKey(trimmedName)
-        const statusDefs = [
-          { id: crypto.randomUUID(), name: 'Todo', key: 'todo', type: 'unstarted', color: '#94a3b8' },
-          { id: crypto.randomUUID(), name: 'In Progress', key: 'in_progress', type: 'started', color: '#fbbf24' },
-          { id: crypto.randomUUID(), name: 'Blocked', key: 'blocked', type: 'blocked', color: '#f87171' },
-          { id: crypto.randomUUID(), name: 'Done', key: 'done', type: 'completed', color: '#4ade80' },
-        ] as const
-
-        await z.mutate.pm_teams.create({
-          id: teamId,
-          key: teamKey,
-          name: trimmedName,
-          position: teams.length,
-        })
-
-        for (const [index, status] of statusDefs.entries()) {
-          await z.mutate.pm_statuses.create({
-            id: status.id,
-            teamId,
-            name: status.name,
-            key: status.key,
-            type: status.type,
-            color: status.color,
-            position: index,
-          })
-        }
-
-        await z.mutate.pm_projects.create({
-          id: projectId,
-          teamId,
-          name: 'Core',
-          slug: 'core',
-          description: `${trimmedName} core roadmap`,
-        })
-
-        setComposerTeamId(teamId)
-        setSection({ kind: 'team', teamId, tab: 'issues' })
-      } else if (teamModal?.mode === 'edit') {
-        await z.mutate.pm_teams.update({
-          id: teamModal.teamId,
-          name: trimmedName,
-        })
-      }
-
-      closeTeamModal()
-    } finally {
-      setSavingTeam(false)
-    }
-  }
-
   async function createIssue() {
     if (!composerTitle.trim() || !user) return
 
@@ -445,116 +404,8 @@ export default function Issues() {
   }
 
   return (
-    <div className="flex-1 min-h-0 overflow-hidden text-fg-1">
-      <div className="flex h-full min-h-0">
-        <aside className="w-[260px] shrink-0 border-r border-[rgba(0,255,140,0.12)] bg-[rgba(5,6,5,0.6)] backdrop-blur-sm px-3 py-4 flex flex-col">
-          <div className="px-4 pb-3 mb-2">
-            <div className="font-bold text-base text-accent [text-shadow:0_0_6px_rgba(0,255,136,0.5)] tracking-wide">
-              p@ch_
-            </div>
-            <div className="text-[9px] uppercase tracking-label text-fg-4 mt-1">
-              // issues · tracker
-            </div>
-          </div>
-
-          <div className="space-y-1">
-            <SidebarSection label="views" />
-            <TrackerNavButton
-              active={section.kind === 'all'}
-              label="all issues"
-              meta={`${issues.length}`}
-              onClick={() => setSection({ kind: 'all' })}
-            />
-          </div>
-
-          <div className="mt-6 space-y-1">
-            <div className="flex items-center justify-between px-3 pb-1">
-              <button
-                onClick={() => setTeamsSectionCollapsed((v) => !v)}
-                className="flex items-center gap-1.5 font-mono text-[10px] uppercase tracking-label text-fg-4 hover:text-fg-2 transition"
-              >
-                {teamsSectionCollapsed
-                  ? <ChevronRight className="h-3 w-3" />
-                  : <ChevronDown className="h-3 w-3" />}
-                teams
-              </button>
-              <button
-                onClick={openCreateTeamModal}
-                className="flex h-5 w-5 items-center justify-center text-fg-4 transition hover:text-accent"
-                title="create team"
-              >
-                <Plus className="h-3.5 w-3.5" />
-              </button>
-            </div>
-            {!teamsSectionCollapsed && (teams.length ? (
-              teams.map((team) => {
-                const teamIssues = issues.filter((issue) => issue.teamId === team.id).length
-                const isActive = section.kind === 'team' && section.teamId === team.id
-                const isExpanded = isActive || !collapsedTeams.has(team.id)
-                return (
-                  <div key={team.id}>
-                    <div className="flex items-stretch">
-                      <button
-                        onClick={() => toggleTeam(team.id)}
-                        className="flex w-7 shrink-0 items-center justify-center text-fg-4 hover:text-fg-2 transition"
-                        title={isExpanded ? 'collapse' : 'expand'}
-                      >
-                        {isExpanded
-                          ? <ChevronDown className="h-3 w-3" />
-                          : <ChevronRight className="h-3 w-3" />}
-                      </button>
-                      <button
-                        onClick={() => setSection({ kind: 'team', teamId: team.id, tab: section.kind === 'team' && section.teamId === team.id ? section.tab : 'issues' })}
-                        className={`flex flex-1 items-center justify-between px-2 py-2 text-left font-mono text-xs lowercase transition ${
-                          isActive
-                            ? 'bg-[rgba(0,255,136,0.08)] text-accent ring-1 ring-[rgba(0,255,136,0.2)]'
-                            : 'text-fg-2 hover:bg-[rgba(0,255,136,0.04)] hover:text-fg-1'
-                        }`}
-                      >
-                        <span className="truncate">{team.name.toLowerCase()}</span>
-                        <span className="ml-3 text-[10px] text-fg-4">{teamIssues}</span>
-                      </button>
-                      <button
-                        onClick={() => openEditTeamModal(team)}
-                        className={`flex w-7 shrink-0 items-center justify-center transition ${
-                          isActive ? 'text-accent' : 'text-fg-4 hover:text-accent'
-                        }`}
-                        title="edit team"
-                      >
-                        <Pencil className="h-3 w-3" />
-                      </button>
-                    </div>
-                    {isExpanded ? (
-                      <div className="mt-1 space-y-1 pl-7">
-                        <TrackerChildNavButton
-                          active={isActive && section.tab === 'issues'}
-                          label="issues"
-                          onClick={() => setSection({ kind: 'team', teamId: team.id, tab: 'issues' })}
-                        />
-                        <TrackerChildNavButton
-                          active={isActive && section.tab === 'projects'}
-                          label="projects"
-                          onClick={() => setSection({ kind: 'team', teamId: team.id, tab: 'projects' })}
-                        />
-                      </div>
-                    ) : null}
-                  </div>
-                )
-              })
-            ) : (
-              <div className="px-3 py-2 font-mono text-xs text-fg-4">// no teams yet</div>
-            ))}
-          </div>
-
-          <div className="mt-auto pt-4 flex justify-center">
-            <div className="rotate-180 [writing-mode:vertical-rl] font-mono text-[9px] uppercase tracking-[0.3em] text-fg-4">
-              pach · tracker
-            </div>
-          </div>
-        </aside>
-
-        <main className="flex-1 min-w-0">
-          <div className="flex h-full min-h-0 flex-col">
+    <>
+    <div className="flex h-full min-h-0 flex-col">
             <div className="border-b border-[rgba(0,255,140,0.15)] px-8 py-5">
               <div className="flex items-start justify-between gap-6">
                 <div>
@@ -622,7 +473,7 @@ export default function Issues() {
                       <section key={group.value} className="overflow-hidden border border-[rgba(0,255,140,0.12)] bg-[rgba(10,14,12,0.6)] backdrop-blur-sm">
                         <button
                           onClick={() => togglePriority(group.value)}
-                          className="flex w-full items-center gap-3 border-b border-[rgba(0,255,140,0.1)] bg-[rgba(20,26,23,0.6)] px-5 py-3 text-left transition hover:bg-[rgba(0,255,136,0.04)]"
+                          className="flex w-full items-center gap-3 border-b border-[rgba(0,255,140,0.1)] bg-[rgba(20,26,23,0.6)] px-5 py-3 text-left"
                         >
                           {isCollapsed
                             ? <ChevronRight className="h-3.5 w-3.5 text-fg-4 shrink-0" />
@@ -630,7 +481,7 @@ export default function Issues() {
                           <span className={`font-mono text-xs uppercase tracking-label ${group.accent}`}>
                             {group.label}
                           </span>
-                          <span className="font-mono text-xs text-fg-4">· {group.issues.length}</span>
+                          <span className="font-mono text-xs text-fg-4">· {sumEstimates(group.issues)} pts</span>
                         </button>
 
                         {!isCollapsed && (
@@ -641,13 +492,22 @@ export default function Issues() {
                                 .sort((a, b) => b.updatedAt - a.updatedAt)
                               if (!statusIssues.length) return null
 
+                              const statusKey = `${group.value}:${status.key}`
+                              const statusCollapsed = collapsedStatuses.has(statusKey)
                               return (
                                 <div key={status.key} className="border-b border-[rgba(0,255,140,0.08)] last:border-b-0">
-                                  <div className="flex items-center gap-2 px-5 py-2.5 font-mono text-[11px] uppercase tracking-label text-fg-3">
-                                    <StatusDot statusType={status.type} />
+                                  <button
+                                    onClick={() => toggleStatusGroup(statusKey)}
+                                    className="flex w-full items-center gap-2 px-5 py-2.5 text-left font-mono text-[11px] uppercase tracking-label text-fg-3"
+                                  >
+                                    {statusCollapsed
+                                      ? <ChevronRight className="h-3 w-3 text-fg-4 shrink-0" />
+                                      : <ChevronDown className="h-3 w-3 text-fg-4 shrink-0" />}
+                                    <StatusIcon statusType={status.type} />
                                     {status.name.toLowerCase()}
-                                    <span className="text-fg-4">· {statusIssues.length}</span>
-                                  </div>
+                                    <span className="text-fg-4">· {sumEstimates(statusIssues)} pts</span>
+                                  </button>
+                                  {!statusCollapsed && (
                                   <div>
                                     {statusIssues.map((issue) => (
                                       <IssueRow
@@ -658,9 +518,19 @@ export default function Issues() {
                                         team={teamMap.get(issue.teamId) ?? null}
                                         project={issue.projectId ? projectMap.get(issue.projectId) : null}
                                         assignee={issue.assigneeId ? userMap.get(issue.assigneeId) : null}
+                                        status={statusMap.get(issue.statusId) ?? null}
+                                        teamStatuses={statuses.filter((s) => s.teamId === issue.teamId)}
+                                        teamProjects={projects.filter((p) => p.teamId === issue.teamId)}
+                                        allTeams={teams}
+                                        onStatusChange={changeIssueStatus}
+                                        onProjectChange={changeIssueProject}
+                                        onTeamChange={changeIssueTeam}
+                                        onEstimateChange={changeIssueEstimate}
+                                        onPriorityChange={changeIssuePriority}
                                       />
                                     ))}
                                   </div>
+                                  )}
                                 </div>
                               )
                             })}
@@ -681,95 +551,31 @@ export default function Issues() {
                 />
               )}
             </div>
-          </div>
-        </main>
-      </div>
-
-      {composerOpen && (
-        <IssueComposerModal
-          title={composerTitle}
-          onTitleChange={setComposerTitle}
-          companyId={composerCompanyId}
-          onCompanyChange={setComposerCompanyId}
-          teamId={composerTeamId}
-          onTeamChange={setComposerTeamId}
-          projectId={composerProjectId}
-          onProjectChange={setComposerProjectId}
-          priority={composerPriority}
-          onPriorityChange={setComposerPriority}
-          estimate={composerEstimate}
-          onEstimateChange={setComposerEstimate}
-          companies={contextCompanies}
-          teams={teams}
-          projects={composerProjects}
-          creating={creatingIssue}
-          onClose={() => setComposerOpen(false)}
-          onCreate={createIssue}
-        />
-      )}
-
-      {teamModal && (
-        <TeamNameModal
-          mode={teamModal.mode}
-          name={teamDraftName}
-          onNameChange={setTeamDraftName}
-          saving={savingTeam}
-          onClose={closeTeamModal}
-          onSubmit={submitTeamModal}
-        />
-      )}
     </div>
-  )
-}
 
-function SidebarSection({ label }: { label: string }) {
-  return <div className="px-3 pb-1 font-mono text-[10px] uppercase tracking-label text-fg-4">{label}</div>
-}
-
-function TrackerNavButton({
-  active,
-  label,
-  meta,
-  onClick,
-}: {
-  active: boolean
-  label: string
-  meta?: string
-  onClick: () => void
-}) {
-  return (
-    <button
-      onClick={onClick}
-      className={`flex w-full items-center justify-between px-3 py-2 text-left font-mono text-xs lowercase transition ${
-        active
-          ? 'bg-[rgba(0,255,136,0.08)] text-accent ring-1 ring-[rgba(0,255,136,0.2)]'
-          : 'text-fg-2 hover:bg-[rgba(0,255,136,0.04)] hover:text-fg-1'
-      }`}
-    >
-      <span className="truncate">{label}</span>
-      {meta ? <span className="ml-3 text-[10px] text-fg-4">{meta}</span> : null}
-    </button>
-  )
-}
-
-function TrackerChildNavButton({
-  active,
-  label,
-  onClick,
-}: {
-  active: boolean
-  label: string
-  onClick: () => void
-}) {
-  return (
-    <button
-      onClick={onClick}
-      className={`flex w-full items-center px-3 py-1.5 text-left font-mono text-xs lowercase transition ${
-        active ? 'text-accent' : 'text-fg-3 hover:text-fg-1'
-      }`}
-    >
-      <span className="text-fg-4 mr-2">›</span>{label}
-    </button>
+    {composerOpen && (
+      <IssueComposerModal
+        title={composerTitle}
+        onTitleChange={setComposerTitle}
+        companyId={composerCompanyId}
+        onCompanyChange={setComposerCompanyId}
+        teamId={composerTeamId}
+        onTeamChange={setComposerTeamId}
+        projectId={composerProjectId}
+        onProjectChange={setComposerProjectId}
+        priority={composerPriority}
+        onPriorityChange={setComposerPriority}
+        estimate={composerEstimate}
+        onEstimateChange={setComposerEstimate}
+        companies={contextCompanies}
+        teams={teams}
+        projects={composerProjects}
+        creating={creatingIssue}
+        onClose={() => setComposerOpen(false)}
+        onCreate={createIssue}
+      />
+    )}
+    </>
   )
 }
 
@@ -963,72 +769,6 @@ function IssueComposerModal({
   )
 }
 
-function TeamNameModal({
-  mode,
-  name,
-  onNameChange,
-  saving,
-  onClose,
-  onSubmit,
-}: {
-  mode: 'create' | 'edit'
-  name: string
-  onNameChange: (value: string) => void
-  saving: boolean
-  onClose: () => void
-  onSubmit: () => void
-}) {
-  return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-[rgba(0,0,0,0.7)] px-4 backdrop-blur-sm"
-      onClick={onClose}
-    >
-      <div
-        className="w-full max-w-lg border border-[rgba(0,255,140,0.2)] bg-pit-2 shadow-[0_30px_80px_rgba(0,0,0,0.5)]"
-        onClick={(event) => event.stopPropagation()}
-      >
-        <div className="border-b border-[rgba(0,255,140,0.12)] px-6 py-5">
-          <div className="text-[10px] uppercase tracking-label text-fg-3">
-            {mode === 'create' ? '◊ teams · create' : '◊ teams · edit'}
-          </div>
-          <div className="mt-1.5 font-mono text-xl lowercase text-fg-1">
-            {mode === 'create' ? 'new team' : 'edit team name'}
-          </div>
-        </div>
-
-        <div className="px-6 py-5">
-          <label className="block">
-            <div className="mb-2 font-mono text-[10px] uppercase tracking-label text-fg-3">team name</div>
-            <input
-              autoFocus
-              value={name}
-              onChange={(event) => onNameChange(event.target.value)}
-              placeholder="$ product"
-              className="w-full bg-rim border border-[rgba(0,255,140,0.15)] px-3 py-2 text-sm text-fg-1 outline-none focus:border-accent focus:shadow-glow-xs placeholder:text-fg-4"
-            />
-          </label>
-        </div>
-
-        <div className="flex items-center justify-between border-t border-[rgba(0,255,140,0.12)] px-6 py-4">
-          <button
-            onClick={onClose}
-            className="px-3 py-2 font-mono text-xs uppercase tracking-label text-fg-3 transition hover:text-fg-1"
-          >
-            [cancel]
-          </button>
-          <button
-            onClick={onSubmit}
-            disabled={!name.trim() || saving}
-            className="inline-flex items-center gap-2 border border-[rgba(0,255,140,0.3)] bg-[rgba(0,255,136,0.08)] px-4 py-2 font-mono text-xs uppercase tracking-label text-accent transition hover:bg-[rgba(0,255,136,0.16)] hover:shadow-glow-xs disabled:opacity-40 disabled:hover:bg-[rgba(0,255,136,0.08)] disabled:hover:shadow-none"
-          >
-            <Plus className="h-3.5 w-3.5" />
-            {saving ? (mode === 'create' ? 'creating…' : 'saving…') : (mode === 'create' ? 'create team' : 'save team')}
-          </button>
-        </div>
-      </div>
-    </div>
-  )
-}
 
 function SelectField({
   label,
@@ -1059,6 +799,8 @@ function SelectField({
   )
 }
 
+const ESTIMATE_VALUES = [1, 2, 3, 4, 8, 16]
+
 function IssueRow({
   issue,
   company,
@@ -1066,6 +808,15 @@ function IssueRow({
   team,
   project,
   assignee,
+  status,
+  teamStatuses,
+  teamProjects,
+  allTeams,
+  onStatusChange,
+  onProjectChange,
+  onTeamChange,
+  onEstimateChange,
+  onPriorityChange,
 }: {
   issue: Schema['tables']['pm_issues']['row']
   company: Schema['tables']['companies']['row'] | null
@@ -1073,37 +824,134 @@ function IssueRow({
   team: Schema['tables']['pm_teams']['row'] | null
   project: Schema['tables']['pm_projects']['row'] | null | undefined
   assignee: Schema['tables']['users']['row'] | null | undefined
+  status: Schema['tables']['pm_statuses']['row'] | null
+  teamStatuses: Schema['tables']['pm_statuses']['row'][]
+  teamProjects: Schema['tables']['pm_projects']['row'][]
+  allTeams: Schema['tables']['pm_teams']['row'][]
+  onStatusChange: (issueId: string, nextStatusId: string) => void | Promise<void>
+  onProjectChange: (issueId: string, nextProjectId: string) => void | Promise<void>
+  onTeamChange: (issueId: string, nextTeamId: string) => void | Promise<void>
+  onEstimateChange: (issueId: string, nextEstimate: string) => void | Promise<void>
+  onPriorityChange: (issueId: string, nextPriority: string) => void | Promise<void>
 }) {
+  const navigate = useNavigate()
   const showCompany = company && company.id !== workspaceCompanyId
 
   return (
-    <div className="flex items-center gap-4 px-5 py-2.5 border-t border-[rgba(0,255,140,0.06)] transition hover:bg-[rgba(0,255,136,0.04)]">
-      <div className="w-[72px] shrink-0 font-mono text-xs text-accent/80">{issue.identifier}</div>
-      <div className="min-w-0 flex-1">
-        <div className="truncate text-sm text-fg-1">{issue.title}</div>
-        <div className="mt-1.5 flex flex-wrap items-center gap-1.5 font-mono text-[10px] uppercase tracking-label">
-          {showCompany && (
-            <span className="inline-flex items-center gap-1 border border-[rgba(255,181,71,0.25)] bg-[rgba(255,181,71,0.06)] px-2 py-0.5 text-amber">
-              <Building2 className="h-3 w-3" />
-              {company.name}
-            </span>
-          )}
-          {project && (
-            <span className="inline-flex items-center gap-1 border border-[rgba(0,255,140,0.15)] bg-pit-3 px-2 py-0.5 text-fg-3">
-              <FolderKanban className="h-3 w-3" />
-              {project.name}
-            </span>
-          )}
-          {team && (
-            <span className="border border-[rgba(0,255,140,0.15)] bg-pit-3 px-2 py-0.5 text-fg-3">
-              {team.name}
-            </span>
-          )}
-        </div>
+    <div
+      role="button"
+      tabIndex={0}
+      onClick={() => navigate(`/issues/${issue.id}`)}
+      onKeyDown={(event) => {
+        if (event.key === 'Enter' || event.key === ' ') {
+          event.preventDefault()
+          navigate(`/issues/${issue.id}`)
+        }
+      }}
+      className="flex items-center gap-2 px-4 py-2 border-t border-[rgba(0,255,140,0.06)] transition hover:bg-[rgba(0,255,136,0.04)] cursor-pointer focus:outline-none focus-visible:bg-[rgba(0,255,136,0.06)]"
+    >
+      <div className="shrink-0" onClick={(event) => event.stopPropagation()}>
+        <PachSelect
+          variant="button"
+          value={issue.statusId}
+          onChange={(next) => onStatusChange(issue.id, next)}
+          options={teamStatuses.map((s) => ({
+            value: s.id,
+            label: s.name.toLowerCase(),
+            icon: <StatusIcon statusType={s.type} />,
+          }))}
+          trigger={<StatusIcon statusType={status?.type ?? 'backlog'} />}
+          triggerTitle={status ? `status · ${status.name.toLowerCase()}` : 'change status'}
+          triggerClassName="flex h-6 w-6 items-center justify-center border border-transparent hover:border-[rgba(0,255,140,0.25)] hover:bg-[rgba(0,255,136,0.06)] transition"
+          popupWidth="200px"
+        />
       </div>
-      <div className="shrink-0 font-mono text-xs text-fg-3">{issue.estimate ? `${issue.estimate} pts` : '— pts'}</div>
-      <div className="w-[140px] shrink-0 text-right font-mono text-xs text-fg-3 truncate">{assignee?.name || assignee?.email || 'unassigned'}</div>
-      <div className="w-[88px] shrink-0 text-right font-mono text-[10px] uppercase tracking-label text-fg-4">{formatShortDate(issue.updatedAt)}</div>
+      <div className="shrink-0" onClick={(event) => event.stopPropagation()}>
+        <PachSelect
+          variant="button"
+          value={String(issue.priority)}
+          onChange={(next) => onPriorityChange(issue.id, next)}
+          options={[1, 2, 3, 4, 0].map((p) => ({
+            value: String(p),
+            label: PRIORITY_META[p].label,
+            icon: <PriorityIcon priority={p} />,
+          }))}
+          trigger={<PriorityIcon priority={issue.priority} />}
+          triggerTitle={`priority · ${PRIORITY_META[issue.priority]?.label ?? '—'}`}
+          triggerClassName="flex h-6 w-6 items-center justify-center border border-transparent hover:border-[rgba(0,255,140,0.25)] hover:bg-[rgba(0,255,136,0.06)] transition"
+          popupWidth="180px"
+        />
+      </div>
+      <div className="shrink-0 font-mono text-xs text-accent/80 tabular-nums">{issue.identifier}</div>
+      {showCompany && (
+        <span className="hidden md:inline-flex shrink-0 items-center gap-1 border border-[rgba(255,181,71,0.25)] bg-[rgba(255,181,71,0.06)] px-2 py-0.5 font-mono text-[10px] uppercase tracking-label text-amber">
+          <Building2 className="h-3 w-3" />
+          {company.name}
+        </span>
+      )}
+      <div className="min-w-0 flex-1 truncate text-sm text-fg-1">{issue.title}</div>
+      <div className="hidden md:block shrink-0" onClick={(event) => event.stopPropagation()}>
+        <PachSelect
+          variant="button"
+          value={issue.projectId ?? ''}
+          onChange={(next) => onProjectChange(issue.id, next)}
+          options={[
+            { value: '', label: 'no project' },
+            ...teamProjects.map((p) => ({
+              value: p.id,
+              label: p.name.toLowerCase(),
+              icon: <FolderKanban className="h-3 w-3" />,
+            })),
+          ]}
+          trigger={
+            <span className="inline-flex items-center gap-1 border border-[rgba(0,255,140,0.15)] bg-pit-3 px-2 py-0.5 font-mono text-[10px] uppercase tracking-label text-fg-3">
+              <FolderKanban className="h-3 w-3" />
+              {project?.name ?? 'no project'}
+            </span>
+          }
+          triggerTitle="change project"
+          triggerClassName="transition hover:opacity-80"
+          popupWidth="220px"
+        />
+      </div>
+      <div className="hidden md:block shrink-0" onClick={(event) => event.stopPropagation()}>
+        <PachSelect
+          variant="button"
+          value={issue.teamId}
+          onChange={(next) => onTeamChange(issue.id, next)}
+          options={allTeams.map((t) => ({ value: t.id, label: t.name.toLowerCase() }))}
+          trigger={
+            <span className="inline-flex shrink-0 border border-[rgba(0,255,140,0.15)] bg-pit-3 px-2 py-0.5 font-mono text-[10px] uppercase tracking-label text-fg-3">
+              {team?.name ?? '—'}
+            </span>
+          }
+          triggerTitle="change team"
+          triggerClassName="transition hover:opacity-80"
+          popupWidth="200px"
+        />
+      </div>
+      <div className="shrink-0" onClick={(event) => event.stopPropagation()}>
+        <PachSelect
+          variant="button"
+          value={issue.estimate != null ? String(issue.estimate) : ''}
+          onChange={(next) => onEstimateChange(issue.id, next)}
+          options={[
+            { value: '', label: 'no estimate' },
+            ...ESTIMATE_VALUES.map((n) => ({ value: String(n), label: `${n} pts` })),
+          ]}
+          trigger={
+            <span className="font-mono text-xs text-fg-3 tabular-nums px-1.5 py-0.5 border border-transparent hover:border-[rgba(0,255,140,0.2)] hover:bg-[rgba(0,255,136,0.04)] transition">
+              {issue.estimate != null ? `${issue.estimate} pts` : '— pts'}
+            </span>
+          }
+          triggerTitle="change estimate"
+          triggerClassName="transition"
+          popupWidth="160px"
+          align="right"
+        />
+      </div>
+      <div className="shrink-0 font-mono text-xs text-fg-3 truncate max-w-[120px]">{assignee?.name || assignee?.email || 'unassigned'}</div>
+      <div className="shrink-0 font-mono text-[10px] uppercase tracking-label text-fg-4">{formatShortDate(issue.updatedAt)}</div>
     </div>
   )
 }
@@ -1126,13 +974,6 @@ function getStatusGroups(
   })
 }
 
-function StatusDot({ statusType }: { statusType: string }) {
-  if (statusType === 'completed') return <CheckCircle2 className="h-3.5 w-3.5 text-accent" />
-  if (statusType === 'blocked') return <AlertTriangle className="h-3.5 w-3.5 text-fail" />
-  if (statusType === 'started') return <AlertTriangle className="h-3.5 w-3.5 text-amber" />
-  return <Circle className="h-3.5 w-3.5 text-fg-4" />
-}
-
 function statusRank(statusType: string) {
   if (statusType === 'backlog') return 0
   if (statusType === 'unstarted') return 1
@@ -1145,4 +986,8 @@ function statusRank(statusType: string) {
 
 function formatShortDate(value: number) {
   return new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric' }).format(new Date(value))
+}
+
+function sumEstimates(items: Schema['tables']['pm_issues']['row'][]) {
+  return items.reduce((total, issue) => total + (issue.estimate ?? 0), 0)
 }

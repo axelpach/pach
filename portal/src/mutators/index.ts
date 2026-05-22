@@ -173,7 +173,7 @@ export const mutators = {
         updatedAt: now,
       })
     },
-    async update(tx: Tx, args: { id: string; contextCompanyId?: string | null; projectId?: string | null; statusId?: string; assigneeId?: string | null; title?: string; description?: string; priority?: number; estimate?: number | null; sortOrder?: number; dueDate?: number | null; startedAt?: number | null; completedAt?: number | null; canceledAt?: number | null; blockedReason?: string | null }) {
+    async update(tx: Tx, args: { id: string; contextCompanyId?: string | null; teamId?: string; projectId?: string | null; statusId?: string; assigneeId?: string | null; identifier?: string; number?: number; title?: string; description?: string; priority?: number; estimate?: number | null; sortOrder?: number; dueDate?: number | null; startedAt?: number | null; completedAt?: number | null; canceledAt?: number | null; blockedReason?: string | null }) {
       const { id, ...updates } = args
       const now = Date.now()
       await tx.mutate.pm_issues.update({ id, ...updates, lastActivityAt: now, updatedAt: now })
