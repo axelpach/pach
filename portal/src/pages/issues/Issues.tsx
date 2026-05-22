@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { AlertTriangle, Building2, CheckCircle2, ChevronDown, ChevronRight, Circle, FolderKanban, Plus, RefreshCw } from 'lucide-react'
+import { AlertTriangle, Building2, CheckCircle2, ChevronDown, ChevronRight, Circle, FolderKanban, Plus } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import {
   DndContext,
@@ -29,8 +29,7 @@ import { FilterButton, type ActiveFilters, type FilterFieldConfig } from './Issu
 import { useQuery, useZero } from '@rocicorp/zero/react'
 import type { Schema } from '../../zero-schema'
 import type { Mutators } from '../../mutators'
-import { authFetch, useAuth } from '../../lib/auth'
-import { config } from '../../config'
+import { useAuth } from '../../lib/auth'
 import { useTrackerContext } from './IssuesLayout'
 
 const PRIORITY_GROUPS = [
@@ -97,9 +96,6 @@ export default function Issues() {
   const [projectDraftDescription, setProjectDraftDescription] = useState('')
   const [projectDraftStatus, setProjectDraftStatus] = useState('active')
   const [savingProject, setSavingProject] = useState(false)
-  const [syncingLinear, setSyncingLinear] = useState(false)
-  const [linearSyncNotice, setLinearSyncNotice] = useState<string | null>(null)
-  const [linearSyncError, setLinearSyncError] = useState<string | null>(null)
 
   function togglePriority(value: number) {
     setCollapsedPriorities((prev) => {
@@ -757,42 +753,6 @@ export default function Issues() {
     }
   }
 
-  async function syncWithLinear() {
-    setSyncingLinear(true)
-    setLinearSyncNotice(null)
-    setLinearSyncError(null)
-
-    try {
-      const res = await authFetch(`${config.apiUrl}/linear/import`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ dryRun: false }),
-      })
-
-      const data = await res.json().catch(() => ({}))
-      if (!res.ok) {
-        throw new Error(data.error || 'sync failed')
-      }
-
-      const summary = data.summary as
-        | {
-            imported?: {
-              issues?: { created?: number; updated?: number }
-            }
-          }
-        | undefined
-      const created = summary?.imported?.issues?.created ?? 0
-      const updated = summary?.imported?.issues?.updated ?? 0
-      setLinearSyncNotice(`linear synced · ${created} created · ${updated} updated`)
-    } catch (error) {
-      setLinearSyncError(error instanceof Error ? error.message : 'sync failed')
-    } finally {
-      setSyncingLinear(false)
-    }
-  }
-
   return (
     <>
     <div className="flex h-full min-h-0 flex-col">
@@ -806,26 +766,6 @@ export default function Issues() {
                     onClearAll={clearAllFilters}
                   />
                 )}
-                {section.kind !== 'team' || section.tab !== 'projects' ? (
-                  <button
-                    onClick={syncWithLinear}
-                    disabled={syncingLinear}
-                    className="inline-flex items-center gap-2 border border-[rgba(0,255,140,0.3)] bg-[rgba(0,255,136,0.08)] px-3 py-1.5 font-mono text-[10px] uppercase tracking-label text-accent transition hover:bg-[rgba(0,255,136,0.16)] hover:shadow-glow-xs disabled:opacity-50 disabled:hover:bg-[rgba(0,255,136,0.08)] disabled:hover:shadow-none"
-                  >
-                    <RefreshCw className={`h-3.5 w-3.5 ${syncingLinear ? 'animate-spin' : ''}`} />
-                    {syncingLinear ? 'syncing…' : 'sync with linear'}
-                  </button>
-                ) : null}
-                {linearSyncNotice ? (
-                  <div className="font-mono text-[10px] uppercase tracking-label text-accent">
-                    {linearSyncNotice}
-                  </div>
-                ) : null}
-                {linearSyncError ? (
-                  <div className="font-mono text-[10px] uppercase tracking-label text-fail">
-                    {linearSyncError}
-                  </div>
-                ) : null}
                 <div className="ml-auto font-mono text-xs uppercase tracking-label text-fg-3">
                   {section.kind === 'team' && section.tab === 'projects'
                     ? `${selectedTeamProjects.length} visible`
