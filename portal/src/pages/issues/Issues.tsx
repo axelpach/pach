@@ -1,6 +1,23 @@
 import { useDeferredValue, useEffect, useState } from 'react'
 import { AlertTriangle, Building2, CheckCircle2, ChevronDown, ChevronRight, Circle, FolderKanban, Plus, Search } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
+import {
+  DndContext,
+  KeyboardSensor,
+  PointerSensor,
+  closestCenter,
+  useSensor,
+  useSensors,
+  type DragEndEvent,
+} from '@dnd-kit/core'
+import {
+  SortableContext,
+  arrayMove,
+  sortableKeyboardCoordinates,
+  useSortable,
+  verticalListSortingStrategy,
+} from '@dnd-kit/sortable'
+import { CSS } from '@dnd-kit/utilities'
 import { PachSelect } from './PachSelect'
 import { StatusIcon } from './StatusIcon'
 import { PRIORITY_META, PriorityIcon } from './PriorityIcon'
@@ -296,6 +313,14 @@ export default function Issues() {
 
   const blockedCount = issues.filter((issue) => statusMap.get(issue.statusId)?.type === 'blocked').length
 
+  function getNextSortOrder(priority: number, statusId: string, excludeIssueId?: string) {
+    const bucket = issues
+      .filter((issue) => issue.priority === priority && issue.statusId === statusId && issue.id !== excludeIssueId)
+      .sort(compareIssuesForBucketOrder)
+    const maxSortOrder = bucket[bucket.length - 1]?.sortOrder ?? 0
+    return maxSortOrder + 1024
+  }
+
   async function logActivity(issueId: string, summary: string, type = 'created') {
     await z.mutate.pm_issue_activity.create({
       id: crypto.randomUUID(),
@@ -307,12 +332,108 @@ export default function Issues() {
     })
   }
 
+  const sensors = useSensors(
+    // require a small drag distance before activating so plain clicks still navigate / open popups
+    useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
+  )
+
+  async function handleDragEnd(event: DragEndEvent) {
+    const { active, over } = event
+    if (!over) return
+    const activeIssue = issues.find((entry) => entry.id === active.id)
+    if (!activeIssue) return
+
+    // figure out destination container (group key "<priority>:<statusBucketKey>")
+    const overContainerRaw = (over.data.current?.sortable as { containerId?: string } | undefined)?.containerId
+    const overContainer = overContainerRaw ?? (typeof over.id === 'string' ? over.id : null)
+    if (!overContainer) return
+
+    const [priorityStr, statusKey] = overContainer.split(':')
+    const targetPriority = Number(priorityStr)
+    if (Number.isNaN(targetPriority) || !statusKey) return
+
+    // resolve target statusId — pick a status from the active issue's team that maps to this bucket
+    const targetStatus =
+      statuses.find(
+        (s) => s.teamId === activeIssue.teamId && getStatusBucket(s)?.key === statusKey,
+      ) ??
+      // fallback: any status in that bucket
+      statuses.find((s) => getStatusBucket(s)?.key === statusKey)
+    if (!targetStatus) return
+
+    // build the destination list including the active issue, sorted by sortOrder
+    const fullList = issues
+      .filter((entry) => entry.priority === targetPriority)
+      .filter((entry) => getStatusBucket(statusMap.get(entry.statusId))?.key === statusKey)
+      .sort(compareIssuesForBucketOrder)
+
+    const oldIndex = fullList.findIndex((entry) => entry.id === activeIssue.id)
+    const overIndex = fullList.findIndex((entry) => entry.id === over.id)
+
+    let reordered: typeof fullList
+    if (oldIndex >= 0) {
+      // same container reorder — use arrayMove on the full list
+      const newIndex = overIndex < 0 ? fullList.length - 1 : overIndex
+      reordered = arrayMove(fullList, oldIndex, newIndex)
+    } else {
+      // cross-container drop — splice the active issue in
+      const insertAt = overIndex < 0 ? fullList.length : overIndex
+      reordered = [...fullList.slice(0, insertAt), activeIssue, ...fullList.slice(insertAt)]
+    }
+
+    const activePos = reordered.findIndex((entry) => entry.id === activeIssue.id)
+    const before = reordered[activePos - 1]?.sortOrder
+    const after = reordered[activePos + 1]?.sortOrder
+    let newSortOrder: number
+    if (before == null && after == null) newSortOrder = 1000
+    else if (before == null) newSortOrder = (after as number) - 1
+    else if (after == null) newSortOrder = before + 1
+    else newSortOrder = (before + after) / 2
+
+    if (
+      newSortOrder === activeIssue.sortOrder &&
+      activeIssue.priority === targetPriority &&
+      activeIssue.statusId === targetStatus.id
+    ) {
+      return
+    }
+
+    const patch: Record<string, unknown> = { sortOrder: newSortOrder }
+    const summaryParts: string[] = []
+
+    if (activeIssue.priority !== targetPriority) {
+      patch.priority = targetPriority
+      summaryParts.push(
+        `priority ${PRIORITY_META[activeIssue.priority]?.label ?? '—'} → ${PRIORITY_META[targetPriority]?.label ?? '—'}`,
+      )
+    }
+    if (activeIssue.statusId !== targetStatus.id) {
+      patch.statusId = targetStatus.id
+      const now = Date.now()
+      if (targetStatus.type === 'started' && !activeIssue.startedAt) patch.startedAt = now
+      if (targetStatus.type === 'completed') patch.completedAt = now
+      if (targetStatus.type === 'canceled') patch.canceledAt = now
+      const fromStatus = statusMap.get(activeIssue.statusId)
+      summaryParts.push(`moved from ${fromStatus?.name ?? '—'} to ${targetStatus.name}`)
+    }
+
+    await z.mutate.pm_issues.update({ id: activeIssue.id, ...patch })
+    if (summaryParts.length) {
+      await logActivity(activeIssue.id, summaryParts.join(' · '), 'updated')
+    }
+  }
+
   async function changeIssuePriority(issueId: string, nextRaw: string) {
     const issue = issues.find((entry) => entry.id === issueId)
     if (!issue) return
     const next = Number(nextRaw)
     if (next === issue.priority) return
-    await z.mutate.pm_issues.update({ id: issueId, priority: next })
+    await z.mutate.pm_issues.update({
+      id: issueId,
+      priority: next,
+      sortOrder: getNextSortOrder(next, issue.statusId, issue.id),
+    })
     await logActivity(
       issueId,
       `priority ${PRIORITY_META[issue.priority]?.label ?? '—'} → ${PRIORITY_META[next]?.label ?? '—'}`,
@@ -379,7 +500,10 @@ export default function Issues() {
     const current = statusMap.get(issue.statusId)
     const next = statusMap.get(nextStatusId)
     if (!next) return
-    const patch: Record<string, unknown> = { statusId: nextStatusId }
+    const patch: Record<string, unknown> = {
+      statusId: nextStatusId,
+      sortOrder: getNextSortOrder(issue.priority, nextStatusId, issue.id),
+    }
     const now = Date.now()
     if (next.type === 'started' && !issue.startedAt) patch.startedAt = now
     if (next.type === 'completed') patch.completedAt = now
@@ -489,7 +613,7 @@ export default function Issues() {
         description: composerDescription.trim() || undefined,
         priority: composerPriority,
         estimate: composerEstimate,
-        sortOrder: nextNumber,
+        sortOrder: getNextSortOrder(composerPriority, statusId),
       })
 
       await logActivity(issueId, `Created issue ${team.key}-${nextNumber}`)
@@ -571,6 +695,7 @@ export default function Issues() {
                   onEdit={openEditProject}
                 />
               ) : filteredIssues.length ? (
+                <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
                 <div className="space-y-3">
                   {groupedIssues.map((group) => {
                     const isCollapsed = collapsedPriorities.has(group.value)
@@ -594,11 +719,7 @@ export default function Issues() {
                             {getStatusBuckets(group.issues, statusMap).map((status) => {
                               const statusIssues = group.issues
                                 .filter((issue) => getStatusBucket(statusMap.get(issue.statusId))?.key === status.key)
-                                .sort((a, b) => {
-                                  const rankDiff = a.sortOrder - b.sortOrder
-                                  if (rankDiff !== 0) return rankDiff
-                                  return b.updatedAt - a.updatedAt
-                                })
+                                .sort(compareIssuesForBucketOrder)
                               if (!statusIssues.length) return null
 
                               const statusKey = `${group.value}:${status.key}`
@@ -617,9 +738,14 @@ export default function Issues() {
                                     <span className="text-fg-4">· {sumEstimates(statusIssues)} pts</span>
                                   </button>
                                   {!statusCollapsed && (
+                                  <SortableContext
+                                    id={statusKey}
+                                    items={statusIssues.map((issue) => issue.id)}
+                                    strategy={verticalListSortingStrategy}
+                                  >
                                   <div>
                                     {statusIssues.map((issue) => (
-                                      <IssueRow
+                                      <SortableIssueRow
                                         key={issue.id}
                                         issue={issue}
                                         company={issue.contextCompanyId ? companyMap.get(issue.contextCompanyId) ?? null : null}
@@ -639,6 +765,7 @@ export default function Issues() {
                                       />
                                     ))}
                                   </div>
+                                  </SortableContext>
                                   )}
                                 </div>
                               )
@@ -649,6 +776,7 @@ export default function Issues() {
                     )
                   })}
                 </div>
+                </DndContext>
               ) : (
                 <EmptyState
                   title={issues.length ? 'no issues match this view yet' : 'start by creating your first issue'}
@@ -1255,6 +1383,24 @@ function SelectField({
 
 const ESTIMATE_VALUES = [1, 2, 3, 4, 8, 16]
 
+function SortableIssueRow(props: React.ComponentProps<typeof IssueRow>) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
+    id: props.issue.id,
+  })
+  const style: React.CSSProperties = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    opacity: isDragging ? 0.4 : 1,
+    position: 'relative',
+    zIndex: isDragging ? 20 : 'auto',
+  }
+  return (
+    <div ref={setNodeRef} style={style} {...attributes} {...listeners}>
+      <IssueRow {...props} />
+    </div>
+  )
+}
+
 function IssueRow({
   issue,
   company,
@@ -1441,6 +1587,17 @@ function getWorkspaceStatuses(statuses: Schema['tables']['pm_statuses']['row'][]
     if (rankDiff !== 0) return rankDiff
     return a.position - b.position
   })
+}
+
+function compareIssuesForBucketOrder(
+  a: Schema['tables']['pm_issues']['row'],
+  b: Schema['tables']['pm_issues']['row'],
+) {
+  const rankDiff = a.sortOrder - b.sortOrder
+  if (rankDiff !== 0) return rankDiff
+  const updatedDiff = b.updatedAt - a.updatedAt
+  if (updatedDiff !== 0) return updatedDiff
+  return a.identifier.localeCompare(b.identifier)
 }
 
 function getStatusBucket(status?: Schema['tables']['pm_statuses']['row'] | null) {

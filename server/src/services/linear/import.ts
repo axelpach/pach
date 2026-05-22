@@ -40,6 +40,8 @@ type ImportSummary = {
   }
 }
 
+type IssueOrderLike = Pick<IssueRow, 'id' | 'identifier' | 'priority' | 'statusId' | 'sortOrder' | 'updatedAt'>
+
 type LinearConnection<T> = {
   nodes: T[]
   pageInfo: {
@@ -374,6 +376,35 @@ function parseDate(value?: null | string) {
 function normalizeIdentifierNumber(identifier: string) {
   const match = identifier.match(/-(\d+)$/)
   return match ? Number(match[1]) : 0
+}
+
+function compareIssueOrder(a: IssueOrderLike, b: IssueOrderLike) {
+  const sortDiff = a.sortOrder - b.sortOrder
+  if (sortDiff !== 0) return sortDiff
+  const updatedDiff = b.updatedAt.getTime() - a.updatedAt.getTime()
+  if (updatedDiff !== 0) return updatedDiff
+  return a.identifier.localeCompare(b.identifier)
+}
+
+async function normalizeIssueSortOrder(db: Db) {
+  const rows = await db.select().from(pmIssues)
+  const buckets = new Map<string, IssueRow[]>()
+
+  for (const row of rows) {
+    const bucketKey = `${row.priority}:${row.statusId}`
+    const bucket = buckets.get(bucketKey)
+    if (bucket) bucket.push(row)
+    else buckets.set(bucketKey, [row])
+  }
+
+  for (const bucket of buckets.values()) {
+    const ordered = [...bucket].sort(compareIssueOrder)
+    for (const [index, issue] of ordered.entries()) {
+      const nextSortOrder = (index + 1) * 1024
+      if (issue.sortOrder === nextSortOrder) continue
+      await db.update(pmIssues).set({ sortOrder: nextSortOrder }).where(eq(pmIssues.id, issue.id))
+    }
+  }
 }
 
 export async function importLinearWorkspace(db: Db, options: ImportOptions = {}): Promise<ImportSummary> {
@@ -745,6 +776,10 @@ export async function importLinearWorkspace(db: Db, options: ImportOptions = {})
         })
       }
     }
+  }
+
+  if (!dryRun) {
+    await normalizeIssueSortOrder(db)
   }
 
   return summary
