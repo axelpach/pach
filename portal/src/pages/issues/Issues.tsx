@@ -41,14 +41,27 @@ export default function Issues() {
   const [search, setSearch] = useState('')
   const [composerOpen, setComposerOpen] = useState(false)
   const [composerTitle, setComposerTitle] = useState('')
+  const [composerDescription, setComposerDescription] = useState('')
   const [composerCompanyId, setComposerCompanyId] = useState('')
   const [composerTeamId, setComposerTeamId] = useState('')
   const [composerProjectId, setComposerProjectId] = useState('')
+  const [composerStatusId, setComposerStatusId] = useState('')
+  const [composerAssigneeId, setComposerAssigneeId] = useState('')
   const [composerPriority, setComposerPriority] = useState<number>(2)
   const [composerEstimate, setComposerEstimate] = useState<number>(4)
+  const [composerCreateMore, setComposerCreateMore] = useState(false)
   const [creatingIssue, setCreatingIssue] = useState(false)
   const [collapsedPriorities, setCollapsedPriorities] = useState<Set<number>>(new Set())
   const [collapsedStatuses, setCollapsedStatuses] = useState<Set<string>>(new Set())
+  const [projectModal, setProjectModal] = useState<
+    | { mode: 'create'; teamId: string }
+    | { mode: 'edit'; projectId: string }
+    | null
+  >(null)
+  const [projectDraftName, setProjectDraftName] = useState('')
+  const [projectDraftDescription, setProjectDraftDescription] = useState('')
+  const [projectDraftStatus, setProjectDraftStatus] = useState('active')
+  const [savingProject, setSavingProject] = useState(false)
   const deferredSearch = useDeferredValue(search)
 
   function togglePriority(value: number) {
@@ -58,6 +71,68 @@ export default function Issues() {
       else next.add(value)
       return next
     })
+  }
+
+  function openCreateProject(teamId: string) {
+    setProjectDraftName('')
+    setProjectDraftDescription('')
+    setProjectDraftStatus('active')
+    setProjectModal({ mode: 'create', teamId })
+  }
+
+  function openEditProject(project: Schema['tables']['pm_projects']['row']) {
+    setProjectDraftName(project.name)
+    setProjectDraftDescription(project.description ?? '')
+    setProjectDraftStatus(project.status || 'active')
+    setProjectModal({ mode: 'edit', projectId: project.id })
+  }
+
+  function closeProjectModal() {
+    setProjectModal(null)
+    setProjectDraftName('')
+    setProjectDraftDescription('')
+    setProjectDraftStatus('active')
+    setSavingProject(false)
+  }
+
+  function slugify(value: string) {
+    return value
+      .trim()
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-+|-+$/g, '')
+      .slice(0, 40) || 'project'
+  }
+
+  async function submitProjectModal() {
+    if (!projectModal) return
+    const name = projectDraftName.trim()
+    if (!name) return
+
+    setSavingProject(true)
+    try {
+      if (projectModal.mode === 'create') {
+        await z.mutate.pm_projects.create({
+          id: crypto.randomUUID(),
+          teamId: projectModal.teamId,
+          name,
+          slug: slugify(name),
+          description: projectDraftDescription.trim() || undefined,
+          status: projectDraftStatus,
+        })
+      } else {
+        await z.mutate.pm_projects.update({
+          id: projectModal.projectId,
+          name,
+          slug: slugify(name),
+          description: projectDraftDescription.trim() || undefined,
+          status: projectDraftStatus,
+        })
+      }
+      closeProjectModal()
+    } finally {
+      setSavingProject(false)
+    }
   }
 
   function toggleStatusGroup(key: string) {
@@ -104,14 +179,37 @@ export default function Issues() {
   }, [composerTeamId, teams])
 
   useEffect(() => {
+    // optional project — keep blank if user hasn't picked one; only clear when invalid
+    if (!composerProjectId) return
     if (composerProjects.some((project) => project.id === composerProjectId)) return
-    setComposerProjectId(composerProjects[0]?.id ?? '')
+    setComposerProjectId('')
   }, [composerProjectId, composerProjects])
 
   useEffect(() => {
-    if (composerCompanyId && contextCompanies.some((company) => company.id === composerCompanyId)) return
-    setComposerCompanyId(contextCompanies[0]?.id ?? '')
+    if (!composerStatusId && defaultComposerStatusId) {
+      setComposerStatusId(defaultComposerStatusId)
+      return
+    }
+    if (composerStatusId && composerStatuses.some((s) => s.id === composerStatusId)) return
+    setComposerStatusId(defaultComposerStatusId)
+  }, [composerStatusId, composerStatuses, defaultComposerStatusId])
+
+  useEffect(() => {
+    // company context is optional — leave blank by default; clear if invalid
+    if (!composerCompanyId) return
+    if (contextCompanies.some((company) => company.id === composerCompanyId)) return
+    setComposerCompanyId('')
   }, [composerCompanyId, contextCompanies])
+
+  useEffect(() => {
+    if (!composerAssigneeId && user?.id) {
+      setComposerAssigneeId(user.id)
+      return
+    }
+    if (composerAssigneeId && !users.some((u) => u.id === composerAssigneeId)) {
+      setComposerAssigneeId(user?.id ?? '')
+    }
+  }, [composerAssigneeId, user, users])
 
   useEffect(() => {
     function handleKeyDown(event: KeyboardEvent) {
@@ -148,6 +246,17 @@ export default function Issues() {
     window.addEventListener('keydown', handleEscape)
     return () => window.removeEventListener('keydown', handleEscape)
   }, [composerOpen])
+
+  useEffect(() => {
+    if (!projectModal) return
+    function handleEscape(event: KeyboardEvent) {
+      if (event.key !== 'Escape') return
+      event.preventDefault()
+      closeProjectModal()
+    }
+    window.addEventListener('keydown', handleEscape)
+    return () => window.removeEventListener('keydown', handleEscape)
+  }, [projectModal])
 
   const normalizedSearch = deferredSearch.trim().toLowerCase()
   const filteredIssues = issues.filter((issue) => {
@@ -370,8 +479,9 @@ export default function Issues() {
 
       const teamStatuses = statuses.filter((status) => status.teamId === teamId)
       const statusId =
-        teamStatuses.find((status) => status.type !== 'completed' && status.type !== 'canceled')?.id ??
-        defaultComposerStatusId ??
+        composerStatusId ||
+        teamStatuses.find((status) => status.type !== 'completed' && status.type !== 'canceled')?.id ||
+        defaultComposerStatusId ||
         foundation.defaultStatusId
 
       const nextNumber =
@@ -382,13 +492,14 @@ export default function Issues() {
         id: issueId,
         contextCompanyId: composerCompanyId || undefined,
         teamId,
-        projectId: composerProjectId || foundation.defaultProjectId,
+        projectId: composerProjectId || undefined,
         statusId,
-        assigneeId: user.id,
+        assigneeId: composerAssigneeId || user.id,
         creatorId: user.id,
         identifier: `${team.key}-${nextNumber}`,
         number: nextNumber,
         title: composerTitle.trim(),
+        description: composerDescription.trim() || undefined,
         priority: composerPriority,
         estimate: composerEstimate,
         sortOrder: nextNumber,
@@ -396,8 +507,13 @@ export default function Issues() {
 
       await logActivity(issueId, `Created issue ${team.key}-${nextNumber}`)
       setComposerTitle('')
-      setComposerOpen(false)
-      setSection({ kind: 'all' })
+      setComposerDescription('')
+      if (composerCreateMore) {
+        // keep the modal open for quick successive creation
+      } else {
+        setComposerOpen(false)
+        setSection({ kind: 'all' })
+      }
     } finally {
       setCreatingIssue(false)
     }
@@ -464,6 +580,8 @@ export default function Issues() {
                   team={selectedTeam}
                   projects={selectedTeamProjects}
                   issues={issues}
+                  onCreate={(teamId) => openCreateProject(teamId)}
+                  onEdit={openEditProject}
                 />
               ) : filteredIssues.length ? (
                 <div className="space-y-3">
@@ -557,65 +675,131 @@ export default function Issues() {
       <IssueComposerModal
         title={composerTitle}
         onTitleChange={setComposerTitle}
+        description={composerDescription}
+        onDescriptionChange={setComposerDescription}
         companyId={composerCompanyId}
         onCompanyChange={setComposerCompanyId}
         teamId={composerTeamId}
         onTeamChange={setComposerTeamId}
         projectId={composerProjectId}
         onProjectChange={setComposerProjectId}
+        statusId={composerStatusId}
+        onStatusChange={setComposerStatusId}
+        assigneeId={composerAssigneeId}
+        onAssigneeChange={setComposerAssigneeId}
         priority={composerPriority}
         onPriorityChange={setComposerPriority}
         estimate={composerEstimate}
         onEstimateChange={setComposerEstimate}
+        createMore={composerCreateMore}
+        onCreateMoreChange={setComposerCreateMore}
         companies={contextCompanies}
         teams={teams}
         projects={composerProjects}
+        statuses={composerStatuses}
+        users={users}
+        team={selectedComposerTeam}
         creating={creatingIssue}
         onClose={() => setComposerOpen(false)}
         onCreate={createIssue}
+      />
+    )}
+
+    {projectModal && (
+      <ProjectModal
+        mode={projectModal.mode}
+        name={projectDraftName}
+        description={projectDraftDescription}
+        status={projectDraftStatus}
+        onNameChange={setProjectDraftName}
+        onDescriptionChange={setProjectDraftDescription}
+        onStatusChange={setProjectDraftStatus}
+        saving={savingProject}
+        onClose={closeProjectModal}
+        onSubmit={submitProjectModal}
       />
     )}
     </>
   )
 }
 
+const PROJECT_STATUS_TONE: Record<string, string> = {
+  planned: 'text-pach-info',
+  active: 'text-accent',
+  paused: 'text-amber',
+  completed: 'text-fg-3',
+  canceled: 'text-fg-4',
+}
+
 function TeamProjectsPanel({
   team,
   projects,
   issues,
+  onCreate,
+  onEdit,
 }: {
   team: Schema['tables']['pm_teams']['row'] | null
   projects: Schema['tables']['pm_projects']['row'][]
   issues: Schema['tables']['pm_issues']['row'][]
+  onCreate: (teamId: string) => void
+  onEdit: (project: Schema['tables']['pm_projects']['row']) => void
 }) {
   if (!team) {
     return <EmptyState title="pick a team first" body="select a team in the sidebar to inspect its issues or projects." />
   }
 
-  if (!projects.length) {
-    return <EmptyState title="no projects in this team yet" body="projects will show up here once the team starts grouping work that way." />
-  }
-
   return (
-    <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-      {projects.map((project) => {
-        const projectIssues = issues.filter((issue) => issue.projectId === project.id)
-        return (
-          <div key={project.id} className="border border-[rgba(0,255,140,0.15)] bg-pit-2 p-5 hover:border-[rgba(0,255,140,0.3)] transition">
-            <div className="flex items-center gap-2 font-mono text-[10px] uppercase tracking-label text-fg-3">
-              <FolderKanban className="h-3.5 w-3.5" />
-              project
-            </div>
-            <div className="mt-3 font-mono text-lg lowercase text-fg-1">{project.name}</div>
-            <div className="mt-2 text-sm text-fg-3">{project.description || 'no description yet.'}</div>
-            <div className="mt-4 flex items-center justify-between font-mono text-xs">
-              <span className="border border-[rgba(0,255,140,0.2)] bg-[rgba(0,255,136,0.05)] px-2 py-0.5 uppercase tracking-label text-accent">{project.status}</span>
-              <span className="text-fg-4">{projectIssues.length} issues</span>
-            </div>
+    <section className="overflow-hidden border border-[rgba(0,255,140,0.12)] bg-[rgba(10,14,12,0.6)] backdrop-blur-sm">
+      <div className="flex items-center justify-between border-b border-[rgba(0,255,140,0.1)] bg-[rgba(20,26,23,0.6)] px-5 py-3">
+        <div className="font-mono text-xs uppercase tracking-label text-fg-3">
+          {team.name.toLowerCase()} · projects <span className="text-fg-4">· {projects.length}</span>
+        </div>
+        <button
+          onClick={() => onCreate(team.id)}
+          className="inline-flex items-center gap-1.5 border border-[rgba(0,255,140,0.3)] bg-[rgba(0,255,136,0.08)] px-3 py-1 font-mono text-[10px] uppercase tracking-label text-accent transition hover:bg-[rgba(0,255,136,0.16)] hover:shadow-glow-xs"
+        >
+          <Plus className="h-3 w-3" />
+          new project
+        </button>
+      </div>
+
+      {projects.length === 0 ? (
+        <div className="px-5 py-10 text-center font-mono text-xs text-fg-4">// no projects in this team yet</div>
+      ) : (
+        <div>
+          <div className="flex items-center gap-4 border-b border-[rgba(0,255,140,0.08)] px-5 py-2 font-mono text-[10px] uppercase tracking-label text-fg-4">
+            <div className="min-w-0 flex-1">name</div>
+            <div className="w-[110px] shrink-0">status</div>
+            <div className="w-[80px] shrink-0 text-right">issues</div>
+            <div className="w-[80px] shrink-0 text-right">pts</div>
+            <div className="w-[88px] shrink-0 text-right">updated</div>
           </div>
-        )
-      })}
-    </div>
+          {projects.map((project) => {
+            const projectIssues = issues.filter((issue) => issue.projectId === project.id)
+            const points = projectIssues.reduce((sum, issue) => sum + (issue.estimate ?? 0), 0)
+            const tone = PROJECT_STATUS_TONE[project.status] ?? 'text-fg-3'
+            return (
+              <button
+                key={project.id}
+                onClick={() => onEdit(project)}
+                className="flex w-full items-center gap-4 border-b border-[rgba(0,255,140,0.06)] px-5 py-2.5 text-left transition hover:bg-[rgba(0,255,136,0.04)] last:border-b-0"
+              >
+                <FolderKanban className="h-3.5 w-3.5 shrink-0 text-fg-3" />
+                <div className="min-w-0 flex-1 truncate font-mono text-sm lowercase text-fg-1">{project.name}</div>
+                <div className={`w-[110px] shrink-0 font-mono text-[10px] uppercase tracking-label ${tone}`}>
+                  {project.status}
+                </div>
+                <div className="w-[80px] shrink-0 text-right font-mono text-xs text-fg-3 tabular-nums">{projectIssues.length}</div>
+                <div className="w-[80px] shrink-0 text-right font-mono text-xs text-fg-3 tabular-nums">{points} pts</div>
+                <div className="w-[88px] shrink-0 text-right font-mono text-[10px] uppercase tracking-label text-fg-4">
+                  {formatShortDate(project.updatedAt)}
+                </div>
+              </button>
+            )
+          })}
+        </div>
+      )}
+    </section>
   )
 }
 
@@ -652,41 +836,324 @@ function EmptyState({
 function IssueComposerModal({
   title,
   onTitleChange,
+  description,
+  onDescriptionChange,
   companyId,
   onCompanyChange,
   teamId,
   onTeamChange,
   projectId,
   onProjectChange,
+  statusId,
+  onStatusChange,
+  assigneeId,
+  onAssigneeChange,
   priority,
   onPriorityChange,
   estimate,
   onEstimateChange,
+  createMore,
+  onCreateMoreChange,
   companies,
   teams,
   projects,
+  statuses,
+  users,
+  team,
   creating,
   onClose,
   onCreate,
 }: {
   title: string
   onTitleChange: (value: string) => void
+  description: string
+  onDescriptionChange: (value: string) => void
   companyId: string
   onCompanyChange: (value: string) => void
   teamId: string
   onTeamChange: (value: string) => void
   projectId: string
   onProjectChange: (value: string) => void
+  statusId: string
+  onStatusChange: (value: string) => void
+  assigneeId: string
+  onAssigneeChange: (value: string) => void
   priority: number
   onPriorityChange: (value: number) => void
   estimate: number
   onEstimateChange: (value: number) => void
+  createMore: boolean
+  onCreateMoreChange: (value: boolean) => void
   companies: Schema['tables']['companies']['row'][]
   teams: Schema['tables']['pm_teams']['row'][]
   projects: Schema['tables']['pm_projects']['row'][]
+  statuses: Schema['tables']['pm_statuses']['row'][]
+  users: Schema['tables']['users']['row'][]
+  team: Schema['tables']['pm_teams']['row'] | null
   creating: boolean
   onClose: () => void
   onCreate: () => void
+}) {
+  const currentStatus = statuses.find((s) => s.id === statusId)
+  const currentProject = projects.find((p) => p.id === projectId)
+  const currentCompany = companies.find((c) => c.id === companyId)
+  const currentAssignee = users.find((u) => u.id === assigneeId)
+
+  function handleKeyDown(event: React.KeyboardEvent) {
+    if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') {
+      event.preventDefault()
+      if (title.trim() && !creating) onCreate()
+    }
+  }
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-start justify-center bg-[rgba(0,0,0,0.7)] px-4 pt-[10vh] backdrop-blur-sm"
+      onClick={onClose}
+    >
+      <div
+        className="w-full max-w-2xl border border-[rgba(0,255,140,0.2)] bg-pit-2 shadow-[0_30px_80px_rgba(0,0,0,0.5)]"
+        onClick={(event) => event.stopPropagation()}
+        onKeyDown={handleKeyDown}
+      >
+        {/* breadcrumb header */}
+        <div className="flex items-center justify-between border-b border-[rgba(0,255,140,0.12)] px-5 py-3">
+          <div className="flex items-center gap-2 font-mono text-xs">
+            <PachSelect
+              variant="button"
+              value={teamId}
+              onChange={onTeamChange}
+              options={teams.map((t) => ({ value: t.id, label: t.name.toLowerCase() }))}
+              trigger={
+                <span className="inline-flex items-center gap-1.5 border border-[rgba(0,255,140,0.25)] bg-[rgba(0,255,136,0.05)] px-2 py-0.5 font-mono text-[10px] uppercase tracking-label text-accent">
+                  {team?.key ?? 'team'}
+                </span>
+              }
+              triggerTitle="change team"
+              triggerClassName="transition hover:opacity-80"
+              popupWidth="200px"
+            />
+            <span className="text-fg-4">›</span>
+            <span className="text-fg-2 lowercase">new issue</span>
+          </div>
+          <button
+            onClick={onClose}
+            className="font-mono text-xs uppercase tracking-label text-fg-4 hover:text-fg-1 transition"
+            title="close"
+          >
+            [esc]
+          </button>
+        </div>
+
+        {/* title + description */}
+        <div className="px-5 pt-4">
+          <input
+            autoFocus
+            value={title}
+            onChange={(event) => onTitleChange(event.target.value)}
+            placeholder="issue title"
+            className="w-full bg-transparent font-mono text-lg text-fg-1 outline-none placeholder:text-fg-4 px-0 py-1"
+          />
+          <textarea
+            value={description}
+            onChange={(event) => onDescriptionChange(event.target.value)}
+            placeholder="add description…"
+            rows={4}
+            className="w-full resize-none bg-transparent font-mono text-sm leading-relaxed text-fg-2 outline-none placeholder:text-fg-4 px-0 py-2"
+          />
+        </div>
+
+        {/* pill row */}
+        <div className="flex flex-wrap items-center gap-2 px-5 py-3">
+          <PachSelect
+            variant="button"
+            value={statusId}
+            onChange={onStatusChange}
+            options={statuses.map((s) => ({
+              value: s.id,
+              label: s.name.toLowerCase(),
+              icon: <StatusIcon statusType={s.type} />,
+            }))}
+            trigger={
+              <ComposerPill
+                icon={<StatusIcon statusType={currentStatus?.type ?? 'backlog'} />}
+                label={currentStatus?.name?.toLowerCase() ?? 'status'}
+              />
+            }
+            triggerTitle="status"
+            triggerClassName="transition"
+            popupWidth="200px"
+          />
+
+          <PachSelect
+            variant="button"
+            value={String(priority)}
+            onChange={(next) => onPriorityChange(Number(next))}
+            options={[1, 2, 3, 4, 0].map((p) => ({
+              value: String(p),
+              label: PRIORITY_META[p].label,
+              icon: <PriorityIcon priority={p} />,
+            }))}
+            trigger={
+              <ComposerPill
+                icon={<PriorityIcon priority={priority} />}
+                label={PRIORITY_META[priority]?.label ?? 'priority'}
+              />
+            }
+            triggerTitle="priority"
+            triggerClassName="transition"
+            popupWidth="180px"
+          />
+
+          <PachSelect
+            variant="button"
+            value={assigneeId}
+            onChange={onAssigneeChange}
+            options={users.map((u) => ({ value: u.id, label: (u.name ?? u.email).toLowerCase() }))}
+            trigger={
+              <ComposerPill
+                icon={<span className="font-mono text-[10px] text-fg-3">@</span>}
+                label={(currentAssignee?.name ?? currentAssignee?.email)?.toLowerCase() ?? 'assignee'}
+              />
+            }
+            triggerTitle="assignee"
+            triggerClassName="transition"
+            popupWidth="220px"
+          />
+
+          <PachSelect
+            variant="button"
+            value={projectId}
+            onChange={onProjectChange}
+            options={[
+              { value: '', label: 'no project' },
+              ...projects.map((p) => ({
+                value: p.id,
+                label: p.name.toLowerCase(),
+                icon: <FolderKanban className="h-3 w-3" />,
+              })),
+            ]}
+            trigger={
+              <ComposerPill
+                icon={<FolderKanban className="h-3 w-3" />}
+                label={currentProject?.name?.toLowerCase() ?? 'project'}
+              />
+            }
+            triggerTitle="project"
+            triggerClassName="transition"
+            popupWidth="220px"
+          />
+
+          <PachSelect
+            variant="button"
+            value={String(estimate)}
+            onChange={(next) => onEstimateChange(Number(next))}
+            options={ESTIMATES.map((n) => ({ value: String(n), label: `${n} pts` }))}
+            trigger={
+              <ComposerPill
+                icon={<span className="font-mono text-[10px] text-fg-3">#</span>}
+                label={`${estimate} pts`}
+              />
+            }
+            triggerTitle="estimate"
+            triggerClassName="transition"
+            popupWidth="160px"
+          />
+
+          <PachSelect
+            variant="button"
+            value={companyId}
+            onChange={onCompanyChange}
+            options={[
+              { value: '', label: 'no company' },
+              ...companies.map((c) => ({ value: c.id, label: c.name })),
+            ]}
+            trigger={
+              <ComposerPill
+                icon={<Building2 className="h-3 w-3" />}
+                label={currentCompany?.name?.toLowerCase() ?? 'company'}
+              />
+            }
+            triggerTitle="company context"
+            triggerClassName="transition"
+            popupWidth="220px"
+          />
+        </div>
+
+        {/* footer */}
+        <div className="flex items-center justify-between border-t border-[rgba(0,255,140,0.12)] px-5 py-3">
+          <button
+            onClick={onClose}
+            className="px-2 py-1.5 font-mono text-xs uppercase tracking-label text-fg-3 transition hover:text-fg-1"
+          >
+            [cancel]
+          </button>
+          <div className="flex items-center gap-4">
+            <button
+              type="button"
+              onClick={() => onCreateMoreChange(!createMore)}
+              className="inline-flex items-center gap-2 font-mono text-[10px] uppercase tracking-label text-fg-3 hover:text-fg-1 transition"
+              title="keep modal open after creating"
+            >
+              <span
+                className={`flex h-3.5 w-3.5 items-center justify-center border transition ${
+                  createMore
+                    ? 'border-accent bg-[rgba(0,255,136,0.2)]'
+                    : 'border-[rgba(0,255,140,0.25)]'
+                }`}
+              >
+                {createMore ? <span className="text-accent text-[10px] leading-none">×</span> : null}
+              </span>
+              create more
+            </button>
+            <button
+              onClick={onCreate}
+              disabled={!title.trim() || creating}
+              className="inline-flex items-center gap-2 border border-[rgba(0,255,140,0.3)] bg-[rgba(0,255,136,0.08)] px-3 py-1.5 font-mono text-xs uppercase tracking-label text-accent transition hover:bg-[rgba(0,255,136,0.16)] hover:shadow-glow-xs disabled:opacity-40 disabled:hover:bg-[rgba(0,255,136,0.08)] disabled:hover:shadow-none"
+            >
+              <Plus className="h-3.5 w-3.5" />
+              {creating ? 'creating…' : 'create issue'}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function ComposerPill({ icon, label }: { icon: React.ReactNode; label: string }) {
+  return (
+    <span className="inline-flex items-center gap-1.5 border border-[rgba(0,255,140,0.2)] bg-pit-3 px-2.5 py-1 font-mono text-[11px] lowercase text-fg-2 hover:border-[rgba(0,255,140,0.4)] hover:bg-[rgba(0,255,136,0.04)] hover:text-fg-1 transition">
+      <span className="flex h-3.5 w-3.5 items-center justify-center">{icon}</span>
+      <span className="truncate max-w-[160px]">{label}</span>
+    </span>
+  )
+}
+
+const PROJECT_STATUS_OPTIONS = ['planned', 'active', 'paused', 'completed', 'canceled']
+
+function ProjectModal({
+  mode,
+  name,
+  description,
+  status,
+  onNameChange,
+  onDescriptionChange,
+  onStatusChange,
+  saving,
+  onClose,
+  onSubmit,
+}: {
+  mode: 'create' | 'edit'
+  name: string
+  description: string
+  status: string
+  onNameChange: (v: string) => void
+  onDescriptionChange: (v: string) => void
+  onStatusChange: (v: string) => void
+  saving: boolean
+  onClose: () => void
+  onSubmit: () => void
 }) {
   return (
     <div
@@ -694,58 +1161,55 @@ function IssueComposerModal({
       onClick={onClose}
     >
       <div
-        className="w-full max-w-2xl border border-[rgba(0,255,140,0.2)] bg-pit-2 shadow-[0_30px_80px_rgba(0,0,0,0.5)]"
+        className="w-full max-w-lg border border-[rgba(0,255,140,0.2)] bg-pit-2 shadow-[0_30px_80px_rgba(0,0,0,0.5)]"
         onClick={(event) => event.stopPropagation()}
       >
         <div className="border-b border-[rgba(0,255,140,0.12)] px-6 py-5">
-          <div className="text-[10px] uppercase tracking-label text-fg-3">◊ issues · create</div>
-          <div className="mt-1.5 font-mono text-xl lowercase text-fg-1">start with one issue</div>
+          <div className="text-[10px] uppercase tracking-label text-fg-3">
+            {mode === 'create' ? '◊ projects · create' : '◊ projects · edit'}
+          </div>
+          <div className="mt-1.5 font-mono text-xl lowercase text-fg-1">
+            {mode === 'create' ? 'new project' : 'edit project'}
+          </div>
         </div>
 
         <div className="space-y-4 px-6 py-5">
           <label className="block">
-            <div className="mb-2 font-mono text-[10px] uppercase tracking-label text-fg-3">title</div>
+            <div className="mb-2 font-mono text-[10px] uppercase tracking-label text-fg-3">name</div>
             <input
               autoFocus
-              value={title}
-              onChange={(event) => onTitleChange(event.target.value)}
-              placeholder="$ what needs to get done?"
+              value={name}
+              onChange={(event) => onNameChange(event.target.value)}
+              placeholder="$ core platform"
               className="w-full bg-rim border border-[rgba(0,255,140,0.15)] px-3 py-2 text-sm text-fg-1 outline-none focus:border-accent focus:shadow-glow-xs placeholder:text-fg-4"
             />
           </label>
 
-          <div className="grid gap-3 md:grid-cols-2">
-            <SelectField
-              label="company context"
-              value={companyId}
-              onChange={onCompanyChange}
-              options={[{ value: '', label: 'no company context' }, ...companies.map((company) => ({ value: company.id, label: company.name }))]}
+          <label className="block">
+            <div className="mb-2 font-mono text-[10px] uppercase tracking-label text-fg-3">description</div>
+            <textarea
+              value={description}
+              onChange={(event) => onDescriptionChange(event.target.value)}
+              placeholder="$ what is this project about?"
+              rows={3}
+              className="w-full resize-none bg-rim border border-[rgba(0,255,140,0.15)] px-3 py-2 text-sm text-fg-1 outline-none focus:border-accent focus:shadow-glow-xs placeholder:text-fg-4"
             />
-            <SelectField
-              label="team"
-              value={teamId}
-              onChange={onTeamChange}
-              options={teams.length ? teams.map((team) => ({ value: team.id, label: team.name })) : [{ value: '', label: 'pach (created automatically)' }]}
-            />
-            <SelectField
-              label="project"
-              value={projectId}
-              onChange={onProjectChange}
-              options={[{ value: '', label: 'no project' }, ...projects.map((project) => ({ value: project.id, label: project.name }))]}
-            />
-            <SelectField
-              label="priority"
-              value={String(priority)}
-              onChange={(value) => onPriorityChange(Number(value))}
-              options={PRIORITY_GROUPS.map((group) => ({ value: String(group.value), label: group.label }))}
-            />
-            <SelectField
-              label="estimate"
-              value={String(estimate)}
-              onChange={(value) => onEstimateChange(Number(value))}
-              options={ESTIMATES.map((points) => ({ value: String(points), label: `${points} pts` }))}
-            />
-          </div>
+          </label>
+
+          <label className="block">
+            <div className="mb-2 font-mono text-[10px] uppercase tracking-label text-fg-3">status</div>
+            <select
+              value={status}
+              onChange={(event) => onStatusChange(event.target.value)}
+              className="w-full bg-rim border border-[rgba(0,255,140,0.15)] px-3 py-2 text-sm text-fg-1 outline-none focus:border-accent focus:shadow-glow-xs"
+            >
+              {PROJECT_STATUS_OPTIONS.map((option) => (
+                <option key={option} value={option}>
+                  {option}
+                </option>
+              ))}
+            </select>
+          </label>
         </div>
 
         <div className="flex items-center justify-between border-t border-[rgba(0,255,140,0.12)] px-6 py-4">
@@ -756,19 +1220,18 @@ function IssueComposerModal({
             [cancel]
           </button>
           <button
-            onClick={onCreate}
-            disabled={!title.trim() || creating}
+            onClick={onSubmit}
+            disabled={!name.trim() || saving}
             className="inline-flex items-center gap-2 border border-[rgba(0,255,140,0.3)] bg-[rgba(0,255,136,0.08)] px-4 py-2 font-mono text-xs uppercase tracking-label text-accent transition hover:bg-[rgba(0,255,136,0.16)] hover:shadow-glow-xs disabled:opacity-40 disabled:hover:bg-[rgba(0,255,136,0.08)] disabled:hover:shadow-none"
           >
             <Plus className="h-3.5 w-3.5" />
-            {creating ? 'creating…' : 'create issue'}
+            {saving ? (mode === 'create' ? 'creating…' : 'saving…') : (mode === 'create' ? 'create project' : 'save project')}
           </button>
         </div>
       </div>
     </div>
   )
 }
-
 
 function SelectField({
   label,
@@ -884,7 +1347,7 @@ function IssueRow({
       </div>
       <div className="shrink-0 font-mono text-xs text-accent/80 tabular-nums">{issue.identifier}</div>
       {showCompany && (
-        <span className="hidden md:inline-flex shrink-0 items-center gap-1 border border-[rgba(255,181,71,0.25)] bg-[rgba(255,181,71,0.06)] px-2 py-0.5 font-mono text-[10px] uppercase tracking-label text-amber">
+        <span className="hidden md:inline-flex shrink-0 items-center gap-1 border border-[rgba(0,255,140,0.15)] bg-pit-3 px-2 py-0.5 font-mono text-[10px] uppercase tracking-label text-fg-3">
           <Building2 className="h-3 w-3" />
           {company.name}
         </span>
