@@ -3,6 +3,7 @@ import { eq } from 'drizzle-orm'
 import { getDb } from '../db.js'
 import { crmContacts } from '../../../db/schema.js'
 import { sendTemplate, type TemplateComponent } from '../services/whatsapp/send.js'
+import { sendText } from '../services/whatsapp/send-text.js'
 import { syncTemplates } from '../services/whatsapp/sync.js'
 import { handleWebhook } from '../services/whatsapp/webhook.js'
 import { fireCampaign } from '../services/whatsapp/fire.js'
@@ -85,6 +86,42 @@ router.post('/templates/sync', async (req, res) => {
   try {
     const result = await syncTemplates(projectId)
     return res.json(result)
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error)
+    return res.status(500).json({ error: message })
+  }
+})
+
+router.post('/send-text', async (req, res) => {
+  const body = req.body as { projectId?: string; to?: string; contactId?: string; body?: string }
+  if (!body?.projectId || !body?.body) {
+    return res.status(400).json({ error: 'projectId and body are required' })
+  }
+  if (!body.to && !body.contactId) {
+    return res.status(400).json({ error: 'either to or contactId is required' })
+  }
+
+  let to = body.to
+  if (!to && body.contactId) {
+    const db = getDb()
+    const [contact] = await db
+      .select({ phone: crmContacts.phone })
+      .from(crmContacts)
+      .where(eq(crmContacts.id, body.contactId))
+      .limit(1)
+    if (!contact) return res.status(404).json({ error: 'contact not found' })
+    if (!contact.phone) return res.status(400).json({ error: 'contact has no phone' })
+    to = contact.phone
+  }
+
+  try {
+    const result = await sendText({
+      projectId: body.projectId,
+      to: to!,
+      body: body.body,
+      contactId: body.contactId,
+    })
+    return res.status(result.success ? 200 : 422).json(result)
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error)
     return res.status(500).json({ error: message })

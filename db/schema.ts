@@ -183,7 +183,14 @@ export const whatsappMessages = pgTable('whatsapp_messages', {
   campaignId: uuid('campaign_id').references(() => whatsappCampaigns.id),
   contactId: uuid('contact_id').references(() => crmContacts.id),
   phone: text('phone').notNull(),
-  templateName: text('template_name').notNull(),
+  /** 'outbound' (we sent it) or 'inbound' (contact sent it to us) */
+  direction: text('direction').notNull().default('outbound'),
+  /** For inbound text replies: the message body. For outbound: null (template was rendered). */
+  body: text('body'),
+  /** Display name pulled from the inbound message's "profile" field; null for outbound */
+  inboundProfileName: text('inbound_profile_name'),
+  /** Null for inbound messages (no template); set for outbound template sends */
+  templateName: text('template_name'),
   /** queued | sent | delivered | read | failed */
   status: text('status').notNull().default('queued'),
   /** Meta's message id, returned after a successful send */

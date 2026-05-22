@@ -1,11 +1,9 @@
 // Zero schema for server-side push processing.
 // Keep in sync with portal/src/zero-schema.ts
 // Generated via: pnpm --filter server zero:generate
-
-import { createSchema, definePermissions, json, number, string, table, ANYONE_CAN, NOBODY_CAN, type ExpressionBuilder, type PermissionsConfig } from '@rocicorp/zero'
-
+import { createSchema, definePermissions, json, number, string, table } from '@rocicorp/zero';
 const decks = table('decks')
-  .columns({
+    .columns({
     id: string(),
     project: string(),
     title: string(),
@@ -15,11 +13,10 @@ const decks = table('decks')
     theme: string(),
     createdAt: number().from('created_at'),
     updatedAt: number().from('updated_at'),
-  })
-  .primaryKey('id')
-
+})
+    .primaryKey('id');
 const companies = table('companies')
-  .columns({
+    .columns({
     id: string(),
     name: string(),
     legalName: string().optional().from('legal_name'),
@@ -29,11 +26,10 @@ const companies = table('companies')
     description: string().optional(),
     createdAt: number().from('created_at'),
     updatedAt: number().from('updated_at'),
-  })
-  .primaryKey('id')
-
+})
+    .primaryKey('id');
 const crmCompanies = table('crm_companies')
-  .columns({
+    .columns({
     id: string(),
     name: string(),
     website: string().optional(),
@@ -45,11 +41,10 @@ const crmCompanies = table('crm_companies')
     description: string().optional(),
     createdAt: number().from('created_at'),
     updatedAt: number().from('updated_at'),
-  })
-  .primaryKey('id')
-
+})
+    .primaryKey('id');
 const crmContacts = table('crm_contacts')
-  .columns({
+    .columns({
     id: string(),
     companyId: string().optional().from('company_id'),
     name: string(),
@@ -60,20 +55,18 @@ const crmContacts = table('crm_contacts')
     role: string().optional(),
     createdAt: number().from('created_at'),
     updatedAt: number().from('updated_at'),
-  })
-  .primaryKey('id')
-
+})
+    .primaryKey('id');
 const crmDealContacts = table('crm_deal_contacts')
-  .columns({
+    .columns({
     id: string(),
     dealId: string().from('deal_id'),
     contactId: string().from('contact_id'),
     createdAt: number().from('created_at'),
-  })
-  .primaryKey('id')
-
+})
+    .primaryKey('id');
 const crmDeals = table('crm_deals')
-  .columns({
+    .columns({
     id: string(),
     companyId: string().optional().from('company_id'),
     title: string(),
@@ -84,46 +77,42 @@ const crmDeals = table('crm_deals')
     description: string().optional(),
     createdAt: number().from('created_at'),
     updatedAt: number().from('updated_at'),
-  })
-  .primaryKey('id')
-
+})
+    .primaryKey('id');
 const crmNotes = table('crm_notes')
-  .columns({
+    .columns({
     id: string(),
     dealId: string().optional().from('deal_id'),
     contactId: string().optional().from('contact_id'),
     body: string(),
     type: string(),
     createdAt: number().from('created_at'),
-  })
-  .primaryKey('id')
-
+})
+    .primaryKey('id');
 const crmBoards = table('crm_boards')
-  .columns({
+    .columns({
     id: string(),
     name: string(),
     slug: string(),
     entityType: string().from('entity_type'),
     groupBy: string().from('group_by'),
-    baseFilter: json<Record<string, string[]>>().from('base_filter'),
+    baseFilter: json().from('base_filter'),
     createdAt: number().from('created_at'),
     updatedAt: number().from('updated_at'),
-  })
-  .primaryKey('id')
-
+})
+    .primaryKey('id');
 const crmBoardColumns = table('crm_board_columns')
-  .columns({
+    .columns({
     id: string(),
     boardId: string().from('board_id'),
     label: string(),
     position: number(),
     value: string(),
     color: string().optional(),
-  })
-  .primaryKey('id')
-
+})
+    .primaryKey('id');
 const whatsappTemplates = table('whatsapp_templates')
-  .columns({
+    .columns({
     id: string(),
     companyId: string().from('company_id'),
     metaId: string().from('meta_id'),
@@ -136,32 +125,30 @@ const whatsappTemplates = table('whatsapp_templates')
     headerSampleUrl: string().optional().from('header_sample_url'),
     bodyText: string().optional().from('body_text'),
     footerText: string().optional().from('footer_text'),
-    components: json<unknown[]>().optional(),
-    variables: json<string[]>(),
+    components: json().optional(),
+    variables: json(),
     lastSyncedAt: number().from('last_synced_at'),
     createdAt: number().from('created_at'),
     updatedAt: number().from('updated_at'),
-  })
-  .primaryKey('id')
-
+})
+    .primaryKey('id');
 const whatsappCampaigns = table('whatsapp_campaigns')
-  .columns({
+    .columns({
     id: string(),
     companyId: string().from('company_id'),
     templateId: string().from('template_id'),
     name: string(),
     status: string(),
-    recipientFilter: json<Record<string, unknown>>().from('recipient_filter'),
-    variableValues: json<Record<string, string>>().from('variable_values'),
+    recipientFilter: json().from('recipient_filter'),
+    variableValues: json().from('variable_values'),
     mediaId: string().optional().from('media_id'),
     firedAt: number().optional().from('fired_at'),
     createdAt: number().from('created_at'),
     updatedAt: number().from('updated_at'),
-  })
-  .primaryKey('id')
-
+})
+    .primaryKey('id');
 const whatsappMessages = table('whatsapp_messages')
-  .columns({
+    .columns({
     id: string(),
     companyId: string().from('company_id'),
     campaignId: string().optional().from('campaign_id'),
@@ -178,53 +165,33 @@ const whatsappMessages = table('whatsapp_messages')
     deliveredAt: number().optional().from('delivered_at'),
     readAt: number().optional().from('read_at'),
     createdAt: number().from('created_at'),
-  })
-  .primaryKey('id')
-
+})
+    .primaryKey('id');
 export const schema = createSchema({
-  tables: [decks, companies, crmCompanies, crmContacts, crmDealContacts, crmDeals, crmNotes, crmBoards, crmBoardColumns, whatsappTemplates, whatsappCampaigns, whatsappMessages],
-})
-
-export type Schema = typeof schema
-
-/**
- * JWT payload shape (issued by server/src/lib/auth.ts).
- * Zero verifies the JWT signature against ZERO_AUTH_SECRET and exposes
- * the payload as AuthData in permission rules.
- */
-type AuthData = {
-  sub: string
-  email: string
-  name: string | null
-}
-
-const allowIfAuthenticated = (
-  authData: AuthData,
-  { cmpLit }: ExpressionBuilder<Schema, keyof Schema['tables']>,
-) => cmpLit(authData.sub, 'IS NOT', null)
-
+    tables: [decks, companies, crmCompanies, crmContacts, crmDealContacts, crmDeals, crmNotes, crmBoards, crmBoardColumns, whatsappTemplates, whatsappCampaigns, whatsappMessages],
+});
+const allowIfAuthenticated = (authData, { cmpLit }) => cmpLit(authData.sub, 'IS NOT', null);
 const AUTHENTICATED_CAN_DO_ANYTHING = {
-  row: {
-    select: [allowIfAuthenticated],
-    insert: [allowIfAuthenticated],
-    update: { preMutation: [allowIfAuthenticated], postMutation: [allowIfAuthenticated] },
-    delete: [allowIfAuthenticated],
-  },
-} as const
-
-export const permissions = definePermissions<AuthData, Schema>(schema, () => {
-  return {
-    decks: AUTHENTICATED_CAN_DO_ANYTHING,
-    companies: AUTHENTICATED_CAN_DO_ANYTHING,
-    crm_companies: AUTHENTICATED_CAN_DO_ANYTHING,
-    crm_contacts: AUTHENTICATED_CAN_DO_ANYTHING,
-    crm_deal_contacts: AUTHENTICATED_CAN_DO_ANYTHING,
-    crm_deals: AUTHENTICATED_CAN_DO_ANYTHING,
-    crm_notes: AUTHENTICATED_CAN_DO_ANYTHING,
-    crm_boards: AUTHENTICATED_CAN_DO_ANYTHING,
-    crm_board_columns: AUTHENTICATED_CAN_DO_ANYTHING,
-    whatsapp_templates: AUTHENTICATED_CAN_DO_ANYTHING,
-    whatsapp_campaigns: AUTHENTICATED_CAN_DO_ANYTHING,
-    whatsapp_messages: AUTHENTICATED_CAN_DO_ANYTHING,
-  } satisfies PermissionsConfig<AuthData, Schema>
-})
+    row: {
+        select: [allowIfAuthenticated],
+        insert: [allowIfAuthenticated],
+        update: { preMutation: [allowIfAuthenticated], postMutation: [allowIfAuthenticated] },
+        delete: [allowIfAuthenticated],
+    },
+};
+export const permissions = definePermissions(schema, () => {
+    return {
+        decks: AUTHENTICATED_CAN_DO_ANYTHING,
+        companies: AUTHENTICATED_CAN_DO_ANYTHING,
+        crm_companies: AUTHENTICATED_CAN_DO_ANYTHING,
+        crm_contacts: AUTHENTICATED_CAN_DO_ANYTHING,
+        crm_deal_contacts: AUTHENTICATED_CAN_DO_ANYTHING,
+        crm_deals: AUTHENTICATED_CAN_DO_ANYTHING,
+        crm_notes: AUTHENTICATED_CAN_DO_ANYTHING,
+        crm_boards: AUTHENTICATED_CAN_DO_ANYTHING,
+        crm_board_columns: AUTHENTICATED_CAN_DO_ANYTHING,
+        whatsapp_templates: AUTHENTICATED_CAN_DO_ANYTHING,
+        whatsapp_campaigns: AUTHENTICATED_CAN_DO_ANYTHING,
+        whatsapp_messages: AUTHENTICATED_CAN_DO_ANYTHING,
+    };
+});
