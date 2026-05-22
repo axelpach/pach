@@ -12,6 +12,8 @@ export type TrackerSection =
 export type TrackerContext = {
   section: TrackerSection
   setSection: (section: TrackerSection) => void
+  composerRequestId: number
+  requestComposer: () => void
 }
 
 export function useTrackerContext(): TrackerContext {
@@ -37,11 +39,17 @@ export default function IssuesLayout() {
   const [teamModal, setTeamModal] = useState<TeamModalState>(null)
   const [teamDraftName, setTeamDraftName] = useState('')
   const [savingTeam, setSavingTeam] = useState(false)
+  const [composerRequestId, setComposerRequestId] = useState(0)
 
   // setSection from any child navigates back to the list view when triggered from /issues/:id
   function setSection(next: TrackerSection) {
     setSectionState(next)
     if (location.pathname !== '/issues') navigate('/issues')
+  }
+
+  function requestComposer() {
+    if (location.pathname !== '/issues') navigate('/issues')
+    setComposerRequestId((id) => id + 1)
   }
 
   function toggleTeam(teamId: string) {
@@ -172,7 +180,7 @@ export default function IssuesLayout() {
     return () => window.removeEventListener('keydown', handleEscape)
   }, [teamModal])
 
-  const context: TrackerContext = { section, setSection }
+  const context: TrackerContext = { section, setSection, composerRequestId, requestComposer }
 
   return (
     <div className="flex-1 min-h-0 overflow-hidden text-fg-1">
@@ -185,6 +193,20 @@ export default function IssuesLayout() {
             <div className="text-[9px] uppercase tracking-label text-fg-4 mt-1">
               // issues · tracker
             </div>
+          </div>
+
+          <div className="mb-4 px-2">
+            <button
+              onClick={requestComposer}
+              className="flex w-full items-center justify-between gap-2 border border-[rgba(0,255,140,0.3)] bg-[rgba(0,255,136,0.08)] px-3 py-1.5 font-mono text-[10px] uppercase tracking-label text-accent transition hover:bg-[rgba(0,255,136,0.16)] hover:shadow-glow-xs"
+              title="create issue (c)"
+            >
+              <span className="inline-flex items-center gap-1.5">
+                <Plus className="h-3 w-3" />
+                create issue
+              </span>
+              <span className="text-fg-4 normal-case tracking-normal">c</span>
+            </button>
           </div>
 
           <div className="space-y-1">

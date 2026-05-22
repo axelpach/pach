@@ -1,5 +1,5 @@
-import { useDeferredValue, useEffect, useState } from 'react'
-import { AlertTriangle, Building2, CheckCircle2, ChevronDown, ChevronRight, Circle, FolderKanban, Plus, Search } from 'lucide-react'
+import { useEffect, useRef, useState } from 'react'
+import { AlertTriangle, Building2, CheckCircle2, ChevronDown, ChevronRight, Circle, FolderKanban, Plus } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import {
   DndContext,
@@ -25,6 +25,7 @@ const noShiftStrategy: SortingStrategy = () => null
 import { PachSelect } from './PachSelect'
 import { StatusIcon } from './StatusIcon'
 import { PRIORITY_META, PriorityIcon } from './PriorityIcon'
+import { FilterButton, type ActiveFilters, type FilterFieldConfig } from './IssueFilters'
 import { useQuery, useZero } from '@rocicorp/zero/react'
 import type { Schema } from '../../zero-schema'
 import type { Mutators } from '../../mutators'
@@ -41,6 +42,15 @@ const PRIORITY_GROUPS = [
 
 const ESTIMATES = [2, 4, 8, 16]
 
+const STATUS_BUCKETS = [
+  { key: 'backlog', label: 'backlog', type: 'backlog' },
+  { key: 'todo', label: 'todo', type: 'unstarted' },
+  { key: 'in_progress', label: 'in progress', type: 'started' },
+  { key: 'blocked', label: 'blocked', type: 'blocked' },
+  { key: 'done', label: 'done', type: 'completed' },
+  { key: 'canceled', label: 'canceled', type: 'canceled' },
+] as const
+
 type Foundation = {
   defaultTeamId: string
   defaultStatusId: string
@@ -50,7 +60,7 @@ type Foundation = {
 export default function Issues() {
   const z = useZero<Schema, Mutators>()
   const { user } = useAuth()
-  const { section, setSection } = useTrackerContext()
+  const { section, setSection, composerRequestId } = useTrackerContext()
 
   const [companies] = useQuery(z.query.companies.orderBy('name', 'asc'))
   const [users] = useQuery(z.query.users.orderBy('email', 'asc'))
@@ -59,7 +69,7 @@ export default function Issues() {
   const [statuses] = useQuery(z.query.pm_statuses.orderBy('position', 'asc'))
   const [issues] = useQuery(z.query.pm_issues.orderBy('updatedAt', 'desc'))
 
-  const [search, setSearch] = useState('')
+  const [activeFilters, setActiveFilters] = useState<ActiveFilters>({})
   const [composerOpen, setComposerOpen] = useState(false)
   const [composerTitle, setComposerTitle] = useState('')
   const [composerDescription, setComposerDescription] = useState('')
@@ -83,7 +93,6 @@ export default function Issues() {
   const [projectDraftDescription, setProjectDraftDescription] = useState('')
   const [projectDraftStatus, setProjectDraftStatus] = useState('active')
   const [savingProject, setSavingProject] = useState(false)
-  const deferredSearch = useDeferredValue(search)
 
   function togglePriority(value: number) {
     setCollapsedPriorities((prev) => {
@@ -230,6 +239,13 @@ export default function Issues() {
     }
   }, [composerAssigneeId, user, users])
 
+  const lastComposerRequestRef = useRef(composerRequestId)
+  useEffect(() => {
+    if (composerRequestId === lastComposerRequestRef.current) return
+    lastComposerRequestRef.current = composerRequestId
+    setComposerOpen(true)
+  }, [composerRequestId])
+
   useEffect(() => {
     function handleKeyDown(event: KeyboardEvent) {
       if (composerOpen) return
@@ -277,33 +293,106 @@ export default function Issues() {
     return () => window.removeEventListener('keydown', handleEscape)
   }, [projectModal])
 
-  const normalizedSearch = deferredSearch.trim().toLowerCase()
   const filteredIssues = issues.filter((issue) => {
     if (section.kind === 'team' && issue.teamId !== section.teamId) return false
 
-    if (!normalizedSearch) return true
+    // multiselect filters
+    for (const [field, values] of Object.entries(activeFilters)) {
+      if (!values.length) continue
+      switch (field) {
+        case 'status': {
+          const bucket = getStatusBucket(statusMap.get(issue.statusId))?.key ?? ''
+          if (!values.includes(bucket)) return false
+          break
+        }
+        case 'priority':
+          if (!values.includes(String(issue.priority))) return false
+          break
+        case 'team':
+          if (!values.includes(issue.teamId)) return false
+          break
+        case 'project':
+          if (!values.includes(issue.projectId ?? '__none')) return false
+          break
+        case 'assignee':
+          if (!values.includes(issue.assigneeId ?? '__none')) return false
+          break
+        case 'company':
+          if (!values.includes(issue.contextCompanyId ?? '__none')) return false
+          break
+      }
+    }
 
-    const team = teamMap.get(issue.teamId)
-    const project = issue.projectId ? projectMap.get(issue.projectId) : null
-    const company = issue.contextCompanyId ? companyMap.get(issue.contextCompanyId) : null
-    const assignee = issue.assigneeId ? userMap.get(issue.assigneeId) : null
-
-    const haystack = [
-      issue.identifier,
-      issue.title,
-      issue.description,
-      team?.name,
-      project?.name,
-      company?.name,
-      assignee?.name,
-      assignee?.email,
-    ]
-      .filter(Boolean)
-      .join(' ')
-      .toLowerCase()
-
-    return haystack.includes(normalizedSearch)
+    return true
   })
+
+  const filterConfigs: FilterFieldConfig[] = [
+    {
+      field: 'status',
+      label: 'status',
+      icon: Circle,
+      options: STATUS_BUCKETS.map((bucket) => ({
+        value: bucket.key,
+        label: bucket.label,
+        icon: <StatusIcon statusType={bucket.type} />,
+      })),
+    },
+    {
+      field: 'priority',
+      label: 'priority',
+      icon: AlertTriangle,
+      options: [1, 2, 3, 4, 0].map((p) => ({
+        value: String(p),
+        label: PRIORITY_META[p].label,
+        icon: <PriorityIcon priority={p} />,
+      })),
+    },
+    {
+      field: 'team',
+      label: 'team',
+      icon: Circle,
+      options: teams.map((t) => ({ value: t.id, label: t.name })),
+    },
+    {
+      field: 'project',
+      label: 'project',
+      icon: FolderKanban,
+      options: [
+        { value: '__none', label: 'no project' },
+        ...projects.map((p) => ({ value: p.id, label: p.name })),
+      ],
+    },
+    {
+      field: 'assignee',
+      label: 'assignee',
+      icon: Circle,
+      options: [
+        { value: '__none', label: 'unassigned' },
+        ...users.map((u) => ({ value: u.id, label: u.name ?? u.email })),
+      ],
+    },
+    {
+      field: 'company',
+      label: 'company',
+      icon: Building2,
+      options: [
+        { value: '__none', label: 'no company' },
+        ...contextCompanies.map((c) => ({ value: c.id, label: c.name })),
+      ],
+    },
+  ]
+
+  function setFilterField(field: string, values: string[]) {
+    setActiveFilters((prev) => {
+      const next = { ...prev }
+      if (values.length === 0) delete next[field]
+      else next[field] = values
+      return next
+    })
+  }
+  function clearAllFilters() {
+    setActiveFilters({})
+  }
 
   const groupedIssues = PRIORITY_GROUPS.map((group) => ({
     ...group,
@@ -645,53 +734,17 @@ export default function Issues() {
   return (
     <>
     <div className="flex h-full min-h-0 flex-col">
-            <div className="border-b border-[rgba(0,255,140,0.15)] px-8 py-5">
-              <div className="flex items-start justify-between gap-6">
-                <div>
-                  <div className="text-[10px] uppercase tracking-label text-fg-3 mb-1">
-                    {section.kind === 'all'
-                      ? '◊ issues · all'
-                      : `◊ ${selectedTeam?.name?.toLowerCase() || 'team'} · ${section.tab === 'projects' ? 'projects' : 'issues'}`}
-                  </div>
-                  <h1 className="font-mono text-2xl font-bold lowercase text-fg-1">
-                    {section.kind === 'all'
-                      ? 'all issues'
-                      : section.tab === 'projects'
-                        ? `${(selectedTeam?.name || 'team').toLowerCase()} projects`
-                        : (selectedTeam?.name || 'team').toLowerCase()}
-                  </h1>
-                  <p className="text-sm text-fg-3 mt-0.5">
-                    <span className="text-fg-4">›</span>{' '}
-                    {section.kind === 'all'
-                      ? `${issues.length} issues · ${openCount} open · ${blockedCount} blocked`
-                      : section.tab === 'issues'
-                        ? `${selectedTeamIssues.length} issues in ${(selectedTeam?.name || 'this team').toLowerCase()}`
-                        : `${selectedTeamProjects.length} projects in ${(selectedTeam?.name || 'this team').toLowerCase()}`}
-                  </p>
-                </div>
-
-                <button
-                  onClick={() => setComposerOpen(true)}
-                  className="inline-flex items-center gap-2 border border-[rgba(0,255,140,0.3)] bg-[rgba(0,255,136,0.08)] px-4 py-2 font-mono text-xs uppercase tracking-label text-accent transition hover:bg-[rgba(0,255,136,0.16)] hover:shadow-glow-xs"
-                >
-                  <Plus className="h-3.5 w-3.5" />
-                  create issue
-                </button>
-              </div>
-            </div>
-
             <div className="flex-1 min-h-0 overflow-auto py-6">
-              <div className="mb-5 flex items-center justify-between gap-4 px-6">
-                <div className="relative max-w-[560px] flex-1">
-                  <Search className="absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-fg-4" />
-                  <input
-                    value={search}
-                    onChange={(event) => setSearch(event.target.value)}
-                    placeholder="$ search issues, companies, teams, projects, assignee…"
-                    className="w-full bg-rim border border-[rgba(0,255,140,0.15)] pl-9 pr-3 py-2 text-sm text-fg-1 outline-none focus:border-accent focus:shadow-glow-xs placeholder:text-fg-4"
+              <div className="mb-4 flex items-center gap-4 px-6">
+                {!(section.kind === 'team' && section.tab === 'projects') && (
+                  <FilterButton
+                    activeFilters={activeFilters}
+                    filterConfigs={filterConfigs}
+                    onFilterChange={setFilterField}
+                    onClearAll={clearAllFilters}
                   />
-                </div>
-                <div className="font-mono text-xs uppercase tracking-label text-fg-3">
+                )}
+                <div className="ml-auto font-mono text-xs uppercase tracking-label text-fg-3">
                   {section.kind === 'team' && section.tab === 'projects'
                     ? `${selectedTeamProjects.length} visible`
                     : `${filteredIssues.length} visible`}
