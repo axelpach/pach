@@ -544,8 +544,8 @@ export default function Issues() {
               </div>
             </div>
 
-            <div className="flex-1 min-h-0 overflow-auto px-8 py-6">
-              <div className="mb-5 flex items-center justify-between gap-4">
+            <div className="flex-1 min-h-0 overflow-auto py-6">
+              <div className="mb-5 flex items-center justify-between gap-4 px-6">
                 <div className="relative max-w-[560px] flex-1">
                   <Search className="absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-fg-4" />
                   <input
@@ -575,7 +575,7 @@ export default function Issues() {
                   {groupedIssues.map((group) => {
                     const isCollapsed = collapsedPriorities.has(group.value)
                     return (
-                      <section key={group.value} className="overflow-hidden border border-[rgba(0,255,140,0.12)] bg-[rgba(10,14,12,0.6)] backdrop-blur-sm">
+                      <section key={group.value} className="overflow-hidden border-y border-[rgba(0,255,140,0.12)] bg-[rgba(10,14,12,0.6)] backdrop-blur-sm">
                         <button
                           onClick={() => togglePriority(group.value)}
                           className="flex w-full items-center gap-3 border-b border-[rgba(0,255,140,0.1)] bg-[rgba(20,26,23,0.6)] px-5 py-3 text-left"
@@ -740,7 +740,7 @@ function TeamProjectsPanel({
   }
 
   return (
-    <section className="overflow-hidden border border-[rgba(0,255,140,0.12)] bg-[rgba(10,14,12,0.6)] backdrop-blur-sm">
+    <section className="overflow-hidden border-y border-[rgba(0,255,140,0.12)] bg-[rgba(10,14,12,0.6)] backdrop-blur-sm">
       <div className="flex items-center justify-between border-b border-[rgba(0,255,140,0.1)] bg-[rgba(20,26,23,0.6)] px-5 py-3">
         <div className="font-mono text-xs uppercase tracking-label text-fg-3">
           {team.name.toLowerCase()} · projects <span className="text-fg-4">· {projects.length}</span>
@@ -1404,7 +1404,6 @@ function IssueRow({
           align="right"
         />
       </div>
-      <div className="shrink-0 font-mono text-xs text-fg-3 truncate max-w-[120px]">{assignee?.name || assignee?.email || 'unassigned'}</div>
       <div className="shrink-0 font-mono text-[10px] uppercase tracking-label text-fg-4">{formatShortDate(issue.updatedAt)}</div>
     </div>
   )

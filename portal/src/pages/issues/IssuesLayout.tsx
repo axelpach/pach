@@ -177,7 +177,7 @@ export default function IssuesLayout() {
   return (
     <div className="flex-1 min-h-0 overflow-hidden text-fg-1">
       <div className="flex h-full min-h-0">
-        <aside className="w-[260px] shrink-0 border-r border-[rgba(0,255,140,0.12)] bg-[rgba(5,6,5,0.6)] backdrop-blur-sm px-3 py-4 flex flex-col">
+        <aside className="w-[200px] shrink-0 border-r border-[rgba(0,255,140,0.12)] bg-[rgba(5,6,5,0.6)] backdrop-blur-sm px-2 py-4 flex flex-col">
           <div className="px-4 pb-3 mb-2">
             <div className="font-bold text-base text-accent [text-shadow:0_0_6px_rgba(0,255,136,0.5)] tracking-wide">
               p@ch_
