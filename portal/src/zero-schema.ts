@@ -17,6 +17,16 @@ const decks = table('decks')
   })
   .primaryKey('id')
 
+const users = table('users')
+  .columns({
+    id: string(),
+    email: string(),
+    name: string().optional(),
+    createdAt: number().from('created_at'),
+    updatedAt: number().from('updated_at'),
+  })
+  .primaryKey('id')
+
 const companies = table('companies')
   .columns({
     id: string(),
@@ -121,6 +131,135 @@ const crmBoardColumns = table('crm_board_columns')
   })
   .primaryKey('id')
 
+const pmTeams = table('pm_teams')
+  .columns({
+    id: string(),
+    companyId: string().optional().from('company_id'),
+    key: string(),
+    name: string(),
+    description: string().optional(),
+    color: string().optional(),
+    icon: string().optional(),
+    position: number(),
+    createdAt: number().from('created_at'),
+    updatedAt: number().from('updated_at'),
+  })
+  .primaryKey('id')
+
+const pmProjects = table('pm_projects')
+  .columns({
+    id: string(),
+    companyId: string().optional().from('company_id'),
+    teamId: string().optional().from('team_id'),
+    name: string(),
+    slug: string(),
+    description: string().optional(),
+    color: string().optional(),
+    icon: string().optional(),
+    status: string(),
+    targetDate: number().optional().from('target_date'),
+    createdAt: number().from('created_at'),
+    updatedAt: number().from('updated_at'),
+  })
+  .primaryKey('id')
+
+const pmStatuses = table('pm_statuses')
+  .columns({
+    id: string(),
+    companyId: string().optional().from('company_id'),
+    teamId: string().from('team_id'),
+    name: string(),
+    key: string(),
+    type: string(),
+    description: string().optional(),
+    color: string().optional(),
+    position: number(),
+    createdAt: number().from('created_at'),
+    updatedAt: number().from('updated_at'),
+  })
+  .primaryKey('id')
+
+const pmLabels = table('pm_labels')
+  .columns({
+    id: string(),
+    companyId: string().optional().from('company_id'),
+    teamId: string().optional().from('team_id'),
+    name: string(),
+    color: string().optional(),
+    description: string().optional(),
+    createdAt: number().from('created_at'),
+    updatedAt: number().from('updated_at'),
+  })
+  .primaryKey('id')
+
+const pmIssues = table('pm_issues')
+  .columns({
+    id: string(),
+    contextCompanyId: string().optional().from('context_company_id'),
+    teamId: string().from('team_id'),
+    projectId: string().optional().from('project_id'),
+    statusId: string().from('status_id'),
+    assigneeId: string().optional().from('assignee_id'),
+    creatorId: string().optional().from('creator_id'),
+    identifier: string(),
+    number: number(),
+    title: string(),
+    description: string().optional(),
+    priority: number(),
+    estimate: number().optional(),
+    sortOrder: number().from('sort_order'),
+    dueDate: number().optional().from('due_date'),
+    startedAt: number().optional().from('started_at'),
+    completedAt: number().optional().from('completed_at'),
+    canceledAt: number().optional().from('canceled_at'),
+    blockedReason: string().optional().from('blocked_reason'),
+    lastActivityAt: number().from('last_activity_at'),
+    createdAt: number().from('created_at'),
+    updatedAt: number().from('updated_at'),
+  })
+  .primaryKey('id')
+
+const pmIssueLabels = table('pm_issue_labels')
+  .columns({
+    id: string(),
+    issueId: string().from('issue_id'),
+    labelId: string().from('label_id'),
+    createdAt: number().from('created_at'),
+  })
+  .primaryKey('id')
+
+const pmIssueActivity = table('pm_issue_activity')
+  .columns({
+    id: string(),
+    issueId: string().from('issue_id'),
+    actorId: string().optional().from('actor_id'),
+    actorName: string().optional().from('actor_name'),
+    type: string(),
+    summary: string(),
+    metadata: json<Record<string, unknown>>().optional(),
+    createdAt: number().from('created_at'),
+  })
+  .primaryKey('id')
+
+const pmSavedViews = table('pm_saved_views')
+  .columns({
+    id: string(),
+    companyId: string().optional().from('company_id'),
+    teamId: string().optional().from('team_id'),
+    ownerId: string().optional().from('owner_id'),
+    name: string(),
+    slug: string(),
+    icon: string().optional(),
+    color: string().optional(),
+    scope: string(),
+    filters: json<Record<string, unknown>>(),
+    display: json<Record<string, unknown>>(),
+    position: number(),
+    createdAt: number().from('created_at'),
+    updatedAt: number().from('updated_at'),
+  })
+  .primaryKey('id')
+
 const whatsappTemplates = table('whatsapp_templates')
   .columns({
     id: string(),
@@ -181,7 +320,29 @@ const whatsappMessages = table('whatsapp_messages')
   .primaryKey('id')
 
 export const schema = createSchema({
-  tables: [decks, companies, crmCompanies, crmContacts, crmDealContacts, crmDeals, crmNotes, crmBoards, crmBoardColumns, whatsappTemplates, whatsappCampaigns, whatsappMessages],
+  tables: [
+    decks,
+    users,
+    companies,
+    crmCompanies,
+    crmContacts,
+    crmDealContacts,
+    crmDeals,
+    crmNotes,
+    crmBoards,
+    crmBoardColumns,
+    pmTeams,
+    pmProjects,
+    pmStatuses,
+    pmLabels,
+    pmIssues,
+    pmIssueLabels,
+    pmIssueActivity,
+    pmSavedViews,
+    whatsappTemplates,
+    whatsappCampaigns,
+    whatsappMessages,
+  ],
 })
 
 export type Schema = typeof schema

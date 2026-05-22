@@ -114,6 +114,128 @@ export const crmBoardColumns = pgTable('crm_board_columns', {
     /** Optional color for the column header */
     color: text('color'),
 });
+/* ─────────────────────── PROJECT MANAGEMENT ─────────────────────── */
+export const pmTeams = pgTable('pm_teams', {
+    id: uuid('id').primaryKey().defaultRandom(),
+    /** Optional legacy link if a team is explicitly tied to one company context. */
+    companyId: uuid('company_id').references(() => companies.id),
+    /** Short issue prefix, e.g. PAC or PRD */
+    key: text('key').notNull(),
+    name: text('name').notNull(),
+    description: text('description'),
+    color: text('color'),
+    icon: text('icon'),
+    position: integer('position').notNull().default(0),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+});
+export const pmProjects = pgTable('pm_projects', {
+    id: uuid('id').primaryKey().defaultRandom(),
+    /** Optional legacy link if a project is explicitly tied to one company context. */
+    companyId: uuid('company_id').references(() => companies.id),
+    teamId: uuid('team_id').references(() => pmTeams.id),
+    name: text('name').notNull(),
+    slug: text('slug').notNull(),
+    description: text('description'),
+    color: text('color'),
+    icon: text('icon'),
+    /** active | completed | archived */
+    status: text('status').notNull().default('active'),
+    targetDate: timestamp('target_date', { withTimezone: true }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+});
+export const pmStatuses = pgTable('pm_statuses', {
+    id: uuid('id').primaryKey().defaultRandom(),
+    /** Optional legacy link if a status workflow is explicitly tied to one company context. */
+    companyId: uuid('company_id').references(() => companies.id),
+    teamId: uuid('team_id').notNull().references(() => pmTeams.id),
+    name: text('name').notNull(),
+    /** Stable programmatic key, e.g. todo, in_progress, blocked */
+    key: text('key').notNull(),
+    /** backlog | unstarted | started | blocked | completed | canceled */
+    type: text('type').notNull().default('unstarted'),
+    description: text('description'),
+    color: text('color'),
+    position: integer('position').notNull().default(0),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+});
+export const pmLabels = pgTable('pm_labels', {
+    id: uuid('id').primaryKey().defaultRandom(),
+    /** Optional legacy link if a label is explicitly tied to one company context. */
+    companyId: uuid('company_id').references(() => companies.id),
+    teamId: uuid('team_id').references(() => pmTeams.id),
+    name: text('name').notNull(),
+    color: text('color'),
+    description: text('description'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+});
+export const pmIssues = pgTable('pm_issues', {
+    id: uuid('id').primaryKey().defaultRandom(),
+    /** Optional issue context, e.g. Ardia or another tracked company. */
+    contextCompanyId: uuid('context_company_id').references(() => companies.id),
+    teamId: uuid('team_id').notNull().references(() => pmTeams.id),
+    projectId: uuid('project_id').references(() => pmProjects.id),
+    statusId: uuid('status_id').notNull().references(() => pmStatuses.id),
+    assigneeId: uuid('assignee_id').references(() => users.id),
+    creatorId: uuid('creator_id').references(() => users.id),
+    /** Human-readable issue id, e.g. PAC-11 */
+    identifier: text('identifier').notNull(),
+    /** Sequential issue number within a team */
+    number: integer('number').notNull(),
+    title: text('title').notNull(),
+    description: text('description'),
+    /** 0 none | 1 urgent | 2 high | 3 medium | 4 low */
+    priority: integer('priority').notNull().default(0),
+    /** Allowed values in the app: 2 | 4 | 8 | 16 */
+    estimate: integer('estimate'),
+    sortOrder: integer('sort_order').notNull().default(0),
+    dueDate: timestamp('due_date', { withTimezone: true }),
+    startedAt: timestamp('started_at', { withTimezone: true }),
+    completedAt: timestamp('completed_at', { withTimezone: true }),
+    canceledAt: timestamp('canceled_at', { withTimezone: true }),
+    blockedReason: text('blocked_reason'),
+    lastActivityAt: timestamp('last_activity_at', { withTimezone: true }).notNull().defaultNow(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+});
+export const pmIssueLabels = pgTable('pm_issue_labels', {
+    id: uuid('id').primaryKey().defaultRandom(),
+    issueId: uuid('issue_id').notNull().references(() => pmIssues.id),
+    labelId: uuid('label_id').notNull().references(() => pmLabels.id),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+});
+export const pmIssueActivity = pgTable('pm_issue_activity', {
+    id: uuid('id').primaryKey().defaultRandom(),
+    issueId: uuid('issue_id').notNull().references(() => pmIssues.id),
+    actorId: uuid('actor_id').references(() => users.id),
+    actorName: text('actor_name'),
+    /** created | updated | status_changed | assigned | commented | imported */
+    type: text('type').notNull(),
+    summary: text('summary').notNull(),
+    metadata: jsonb('metadata').$type(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+});
+export const pmSavedViews = pgTable('pm_saved_views', {
+    id: uuid('id').primaryKey().defaultRandom(),
+    /** Optional legacy link if a saved view is explicitly tied to one company context. */
+    companyId: uuid('company_id').references(() => companies.id),
+    teamId: uuid('team_id').references(() => pmTeams.id),
+    ownerId: uuid('owner_id').references(() => users.id),
+    name: text('name').notNull(),
+    slug: text('slug').notNull(),
+    icon: text('icon'),
+    color: text('color'),
+    /** personal | team | company */
+    scope: text('scope').notNull().default('personal'),
+    filters: jsonb('filters').$type().notNull().default({}),
+    display: jsonb('display').$type().notNull().default({}),
+    position: integer('position').notNull().default(0),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+});
 /* ─────────────────────── WHATSAPP ─────────────────────── */
 export const whatsappTemplates = pgTable('whatsapp_templates', {
     id: uuid('id').primaryKey().defaultRandom(),
