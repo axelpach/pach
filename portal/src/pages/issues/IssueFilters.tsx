@@ -1,0 +1,286 @@
+import { useEffect, useMemo, useRef, useState, type ComponentType, type ReactNode } from 'react'
+import { Check, Search, X } from 'lucide-react'
+
+export type ActiveFilters = Record<string, string[]>
+
+export type FilterOption = {
+  value: string
+  label: string
+  icon?: ReactNode
+}
+
+export type FilterFieldConfig = {
+  field: string
+  label: string
+  icon: ComponentType<{ className?: string }>
+  options: FilterOption[]
+}
+
+export function FilterButton({
+  activeFilters,
+  filterConfigs,
+  onFilterChange,
+  onClearAll,
+}: {
+  activeFilters: ActiveFilters
+  filterConfigs: FilterFieldConfig[]
+  onFilterChange: (field: string, values: string[]) => void
+  onClearAll: () => void
+}) {
+  const [isOpen, setIsOpen] = useState(false)
+  const [initialField, setInitialField] = useState<string | null>(null)
+  const containerRef = useRef<HTMLDivElement>(null)
+
+  const totalActive = Object.values(activeFilters).reduce((sum, v) => sum + v.length, 0)
+  const hasActive = totalActive > 0
+
+  useEffect(() => {
+    if (!isOpen) return
+    function handleClickOutside(event: MouseEvent) {
+      if (!containerRef.current) return
+      if (containerRef.current.contains(event.target as Node)) return
+      setIsOpen(false)
+      setInitialField(null)
+    }
+    function handleKey(event: KeyboardEvent) {
+      if (event.key === 'Escape') {
+        setIsOpen(false)
+        setInitialField(null)
+      }
+    }
+    window.addEventListener('mousedown', handleClickOutside)
+    window.addEventListener('keydown', handleKey)
+    return () => {
+      window.removeEventListener('mousedown', handleClickOutside)
+      window.removeEventListener('keydown', handleKey)
+    }
+  }, [isOpen])
+
+  function openOnField(field: string) {
+    setInitialField(field)
+    setIsOpen(true)
+  }
+
+  return (
+    <div className="flex flex-wrap items-center gap-2" ref={containerRef}>
+      <div className="relative">
+        <button
+          onClick={() => {
+            setInitialField(null)
+            setIsOpen((v) => !v)
+          }}
+          className={`inline-flex items-center gap-1.5 border px-2.5 py-1 font-mono text-[10px] uppercase tracking-label transition ${
+            isOpen
+              ? 'border-[rgba(0,255,140,0.35)] bg-[rgba(0,255,136,0.06)] text-accent shadow-glow-xs'
+              : hasActive
+                ? 'border-[rgba(0,255,140,0.25)] bg-pit-3 text-accent'
+                : 'border-[rgba(0,255,140,0.15)] bg-pit-3 text-fg-3 hover:text-fg-1 hover:border-[rgba(0,255,140,0.25)]'
+          }`}
+        >
+          filter
+          {hasActive && <span className="text-accent">· {totalActive}</span>}
+        </button>
+
+        {isOpen && (
+          <div className="absolute left-0 top-full z-50 mt-1.5">
+            <FilterDropdown
+              filterConfigs={filterConfigs}
+              activeFilters={activeFilters}
+              onFilterChange={onFilterChange}
+              initialField={initialField}
+            />
+          </div>
+        )}
+      </div>
+
+      {hasActive && Object.entries(activeFilters).map(([field, values]) => {
+        if (!values.length) return null
+        const config = filterConfigs.find((c) => c.field === field)
+        if (!config) return null
+        const labels = values.map((v) => config.options.find((o) => o.value === v)?.label ?? v)
+        const maxDisplay = 2
+        const shown = labels.slice(0, maxDisplay)
+        const overflow = labels.length - maxDisplay
+
+        return (
+          <span
+            key={field}
+            className="group inline-flex items-center gap-1.5 border border-[rgba(0,255,140,0.2)] bg-pit-3 pl-2.5 pr-1 py-0.5 font-mono text-[10px] uppercase tracking-label text-fg-2"
+          >
+            <button
+              onClick={() => openOnField(field)}
+              className="inline-flex items-center gap-1.5 hover:text-fg-1 transition"
+            >
+              <span className="text-fg-4">{config.label}</span>
+              <span className="text-fg-1 normal-case tracking-normal">
+                {shown.join(', ').toLowerCase()}
+                {overflow > 0 && <span className="text-fg-4"> +{overflow}</span>}
+              </span>
+            </button>
+            <button
+              onClick={(event) => {
+                event.stopPropagation()
+                onFilterChange(field, [])
+              }}
+              className="ml-0.5 p-0.5 text-fg-4 hover:text-fail transition"
+              title="clear"
+            >
+              <X className="h-3 w-3" strokeWidth={1.5} />
+            </button>
+          </span>
+        )
+      })}
+
+      {hasActive && (
+        <button
+          onClick={onClearAll}
+          className="font-mono text-[10px] uppercase tracking-label text-fg-4 hover:text-fail transition"
+        >
+          [clear all]
+        </button>
+      )}
+    </div>
+  )
+}
+
+function FilterDropdown({
+  filterConfigs,
+  activeFilters,
+  onFilterChange,
+  initialField,
+}: {
+  filterConfigs: FilterFieldConfig[]
+  activeFilters: ActiveFilters
+  onFilterChange: (field: string, values: string[]) => void
+  initialField?: string | null
+}) {
+  const [selectedField, setSelectedField] = useState<string>(
+    initialField || filterConfigs[0]?.field || '',
+  )
+  const [searchQuery, setSearchQuery] = useState('')
+
+  const selectedConfig = filterConfigs.find((c) => c.field === selectedField)
+  const selectedValues = activeFilters[selectedField] || []
+
+  const filteredOptions = useMemo(() => {
+    if (!selectedConfig) return []
+    if (!searchQuery) return selectedConfig.options
+    const q = searchQuery.toLowerCase()
+    return selectedConfig.options.filter((o) => o.label.toLowerCase().includes(q))
+  }, [selectedConfig, searchQuery])
+
+  const showSearch = (selectedConfig?.options.length ?? 0) > 6
+
+  function toggleValue(value: string) {
+    const current = activeFilters[selectedField] || []
+    const next = current.includes(value)
+      ? current.filter((v) => v !== value)
+      : [...current, value]
+    onFilterChange(selectedField, next)
+  }
+
+  function clearField() {
+    onFilterChange(selectedField, [])
+  }
+
+  return (
+    <div className="flex w-[480px] max-h-[340px] overflow-hidden border border-[rgba(0,255,140,0.25)] bg-pit shadow-[0_0_18px_rgba(0,255,136,0.18),0_18px_44px_rgba(0,0,0,0.6)]">
+      {/* left: field list */}
+      <div className="w-[160px] shrink-0 overflow-y-auto border-r border-[rgba(0,255,140,0.12)] py-1">
+        {filterConfigs.map((config) => {
+          const isSelected = config.field === selectedField
+          const isActive = (activeFilters[config.field]?.length ?? 0) > 0
+          const Icon = config.icon
+          return (
+            <button
+              key={config.field}
+              onClick={() => {
+                setSelectedField(config.field)
+                setSearchQuery('')
+              }}
+              className={`flex w-full items-center gap-2 px-3 py-1.5 text-left font-mono text-xs lowercase transition ${
+                isSelected
+                  ? 'bg-[rgba(0,255,136,0.08)] text-accent'
+                  : 'text-fg-2 hover:bg-[rgba(0,255,136,0.04)] hover:text-fg-1'
+              }`}
+            >
+              <span
+                aria-hidden
+                className="block h-1.5 w-1.5 shrink-0 rounded-full"
+                style={{ background: isActive ? 'var(--phosphor, #00ff88)' : 'transparent' }}
+              />
+              <Icon className="h-3.5 w-3.5 shrink-0 text-fg-4" />
+              <span className="truncate">{config.label}</span>
+            </button>
+          )
+        })}
+      </div>
+
+      {/* right: options */}
+      <div className="flex flex-1 min-w-0 flex-col">
+        <div className="flex items-center justify-between border-b border-[rgba(0,255,140,0.12)] px-3 py-2">
+          <span className="font-mono text-[10px] uppercase tracking-label text-fg-3">
+            {selectedConfig?.label}
+          </span>
+          <button
+            onClick={clearField}
+            disabled={selectedValues.length === 0}
+            className={`font-mono text-[10px] uppercase tracking-label transition ${
+              selectedValues.length > 0
+                ? 'text-fg-3 hover:text-fail'
+                : 'text-fg-4 cursor-not-allowed opacity-50'
+            }`}
+          >
+            clear
+          </button>
+        </div>
+
+        {showSearch && (
+          <div className="border-b border-[rgba(0,255,140,0.08)] px-3 py-2">
+            <div className="relative">
+              <Search className="absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-fg-4" strokeWidth={1.5} />
+              <input
+                value={searchQuery}
+                onChange={(event) => setSearchQuery(event.target.value)}
+                placeholder="$ search…"
+                className="w-full bg-rim border border-[rgba(0,255,140,0.15)] pl-7 pr-2 py-1.5 font-mono text-xs text-fg-1 outline-none focus:border-accent focus:shadow-glow-xs placeholder:text-fg-4"
+              />
+            </div>
+          </div>
+        )}
+
+        <div className="flex-1 overflow-y-auto py-1">
+          {filteredOptions.length === 0 ? (
+            <div className="px-3 py-4 text-center font-mono text-xs text-fg-4">// no results</div>
+          ) : (
+            filteredOptions.map((option) => {
+              const isChecked = selectedValues.includes(option.value)
+              return (
+                <button
+                  key={option.value}
+                  onClick={() => toggleValue(option.value)}
+                  className="flex w-full items-center gap-2.5 px-3 py-1.5 text-left font-mono text-xs lowercase text-fg-2 hover:bg-[rgba(0,255,136,0.04)] hover:text-fg-1 transition"
+                >
+                  <span
+                    aria-hidden
+                    className={`inline-flex h-3.5 w-3.5 shrink-0 items-center justify-center border transition ${
+                      isChecked
+                        ? 'border-accent bg-accent'
+                        : 'border-[rgba(0,255,140,0.2)] bg-transparent'
+                    }`}
+                  >
+                    {isChecked && <Check className="h-2.5 w-2.5 text-pit" strokeWidth={3} />}
+                  </span>
+                  {option.icon ? (
+                    <span className="flex h-3.5 w-3.5 shrink-0 items-center justify-center">{option.icon}</span>
+                  ) : null}
+                  <span className="truncate">{option.label}</span>
+                </button>
+              )
+            })
+          )}
+        </div>
+      </div>
+    </div>
+  )
+}
