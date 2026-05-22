@@ -3,21 +3,25 @@ import { AlertTriangle, Building2, CheckCircle2, ChevronDown, ChevronRight, Circ
 import { useNavigate } from 'react-router-dom'
 import {
   DndContext,
+  DragOverlay,
   KeyboardSensor,
   PointerSensor,
   closestCenter,
   useSensor,
   useSensors,
   type DragEndEvent,
+  type DragStartEvent,
 } from '@dnd-kit/core'
 import {
   SortableContext,
   arrayMove,
   sortableKeyboardCoordinates,
   useSortable,
-  verticalListSortingStrategy,
+  type SortingStrategy,
 } from '@dnd-kit/sortable'
-import { CSS } from '@dnd-kit/utilities'
+
+// rows stay put while dragging — we show an indicator line + DragOverlay ghost instead
+const noShiftStrategy: SortingStrategy = () => null
 import { PachSelect } from './PachSelect'
 import { StatusIcon } from './StatusIcon'
 import { PRIORITY_META, PriorityIcon } from './PriorityIcon'
@@ -332,6 +336,13 @@ export default function Issues() {
     })
   }
 
+  const [activeDragId, setActiveDragId] = useState<string | null>(null)
+  const activeDragIssue = activeDragId ? issues.find((entry) => entry.id === activeDragId) ?? null : null
+
+  function handleDragStart(event: DragStartEvent) {
+    setActiveDragId(String(event.active.id))
+  }
+
   const sensors = useSensors(
     // require a small drag distance before activating so plain clicks still navigate / open popups
     useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
@@ -339,6 +350,7 @@ export default function Issues() {
   )
 
   async function handleDragEnd(event: DragEndEvent) {
+    setActiveDragId(null)
     const { active, over } = event
     if (!over) return
     const activeIssue = issues.find((entry) => entry.id === active.id)
@@ -695,7 +707,13 @@ export default function Issues() {
                   onEdit={openEditProject}
                 />
               ) : filteredIssues.length ? (
-                <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
+                <DndContext
+                  sensors={sensors}
+                  collisionDetection={closestCenter}
+                  onDragStart={handleDragStart}
+                  onDragEnd={handleDragEnd}
+                  onDragCancel={() => setActiveDragId(null)}
+                >
                 <div className="space-y-3">
                   {groupedIssues.map((group) => {
                     const isCollapsed = collapsedPriorities.has(group.value)
@@ -741,7 +759,7 @@ export default function Issues() {
                                   <SortableContext
                                     id={statusKey}
                                     items={statusIssues.map((issue) => issue.id)}
-                                    strategy={verticalListSortingStrategy}
+                                    strategy={noShiftStrategy}
                                   >
                                   <div>
                                     {statusIssues.map((issue) => (
@@ -776,6 +794,29 @@ export default function Issues() {
                     )
                   })}
                 </div>
+                <DragOverlay dropAnimation={null}>
+                  {activeDragIssue ? (
+                    <div className="border border-[rgba(0,255,140,0.4)] bg-[rgba(20,26,23,0.95)] shadow-[0_12px_40px_rgba(0,0,0,0.6),0_0_22px_rgba(0,255,136,0.25)] backdrop-blur-sm">
+                      <IssueRow
+                        issue={activeDragIssue}
+                        company={activeDragIssue.contextCompanyId ? companyMap.get(activeDragIssue.contextCompanyId) ?? null : null}
+                        workspaceCompanyId={workspaceCompany?.id ?? null}
+                        team={teamMap.get(activeDragIssue.teamId) ?? null}
+                        project={activeDragIssue.projectId ? projectMap.get(activeDragIssue.projectId) : null}
+                        assignee={activeDragIssue.assigneeId ? userMap.get(activeDragIssue.assigneeId) : null}
+                        status={statusMap.get(activeDragIssue.statusId) ?? null}
+                        statusOptions={workspaceStatuses}
+                        teamProjects={projects.filter((p) => p.teamId === activeDragIssue.teamId)}
+                        allTeams={teams}
+                        onStatusChange={() => {}}
+                        onProjectChange={() => {}}
+                        onTeamChange={() => {}}
+                        onEstimateChange={() => {}}
+                        onPriorityChange={() => {}}
+                      />
+                    </div>
+                  ) : null}
+                </DragOverlay>
                 </DndContext>
               ) : (
                 <EmptyState
@@ -1384,20 +1425,50 @@ function SelectField({
 const ESTIMATE_VALUES = [1, 2, 3, 4, 8, 16]
 
 function SortableIssueRow(props: React.ComponentProps<typeof IssueRow>) {
-  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
-    id: props.issue.id,
-  })
-  const style: React.CSSProperties = {
-    transform: CSS.Transform.toString(transform),
-    transition,
-    opacity: isDragging ? 0.4 : 1,
-    position: 'relative',
-    zIndex: isDragging ? 20 : 'auto',
+  const {
+    attributes,
+    listeners,
+    setNodeRef,
+    isDragging,
+    isOver,
+    index,
+    activeIndex,
+  } = useSortable({ id: props.issue.id })
+
+  // determine if this row should show a drop indicator and where
+  let indicator: 'above' | 'below' | null = null
+  if (isOver && activeIndex !== index) {
+    if (activeIndex < 0) {
+      // cross-container drop — show above the hovered row
+      indicator = 'above'
+    } else {
+      indicator = activeIndex > index ? 'above' : 'below'
+    }
   }
+
   return (
-    <div ref={setNodeRef} style={style} {...attributes} {...listeners}>
+    <div
+      ref={setNodeRef}
+      {...attributes}
+      {...listeners}
+      className="relative"
+      style={{ opacity: isDragging ? 0.35 : 1 }}
+    >
+      {indicator === 'above' && <DropIndicator position="top" />}
       <IssueRow {...props} />
+      {indicator === 'below' && <DropIndicator position="bottom" />}
     </div>
+  )
+}
+
+function DropIndicator({ position }: { position: 'top' | 'bottom' }) {
+  return (
+    <div
+      aria-hidden
+      className={`pointer-events-none absolute left-0 right-0 z-30 h-[1.5px] bg-[rgba(0,255,136,0.55)] shadow-[0_0_5px_rgba(0,255,136,0.3)] ${
+        position === 'top' ? '-top-px' : '-bottom-px'
+      }`}
+    />
   )
 }
 
