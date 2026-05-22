@@ -167,7 +167,8 @@ export const pmStatuses = pgTable('pm_statuses', {
   id: uuid('id').primaryKey().defaultRandom(),
   /** Optional legacy link if a status workflow is explicitly tied to one company context. */
   companyId: uuid('company_id').references(() => companies.id),
-  teamId: uuid('team_id').notNull().references(() => pmTeams.id),
+  /** Null means a workspace-global status shared across all teams/projects. */
+  teamId: uuid('team_id').references(() => pmTeams.id),
   name: text('name').notNull(),
   /** Stable programmatic key, e.g. todo, in_progress, blocked */
   key: text('key').notNull(),

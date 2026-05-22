@@ -54,7 +54,7 @@ export default function IssueDetail() {
     ? companies.find((c) => c.id === issue.contextCompanyId) ?? null
     : null
 
-  const teamStatuses = team ? statuses.filter((s) => s.teamId === team.id) : []
+  const workspaceStatuses = getWorkspaceStatuses(statuses)
   const teamProjects = team ? projects.filter((p) => p.teamId === team.id) : []
   const sameTeamIssues = team
     ? allIssues.filter((entry) => entry.teamId === team.id).sort((a, b) => a.number - b.number)
@@ -247,7 +247,7 @@ export default function IssueDetail() {
                   value={issue.statusId}
                   onChange={async (next) => {
                     if (next === issue.statusId) return
-                    const newStatus = teamStatuses.find((s) => s.id === next)
+                    const newStatus = workspaceStatuses.find((s) => s.id === next)
                     const patch: Record<string, unknown> = { statusId: next }
                     const now = Date.now()
                     if (newStatus?.type === 'started' && !issue.startedAt) patch.startedAt = now
@@ -258,7 +258,7 @@ export default function IssueDetail() {
                       `moved from ${status?.name ?? '—'} to ${newStatus?.name ?? '—'}`,
                     )
                   }}
-                  options={teamStatuses.map((s) => ({ value: s.id, label: s.name.toLowerCase() }))}
+                  options={workspaceStatuses.map((s) => ({ value: s.id, label: s.name.toLowerCase() }))}
                   display={status?.name?.toLowerCase() ?? 'no status'}
                 />
               </PropertyRow>
@@ -404,6 +404,16 @@ function NotFound({ onBack }: { onBack: () => void }) {
       </div>
     </div>
   )
+}
+
+function getWorkspaceStatuses(statuses: Schema['tables']['pm_statuses']['row'][]) {
+  const uniqueStatuses = new Map<string, Schema['tables']['pm_statuses']['row']>()
+  for (const status of statuses) {
+    if (status.teamId) continue
+    if (!uniqueStatuses.has(status.key)) uniqueStatuses.set(status.key, status)
+  }
+
+  return Array.from(uniqueStatuses.values()).sort((a, b) => a.position - b.position)
 }
 
 function AutoGrowTextarea({

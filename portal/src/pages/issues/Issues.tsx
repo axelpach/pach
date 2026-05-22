@@ -154,6 +154,7 @@ export default function Issues() {
   const statusMap = new Map(statuses.map((status) => [status.id, status]))
   const projectMap = new Map(projects.map((project) => [project.id, project]))
   const userMap = new Map(users.map((entry) => [entry.id, entry]))
+  const workspaceStatuses = getWorkspaceStatuses(statuses)
 
   const contextCompanies = companies.filter((company) => company.id !== workspaceCompany?.id)
   const selectedTeam = section.kind === 'team' ? teams.find((team) => team.id === section.teamId) ?? null : null
@@ -164,12 +165,9 @@ export default function Issues() {
   const composerProjects = selectedComposerTeam
     ? projects.filter((project) => project.teamId === selectedComposerTeam.id)
     : []
-  const composerStatuses = selectedComposerTeam
-    ? statuses.filter((status) => status.teamId === selectedComposerTeam.id)
-    : []
   const defaultComposerStatusId =
-    composerStatuses.find((status) => status.type !== 'completed' && status.type !== 'canceled')?.id ??
-    composerStatuses[0]?.id ??
+    workspaceStatuses.find((status) => status.type !== 'completed' && status.type !== 'canceled')?.id ??
+    workspaceStatuses[0]?.id ??
     ''
 
   useEffect(() => {
@@ -190,9 +188,9 @@ export default function Issues() {
       setComposerStatusId(defaultComposerStatusId)
       return
     }
-    if (composerStatusId && composerStatuses.some((s) => s.id === composerStatusId)) return
+    if (composerStatusId && workspaceStatuses.some((s) => s.id === composerStatusId)) return
     setComposerStatusId(defaultComposerStatusId)
-  }, [composerStatusId, composerStatuses, defaultComposerStatusId])
+  }, [composerStatusId, workspaceStatuses, defaultComposerStatusId])
 
   useEffect(() => {
     // company context is optional — leave blank by default; clear if invalid
@@ -296,7 +294,7 @@ export default function Issues() {
     return status?.type !== 'completed' && status?.type !== 'canceled'
   }).length
 
-  const blockedCount = issues.filter((issue) => statusMap.get(issue.statusId)?.key === 'blocked').length
+  const blockedCount = issues.filter((issue) => statusMap.get(issue.statusId)?.type === 'blocked').length
 
   async function logActivity(issueId: string, summary: string, type = 'created') {
     await z.mutate.pm_issue_activity.create({
@@ -356,12 +354,6 @@ export default function Issues() {
     const toTeam = teams.find((t) => t.id === nextTeamId)
     if (!toTeam) return
 
-    const toStatuses = statuses.filter((s) => s.teamId === nextTeamId)
-    const newStatusId =
-      toStatuses.find((s) => s.type !== 'completed' && s.type !== 'canceled')?.id ??
-      toStatuses[0]?.id
-    if (!newStatusId) return
-
     const nextNumber =
       issues
         .filter((entry) => entry.teamId === nextTeamId)
@@ -370,7 +362,6 @@ export default function Issues() {
     await z.mutate.pm_issues.update({
       id: issueId,
       teamId: nextTeamId,
-      statusId: newStatusId,
       projectId: undefined,
       number: nextNumber,
       identifier: `${toTeam.key}-${nextNumber}`,
@@ -402,19 +393,16 @@ export default function Issues() {
   }
 
   async function ensureWorkspaceFoundation(): Promise<Foundation> {
+    const defaultStatusId =
+      workspaceStatuses.find((status) => status.type !== 'completed' && status.type !== 'canceled')?.id ??
+      workspaceStatuses[0]?.id
     const existingTeam = teams[0]
-    if (existingTeam) {
-      const teamStatuses = statuses.filter((status) => status.teamId === existingTeam.id)
-      if (teamStatuses.length) {
-        const defaultStatusId =
-          teamStatuses.find((status) => status.type !== 'completed' && status.type !== 'canceled')?.id ??
-          teamStatuses[0].id
-        const defaultProjectId = projects.find((project) => project.teamId === existingTeam.id)?.id
-        return {
-          defaultTeamId: existingTeam.id,
-          defaultStatusId,
-          defaultProjectId,
-        }
+    if (existingTeam && defaultStatusId) {
+      const defaultProjectId = projects.find((project) => project.teamId === existingTeam.id)?.id
+      return {
+        defaultTeamId: existingTeam.id,
+        defaultStatusId,
+        defaultProjectId,
       }
     }
 
@@ -423,6 +411,7 @@ export default function Issues() {
       { id: crypto.randomUUID(), name: 'Todo', key: 'todo', type: 'unstarted', color: '#94a3b8' },
       { id: crypto.randomUUID(), name: 'In Progress', key: 'in_progress', type: 'started', color: '#fbbf24' },
       { id: crypto.randomUUID(), name: 'Blocked', key: 'blocked', type: 'blocked', color: '#f87171' },
+      { id: crypto.randomUUID(), name: 'Canceled', key: 'canceled', type: 'canceled', color: '#6b7280' },
       { id: crypto.randomUUID(), name: 'Done', key: 'done', type: 'completed', color: '#4ade80' },
     ]
     const projectId = crypto.randomUUID()
@@ -440,7 +429,6 @@ export default function Issues() {
     for (const [index, status] of statusDefs.entries()) {
       await z.mutate.pm_statuses.create({
         id: status.id,
-        teamId,
         name: status.name,
         key: status.key,
         type: status.type,
@@ -477,10 +465,9 @@ export default function Issues() {
         name: 'Pach',
       }
 
-      const teamStatuses = statuses.filter((status) => status.teamId === teamId)
       const statusId =
         composerStatusId ||
-        teamStatuses.find((status) => status.type !== 'completed' && status.type !== 'canceled')?.id ||
+        workspaceStatuses.find((status) => status.type !== 'completed' && status.type !== 'canceled')?.id ||
         defaultComposerStatusId ||
         foundation.defaultStatusId
 
@@ -604,10 +591,14 @@ export default function Issues() {
 
                         {!isCollapsed && (
                           <div>
-                            {getStatusGroups(group.issues, statusMap).map((status) => {
+                            {getStatusBuckets(group.issues, statusMap).map((status) => {
                               const statusIssues = group.issues
-                                .filter((issue) => statusMap.get(issue.statusId)?.key === status.key)
-                                .sort((a, b) => b.updatedAt - a.updatedAt)
+                                .filter((issue) => getStatusBucket(statusMap.get(issue.statusId))?.key === status.key)
+                                .sort((a, b) => {
+                                  const rankDiff = a.sortOrder - b.sortOrder
+                                  if (rankDiff !== 0) return rankDiff
+                                  return b.updatedAt - a.updatedAt
+                                })
                               if (!statusIssues.length) return null
 
                               const statusKey = `${group.value}:${status.key}`
@@ -637,7 +628,7 @@ export default function Issues() {
                                         project={issue.projectId ? projectMap.get(issue.projectId) : null}
                                         assignee={issue.assigneeId ? userMap.get(issue.assigneeId) : null}
                                         status={statusMap.get(issue.statusId) ?? null}
-                                        teamStatuses={statuses.filter((s) => s.teamId === issue.teamId)}
+                                        statusOptions={workspaceStatuses}
                                         teamProjects={projects.filter((p) => p.teamId === issue.teamId)}
                                         allTeams={teams}
                                         onStatusChange={changeIssueStatus}
@@ -696,7 +687,7 @@ export default function Issues() {
         companies={contextCompanies}
         teams={teams}
         projects={composerProjects}
-        statuses={composerStatuses}
+        statuses={workspaceStatuses}
         users={users}
         team={selectedComposerTeam}
         creating={creatingIssue}
@@ -930,7 +921,7 @@ function IssueComposerModal({
                 </span>
               }
               triggerTitle="change team"
-              triggerClassName="transition hover:opacity-80"
+              triggerClassName="inline-flex p-0 border-0 bg-transparent transition hover:opacity-80"
               popupWidth="200px"
             />
             <span className="text-fg-4">›</span>
@@ -1272,7 +1263,7 @@ function IssueRow({
   project,
   assignee,
   status,
-  teamStatuses,
+  statusOptions,
   teamProjects,
   allTeams,
   onStatusChange,
@@ -1288,7 +1279,7 @@ function IssueRow({
   project: Schema['tables']['pm_projects']['row'] | null | undefined
   assignee: Schema['tables']['users']['row'] | null | undefined
   status: Schema['tables']['pm_statuses']['row'] | null
-  teamStatuses: Schema['tables']['pm_statuses']['row'][]
+  statusOptions: Schema['tables']['pm_statuses']['row'][]
   teamProjects: Schema['tables']['pm_projects']['row'][]
   allTeams: Schema['tables']['pm_teams']['row'][]
   onStatusChange: (issueId: string, nextStatusId: string) => void | Promise<void>
@@ -1318,7 +1309,7 @@ function IssueRow({
           variant="button"
           value={issue.statusId}
           onChange={(next) => onStatusChange(issue.id, next)}
-          options={teamStatuses.map((s) => ({
+          options={statusOptions.map((s) => ({
             value: s.id,
             label: s.name.toLowerCase(),
             icon: <StatusIcon statusType={s.type} />,
@@ -1347,7 +1338,7 @@ function IssueRow({
       </div>
       <div className="shrink-0 font-mono text-xs text-accent/80 tabular-nums">{issue.identifier}</div>
       {showCompany && (
-        <span className="hidden md:inline-flex shrink-0 items-center gap-1 border border-[rgba(0,255,140,0.15)] bg-pit-3 px-2 py-0.5 font-mono text-[10px] uppercase tracking-label text-fg-3">
+        <span className="hidden md:inline-flex shrink-0 h-5 items-center gap-1 border border-[rgba(0,255,140,0.15)] bg-pit-3 px-2 font-mono text-[10px] uppercase tracking-label text-fg-3">
           <Building2 className="h-3 w-3" />
           {company.name}
         </span>
@@ -1367,13 +1358,13 @@ function IssueRow({
             })),
           ]}
           trigger={
-            <span className="inline-flex items-center gap-1 border border-[rgba(0,255,140,0.15)] bg-pit-3 px-2 py-0.5 font-mono text-[10px] uppercase tracking-label text-fg-3">
+            <span className="inline-flex h-5 items-center gap-1 border border-[rgba(0,255,140,0.15)] bg-pit-3 px-2 font-mono text-[10px] uppercase tracking-label text-fg-3">
               <FolderKanban className="h-3 w-3" />
               {project?.name ?? 'no project'}
             </span>
           }
           triggerTitle="change project"
-          triggerClassName="transition hover:opacity-80"
+          triggerClassName="inline-flex p-0 border-0 bg-transparent transition hover:opacity-80"
           popupWidth="220px"
         />
       </div>
@@ -1384,12 +1375,12 @@ function IssueRow({
           onChange={(next) => onTeamChange(issue.id, next)}
           options={allTeams.map((t) => ({ value: t.id, label: t.name.toLowerCase() }))}
           trigger={
-            <span className="inline-flex shrink-0 border border-[rgba(0,255,140,0.15)] bg-pit-3 px-2 py-0.5 font-mono text-[10px] uppercase tracking-label text-fg-3">
+            <span className="inline-flex shrink-0 h-5 items-center border border-[rgba(0,255,140,0.15)] bg-pit-3 px-2 font-mono text-[10px] uppercase tracking-label text-fg-3">
               {team?.name ?? '—'}
             </span>
           }
           triggerTitle="change team"
-          triggerClassName="transition hover:opacity-80"
+          triggerClassName="inline-flex p-0 border-0 bg-transparent transition hover:opacity-80"
           popupWidth="200px"
         />
       </div>
@@ -1419,14 +1410,30 @@ function IssueRow({
   )
 }
 
-function getStatusGroups(
+function getStatusBuckets(
   issues: Schema['tables']['pm_issues']['row'][],
   statusMap: Map<string, Schema['tables']['pm_statuses']['row']>,
 ) {
-  const uniqueStatuses = new Map<string, Schema['tables']['pm_statuses']['row']>()
+  const uniqueStatuses = new Map<string, { key: string; name: string; type: string; position: number }>()
   for (const issue of issues) {
     const status = statusMap.get(issue.statusId)
     if (!status) continue
+    const bucket = getStatusBucket(status)
+    if (!bucket) continue
+    if (!uniqueStatuses.has(bucket.key)) uniqueStatuses.set(bucket.key, bucket)
+  }
+
+  return Array.from(uniqueStatuses.values()).sort((a, b) => {
+    const rankDiff = statusRank(a.type) - statusRank(b.type)
+    if (rankDiff !== 0) return rankDiff
+    return a.position - b.position
+  })
+}
+
+function getWorkspaceStatuses(statuses: Schema['tables']['pm_statuses']['row'][]) {
+  const uniqueStatuses = new Map<string, Schema['tables']['pm_statuses']['row']>()
+  for (const status of statuses) {
+    if (status.teamId) continue
     if (!uniqueStatuses.has(status.key)) uniqueStatuses.set(status.key, status)
   }
 
@@ -1435,6 +1442,34 @@ function getStatusGroups(
     if (rankDiff !== 0) return rankDiff
     return a.position - b.position
   })
+}
+
+function getStatusBucket(status?: Schema['tables']['pm_statuses']['row'] | null) {
+  if (!status) return null
+  if (status.type === 'backlog') {
+    return { key: 'backlog', name: 'backlog', type: 'backlog', position: 0 }
+  }
+  if (status.type === 'unstarted') {
+    return { key: 'todo', name: 'todo', type: 'unstarted', position: 1 }
+  }
+  if (status.type === 'started') {
+    return { key: 'in_progress', name: 'in progress', type: 'started', position: 2 }
+  }
+  if (status.type === 'blocked') {
+    return { key: 'blocked', name: 'blocked', type: 'blocked', position: 3 }
+  }
+  if (status.type === 'completed') {
+    return { key: 'done', name: 'done', type: 'completed', position: 4 }
+  }
+  if (status.type === 'canceled') {
+    return { key: 'canceled', name: 'canceled', type: 'canceled', position: 5 }
+  }
+  return {
+    key: status.key,
+    name: status.name.toLowerCase(),
+    type: status.type,
+    position: status.position,
+  }
 }
 
 function statusRank(statusType: string) {

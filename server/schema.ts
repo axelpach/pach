@@ -168,7 +168,7 @@ const pmStatuses = table('pm_statuses')
   .columns({
     id: string(),
     companyId: string().optional().from('company_id'),
-    teamId: string().from('team_id'),
+    teamId: string().optional().from('team_id'),
     name: string(),
     key: string(),
     type: string(),

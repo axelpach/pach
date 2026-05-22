@@ -137,7 +137,7 @@ export function createServerMutators() {
     },
 
     pm_statuses: {
-      async create(tx: Tx, args: { id: string; companyId?: string; teamId: string; name: string; key: string; type?: string; description?: string; color?: string; position?: number }) {
+      async create(tx: Tx, args: { id: string; companyId?: string; teamId?: string; name: string; key: string; type?: string; description?: string; color?: string; position?: number }) {
         const now = Date.now()
         await tx.mutate.pm_statuses.insert({ type: 'unstarted', position: 0, ...args, createdAt: now, updatedAt: now })
       },
