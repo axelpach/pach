@@ -69,7 +69,10 @@ export default function Issues() {
   const [statuses] = useQuery(z.query.pm_statuses.orderBy('position', 'asc'))
   const [issues] = useQuery(z.query.pm_issues.orderBy('updatedAt', 'desc'))
 
-  const [activeFilters, setActiveFilters] = useState<ActiveFilters>({})
+  const storageKey = user ? `pach:issues:view:${user.id}` : null
+  const initialStoredView = readStoredView(storageKey)
+
+  const [activeFilters, setActiveFilters] = useState<ActiveFilters>(() => initialStoredView.filters)
   const [composerOpen, setComposerOpen] = useState(false)
   const [composerTitle, setComposerTitle] = useState('')
   const [composerDescription, setComposerDescription] = useState('')
@@ -82,8 +85,8 @@ export default function Issues() {
   const [composerEstimate, setComposerEstimate] = useState<number>(4)
   const [composerCreateMore, setComposerCreateMore] = useState(false)
   const [creatingIssue, setCreatingIssue] = useState(false)
-  const [collapsedPriorities, setCollapsedPriorities] = useState<Set<number>>(new Set())
-  const [collapsedStatuses, setCollapsedStatuses] = useState<Set<string>>(new Set())
+  const [collapsedPriorities, setCollapsedPriorities] = useState<Set<number>>(() => new Set(initialStoredView.collapsedPriorities))
+  const [collapsedStatuses, setCollapsedStatuses] = useState<Set<string>>(() => new Set(initialStoredView.collapsedStatuses))
   const [projectModal, setProjectModal] = useState<
     | { mode: 'create'; teamId: string }
     | { mode: 'edit'; projectId: string }
@@ -238,6 +241,25 @@ export default function Issues() {
       setComposerAssigneeId(user?.id ?? '')
     }
   }, [composerAssigneeId, user, users])
+
+  // save to localStorage on change — initial state is already hydrated via the
+  // useState lazy initializers above (see `readStoredView`), so no separate
+  // hydrate effect is needed and there's no risk of clobbering with defaults.
+  useEffect(() => {
+    if (!storageKey) return
+    try {
+      localStorage.setItem(
+        storageKey,
+        JSON.stringify({
+          filters: activeFilters,
+          collapsedPriorities: [...collapsedPriorities],
+          collapsedStatuses: [...collapsedStatuses],
+        }),
+      )
+    } catch {
+      // ignore quota / serialization errors
+    }
+  }, [storageKey, activeFilters, collapsedPriorities, collapsedStatuses])
 
   const lastComposerRequestRef = useRef(composerRequestId)
   useEffect(() => {
@@ -1711,6 +1733,44 @@ function getWorkspaceStatuses(statuses: Schema['tables']['pm_statuses']['row'][]
     if (rankDiff !== 0) return rankDiff
     return a.position - b.position
   })
+}
+
+function readStoredView(storageKey: string | null): {
+  filters: ActiveFilters
+  collapsedPriorities: number[]
+  collapsedStatuses: string[]
+} {
+  const empty = { filters: {}, collapsedPriorities: [], collapsedStatuses: [] }
+  if (!storageKey || typeof window === 'undefined') return empty
+  try {
+    const raw = window.localStorage.getItem(storageKey)
+    if (!raw) return empty
+    const parsed = JSON.parse(raw) as {
+      filters?: Record<string, unknown>
+      collapsedPriorities?: unknown
+      collapsedStatuses?: unknown
+    }
+
+    const filters: ActiveFilters = {}
+    if (parsed.filters && typeof parsed.filters === 'object') {
+      for (const [field, values] of Object.entries(parsed.filters)) {
+        if (!Array.isArray(values)) continue
+        const stringValues = values.filter((v): v is string => typeof v === 'string')
+        if (stringValues.length) filters[field] = stringValues
+      }
+    }
+
+    const collapsedPriorities = Array.isArray(parsed.collapsedPriorities)
+      ? parsed.collapsedPriorities.filter((v): v is number => typeof v === 'number')
+      : []
+    const collapsedStatuses = Array.isArray(parsed.collapsedStatuses)
+      ? parsed.collapsedStatuses.filter((v): v is string => typeof v === 'string')
+      : []
+
+    return { filters, collapsedPriorities, collapsedStatuses }
+  } catch {
+    return empty
+  }
 }
 
 function compareIssuesForBucketOrder(

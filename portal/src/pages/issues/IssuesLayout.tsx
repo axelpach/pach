@@ -4,6 +4,7 @@ import { useQuery, useZero } from '@rocicorp/zero/react'
 import { ChevronDown, ChevronRight, Pencil, Plus } from 'lucide-react'
 import type { Schema } from '../../zero-schema'
 import type { Mutators } from '../../mutators'
+import { useAuth } from '../../lib/auth'
 
 export type TrackerSection =
   | { kind: 'all' }
@@ -29,13 +30,17 @@ export default function IssuesLayout() {
   const z = useZero<Schema, Mutators>()
   const navigate = useNavigate()
   const location = useLocation()
+  const { user } = useAuth()
 
   const [teams] = useQuery(z.query.pm_teams.orderBy('position', 'asc'))
   const [issues] = useQuery(z.query.pm_issues)
 
+  const sidebarStorageKey = user ? `pach:issues:sidebar:${user.id}` : null
+  const initialSidebar = readStoredSidebar(sidebarStorageKey)
+
   const [section, setSectionState] = useState<TrackerSection>({ kind: 'all' })
-  const [teamsSectionCollapsed, setTeamsSectionCollapsed] = useState(false)
-  const [collapsedTeams, setCollapsedTeams] = useState<Set<string>>(new Set())
+  const [teamsSectionCollapsed, setTeamsSectionCollapsed] = useState(initialSidebar.teamsSectionCollapsed)
+  const [collapsedTeams, setCollapsedTeams] = useState<Set<string>>(() => new Set(initialSidebar.collapsedTeams))
   const [teamModal, setTeamModal] = useState<TeamModalState>(null)
   const [teamDraftName, setTeamDraftName] = useState('')
   const [savingTeam, setSavingTeam] = useState(false)
@@ -179,6 +184,22 @@ export default function IssuesLayout() {
     window.addEventListener('keydown', handleEscape)
     return () => window.removeEventListener('keydown', handleEscape)
   }, [teamModal])
+
+  // persist sidebar collapse state per-user (filter state lives in Issues.tsx)
+  useEffect(() => {
+    if (!sidebarStorageKey) return
+    try {
+      localStorage.setItem(
+        sidebarStorageKey,
+        JSON.stringify({
+          teamsSectionCollapsed,
+          collapsedTeams: [...collapsedTeams],
+        }),
+      )
+    } catch {
+      // ignore quota / serialization errors
+    }
+  }, [sidebarStorageKey, teamsSectionCollapsed, collapsedTeams])
 
   const context: TrackerContext = { section, setSection, composerRequestId, requestComposer }
 
@@ -443,4 +464,28 @@ function TeamNameModal({
       </div>
     </div>
   )
+}
+
+function readStoredSidebar(storageKey: string | null): {
+  teamsSectionCollapsed: boolean
+  collapsedTeams: string[]
+} {
+  const empty = { teamsSectionCollapsed: false, collapsedTeams: [] }
+  if (!storageKey || typeof window === 'undefined') return empty
+  try {
+    const raw = window.localStorage.getItem(storageKey)
+    if (!raw) return empty
+    const parsed = JSON.parse(raw) as {
+      teamsSectionCollapsed?: unknown
+      collapsedTeams?: unknown
+    }
+    return {
+      teamsSectionCollapsed: parsed.teamsSectionCollapsed === true,
+      collapsedTeams: Array.isArray(parsed.collapsedTeams)
+        ? parsed.collapsedTeams.filter((v): v is string => typeof v === 'string')
+        : [],
+    }
+  } catch {
+    return empty
+  }
 }
