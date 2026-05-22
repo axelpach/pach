@@ -2,6 +2,7 @@ import { eq } from 'drizzle-orm'
 import { getDb } from '../../db.js'
 import { companies, crmContacts, whatsappMessages, whatsappTemplates } from '../../../../db/schema.js'
 import { projects } from '../../../../pach.config.js'
+import { normalizeWhatsAppPhone } from './phone.js'
 
 interface StatusEntry {
   id: string
@@ -65,14 +66,6 @@ function projectIdForPhoneNumberId(phoneNumberId: string | undefined): string | 
   return projectByPhoneNumberIdCache.get(phoneNumberId) ?? null
 }
 
-function normalizePhone(raw: string): string {
-  let p = raw.replace(/[\s\-()]/g, '')
-  if (!p.startsWith('+')) p = '+' + p
-  // Meta sometimes returns +521XXXXXXXXXX for Mexican mobiles; collapse to +52XXXXXXXXXX
-  if (p.startsWith('+521') && p.length === 14) p = '+52' + p.slice(4)
-  return p
-}
-
 export async function handleWebhook(payload: WebhookPayload): Promise<void> {
   const db = getDb()
 
@@ -122,7 +115,7 @@ export async function handleWebhook(payload: WebhookPayload): Promise<void> {
 
         for (const msg of value.messages) {
           if (!msg.from) continue
-          const phone = normalizePhone(msg.from)
+          const phone = normalizeWhatsAppPhone(msg.from)
           const profileName = contactsByWaId.get(msg.from)?.profile?.name ?? null
 
           // Find or create the CRM contact for this phone

@@ -29,14 +29,9 @@ function buildComponents(variableValues: Record<string, string>, variables: read
   }
 
   if (variables.length > 0) {
-    const sorted = [...variables].sort((a, b) => {
-      const ai = parseInt(a.replace(/[^\d]/g, ''), 10)
-      const bi = parseInt(b.replace(/[^\d]/g, ''), 10)
-      return ai - bi
-    })
     components.push({
       type: 'body',
-      parameters: sorted.map(v => ({ type: 'text', text: variableValues[v] ?? '' })),
+      parameters: variables.map(v => ({ type: 'text', text: variableValues[v] ?? '' })),
     })
   }
 

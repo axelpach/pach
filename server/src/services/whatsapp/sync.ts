@@ -25,7 +25,7 @@ interface RemoteTemplate {
 
 function extractVariables(bodyText: string | undefined): string[] {
   if (!bodyText) return []
-  const matches = bodyText.match(/\{\{\d+\}\}/g) || []
+  const matches = bodyText.match(/\{\{\s*([a-zA-Z_][\w]*|\d+)\s*\}\}/g) || []
   return Array.from(new Set(matches))
 }
 

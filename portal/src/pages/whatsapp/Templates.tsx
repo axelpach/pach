@@ -1,11 +1,11 @@
+import { useQuery, useZero } from '@rocicorp/zero/react'
+import { FileText, Image, RefreshCw, Send, Type, Video, X } from 'lucide-react'
 import { useMemo, useState } from 'react'
-import { useZero, useQuery } from '@rocicorp/zero/react'
-import { RefreshCw, CheckCircle2, Clock, XCircle, Pause, Image, Video, FileText, Type, X } from 'lucide-react'
-import type { Schema } from '../../zero-schema'
-import type { Mutators } from '../../mutators'
+import { Button, StatusPill } from '../../components/pach'
 import { config } from '../../config'
 import { authFetch } from '../../lib/auth'
-import { StatusPill, Button } from '../../components/pach'
+import type { Mutators } from '../../mutators'
+import type { Schema } from '../../zero-schema'
 
 const PROJECTS = ['ardia', 'ardia-mkt'] as const
 type ProjectId = (typeof PROJECTS)[number]
@@ -16,7 +16,7 @@ const PROJECT_LABEL: Record<ProjectId, string> = {
 }
 
 const PROJECT_NAME: Record<ProjectId, string> = {
-  ardia: 'Ardia Operativa',
+  ardia: 'Ardia Operations',
   'ardia-mkt': 'Ardia Marketing',
 }
 
@@ -42,6 +42,39 @@ const HEADER_ICON: Record<string, typeof Image> = {
   TEXT: Type,
 }
 
+function normalizeWhatsAppPhone(raw: string): string {
+  const digits = raw.replace(/\D/g, '')
+  if (!digits) return ''
+
+  if (digits.startsWith('521') && digits.length === 13) {
+    return `+52${digits.slice(3)}`
+  }
+  if (digits.length === 10) {
+    return `+52${digits}`
+  }
+  if (digits.startsWith('52') && digits.length === 12) {
+    return `+${digits}`
+  }
+
+  return `+${digits}`
+}
+
+function formatWhatsAppPhone(raw: string | null): string {
+  if (!raw) return '—'
+
+  const normalized = normalizeWhatsAppPhone(raw)
+  const digits = normalized.replace(/\D/g, '')
+
+  if (digits.startsWith('52') && digits.length === 12) {
+    return `+52 ${digits.slice(2, 5)} ${digits.slice(5, 8)} ${digits.slice(8)}`
+  }
+  if (digits.startsWith('1') && digits.length === 11) {
+    return `+1 ${digits.slice(1, 4)} ${digits.slice(4, 7)} ${digits.slice(7)}`
+  }
+
+  return normalized
+}
+
 interface RemoteTemplate {
   id: string
   companyId: string
@@ -59,13 +92,83 @@ interface RemoteTemplate {
   lastSyncedAt: number
 }
 
+interface ContactOption {
+  id: string
+  name: string
+  phone: string | null
+}
+
+function extractTemplateVariables(template: RemoteTemplate): string[] {
+  if (template.variables.length > 0) return [...template.variables]
+  if (!template.bodyText) return []
+
+  const matches = template.bodyText.match(/\{\{\s*([a-zA-Z_][\w]*|\d+)\s*\}\}/g) || []
+  return Array.from(new Set(matches))
+}
+
+function parseTemplateVariableName(variable: string): string {
+  return variable.replace(/\{\{\s*|\s*\}\}/g, '')
+}
+
+function hasDynamicUrlButton(template: RemoteTemplate): boolean {
+  if (!Array.isArray(template.components)) return false
+
+  return template.components.some(component => {
+    const buttons = (component as { type?: string; buttons?: Array<{ type?: string; url?: string }> }).buttons
+    if (!Array.isArray(buttons)) return false
+    return buttons.some(button => button.type?.toUpperCase() === 'URL' && typeof button.url === 'string' && button.url.includes('{{'))
+  })
+}
+
+function resolveTemplateVariable(name: string, contact: ContactOption): string | null {
+  if (name === 'nombre') return contact.name.trim() || 'cliente'
+  return null
+}
+
+function buildSendPlan(template: RemoteTemplate, contact: ContactOption): { components?: Array<Record<string, unknown>>; error?: string } {
+  const variables = extractTemplateVariables(template)
+  const variableNames = variables.map(parseTemplateVariableName)
+  const unresolved = variableNames.filter(name => resolveTemplateVariable(name, contact) == null)
+
+  if (unresolved.length > 0) {
+    return {
+      error: `template requiere datos no disponibles: ${unresolved.join(', ')}`,
+    }
+  }
+
+  if (hasDynamicUrlButton(template)) {
+    return {
+      error: 'template requiere un botón URL dinámico y Pach aún no sabe construir ese token',
+    }
+  }
+
+  if (variableNames.length === 0) return {}
+
+  return [
+    {
+      components: [
+        {
+          type: 'body',
+          parameters: variableNames.map(name => ({
+            type: 'text',
+            parameter_name: name,
+            text: resolveTemplateVariable(name, contact) ?? '',
+          })),
+        },
+      ],
+    },
+  ][0]
+}
+
 export default function WhatsAppTemplates() {
   const z = useZero<Schema, Mutators>()
   const [templates] = useQuery(z.query.whatsapp_templates.orderBy('name', 'asc'))
   const [companies] = useQuery(z.query.companies.orderBy('name', 'asc'))
+  const [contacts] = useQuery(z.query.crm_contacts.orderBy('name', 'asc'))
   const [syncing, setSyncing] = useState(false)
   const [statusMessage, setStatusMessage] = useState<string | null>(null)
   const [selectedId, setSelectedId] = useState<string | null>(null)
+  const [sendTemplate, setSendTemplate] = useState<RemoteTemplate | null>(null)
 
   const projectByCompanyId = useMemo(
     () => new Map(companies.map(c => [c.id, (c.project ?? null) as ProjectId | null])),
@@ -140,7 +243,7 @@ export default function WhatsAppTemplates() {
       )}
 
       <div className="flex-1 overflow-auto px-8 py-6 space-y-6">
-        <section className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <section className="grid grid-cols-1 xl:grid-cols-2 gap-4">
           {projectStats.map(stat => (
             <div key={stat.projectId} className="border border-[rgba(0,255,140,0.15)] bg-bg-2 p-4 font-mono">
               <div className="flex items-center justify-between gap-3">
@@ -174,11 +277,20 @@ export default function WhatsAppTemplates() {
                 const reviewInfo = STATUS_STYLES[String(template.status).toUpperCase()] || STATUS_STYLES.PENDING
                 const isActive = template.id === selectedId
                 const projectId = projectByCompanyId.get(template.companyId) as ProjectId | null
+                const canSendFromPach = projectId === 'ardia-mkt' && String(template.status).toUpperCase() === 'APPROVED'
                 return (
-                  <button
+                  <div
                     key={template.id}
                     onClick={() => setSelectedId(template.id)}
-                    className={`w-full text-left px-5 py-3 flex items-center gap-4 border-b border-[rgba(0,255,140,0.08)] last:border-b-0 hover:bg-[rgba(0,255,136,0.03)] transition-colors ${
+                    onKeyDown={event => {
+                      if (event.key === 'Enter' || event.key === ' ') {
+                        event.preventDefault()
+                        setSelectedId(template.id)
+                      }
+                    }}
+                    role="button"
+                    tabIndex={0}
+                    className={`w-full text-left px-5 py-3 flex items-center gap-4 border-b border-[rgba(0,255,140,0.08)] last:border-b-0 hover:bg-[rgba(0,255,136,0.03)] transition-colors cursor-pointer ${
                       isActive ? 'bg-[rgba(0,255,136,0.05)] border-l-2 border-l-accent' : ''
                     }`}
                   >
@@ -206,7 +318,21 @@ export default function WhatsAppTemplates() {
                         )}
                       </div>
                     </div>
-                  </button>
+                    {canSendFromPach && (
+                      <div
+                        className="shrink-0"
+                        onClick={event => event.stopPropagation()}
+                      >
+                        <Button
+                          kind="ghost"
+                          icon={<Send className="w-3.5 h-3.5" />}
+                          onClick={() => setSendTemplate(template)}
+                        >
+                          enviar
+                        </Button>
+                      </div>
+                    )}
+                  </div>
                 )
               })
             )}
@@ -215,6 +341,14 @@ export default function WhatsAppTemplates() {
       </div>
 
       {selected && <TemplateDetail template={selected} projectId={projectByCompanyId.get(selected.companyId) as ProjectId | null} onClose={() => setSelectedId(null)} />}
+      {sendTemplate && (
+        <SendTemplateModal
+          template={sendTemplate}
+          projectId={projectByCompanyId.get(sendTemplate.companyId) as ProjectId | null}
+          contacts={contacts}
+          onClose={() => setSendTemplate(null)}
+        />
+      )}
     </div>
   )
 }
@@ -327,6 +461,180 @@ function TemplateDetail({ template: t, projectId, onClose }: { template: RemoteT
             <pre className="text-[11px] text-fg-3 bg-void border border-[rgba(0,255,140,0.10)] p-3 overflow-auto max-h-64">
               {JSON.stringify(t.components ?? [], null, 2)}
             </pre>
+          </div>
+        </div>
+      </div>
+    </>
+  )
+}
+
+function SendTemplateModal({
+  template,
+  projectId,
+  contacts,
+  onClose,
+}: {
+  template: RemoteTemplate
+  projectId: ProjectId | null
+  contacts: ContactOption[]
+  onClose: () => void
+}) {
+  const eligibleContacts = contacts.filter(contact => Boolean(contact.phone) && normalizeWhatsAppPhone(contact.phone ?? '').length > 1)
+  const [selectedIds, setSelectedIds] = useState<string[]>(eligibleContacts.map(contact => contact.id))
+  const [sending, setSending] = useState(false)
+  const [message, setMessage] = useState<string | null>(null)
+
+  const canSendFromPach = projectId === 'ardia-mkt'
+
+  function toggleContact(contactId: string) {
+    setSelectedIds(current =>
+      current.includes(contactId)
+        ? current.filter(id => id !== contactId)
+        : [...current, contactId],
+    )
+  }
+
+  async function handleSend() {
+    if (!canSendFromPach) {
+      setMessage('✕ por ahora Pach solo envía templates del WABA de marketing')
+      return
+    }
+    if (!projectId) {
+      setMessage('✕ template sin projectId asociado')
+      return
+    }
+    if (selectedIds.length === 0) {
+      setMessage('✕ selecciona al menos un contacto')
+      return
+    }
+
+    setSending(true)
+    setMessage(null)
+    const chosen = eligibleContacts.filter(contact => selectedIds.includes(contact.id))
+    let success = 0
+    let failed = 0
+    const errors: string[] = []
+
+    for (const contact of chosen) {
+      const sendPlan = buildSendPlan(template, contact)
+      if (sendPlan.error) {
+        failed++
+        errors.push(`${contact.name}: ${sendPlan.error}`)
+        continue
+      }
+
+      const res = await authFetch(`${config.apiUrl}/whatsapp/send-template`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          projectId,
+          contactId: contact.id,
+          templateName: template.name,
+          languageCode: template.language,
+          components: sendPlan.components,
+        }),
+      })
+
+      if (res.ok) {
+        success++
+        continue
+      }
+
+      failed++
+      try {
+        const data = await res.json()
+        const debug = data.debug
+          ? ` [project=${data.debug.projectId} · phoneNumberId=${data.debug.phoneNumberId} · wabaId=${data.debug.wabaId} · lang=${data.debug.languageCode}${data.debug.components ? ` · components=${JSON.stringify(data.debug.components)}` : ''}]`
+          : ''
+        errors.push(`${contact.name}: ${data.error || 'send failed'}${debug}`)
+      } catch {
+        errors.push(`${contact.name}: send failed`)
+      }
+    }
+
+    setSending(false)
+    setMessage([
+      `› envío terminado · ${success} ok${failed ? ` · ${failed} fallos` : ''}`,
+      ...errors,
+    ].join('\n'))
+  }
+
+  return (
+    <>
+      <div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-40" onClick={onClose} />
+      <div className="fixed inset-0 z-50 flex items-center justify-center p-4 pointer-events-none">
+        <div className="bg-bg-2 border border-[rgba(0,255,140,0.35)] shadow-glow-sm w-full max-w-2xl max-h-[78vh] flex flex-col pointer-events-auto font-mono">
+          <div className="px-6 py-4 border-b border-[rgba(0,255,140,0.15)] flex items-start justify-between gap-4">
+            <div className="min-w-0">
+              <div className="text-base text-accent uppercase tracking-label [text-shadow:0_0_6px_rgba(0,255,136,0.4)]">
+                ◊ enviar template
+              </div>
+              <div className="text-sm text-fg-1 mt-2 truncate">{template.name}</div>
+              <div className="text-[10px] uppercase tracking-label text-fg-3 mt-1 flex items-center gap-2">
+                {projectId && <ProjectBadge projectId={projectId} />}
+                <span>{template.language} · {template.category}</span>
+              </div>
+            </div>
+            <button onClick={onClose} className="p-1 text-fg-4 hover:text-accent">
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+
+          {message && (
+            <div className="px-6 py-2 text-xs text-fg-2 border-b border-[rgba(0,255,140,0.10)] bg-[rgba(0,255,136,0.03)] whitespace-pre-wrap">
+              {message}
+            </div>
+          )}
+
+          <div className="px-6 py-3 border-b border-[rgba(0,255,140,0.10)] text-[11px] text-fg-3 uppercase tracking-label leading-relaxed">
+            › {eligibleContacts.length} contactos con teléfono normalizado · todos vienen preseleccionados · en local dev se enviará a `WHATSAPP_DEV_PHONE`
+            {!canSendFromPach ? '\n› los templates OPS quedan solo de referencia hasta conectar Pach con datos de Ardia' : ''}
+          </div>
+
+          <div className="flex-1 overflow-auto min-h-0">
+            {eligibleContacts.length === 0 ? (
+              <EmptyState text="no hay contactos con teléfono todavía" />
+            ) : (
+              <div>
+                {eligibleContacts.map(contact => {
+                  const checked = selectedIds.includes(contact.id)
+                  return (
+                    <label
+                      key={contact.id}
+                      className="w-full flex items-center gap-3 px-6 py-2.5 border-b border-[rgba(0,255,140,0.08)] hover:bg-[rgba(0,255,136,0.03)] cursor-pointer"
+                    >
+                      <input
+                        type="checkbox"
+                        checked={checked}
+                        onChange={() => toggleContact(contact.id)}
+                        className="w-4 h-4 accent-[rgb(0,255,136)]"
+                      />
+                      <div className="flex-1 min-w-0">
+                        <div className="text-sm text-fg-1 truncate">{contact.name}</div>
+                        <div className="text-[11px] text-fg-3 mt-0.5">{formatWhatsAppPhone(contact.phone)}</div>
+                      </div>
+                    </label>
+                  )
+                })}
+              </div>
+            )}
+          </div>
+
+          <div className="px-6 py-4 border-t border-[rgba(0,255,140,0.15)] flex items-center justify-between gap-3">
+            <div className="text-xs text-fg-3 uppercase tracking-label">
+              seleccionados: <span className="text-fg-1">{selectedIds.length}</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <Button kind="ghost" onClick={() => setSelectedIds([])} disabled={sending || selectedIds.length === 0}>
+                quitar todos
+              </Button>
+              <Button kind="ghost" onClick={() => setSelectedIds(eligibleContacts.map(contact => contact.id))} disabled={sending}>
+                marcar todos
+              </Button>
+              <Button kind="primary" icon={<Send className="w-3.5 h-3.5" />} onClick={handleSend} disabled={!canSendFromPach || sending || selectedIds.length === 0}>
+                {sending ? 'enviando…' : 'enviar'}
+              </Button>
+            </div>
           </div>
         </div>
       </div>

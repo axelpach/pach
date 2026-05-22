@@ -2,6 +2,7 @@ import { eq, and, desc } from 'drizzle-orm'
 import { getDb } from '../../db.js'
 import { companies, whatsappMessages } from '../../../../db/schema.js'
 import { getWhatsApp } from './client.js'
+import { normalizeWhatsAppPhone } from './phone.js'
 
 export interface SendTextInput {
   projectId: string
@@ -19,20 +20,13 @@ export interface SendTextResult {
 
 const WINDOW_MS = 24 * 60 * 60 * 1000 // WhatsApp's 24h free-form reply window
 
-function normalizePhone(raw: string): string {
-  let p = raw.replace(/[\s\-()]/g, '')
-  if (!p.startsWith('+')) p = '+' + p
-  if (p.startsWith('+521') && p.length === 14) p = '+52' + p.slice(4)
-  return p
-}
-
 /**
  * Send a free-form text message. Only valid within 24h of the contact's
  * last inbound message — outside that window, must use a template instead.
  */
 export async function sendText(input: SendTextInput): Promise<SendTextResult> {
   const db = getDb()
-  const phone = normalizePhone(input.to)
+  const phone = normalizeWhatsAppPhone(input.to)
 
   // Resolve company for this project
   const [company] = await db

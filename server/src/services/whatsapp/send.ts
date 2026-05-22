@@ -2,6 +2,7 @@ import { eq } from 'drizzle-orm'
 import { getDb } from '../../db.js'
 import { companies, whatsappMessages } from '../../../../db/schema.js'
 import { getWhatsApp } from './client.js'
+import { normalizeWhatsAppPhone } from './phone.js'
 
 export interface TemplateComponent {
   type: 'header' | 'body' | 'button'
@@ -27,23 +28,23 @@ export interface SendTemplateResult {
   messageId?: string
   to: string
   error?: string
+  debug?: {
+    projectId: string
+    phoneNumberId: string
+    wabaId: string
+    languageCode: string
+    templateName: string
+    recipient: string
+    components?: TemplateComponent[]
+  }
 }
 
 const isProduction = process.env.NODE_ENV === 'production'
 const DEV_PHONE = process.env.WHATSAPP_DEV_PHONE
 
-function normalizePhoneNumber(phone: string): string {
-  let normalized = phone.replace(/[\s\-()]/g, '')
-  if (!normalized.startsWith('+')) normalized = '+' + normalized
-  if (normalized.startsWith('+521') && normalized.length === 13) {
-    normalized = '+52' + normalized.slice(4)
-  }
-  return normalized
-}
-
 function getRecipient(phone: string): string {
-  const normalized = normalizePhoneNumber(phone)
-  if (!isProduction && DEV_PHONE) return normalizePhoneNumber(DEV_PHONE)
+  const normalized = normalizeWhatsAppPhone(phone)
+  if (!isProduction && DEV_PHONE) return normalizeWhatsAppPhone(DEV_PHONE)
   return normalized
 }
 
@@ -60,15 +61,16 @@ async function resolveCompanyId(projectId: string): Promise<string> {
 
 export async function sendTemplate(input: SendTemplateInput): Promise<SendTemplateResult> {
   const db = getDb()
-  const normalizedTo = normalizePhoneNumber(input.to)
+  const normalizedTo = normalizeWhatsAppPhone(input.to)
   const recipient = getRecipient(input.to)
   const companyId = await resolveCompanyId(input.projectId)
 
-  const { client, phoneNumberId, defaultLanguageCode } = getWhatsApp(input.projectId)
+  const { client, phoneNumberId, wabaId, defaultLanguageCode } = getWhatsApp(input.projectId)
+  const languageCode = input.languageCode || defaultLanguageCode
 
   const templatePayload: Record<string, unknown> = {
     name: input.templateName,
-    language: { code: input.languageCode || defaultLanguageCode },
+    language: { code: languageCode },
   }
   if (input.components && input.components.length > 0) {
     templatePayload.components = input.components
@@ -93,7 +95,22 @@ export async function sendTemplate(input: SendTemplateInput): Promise<SendTempla
       sentAt: new Date(),
     })
 
-    return { success: true, messageId, to: normalizedTo }
+    return {
+      success: true,
+      messageId,
+      to: normalizedTo,
+      ...(isProduction ? {} : {
+        debug: {
+          projectId: input.projectId,
+          phoneNumberId,
+          wabaId,
+          languageCode,
+          templateName: input.templateName,
+          recipient,
+          components: input.components,
+        },
+      }),
+    }
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error)
 
@@ -107,6 +124,21 @@ export async function sendTemplate(input: SendTemplateInput): Promise<SendTempla
       error: message,
     })
 
-    return { success: false, to: normalizedTo, error: message }
+    return {
+      success: false,
+      to: normalizedTo,
+      error: message,
+      ...(isProduction ? {} : {
+        debug: {
+          projectId: input.projectId,
+          phoneNumberId,
+          wabaId,
+          languageCode,
+          templateName: input.templateName,
+          recipient,
+          components: input.components,
+        },
+      }),
+    }
   }
 }
