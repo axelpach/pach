@@ -2,7 +2,7 @@ import 'dotenv/config'
 import express from 'express'
 import cors from 'cors'
 import zeroPushRoute from './zero/push-route.js'
-import whatsappRoute from './routes/whatsapp.js'
+import whatsappRoute, { publicWhatsAppRouter } from './routes/whatsapp.js'
 import authRoute from './routes/auth.js'
 import { requireAuth } from './middleware/auth.js'
 
@@ -15,6 +15,7 @@ app.use(express.json())
 app.get('/health', (_req, res) => res.json({ ok: true }))
 
 app.use('/auth', authRoute)
+app.use('/whatsapp', publicWhatsAppRouter)
 app.use('/zero', requireAuth, zeroPushRoute)
 app.use('/whatsapp', requireAuth, whatsappRoute)
 

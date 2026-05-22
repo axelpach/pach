@@ -3,6 +3,7 @@ import { getDb } from '../../db.js'
 import { companies, crmContacts, whatsappMessages, whatsappTemplates } from '../../../../db/schema.js'
 import { projects } from '../../../../pach.config.js'
 import { normalizeWhatsAppPhone } from './phone.js'
+import { sendMarketingWhatsAppReplyAlert } from '../discord.js'
 
 interface StatusEntry {
   id: string
@@ -117,6 +118,17 @@ export async function handleWebhook(payload: WebhookPayload): Promise<void> {
           if (!msg.from) continue
           const phone = normalizeWhatsAppPhone(msg.from)
           const profileName = contactsByWaId.get(msg.from)?.profile?.name ?? null
+          const ts = msg.timestamp ? new Date(Number(msg.timestamp) * 1000) : new Date()
+          const body = msg.type === 'text' ? (msg.text?.body ?? '') : `[${msg.type ?? 'unknown'}]`
+
+          if (msg.id) {
+            const [existingMessage] = await db
+              .select({ id: whatsappMessages.id })
+              .from(whatsappMessages)
+              .where(eq(whatsappMessages.metaMessageId, msg.id))
+              .limit(1)
+            if (existingMessage) continue
+          }
 
           // Find or create the CRM contact for this phone
           const [existing] = await db
@@ -133,9 +145,6 @@ export async function handleWebhook(payload: WebhookPayload): Promise<void> {
             contactId = created.id
           }
 
-          const ts = msg.timestamp ? new Date(Number(msg.timestamp) * 1000) : new Date()
-          const body = msg.type === 'text' ? (msg.text?.body ?? '') : `[${msg.type ?? 'unknown'}]`
-
           await db.insert(whatsappMessages).values({
             companyId: company.id,
             contactId,
@@ -148,6 +157,16 @@ export async function handleWebhook(payload: WebhookPayload): Promise<void> {
             metaMessageId: msg.id,
             createdAt: ts,
           })
+
+          if (projectId === 'ardia-mkt') {
+            sendMarketingWhatsAppReplyAlert({
+              contactName: profileName || phone,
+              phone,
+              message: body,
+              projectId,
+              receivedAt: ts,
+            })
+          }
         }
       }
 

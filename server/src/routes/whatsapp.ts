@@ -8,6 +8,7 @@ import { syncTemplates } from '../services/whatsapp/sync.js'
 import { handleWebhook } from '../services/whatsapp/webhook.js'
 import { fireCampaign } from '../services/whatsapp/fire.js'
 
+export const publicWhatsAppRouter = Router()
 const router = Router()
 
 interface SendTemplateBody {
@@ -59,18 +60,18 @@ router.post('/send-template', async (req, res) => {
 })
 
 // Meta webhook verification (GET) and event delivery (POST).
-router.get('/webhook', (req, res) => {
+publicWhatsAppRouter.get('/webhook', (req, res) => {
   const mode = req.query['hub.mode']
   const token = req.query['hub.verify_token']
   const challenge = req.query['hub.challenge']
-  const expected = process.env.WHATSAPP_WEBHOOK_VERIFY_TOKEN
+  const expected = process.env.WHATSAPP_WEBHOOK_VERIFY_TOKEN || process.env.WHATSAPP_WEBHOOK_VERIFICATION_TOKEN
   if (mode === 'subscribe' && expected && token === expected) {
     return res.status(200).send(String(challenge ?? ''))
   }
   return res.sendStatus(403)
 })
 
-router.post('/webhook', async (req, res) => {
+publicWhatsAppRouter.post('/webhook', async (req, res) => {
   // Always 200 quickly so Meta doesn't retry; process async.
   res.sendStatus(200)
   try {
