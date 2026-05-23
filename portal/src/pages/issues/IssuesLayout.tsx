@@ -238,6 +238,11 @@ export default function IssuesLayout() {
               meta={`${issues.length}`}
               onClick={() => setSection({ kind: 'all' })}
             />
+            <TrackerNavButton
+              active={location.pathname === '/issues/labels'}
+              label="labels"
+              onClick={() => navigate('/issues/labels')}
+            />
           </div>
 
           <div className="mt-6 space-y-1">

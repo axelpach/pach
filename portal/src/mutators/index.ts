@@ -152,7 +152,7 @@ export const mutators = {
       const now = Date.now()
       await tx.mutate.pm_labels.insert({ ...args, createdAt: now, updatedAt: now })
     },
-    async update(tx: Tx, args: { id: string; companyId?: string | null; teamId?: string; name?: string; color?: string; description?: string }) {
+    async update(tx: Tx, args: { id: string; companyId?: string | null; teamId?: string | null; name?: string; color?: string; description?: string }) {
       const { id, ...updates } = args
       await tx.mutate.pm_labels.update({ id, ...updates, updatedAt: Date.now() })
     },

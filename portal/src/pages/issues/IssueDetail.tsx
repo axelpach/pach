@@ -159,7 +159,7 @@ export default function IssueDetail() {
 
   if (!issue) {
     return (
-      <div className="flex-1 min-h-0 overflow-hidden text-fg-1">
+      <div className="h-full min-h-0 overflow-hidden text-fg-1">
         <div className="flex h-full items-center justify-center font-mono text-xs uppercase tracking-label text-fg-3">
           // loading issue…
         </div>
@@ -168,7 +168,7 @@ export default function IssueDetail() {
   }
 
   return (
-    <div className="flex-1 min-h-0 overflow-hidden text-fg-1">
+    <div className="h-full min-h-0 overflow-hidden text-fg-1">
       <div className="flex h-full min-h-0 flex-col">
         {/* top bar */}
         <div className="flex items-center justify-between gap-3 border-b border-[rgba(0,255,140,0.15)] bg-[rgba(5,6,5,0.6)] backdrop-blur-sm px-6 py-3">
@@ -216,7 +216,10 @@ export default function IssueDetail() {
         {/* body */}
         <div className="flex-1 min-h-0 overflow-hidden flex">
           {/* main column */}
-          <div className="flex-1 min-w-0 overflow-auto px-10 py-8">
+          <div
+            className="flex-1 min-w-0 overflow-y-auto overflow-x-hidden px-10 py-8 [&::-webkit-scrollbar]:hidden"
+            style={{ scrollbarWidth: 'none' }}
+          >
             <div className="mx-auto max-w-3xl">
               <textarea
                 ref={titleRef}
@@ -452,7 +455,7 @@ export default function IssueDetail() {
 
 function NotFound({ onBack }: { onBack: () => void }) {
   return (
-    <div className="flex-1 min-h-0 overflow-hidden text-fg-1">
+    <div className="h-full min-h-0 overflow-hidden text-fg-1">
       <div className="flex h-full items-center justify-center">
         <div className="text-center">
           <div className="font-mono text-sm uppercase tracking-label text-fg-3">// issue not found</div>

@@ -12,6 +12,7 @@ import CRM from './pages/crm/CRM'
 import Issues from './pages/issues/Issues'
 import IssueDetail from './pages/issues/IssueDetail'
 import IssuesLayout from './pages/issues/IssuesLayout'
+import Labels from './pages/issues/Labels'
 import Login from './pages/Login'
 import WhatsAppLayout from './pages/whatsapp/WhatsAppLayout'
 import WhatsAppTemplates from './pages/whatsapp/Templates'
@@ -162,6 +163,7 @@ function AppShell() {
               <Route path="/crm/*" element={<CRM />} />
               <Route path="/issues" element={<IssuesLayout />}>
                 <Route index element={<Issues />} />
+                <Route path="labels" element={<Labels />} />
                 <Route path=":issueId" element={<IssueDetail />} />
               </Route>
               <Route path="/whatsapp" element={<WhatsAppLayout />}>

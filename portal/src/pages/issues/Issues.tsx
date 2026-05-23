@@ -25,6 +25,7 @@ const noShiftStrategy: SortingStrategy = () => null
 import { PachSelect } from './PachSelect'
 import { StatusIcon } from './StatusIcon'
 import { PRIORITY_META, PriorityIcon } from './PriorityIcon'
+import { LabelMenu } from './LabelMenu'
 import { FilterButton, type ActiveFilters, type FilterFieldConfig } from './IssueFilters'
 import { useQuery, useZero } from '@rocicorp/zero/react'
 import type { Schema } from '../../zero-schema'
@@ -670,6 +671,24 @@ export default function Issues() {
     }
   }
 
+  async function toggleIssueLabel(issueId: string, labelId: string) {
+    const existing = issueLabels.find(
+      (link) => link.issueId === issueId && link.labelId === labelId,
+    )
+    const label = labelMap.get(labelId)
+    if (existing) {
+      await z.mutate.pm_issue_labels.delete({ id: existing.id })
+      if (label) await logActivity(issueId, `removed label ${label.name}`, 'updated')
+    } else {
+      await z.mutate.pm_issue_labels.create({
+        id: crypto.randomUUID(),
+        issueId,
+        labelId,
+      })
+      if (label) await logActivity(issueId, `added label ${label.name}`, 'updated')
+    }
+  }
+
   async function changeIssuePriority(issueId: string, nextRaw: string) {
     const issue = issues.find((entry) => entry.id === issueId)
     if (!issue) return
@@ -983,6 +1002,10 @@ export default function Issues() {
                                         teamProjects={projects.filter((p) => p.teamId === issue.teamId)}
                                         allTeams={teams}
                                         issueLabels={labelsByIssue.get(issue.id) ?? []}
+                                        availableLabels={labels.filter((l) =>
+                                          (!l.teamId || l.teamId === issue.teamId) &&
+                                          (!l.companyId || l.companyId === issue.contextCompanyId),
+                                        )}
                                         visibleFields={visibleFields}
                                         draggable={isManualSort}
                                         onStatusChange={changeIssueStatus}
@@ -990,6 +1013,7 @@ export default function Issues() {
                                         onTeamChange={changeIssueTeam}
                                         onEstimateChange={changeIssueEstimate}
                                         onPriorityChange={changeIssuePriority}
+                                        onToggleLabel={toggleIssueLabel}
                                       />
                                     ))}
                                   </div>
@@ -1019,6 +1043,7 @@ export default function Issues() {
                         teamProjects={projects.filter((p) => p.teamId === activeDragIssue.teamId)}
                         allTeams={teams}
                         issueLabels={labelsByIssue.get(activeDragIssue.id) ?? []}
+                        availableLabels={[]}
                         visibleFields={visibleFields}
                         draggable={isManualSort}
                         onStatusChange={() => {}}
@@ -1026,6 +1051,7 @@ export default function Issues() {
                         onTeamChange={() => {}}
                         onEstimateChange={() => {}}
                         onPriorityChange={() => {}}
+                        onToggleLabel={() => {}}
                       />
                     </div>
                   ) : null}
@@ -1697,12 +1723,14 @@ function IssueRow({
   teamProjects,
   allTeams,
   issueLabels,
+  availableLabels,
   visibleFields,
   onStatusChange,
   onProjectChange,
   onTeamChange,
   onEstimateChange,
   onPriorityChange,
+  onToggleLabel,
 }: {
   issue: Schema['tables']['pm_issues']['row']
   company: Schema['tables']['companies']['row'] | null
@@ -1715,6 +1743,7 @@ function IssueRow({
   teamProjects: Schema['tables']['pm_projects']['row'][]
   allTeams: Schema['tables']['pm_teams']['row'][]
   issueLabels: Schema['tables']['pm_labels']['row'][]
+  availableLabels: Schema['tables']['pm_labels']['row'][]
   visibleFields: Set<RowField>
   draggable?: boolean
   onStatusChange: (issueId: string, nextStatusId: string) => void | Promise<void>
@@ -1722,6 +1751,7 @@ function IssueRow({
   onTeamChange: (issueId: string, nextTeamId: string) => void | Promise<void>
   onEstimateChange: (issueId: string, nextEstimate: string) => void | Promise<void>
   onPriorityChange: (issueId: string, nextPriority: string) => void | Promise<void>
+  onToggleLabel: (issueId: string, labelId: string) => void | Promise<void>
 }) {
   const navigate = useNavigate()
   const showCompany = company && company.id !== workspaceCompanyId
@@ -1831,13 +1861,24 @@ function IssueRow({
         </div>
       )}
       {shows('labels') && issueLabels.length > 0 && (
-        <div className="hidden md:flex shrink-0 items-center gap-1">
-          {issueLabels.slice(0, 3).map((label) => (
-            <LabelChip key={label.id} label={label} />
-          ))}
-          {issueLabels.length > 3 && (
-            <span className="font-mono text-[10px] text-fg-4">+{issueLabels.length - 3}</span>
-          )}
+        <div className="hidden md:block shrink-0" onClick={(event) => event.stopPropagation()}>
+          <LabelMenu
+            available={availableLabels}
+            selectedIds={new Set(issueLabels.map((l) => l.id))}
+            onToggle={(labelId) => onToggleLabel(issue.id, labelId)}
+            trigger={
+              <span className="inline-flex items-center gap-1">
+                {issueLabels.slice(0, 3).map((label) => (
+                  <LabelChip key={label.id} label={label} />
+                ))}
+                {issueLabels.length > 3 && (
+                  <span className="font-mono text-[10px] text-fg-4">+{issueLabels.length - 3}</span>
+                )}
+              </span>
+            }
+            triggerClassName="inline-flex items-center gap-1 p-0 border-0 bg-transparent transition hover:opacity-80"
+            popupWidth="240px"
+          />
         </div>
       )}
       {shows('estimate') && (
@@ -2057,11 +2098,7 @@ function LabelChip({ label }: { label: Schema['tables']['pm_labels']['row'] }) {
   const color = label.color || '#5a8a72'
   return (
     <span
-      className="inline-flex h-5 shrink-0 items-center gap-1 border bg-pit-3 px-1.5 font-mono text-[10px] tracking-label lowercase"
-      style={{
-        borderColor: `${color}55`,
-        color,
-      }}
+      className="inline-flex h-5 shrink-0 items-center gap-1 border border-[rgba(0,255,140,0.15)] bg-pit-3 px-1.5 font-mono text-[10px] tracking-label lowercase text-fg-3"
       title={label.name}
     >
       <span aria-hidden className="block h-1.5 w-1.5 rounded-full" style={{ background: color }} />
