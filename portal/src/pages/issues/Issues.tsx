@@ -70,7 +70,11 @@ export default function Issues() {
   const [issues] = useQuery(z.query.pm_issues.orderBy('updatedAt', 'desc'))
 
   const storageKey = user ? `pach:issues:view:${user.id}` : null
+  const scrollStorageKey = user ? `pach:issues:scroll:${user.id}` : null
   const initialStoredView = readStoredView(storageKey)
+  const scrollContainerRef = useRef<HTMLDivElement | null>(null)
+  const scrollRestoredRef = useRef(false)
+  const scrollSaveTimerRef = useRef<number | null>(null)
 
   const [activeFilters, setActiveFilters] = useState<ActiveFilters>(() => initialStoredView.filters)
   const [composerOpen, setComposerOpen] = useState(false)
@@ -428,6 +432,45 @@ export default function Issues() {
 
   const blockedCount = issues.filter((issue) => statusMap.get(issue.statusId)?.type === 'blocked').length
 
+  // restore scroll once the list has rendered (issues query loaded)
+  useEffect(() => {
+    if (scrollRestoredRef.current) return
+    if (!scrollStorageKey) return
+    if (issues.length === 0) return
+    const el = scrollContainerRef.current
+    if (!el) return
+
+    let target = 0
+    try {
+      const raw = localStorage.getItem(scrollStorageKey)
+      const parsed = raw ? Number(raw) : 0
+      if (Number.isFinite(parsed) && parsed > 0) target = parsed
+    } catch {
+      // ignore
+    }
+
+    scrollRestoredRef.current = true
+    if (target > 0) {
+      // wait one frame so the rows are laid out and scrollHeight is final
+      requestAnimationFrame(() => {
+        el.scrollTop = target
+      })
+    }
+  }, [scrollStorageKey, issues.length, groupedIssues.length])
+
+  function handleScroll(event: React.UIEvent<HTMLDivElement>) {
+    if (!scrollStorageKey || !scrollRestoredRef.current) return
+    const top = event.currentTarget.scrollTop
+    if (scrollSaveTimerRef.current != null) window.clearTimeout(scrollSaveTimerRef.current)
+    scrollSaveTimerRef.current = window.setTimeout(() => {
+      try {
+        localStorage.setItem(scrollStorageKey, String(Math.round(top)))
+      } catch {
+        // ignore quota errors
+      }
+    }, 150)
+  }
+
   function getNextSortOrder(priority: number, statusId: string, excludeIssueId?: string) {
     const bucket = issues
       .filter((issue) => issue.priority === priority && issue.statusId === statusId && issue.id !== excludeIssueId)
@@ -756,7 +799,7 @@ export default function Issues() {
   return (
     <>
     <div className="flex h-full min-h-0 flex-col">
-            <div className="flex-1 min-h-0 overflow-auto py-6">
+            <div ref={scrollContainerRef} onScroll={handleScroll} className="flex-1 min-h-0 overflow-auto py-6">
               <div className="mb-4 flex items-center gap-4 px-6">
                 {!(section.kind === 'team' && section.tab === 'projects') && (
                   <FilterButton
