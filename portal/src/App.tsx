@@ -19,6 +19,7 @@ import WhatsAppTemplates from './pages/whatsapp/Templates'
 import Campaigns from './pages/whatsapp/Campaigns'
 import CampaignDetail from './pages/whatsapp/CampaignDetail'
 import { GlyphRain, Scanlines, LiveClock } from './components/pach'
+import { SearchPalette } from './components/SearchPalette'
 
 const OUTER_NAV_ITEMS = [
   { label: 'Issues', path: '/issues' },
@@ -276,6 +277,7 @@ function AppShell() {
         <Topbar />
         <MobileHeader onMenuClick={() => setMobileMenuOpen(true)} />
         <MobileMenu open={mobileMenuOpen} onClose={() => setMobileMenuOpen(false)} />
+        <SearchPalette />
         <div className="flex flex-1 min-h-0 overflow-hidden">
           <Sidebar />
           <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
