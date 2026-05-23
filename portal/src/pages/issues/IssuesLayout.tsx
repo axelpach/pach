@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Outlet, useLocation, useNavigate, useOutletContext } from 'react-router-dom'
 import { useQuery, useZero } from '@rocicorp/zero/react'
 import { ChevronDown, ChevronRight, Pencil, Plus } from 'lucide-react'
@@ -34,6 +34,7 @@ export default function IssuesLayout() {
 
   const [teams] = useQuery(z.query.pm_teams.orderBy('position', 'asc'))
   const [issues] = useQuery(z.query.pm_issues)
+  const [statuses] = useQuery(z.query.pm_statuses)
 
   const sidebarStorageKey = user ? `pach:issues:sidebar:${user.id}` : null
   const initialSidebar = readStoredSidebar(sidebarStorageKey)
@@ -166,6 +167,38 @@ export default function IssuesLayout() {
       setSavingTeam(false)
     }
   }
+
+  // ensure the 6 standard workspace-scoped status rows exist (backlog, todo, in
+  // progress, blocked, done, canceled). New teams may seed their own copies,
+  // but the row's status dropdown reads from workspace scope, so they need to
+  // be present here as well.
+  const seededWorkspaceStatusesRef = useRef(false)
+  useEffect(() => {
+    if (seededWorkspaceStatusesRef.current) return
+    const workspace = statuses.filter((s) => !s.teamId)
+    const desired = [
+      { key: 'backlog', name: 'Backlog', type: 'backlog', color: '#6b7280' },
+      { key: 'todo', name: 'Todo', type: 'unstarted', color: '#94a3b8' },
+      { key: 'in_progress', name: 'In Progress', type: 'started', color: '#fbbf24' },
+      { key: 'blocked', name: 'Blocked', type: 'blocked', color: '#f87171' },
+      { key: 'done', name: 'Done', type: 'completed', color: '#4ade80' },
+      { key: 'canceled', name: 'Canceled', type: 'canceled', color: '#9ca3af' },
+    ]
+    const missing = desired.filter((def) => !workspace.some((s) => s.key === def.key))
+    if (missing.length === 0) {
+      seededWorkspaceStatusesRef.current = true
+      return
+    }
+    seededWorkspaceStatusesRef.current = true
+    for (const [index, def] of desired.entries()) {
+      if (workspace.some((s) => s.key === def.key)) continue
+      void z.mutate.pm_statuses.create({
+        id: crypto.randomUUID(),
+        ...def,
+        position: index,
+      })
+    }
+  }, [statuses, z])
 
   // keep section valid if team disappears
   useEffect(() => {
