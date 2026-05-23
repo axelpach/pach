@@ -217,10 +217,10 @@ export default function IssueDetail() {
         </div>
 
         {/* body */}
-        <div className="flex-1 min-h-0 overflow-hidden flex">
+        <div className="flex-1 min-h-0 overflow-y-auto md:overflow-hidden flex flex-col md:flex-row">
           {/* main column */}
           <div
-            className="flex-1 min-w-0 overflow-y-auto overflow-x-hidden px-10 py-8 [&::-webkit-scrollbar]:hidden"
+            className="flex-1 min-w-0 md:overflow-y-auto md:overflow-x-hidden px-4 py-5 md:px-10 md:py-8 [&::-webkit-scrollbar]:hidden"
             style={{ scrollbarWidth: 'none' }}
           >
             <div className="mx-auto max-w-3xl">
@@ -298,7 +298,7 @@ export default function IssueDetail() {
           </div>
 
           {/* properties sidebar */}
-          <aside className="w-[300px] shrink-0 border-l border-[rgba(0,255,140,0.12)] bg-[rgba(5,6,5,0.6)] backdrop-blur-sm overflow-auto">
+          <aside className="w-full md:w-[300px] shrink-0 border-t md:border-t-0 md:border-l border-[rgba(0,255,140,0.12)] bg-[rgba(5,6,5,0.6)] backdrop-blur-sm md:overflow-auto">
             <div className="border-b border-[rgba(0,255,140,0.1)] px-5 py-4">
               <div className="mb-3 font-mono text-[10px] uppercase tracking-label text-fg-4">◊ properties</div>
 

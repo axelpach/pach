@@ -1,4 +1,4 @@
-import { useParams } from 'react-router-dom'
+import { useNavigate, useParams } from 'react-router-dom'
 import { SlideRenderer } from '@decks/engine/SlideRenderer'
 import { getTheme } from '@decks/engine/themes'
 
@@ -24,6 +24,7 @@ const deckRegistry: Record<string, { slides: typeof slides; config: typeof confi
 
 export default function DeckViewer() {
   const { slug } = useParams<{ slug: string }>()
+  const navigate = useNavigate()
   const deck = slug ? deckRegistry[slug] : null
 
   if (!deck) {
@@ -46,6 +47,7 @@ export default function DeckViewer() {
       theme={theme}
       filename={slug!}
       ctaLinks={deck.config.ctaLinks}
+      onBack={() => navigate('/decks')}
     />
   )
 }

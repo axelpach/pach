@@ -1,7 +1,7 @@
 import { Routes, Route, NavLink, Navigate, useLocation, useNavigate } from 'react-router-dom'
 import { ZeroProvider } from '@rocicorp/zero/react'
-import { FolderKanban, LayoutTemplate, MessageCircleMore, Rows3 } from 'lucide-react'
-import { useEffect, type ComponentType } from 'react'
+import { FolderKanban, LayoutTemplate, LogOut, MessageCircleMore, Menu, Rows3, X } from 'lucide-react'
+import { useEffect, useState, type ComponentType } from 'react'
 import { schema } from './zero-schema'
 import { mutators } from './mutators'
 import { config } from './config'
@@ -32,7 +32,7 @@ function Topbar() {
   const { user, logout } = useAuth()
   return (
     <div
-      className="flex items-center justify-between flex-shrink-0 px-5 py-2.5 border-b border-[rgba(0,255,140,0.15)] bg-void text-[10px] uppercase tracking-label text-fg-3 relative z-20"
+      className="hidden md:flex items-center justify-between flex-shrink-0 px-5 py-2.5 border-b border-[rgba(0,255,140,0.15)] bg-void text-[10px] uppercase tracking-label text-fg-3 relative z-20"
     >
       <span className="flex items-center gap-3.5">
         <span className="text-accent [text-shadow:0_0_6px_rgba(0,255,136,0.5)] tracking-wide-2">P@CH</span>
@@ -92,7 +92,7 @@ function NavItem({
 
 function Sidebar() {
   return (
-    <nav className="w-[68px] flex-shrink-0 py-3 font-mono text-xs relative z-10 flex flex-col items-center bg-void border-r border-[rgba(0,255,140,0.12)]">
+    <nav className="hidden md:flex w-[68px] flex-shrink-0 py-3 font-mono text-xs relative z-10 flex-col items-center bg-void border-r border-[rgba(0,255,140,0.12)]">
       <div className="flex flex-col items-center gap-2">
         <NavItem to="/issues" icon={Rows3} label="Issues" />
         <NavItem to="/crm" icon={FolderKanban} label="CRM" />
@@ -109,10 +109,129 @@ function Sidebar() {
   )
 }
 
+/* ---------------- Mobile header + drawer ---------------- */
+const MOBILE_NAV_ITEMS: Array<{
+  to: string
+  label: string
+  icon: ComponentType<{ className?: string }>
+}> = [
+  { to: '/issues', label: 'issues', icon: Rows3 },
+  { to: '/crm', label: 'crm', icon: FolderKanban },
+  { to: '/whatsapp/templates', label: 'whatsapp', icon: MessageCircleMore },
+  { to: '/decks', label: 'decks', icon: LayoutTemplate },
+]
+
+function MobileHeader({ onMenuClick }: { onMenuClick: () => void }) {
+  return (
+    <div className="md:hidden flex items-center justify-between flex-shrink-0 px-4 py-3 border-b border-[rgba(0,255,140,0.15)] bg-void relative z-20">
+      <div className="font-bold text-base text-accent [text-shadow:0_0_6px_rgba(0,255,136,0.5)] tracking-wide">
+        p@ch_
+      </div>
+      <button
+        onClick={onMenuClick}
+        className="flex h-9 w-9 items-center justify-center border border-[rgba(0,255,140,0.2)] bg-pit-3 text-fg-2 transition hover:text-accent hover:border-[rgba(0,255,140,0.4)]"
+        aria-label="open menu"
+      >
+        <Menu className="h-4 w-4" />
+      </button>
+    </div>
+  )
+}
+
+function MobileMenu({ open, onClose }: { open: boolean; onClose: () => void }) {
+  const { user, logout } = useAuth()
+  const location = useLocation()
+
+  useEffect(() => {
+    if (!open) return
+    function handleKey(event: KeyboardEvent) {
+      if (event.key === 'Escape') onClose()
+    }
+    window.addEventListener('keydown', handleKey)
+    document.body.style.overflow = 'hidden'
+    return () => {
+      window.removeEventListener('keydown', handleKey)
+      document.body.style.overflow = ''
+    }
+  }, [open, onClose])
+
+  // close drawer when route changes
+  useEffect(() => {
+    if (open) onClose()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [location.pathname])
+
+  if (!open) return null
+
+  return (
+    <div className="md:hidden fixed inset-0 z-50 flex">
+      <div
+        className="absolute inset-0 bg-[rgba(0,0,0,0.7)] backdrop-blur-sm"
+        onClick={onClose}
+      />
+      <div className="relative z-10 flex h-full w-[80%] max-w-[320px] flex-col bg-void border-r border-[rgba(0,255,140,0.2)] shadow-[0_0_24px_rgba(0,255,136,0.18)]">
+        <div className="flex items-center justify-between border-b border-[rgba(0,255,140,0.15)] px-4 py-3">
+          <div className="font-bold text-base text-accent [text-shadow:0_0_6px_rgba(0,255,136,0.5)] tracking-wide">
+            p@ch_
+          </div>
+          <button
+            onClick={onClose}
+            className="flex h-8 w-8 items-center justify-center text-fg-3 transition hover:text-accent"
+            aria-label="close menu"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+
+        <div className="px-4 py-3 text-[9px] uppercase tracking-label text-fg-4">
+          // op: <span className="text-fg-2">{user?.name?.toLowerCase() || user?.email || 'unknown'}</span>
+        </div>
+
+        <nav className="flex-1 overflow-auto px-2 py-2 space-y-1">
+          {MOBILE_NAV_ITEMS.map((item) => {
+            const Icon = item.icon
+            return (
+              <NavLink
+                key={item.to}
+                to={item.to}
+                onClick={onClose}
+                className={({ isActive }) =>
+                  `flex items-center gap-3 px-3 py-2.5 font-mono text-sm lowercase transition ${
+                    isActive
+                      ? 'bg-[rgba(0,255,136,0.08)] text-accent ring-1 ring-[rgba(0,255,136,0.2)]'
+                      : 'text-fg-2 hover:bg-[rgba(0,255,136,0.04)] hover:text-fg-1'
+                  }`
+                }
+              >
+                <Icon className="h-4 w-4" />
+                {item.label}
+              </NavLink>
+            )
+          })}
+        </nav>
+
+        <div className="border-t border-[rgba(0,255,140,0.12)] p-2">
+          <button
+            onClick={() => {
+              onClose()
+              logout()
+            }}
+            className="flex w-full items-center gap-3 px-3 py-2.5 font-mono text-sm uppercase tracking-label text-fg-4 transition hover:text-fail"
+          >
+            <LogOut className="h-4 w-4" />
+            [logout]
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 /* ---------------- Shell ---------------- */
 function AppShell() {
   const location = useLocation()
   const navigate = useNavigate()
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
 
   useEffect(() => {
     function handleKeyDown(event: KeyboardEvent) {
@@ -155,6 +274,8 @@ function AppShell() {
       <Scanlines opacity={0.4} />
       <div className="relative z-10 flex flex-col h-full">
         <Topbar />
+        <MobileHeader onMenuClick={() => setMobileMenuOpen(true)} />
+        <MobileMenu open={mobileMenuOpen} onClose={() => setMobileMenuOpen(false)} />
         <div className="flex flex-1 min-h-0 overflow-hidden">
           <Sidebar />
           <div className="flex-1 flex flex-col min-w-0 overflow-hidden">

@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { Outlet, useLocation, useNavigate, useOutletContext } from 'react-router-dom'
 import { useQuery, useZero } from '@rocicorp/zero/react'
-import { ChevronDown, ChevronRight, Pencil, Plus } from 'lucide-react'
+import { ChevronDown, ChevronRight, Menu, Pencil, Plus, X } from 'lucide-react'
 import type { Schema } from '../../zero-schema'
 import type { Mutators } from '../../mutators'
 import { useAuth } from '../../lib/auth'
@@ -46,6 +46,12 @@ export default function IssuesLayout() {
   const [teamDraftName, setTeamDraftName] = useState('')
   const [savingTeam, setSavingTeam] = useState(false)
   const [composerRequestId, setComposerRequestId] = useState(0)
+  const [mobileTrackerOpen, setMobileTrackerOpen] = useState(false)
+
+  // close mobile tracker on route change
+  useEffect(() => {
+    setMobileTrackerOpen(false)
+  }, [location.pathname])
 
   // setSection from any child navigates back to the list view when triggered from /issues/:id
   function setSection(next: TrackerSection) {
@@ -238,15 +244,37 @@ export default function IssuesLayout() {
 
   return (
     <div className="flex-1 min-h-0 overflow-hidden text-fg-1">
-      <div className="flex h-full min-h-0">
-        <aside className="w-[200px] shrink-0 border-r border-[rgba(0,255,140,0.12)] bg-[rgba(5,6,5,0.6)] backdrop-blur-sm px-2 py-4 flex flex-col">
-          <div className="px-4 pb-3 mb-2">
-            <div className="font-bold text-base text-accent [text-shadow:0_0_6px_rgba(0,255,136,0.5)] tracking-wide">
-              p@ch_
+      <div className="flex h-full min-h-0 relative">
+        {/* mobile drawer backdrop */}
+        {mobileTrackerOpen && (
+          <div
+            className="md:hidden absolute inset-0 z-30 bg-[rgba(0,0,0,0.7)] backdrop-blur-sm"
+            onClick={() => setMobileTrackerOpen(false)}
+          />
+        )}
+        <aside
+          className={`${
+            mobileTrackerOpen
+              ? 'absolute inset-y-0 left-0 z-40 w-[80%] max-w-[280px] flex'
+              : 'hidden md:flex md:relative md:z-auto md:w-[200px]'
+          } shrink-0 border-r border-[rgba(0,255,140,0.12)] bg-[rgba(5,6,5,0.85)] backdrop-blur-sm px-2 py-4 flex-col md:bg-[rgba(5,6,5,0.6)]`}
+        >
+          <div className="px-4 pb-3 mb-2 flex items-start justify-between gap-2">
+            <div>
+              <div className="font-bold text-base text-accent [text-shadow:0_0_6px_rgba(0,255,136,0.5)] tracking-wide">
+                p@ch_
+              </div>
+              <div className="text-[9px] uppercase tracking-label text-fg-4 mt-1">
+                // issues · tracker
+              </div>
             </div>
-            <div className="text-[9px] uppercase tracking-label text-fg-4 mt-1">
-              // issues · tracker
-            </div>
+            <button
+              onClick={() => setMobileTrackerOpen(false)}
+              className="md:hidden flex h-7 w-7 items-center justify-center text-fg-3 transition hover:text-accent"
+              aria-label="close tracker"
+            >
+              <X className="h-4 w-4" />
+            </button>
           </div>
 
           <div className="mb-4 px-2">
@@ -371,8 +399,23 @@ export default function IssuesLayout() {
           </div>
         </aside>
 
-        <main className="flex-1 min-w-0">
-          <Outlet context={context} />
+        <main className="flex-1 min-w-0 flex flex-col">
+          {/* mobile tracker toggle */}
+          <div className="md:hidden flex items-center gap-2 border-b border-[rgba(0,255,140,0.12)] bg-[rgba(5,6,5,0.6)] backdrop-blur-sm px-3 py-2">
+            <button
+              onClick={() => setMobileTrackerOpen(true)}
+              className="flex h-8 w-8 items-center justify-center border border-[rgba(0,255,140,0.2)] bg-pit-3 text-fg-2 transition hover:text-accent hover:border-[rgba(0,255,140,0.4)]"
+              aria-label="open tracker menu"
+            >
+              <Menu className="h-4 w-4" />
+            </button>
+            <span className="font-mono text-[10px] uppercase tracking-label text-fg-3">
+              ◊ issues · tracker
+            </span>
+          </div>
+          <div className="flex-1 min-h-0">
+            <Outlet context={context} />
+          </div>
         </main>
       </div>
 

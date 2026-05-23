@@ -899,7 +899,7 @@ export default function Issues() {
     <>
     <div className="flex h-full min-h-0 flex-col">
             <div ref={scrollContainerRef} onScroll={handleScroll} className="flex-1 min-h-0 overflow-auto py-6">
-              <div className="mb-4 flex items-center gap-4 px-6">
+              <div className="mb-4 flex flex-wrap items-center gap-3 px-4 md:gap-4 md:px-6">
                 {!(section.kind === 'team' && section.tab === 'projects') && (
                   <FilterButton
                     activeFilters={activeFilters}
@@ -1768,7 +1768,7 @@ function IssueRow({
           navigate(`/issues/${issue.id}`)
         }
       }}
-      className="flex items-center gap-2 px-4 py-2 border-t border-[rgba(0,255,140,0.06)] transition hover:bg-[rgba(0,255,136,0.04)] cursor-pointer focus:outline-none focus-visible:bg-[rgba(0,255,136,0.06)]"
+      className="flex items-center gap-2 px-3 md:px-4 py-2 border-t border-[rgba(0,255,140,0.06)] transition hover:bg-[rgba(0,255,136,0.04)] cursor-pointer focus:outline-none focus-visible:bg-[rgba(0,255,136,0.06)]"
     >
       {shows('status') && (
         <div className="shrink-0" onClick={(event) => event.stopPropagation()}>
@@ -1904,7 +1904,7 @@ function IssueRow({
         </div>
       )}
       {shows('updated') && (
-        <div className="shrink-0 font-mono text-[10px] uppercase tracking-label text-fg-4">{formatShortDate(issue.updatedAt)}</div>
+        <div className="hidden sm:block shrink-0 font-mono text-[10px] uppercase tracking-label text-fg-4">{formatShortDate(issue.updatedAt)}</div>
       )}
     </div>
   )
