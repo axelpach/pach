@@ -5,11 +5,13 @@ import {
   AlertTriangle,
   ArrowLeft,
   Building2,
+  Check,
   CheckCircle2,
   ChevronDown,
   ChevronUp,
   Circle,
   FolderKanban,
+  Plus,
 } from 'lucide-react'
 import type { Schema } from '../../zero-schema'
 import type { Mutators } from '../../mutators'
@@ -40,6 +42,8 @@ export default function IssueDetail() {
   const [teams] = useQuery(z.query.pm_teams.orderBy('position', 'asc'))
   const [projects] = useQuery(z.query.pm_projects.orderBy('name', 'asc'))
   const [statuses] = useQuery(z.query.pm_statuses.orderBy('position', 'asc'))
+  const [labels] = useQuery(z.query.pm_labels.orderBy('name', 'asc'))
+  const [issueLabelLinks] = useQuery(z.query.pm_issue_labels.where('issueId', issueId ?? ''))
   const [activity] = useQuery(
     z.query.pm_issue_activity.where('issueId', issueId ?? '').orderBy('createdAt', 'asc'),
   )
@@ -56,6 +60,16 @@ export default function IssueDetail() {
 
   const workspaceStatuses = getWorkspaceStatuses(statuses)
   const teamProjects = team ? projects.filter((p) => p.teamId === team.id) : []
+  const labelMap = new Map(labels.map((l) => [l.id, l]))
+  const currentLabels = issueLabelLinks
+    .map((link) => ({ link, label: labelMap.get(link.labelId) }))
+    .filter((entry): entry is { link: typeof entry.link; label: Schema['tables']['pm_labels']['row'] } => Boolean(entry.label))
+  const currentLabelIds = new Set(currentLabels.map((entry) => entry.label.id))
+  const availableLabels = labels.filter((l) => {
+    if (!team) return true
+    if (!l.teamId) return true
+    return l.teamId === team.id
+  })
   const sameTeamIssues = team
     ? allIssues.filter((entry) => entry.teamId === team.id).sort((a, b) => a.number - b.number)
     : []
@@ -105,6 +119,23 @@ export default function IssueDetail() {
     if (!issue) return
     await z.mutate.pm_issues.update({ id: issue.id, ...patch })
     if (summary) await logActivity(summary)
+  }
+
+  async function toggleLabel(labelId: string) {
+    if (!issue) return
+    const existing = currentLabels.find((entry) => entry.label.id === labelId)
+    const label = labelMap.get(labelId)
+    if (existing) {
+      await z.mutate.pm_issue_labels.delete({ id: existing.link.id })
+      if (label) await logActivity(`removed label ${label.name}`)
+    } else {
+      await z.mutate.pm_issue_labels.create({
+        id: crypto.randomUUID(),
+        issueId: issue.id,
+        labelId,
+      })
+      if (label) await logActivity(`added label ${label.name}`)
+    }
   }
 
   async function commitTitle() {
@@ -373,6 +404,38 @@ export default function IssueDetail() {
               </PropertyRow>
             </div>
 
+            <div className="border-b border-[rgba(0,255,140,0.1)] px-5 py-4">
+              <div className="mb-3 flex items-center justify-between">
+                <span className="font-mono text-[10px] uppercase tracking-label text-fg-4">◊ labels</span>
+                <LabelPicker
+                  available={availableLabels}
+                  selectedIds={currentLabelIds}
+                  onToggle={toggleLabel}
+                />
+              </div>
+              {currentLabels.length === 0 ? (
+                <div className="font-mono text-xs text-fg-4">// no labels</div>
+              ) : (
+                <div className="flex flex-wrap gap-1.5">
+                  {currentLabels.map(({ label }) => {
+                    const color = label.color || '#5a8a72'
+                    return (
+                      <button
+                        key={label.id}
+                        onClick={() => toggleLabel(label.id)}
+                        className="inline-flex h-5 items-center gap-1 border bg-pit-3 px-1.5 font-mono text-[10px] tracking-label lowercase transition hover:opacity-80"
+                        style={{ borderColor: `${color}55`, color }}
+                        title={`remove ${label.name}`}
+                      >
+                        <span aria-hidden className="block h-1.5 w-1.5 rounded-full" style={{ background: color }} />
+                        {label.name.toLowerCase()}
+                      </button>
+                    )
+                  })}
+                </div>
+              )}
+            </div>
+
             <div className="px-5 py-4">
               <div className="mb-3 font-mono text-[10px] uppercase tracking-label text-fg-4">◊ meta</div>
               <MetaRow label="created" value={formatDateTime(issue.createdAt)} />
@@ -472,6 +535,85 @@ function PropertyRow({
         {label}
       </div>
       <div className="min-w-0 flex-1">{children}</div>
+    </div>
+  )
+}
+
+function LabelPicker({
+  available,
+  selectedIds,
+  onToggle,
+}: {
+  available: Schema['tables']['pm_labels']['row'][]
+  selectedIds: Set<string>
+  onToggle: (labelId: string) => void
+}) {
+  const [open, setOpen] = useState(false)
+  const ref = useRef<HTMLDivElement | null>(null)
+
+  useEffect(() => {
+    if (!open) return
+    function handleClickOutside(event: MouseEvent) {
+      if (!ref.current) return
+      if (ref.current.contains(event.target as Node)) return
+      setOpen(false)
+    }
+    function handleKey(event: KeyboardEvent) {
+      if (event.key === 'Escape') setOpen(false)
+    }
+    window.addEventListener('mousedown', handleClickOutside)
+    window.addEventListener('keydown', handleKey)
+    return () => {
+      window.removeEventListener('mousedown', handleClickOutside)
+      window.removeEventListener('keydown', handleKey)
+    }
+  }, [open])
+
+  return (
+    <div className="relative" ref={ref}>
+      <button
+        onClick={() => setOpen((v) => !v)}
+        className="inline-flex items-center gap-1 border border-[rgba(0,255,140,0.2)] bg-pit-3 px-2 py-0.5 font-mono text-[10px] uppercase tracking-label text-fg-3 hover:text-fg-1 hover:border-[rgba(0,255,140,0.3)] transition"
+        title="add label"
+      >
+        <Plus className="h-3 w-3" />
+        add
+      </button>
+      {open && (
+        <div className="absolute right-0 top-full z-50 mt-1.5 w-[220px] border border-[rgba(0,255,140,0.25)] bg-pit shadow-[0_0_18px_rgba(0,255,136,0.18),0_18px_44px_rgba(0,0,0,0.6)]">
+          <div className="border-b border-[rgba(0,255,140,0.12)] px-3 py-2 font-mono text-[10px] uppercase tracking-label text-fg-3">
+            labels
+          </div>
+          <div className="max-h-60 overflow-auto py-1">
+            {available.length === 0 ? (
+              <div className="px-3 py-2 font-mono text-xs text-fg-4">// no labels available</div>
+            ) : (
+              available.map((label) => {
+                const checked = selectedIds.has(label.id)
+                const color = label.color || '#5a8a72'
+                return (
+                  <button
+                    key={label.id}
+                    onClick={() => onToggle(label.id)}
+                    className="flex w-full items-center gap-2.5 px-3 py-1.5 text-left font-mono text-xs lowercase text-fg-2 hover:bg-[rgba(0,255,136,0.04)] hover:text-fg-1 transition"
+                  >
+                    <span
+                      aria-hidden
+                      className={`inline-flex h-3.5 w-3.5 shrink-0 items-center justify-center border transition ${
+                        checked ? 'border-accent bg-accent' : 'border-[rgba(0,255,140,0.2)] bg-transparent'
+                      }`}
+                    >
+                      {checked && <Check className="h-2.5 w-2.5 text-pit" strokeWidth={3} />}
+                    </span>
+                    <span aria-hidden className="block h-2 w-2 rounded-full" style={{ background: color }} />
+                    <span className="truncate">{label.name.toLowerCase()}</span>
+                  </button>
+                )
+              })
+            )}
+          </div>
+        </div>
+      )}
     </div>
   )
 }

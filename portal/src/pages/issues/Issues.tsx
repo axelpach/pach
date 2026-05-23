@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { AlertTriangle, Building2, CheckCircle2, ChevronDown, ChevronRight, Circle, FolderKanban, Plus } from 'lucide-react'
+import { AlertTriangle, ArrowDown, ArrowUp, ArrowUpDown, Building2, CheckCircle2, Check, ChevronDown, ChevronRight, Circle, FolderKanban, Plus, Settings2 } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import {
   DndContext,
@@ -51,6 +51,67 @@ const STATUS_BUCKETS = [
   { key: 'canceled', label: 'canceled', type: 'canceled' },
 ] as const
 
+type SortField =
+  | 'manual'
+  | 'priority'
+  | 'status'
+  | 'identifier'
+  | 'title'
+  | 'estimate'
+  | 'updated'
+  | 'created'
+  | 'due'
+type SortDirection = 'asc' | 'desc'
+export type SortConfig = { field: SortField; direction: SortDirection }
+
+const SORT_FIELDS: Array<{ value: SortField; label: string }> = [
+  { value: 'manual', label: 'manual order' },
+  { value: 'priority', label: 'priority' },
+  { value: 'status', label: 'status' },
+  { value: 'identifier', label: 'identifier' },
+  { value: 'title', label: 'title' },
+  { value: 'estimate', label: 'estimate' },
+  { value: 'updated', label: 'updated' },
+  { value: 'created', label: 'created' },
+  { value: 'due', label: 'due date' },
+]
+
+export type RowField =
+  | 'status'
+  | 'priority'
+  | 'identifier'
+  | 'company'
+  | 'project'
+  | 'team'
+  | 'labels'
+  | 'estimate'
+  | 'updated'
+
+const ROW_FIELDS: Array<{ value: RowField; label: string }> = [
+  { value: 'status', label: 'status' },
+  { value: 'priority', label: 'priority' },
+  { value: 'identifier', label: 'identifier' },
+  { value: 'company', label: 'company' },
+  { value: 'project', label: 'project' },
+  { value: 'team', label: 'team' },
+  { value: 'labels', label: 'labels' },
+  { value: 'estimate', label: 'estimate' },
+  { value: 'updated', label: 'updated' },
+]
+
+const DEFAULT_SORT: SortConfig = { field: 'manual', direction: 'asc' }
+const DEFAULT_VISIBLE_FIELDS: RowField[] = [
+  'status',
+  'priority',
+  'identifier',
+  'company',
+  'project',
+  'team',
+  'labels',
+  'estimate',
+  'updated',
+]
+
 type Foundation = {
   defaultTeamId: string
   defaultStatusId: string
@@ -68,6 +129,8 @@ export default function Issues() {
   const [projects] = useQuery(z.query.pm_projects.orderBy('name', 'asc'))
   const [statuses] = useQuery(z.query.pm_statuses.orderBy('position', 'asc'))
   const [issues] = useQuery(z.query.pm_issues.orderBy('updatedAt', 'desc'))
+  const [labels] = useQuery(z.query.pm_labels.orderBy('name', 'asc'))
+  const [issueLabels] = useQuery(z.query.pm_issue_labels)
 
   const storageKey = user ? `pach:issues:view:${user.id}` : null
   const scrollStorageKey = user ? `pach:issues:scroll:${user.id}` : null
@@ -75,6 +138,12 @@ export default function Issues() {
   const scrollContainerRef = useRef<HTMLDivElement | null>(null)
   const scrollRestoredRef = useRef(false)
   const scrollSaveTimerRef = useRef<number | null>(null)
+
+  const [sortConfig, setSortConfig] = useState<SortConfig>(() => initialStoredView.sort)
+  const [visibleFields, setVisibleFields] = useState<Set<RowField>>(
+    () => new Set(initialStoredView.visibleFields),
+  )
+  const isManualSort = sortConfig.field === 'manual'
 
   const [activeFilters, setActiveFilters] = useState<ActiveFilters>(() => initialStoredView.filters)
   const [composerOpen, setComposerOpen] = useState(false)
@@ -191,6 +260,15 @@ export default function Issues() {
   const statusMap = new Map(statuses.map((status) => [status.id, status]))
   const projectMap = new Map(projects.map((project) => [project.id, project]))
   const userMap = new Map(users.map((entry) => [entry.id, entry]))
+  const labelMap = new Map(labels.map((entry) => [entry.id, entry]))
+  const labelsByIssue = new Map<string, Schema['tables']['pm_labels']['row'][]>()
+  for (const link of issueLabels) {
+    const label = labelMap.get(link.labelId)
+    if (!label) continue
+    const list = labelsByIssue.get(link.issueId) ?? []
+    list.push(label)
+    labelsByIssue.set(link.issueId, list)
+  }
   const workspaceStatuses = getWorkspaceStatuses(statuses)
 
   const contextCompanies = companies.filter((company) => company.id !== workspaceCompany?.id)
@@ -258,12 +336,14 @@ export default function Issues() {
           filters: activeFilters,
           collapsedPriorities: [...collapsedPriorities],
           collapsedStatuses: [...collapsedStatuses],
+          sort: sortConfig,
+          visibleFields: [...visibleFields],
         }),
       )
     } catch {
       // ignore quota / serialization errors
     }
-  }, [storageKey, activeFilters, collapsedPriorities, collapsedStatuses])
+  }, [storageKey, activeFilters, collapsedPriorities, collapsedStatuses, sortConfig, visibleFields])
 
   const lastComposerRequestRef = useRef(composerRequestId)
   useEffect(() => {
@@ -809,10 +889,18 @@ export default function Issues() {
                     onClearAll={clearAllFilters}
                   />
                 )}
-                <div className="ml-auto font-mono text-xs uppercase tracking-label text-fg-3">
-                  {section.kind === 'team' && section.tab === 'projects'
-                    ? `${selectedTeamProjects.length} visible`
-                    : `${filteredIssues.length} visible`}
+                <div className="ml-auto flex items-center gap-2">
+                  <div className="font-mono text-xs uppercase tracking-label text-fg-3">
+                    {section.kind === 'team' && section.tab === 'projects'
+                      ? `${selectedTeamProjects.length} visible`
+                      : `${filteredIssues.length} visible`}
+                  </div>
+                  {!(section.kind === 'team' && section.tab === 'projects') && (
+                    <>
+                      <SortMenu value={sortConfig} onChange={setSortConfig} />
+                      <DisplayMenu value={visibleFields} onChange={setVisibleFields} />
+                    </>
+                  )}
                 </div>
               </div>
 
@@ -855,7 +943,7 @@ export default function Issues() {
                             {getStatusBuckets(group.issues, statusMap).map((status) => {
                               const statusIssues = group.issues
                                 .filter((issue) => getStatusBucket(statusMap.get(issue.statusId))?.key === status.key)
-                                .sort(compareIssuesForBucketOrder)
+                                .sort(makeIssueComparator(sortConfig, statusMap))
                               if (!statusIssues.length) return null
 
                               const statusKey = `${group.value}:${status.key}`
@@ -878,6 +966,7 @@ export default function Issues() {
                                     id={statusKey}
                                     items={statusIssues.map((issue) => issue.id)}
                                     strategy={noShiftStrategy}
+                                    disabled={!isManualSort}
                                   >
                                   <div>
                                     {statusIssues.map((issue) => (
@@ -893,6 +982,9 @@ export default function Issues() {
                                         statusOptions={workspaceStatuses}
                                         teamProjects={projects.filter((p) => p.teamId === issue.teamId)}
                                         allTeams={teams}
+                                        issueLabels={labelsByIssue.get(issue.id) ?? []}
+                                        visibleFields={visibleFields}
+                                        draggable={isManualSort}
                                         onStatusChange={changeIssueStatus}
                                         onProjectChange={changeIssueProject}
                                         onTeamChange={changeIssueTeam}
@@ -926,6 +1018,9 @@ export default function Issues() {
                         statusOptions={workspaceStatuses}
                         teamProjects={projects.filter((p) => p.teamId === activeDragIssue.teamId)}
                         allTeams={teams}
+                        issueLabels={labelsByIssue.get(activeDragIssue.id) ?? []}
+                        visibleFields={visibleFields}
+                        draggable={isManualSort}
                         onStatusChange={() => {}}
                         onProjectChange={() => {}}
                         onTeamChange={() => {}}
@@ -1543,6 +1638,7 @@ function SelectField({
 const ESTIMATE_VALUES = [1, 2, 3, 4, 8, 16]
 
 function SortableIssueRow(props: React.ComponentProps<typeof IssueRow>) {
+  const draggable = props.draggable !== false
   const {
     attributes,
     listeners,
@@ -1551,13 +1647,12 @@ function SortableIssueRow(props: React.ComponentProps<typeof IssueRow>) {
     isOver,
     index,
     activeIndex,
-  } = useSortable({ id: props.issue.id })
+  } = useSortable({ id: props.issue.id, disabled: !draggable })
 
   // determine if this row should show a drop indicator and where
   let indicator: 'above' | 'below' | null = null
-  if (isOver && activeIndex !== index) {
+  if (draggable && isOver && activeIndex !== index) {
     if (activeIndex < 0) {
-      // cross-container drop — show above the hovered row
       indicator = 'above'
     } else {
       indicator = activeIndex > index ? 'above' : 'below'
@@ -1567,8 +1662,8 @@ function SortableIssueRow(props: React.ComponentProps<typeof IssueRow>) {
   return (
     <div
       ref={setNodeRef}
-      {...attributes}
-      {...listeners}
+      {...(draggable ? attributes : {})}
+      {...(draggable ? listeners : {})}
       className="relative"
       style={{ opacity: isDragging ? 0.35 : 1 }}
     >
@@ -1601,6 +1696,8 @@ function IssueRow({
   statusOptions,
   teamProjects,
   allTeams,
+  issueLabels,
+  visibleFields,
   onStatusChange,
   onProjectChange,
   onTeamChange,
@@ -1617,6 +1714,9 @@ function IssueRow({
   statusOptions: Schema['tables']['pm_statuses']['row'][]
   teamProjects: Schema['tables']['pm_projects']['row'][]
   allTeams: Schema['tables']['pm_teams']['row'][]
+  issueLabels: Schema['tables']['pm_labels']['row'][]
+  visibleFields: Set<RowField>
+  draggable?: boolean
   onStatusChange: (issueId: string, nextStatusId: string) => void | Promise<void>
   onProjectChange: (issueId: string, nextProjectId: string) => void | Promise<void>
   onTeamChange: (issueId: string, nextTeamId: string) => void | Promise<void>
@@ -1625,6 +1725,7 @@ function IssueRow({
 }) {
   const navigate = useNavigate()
   const showCompany = company && company.id !== workspaceCompanyId
+  const shows = (field: RowField) => visibleFields.has(field)
 
   return (
     <div
@@ -1639,108 +1740,333 @@ function IssueRow({
       }}
       className="flex items-center gap-2 px-4 py-2 border-t border-[rgba(0,255,140,0.06)] transition hover:bg-[rgba(0,255,136,0.04)] cursor-pointer focus:outline-none focus-visible:bg-[rgba(0,255,136,0.06)]"
     >
-      <div className="shrink-0" onClick={(event) => event.stopPropagation()}>
-        <PachSelect
-          variant="button"
-          value={issue.statusId}
-          onChange={(next) => onStatusChange(issue.id, next)}
-          options={statusOptions.map((s) => ({
-            value: s.id,
-            label: s.name.toLowerCase(),
-            icon: <StatusIcon statusType={s.type} />,
-          }))}
-          trigger={<StatusIcon statusType={status?.type ?? 'backlog'} />}
-          triggerTitle={status ? `status · ${status.name.toLowerCase()}` : 'change status'}
-          triggerClassName="flex h-6 w-6 items-center justify-center border border-transparent hover:border-[rgba(0,255,140,0.25)] hover:bg-[rgba(0,255,136,0.06)] transition"
-          popupWidth="200px"
-        />
-      </div>
-      <div className="shrink-0" onClick={(event) => event.stopPropagation()}>
-        <PachSelect
-          variant="button"
-          value={String(issue.priority)}
-          onChange={(next) => onPriorityChange(issue.id, next)}
-          options={[1, 2, 3, 4, 0].map((p) => ({
-            value: String(p),
-            label: PRIORITY_META[p].label,
-            icon: <PriorityIcon priority={p} />,
-          }))}
-          trigger={<PriorityIcon priority={issue.priority} />}
-          triggerTitle={`priority · ${PRIORITY_META[issue.priority]?.label ?? '—'}`}
-          triggerClassName="flex h-6 w-6 items-center justify-center border border-transparent hover:border-[rgba(0,255,140,0.25)] hover:bg-[rgba(0,255,136,0.06)] transition"
-          popupWidth="180px"
-        />
-      </div>
-      <div className="shrink-0 font-mono text-xs text-accent/80 tabular-nums">{issue.identifier}</div>
-      {showCompany && (
+      {shows('status') && (
+        <div className="shrink-0" onClick={(event) => event.stopPropagation()}>
+          <PachSelect
+            variant="button"
+            value={issue.statusId}
+            onChange={(next) => onStatusChange(issue.id, next)}
+            options={statusOptions.map((s) => ({
+              value: s.id,
+              label: s.name.toLowerCase(),
+              icon: <StatusIcon statusType={s.type} />,
+            }))}
+            trigger={<StatusIcon statusType={status?.type ?? 'backlog'} />}
+            triggerTitle={status ? `status · ${status.name.toLowerCase()}` : 'change status'}
+            triggerClassName="flex h-6 w-6 items-center justify-center border border-transparent hover:border-[rgba(0,255,140,0.25)] hover:bg-[rgba(0,255,136,0.06)] transition"
+            popupWidth="200px"
+          />
+        </div>
+      )}
+      {shows('priority') && (
+        <div className="shrink-0" onClick={(event) => event.stopPropagation()}>
+          <PachSelect
+            variant="button"
+            value={String(issue.priority)}
+            onChange={(next) => onPriorityChange(issue.id, next)}
+            options={[1, 2, 3, 4, 0].map((p) => ({
+              value: String(p),
+              label: PRIORITY_META[p].label,
+              icon: <PriorityIcon priority={p} />,
+            }))}
+            trigger={<PriorityIcon priority={issue.priority} />}
+            triggerTitle={`priority · ${PRIORITY_META[issue.priority]?.label ?? '—'}`}
+            triggerClassName="flex h-6 w-6 items-center justify-center border border-transparent hover:border-[rgba(0,255,140,0.25)] hover:bg-[rgba(0,255,136,0.06)] transition"
+            popupWidth="180px"
+          />
+        </div>
+      )}
+      {shows('identifier') && (
+        <div className="shrink-0 font-mono text-xs text-accent/80 tabular-nums">{issue.identifier}</div>
+      )}
+      {shows('company') && showCompany && (
         <span className="hidden md:inline-flex shrink-0 h-5 items-center gap-1 border border-[rgba(0,255,140,0.15)] bg-pit-3 px-2 font-mono text-[10px] uppercase tracking-label text-fg-3">
           <Building2 className="h-3 w-3" />
           {company.name}
         </span>
       )}
       <div className="min-w-0 flex-1 truncate text-sm text-fg-1">{issue.title}</div>
-      <div className="hidden md:block shrink-0" onClick={(event) => event.stopPropagation()}>
-        <PachSelect
-          variant="button"
-          value={issue.projectId ?? ''}
-          onChange={(next) => onProjectChange(issue.id, next)}
-          options={[
-            { value: '', label: 'no project' },
-            ...teamProjects.map((p) => ({
-              value: p.id,
-              label: p.name.toLowerCase(),
-              icon: <FolderKanban className="h-3 w-3" />,
-            })),
-          ]}
-          trigger={
-            <span className="inline-flex h-5 items-center gap-1 border border-[rgba(0,255,140,0.15)] bg-pit-3 px-2 font-mono text-[10px] uppercase tracking-label text-fg-3">
-              <FolderKanban className="h-3 w-3" />
-              {project?.name ?? 'no project'}
-            </span>
-          }
-          triggerTitle="change project"
-          triggerClassName="inline-flex p-0 border-0 bg-transparent transition hover:opacity-80"
-          popupWidth="220px"
-        />
-      </div>
-      <div className="hidden md:block shrink-0" onClick={(event) => event.stopPropagation()}>
-        <PachSelect
-          variant="button"
-          value={issue.teamId}
-          onChange={(next) => onTeamChange(issue.id, next)}
-          options={allTeams.map((t) => ({ value: t.id, label: t.name.toLowerCase() }))}
-          trigger={
-            <span className="inline-flex shrink-0 h-5 items-center border border-[rgba(0,255,140,0.15)] bg-pit-3 px-2 font-mono text-[10px] uppercase tracking-label text-fg-3">
-              {team?.name ?? '—'}
-            </span>
-          }
-          triggerTitle="change team"
-          triggerClassName="inline-flex p-0 border-0 bg-transparent transition hover:opacity-80"
-          popupWidth="200px"
-        />
-      </div>
-      <div className="shrink-0" onClick={(event) => event.stopPropagation()}>
-        <PachSelect
-          variant="button"
-          value={issue.estimate != null ? String(issue.estimate) : ''}
-          onChange={(next) => onEstimateChange(issue.id, next)}
-          options={[
-            { value: '', label: 'no estimate' },
-            ...ESTIMATE_VALUES.map((n) => ({ value: String(n), label: `${n} pts` })),
-          ]}
-          trigger={
-            <span className="font-mono text-xs text-fg-3 tabular-nums px-1.5 py-0.5 border border-transparent hover:border-[rgba(0,255,140,0.2)] hover:bg-[rgba(0,255,136,0.04)] transition">
-              {issue.estimate != null ? `${issue.estimate} pts` : '— pts'}
-            </span>
-          }
-          triggerTitle="change estimate"
-          triggerClassName="transition"
-          popupWidth="160px"
-          align="right"
-        />
-      </div>
-      <div className="shrink-0 font-mono text-[10px] uppercase tracking-label text-fg-4">{formatShortDate(issue.updatedAt)}</div>
+      {shows('project') && (
+        <div className="hidden md:block shrink-0" onClick={(event) => event.stopPropagation()}>
+          <PachSelect
+            variant="button"
+            value={issue.projectId ?? ''}
+            onChange={(next) => onProjectChange(issue.id, next)}
+            options={[
+              { value: '', label: 'no project' },
+              ...teamProjects.map((p) => ({
+                value: p.id,
+                label: p.name.toLowerCase(),
+                icon: <FolderKanban className="h-3 w-3" />,
+              })),
+            ]}
+            trigger={
+              <span className="inline-flex h-5 items-center gap-1 border border-[rgba(0,255,140,0.15)] bg-pit-3 px-2 font-mono text-[10px] uppercase tracking-label text-fg-3">
+                <FolderKanban className="h-3 w-3" />
+                {project?.name ?? 'no project'}
+              </span>
+            }
+            triggerTitle="change project"
+            triggerClassName="inline-flex p-0 border-0 bg-transparent transition hover:opacity-80"
+            popupWidth="220px"
+          />
+        </div>
+      )}
+      {shows('team') && (
+        <div className="hidden md:block shrink-0" onClick={(event) => event.stopPropagation()}>
+          <PachSelect
+            variant="button"
+            value={issue.teamId}
+            onChange={(next) => onTeamChange(issue.id, next)}
+            options={allTeams.map((t) => ({ value: t.id, label: t.name.toLowerCase() }))}
+            trigger={
+              <span className="inline-flex shrink-0 h-5 items-center border border-[rgba(0,255,140,0.15)] bg-pit-3 px-2 font-mono text-[10px] uppercase tracking-label text-fg-3">
+                {team?.name ?? '—'}
+              </span>
+            }
+            triggerTitle="change team"
+            triggerClassName="inline-flex p-0 border-0 bg-transparent transition hover:opacity-80"
+            popupWidth="200px"
+          />
+        </div>
+      )}
+      {shows('labels') && issueLabels.length > 0 && (
+        <div className="hidden md:flex shrink-0 items-center gap-1">
+          {issueLabels.slice(0, 3).map((label) => (
+            <LabelChip key={label.id} label={label} />
+          ))}
+          {issueLabels.length > 3 && (
+            <span className="font-mono text-[10px] text-fg-4">+{issueLabels.length - 3}</span>
+          )}
+        </div>
+      )}
+      {shows('estimate') && (
+        <div className="shrink-0" onClick={(event) => event.stopPropagation()}>
+          <PachSelect
+            variant="button"
+            value={issue.estimate != null ? String(issue.estimate) : ''}
+            onChange={(next) => onEstimateChange(issue.id, next)}
+            options={[
+              { value: '', label: 'no estimate' },
+              ...ESTIMATE_VALUES.map((n) => ({ value: String(n), label: `${n} pts` })),
+            ]}
+            trigger={
+              <span className="font-mono text-xs text-fg-3 tabular-nums px-1.5 py-0.5 border border-transparent hover:border-[rgba(0,255,140,0.2)] hover:bg-[rgba(0,255,136,0.04)] transition">
+                {issue.estimate != null ? `${issue.estimate} pts` : '— pts'}
+              </span>
+            }
+            triggerTitle="change estimate"
+            triggerClassName="transition"
+            popupWidth="160px"
+            align="right"
+          />
+        </div>
+      )}
+      {shows('updated') && (
+        <div className="shrink-0 font-mono text-[10px] uppercase tracking-label text-fg-4">{formatShortDate(issue.updatedAt)}</div>
+      )}
     </div>
+  )
+}
+
+function SortMenu({
+  value,
+  onChange,
+}: {
+  value: SortConfig
+  onChange: (next: SortConfig) => void
+}) {
+  const [open, setOpen] = useState(false)
+  const ref = useRef<HTMLDivElement | null>(null)
+
+  useEffect(() => {
+    if (!open) return
+    function handleClickOutside(event: MouseEvent) {
+      if (!ref.current) return
+      if (ref.current.contains(event.target as Node)) return
+      setOpen(false)
+    }
+    function handleKey(event: KeyboardEvent) {
+      if (event.key === 'Escape') setOpen(false)
+    }
+    window.addEventListener('mousedown', handleClickOutside)
+    window.addEventListener('keydown', handleKey)
+    return () => {
+      window.removeEventListener('mousedown', handleClickOutside)
+      window.removeEventListener('keydown', handleKey)
+    }
+  }, [open])
+
+  const currentLabel = SORT_FIELDS.find((f) => f.value === value.field)?.label ?? 'manual order'
+  const isManual = value.field === 'manual'
+
+  return (
+    <div className="relative" ref={ref}>
+      <button
+        onClick={() => setOpen((v) => !v)}
+        title={`sort · ${currentLabel}${isManual ? '' : ` (${value.direction})`}`}
+        className={`flex h-6 w-6 items-center justify-center border transition ${
+          open
+            ? 'border-[rgba(0,255,140,0.35)] bg-[rgba(0,255,136,0.06)] text-accent shadow-glow-xs'
+            : !isManual
+              ? 'border-[rgba(0,255,140,0.25)] bg-pit-3 text-accent'
+              : 'border-[rgba(0,255,140,0.15)] bg-pit-3 text-fg-3 hover:text-fg-1 hover:border-[rgba(0,255,140,0.25)]'
+        }`}
+      >
+        <ArrowUpDown className="h-3 w-3" />
+      </button>
+      {open && (
+        <div className="absolute right-0 top-full z-50 mt-1.5 w-[240px] border border-[rgba(0,255,140,0.25)] bg-pit shadow-[0_0_18px_rgba(0,255,136,0.18),0_18px_44px_rgba(0,0,0,0.6)]">
+          <div className="border-b border-[rgba(0,255,140,0.12)] px-3 py-2 font-mono text-[10px] uppercase tracking-label text-fg-3">
+            sort by
+          </div>
+          <div className="max-h-72 overflow-auto py-1">
+            {SORT_FIELDS.map((field) => {
+              const isActive = field.value === value.field
+              const isManualField = field.value === 'manual'
+              return (
+                <button
+                  key={field.value}
+                  onClick={() => {
+                    if (isManualField) {
+                      onChange({ field: 'manual', direction: 'asc' })
+                    } else {
+                      // toggle direction if same field, otherwise default to asc
+                      onChange({
+                        field: field.value,
+                        direction: isActive && value.direction === 'asc' ? 'desc' : 'asc',
+                      })
+                    }
+                  }}
+                  className={`flex w-full items-center justify-between gap-2 px-3 py-1.5 text-left font-mono text-xs lowercase transition ${
+                    isActive
+                      ? 'bg-[rgba(0,255,136,0.08)] text-accent'
+                      : 'text-fg-2 hover:bg-[rgba(0,255,136,0.04)] hover:text-fg-1'
+                  }`}
+                >
+                  <span className="truncate">{field.label}</span>
+                  {isActive && !isManualField && (
+                    value.direction === 'asc'
+                      ? <ArrowUp className="h-3 w-3 shrink-0" />
+                      : <ArrowDown className="h-3 w-3 shrink-0" />
+                  )}
+                  {isActive && isManualField && <Check className="h-3 w-3 shrink-0" />}
+                </button>
+              )
+            })}
+          </div>
+          {!isManual && (
+            <div className="border-t border-[rgba(0,255,140,0.12)] px-3 py-2 font-mono text-[10px] uppercase tracking-label text-fg-4">
+              // dragging disabled while sorted
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function DisplayMenu({
+  value,
+  onChange,
+}: {
+  value: Set<RowField>
+  onChange: (next: Set<RowField>) => void
+}) {
+  const [open, setOpen] = useState(false)
+  const ref = useRef<HTMLDivElement | null>(null)
+
+  useEffect(() => {
+    if (!open) return
+    function handleClickOutside(event: MouseEvent) {
+      if (!ref.current) return
+      if (ref.current.contains(event.target as Node)) return
+      setOpen(false)
+    }
+    function handleKey(event: KeyboardEvent) {
+      if (event.key === 'Escape') setOpen(false)
+    }
+    window.addEventListener('mousedown', handleClickOutside)
+    window.addEventListener('keydown', handleKey)
+    return () => {
+      window.removeEventListener('mousedown', handleClickOutside)
+      window.removeEventListener('keydown', handleKey)
+    }
+  }, [open])
+
+  function toggle(field: RowField) {
+    const next = new Set(value)
+    if (next.has(field)) next.delete(field)
+    else next.add(field)
+    onChange(next)
+  }
+
+  return (
+    <div className="relative" ref={ref}>
+      <button
+        onClick={() => setOpen((v) => !v)}
+        title="display"
+        className={`flex h-6 w-6 items-center justify-center border transition ${
+          open
+            ? 'border-[rgba(0,255,140,0.35)] bg-[rgba(0,255,136,0.06)] text-accent shadow-glow-xs'
+            : 'border-[rgba(0,255,140,0.15)] bg-pit-3 text-fg-3 hover:text-fg-1 hover:border-[rgba(0,255,140,0.25)]'
+        }`}
+      >
+        <Settings2 className="h-3 w-3" />
+      </button>
+      {open && (
+        <div className="absolute right-0 top-full z-50 mt-1.5 w-[220px] border border-[rgba(0,255,140,0.25)] bg-pit shadow-[0_0_18px_rgba(0,255,136,0.18),0_18px_44px_rgba(0,0,0,0.6)]">
+          <div className="border-b border-[rgba(0,255,140,0.12)] px-3 py-2 font-mono text-[10px] uppercase tracking-label text-fg-3">
+            show on row
+          </div>
+          <div className="max-h-72 overflow-auto py-1">
+            <div className="flex items-center gap-2.5 px-3 py-1.5 font-mono text-xs lowercase text-fg-4">
+              <span className="inline-flex h-3.5 w-3.5 shrink-0 items-center justify-center border border-[rgba(0,255,140,0.15)] bg-pit-3">
+                <Check className="h-2.5 w-2.5 text-fg-4" strokeWidth={3} />
+              </span>
+              <span className="truncate">title (always)</span>
+            </div>
+            {ROW_FIELDS.map((field) => {
+              const isChecked = value.has(field.value)
+              return (
+                <button
+                  key={field.value}
+                  onClick={() => toggle(field.value)}
+                  className="flex w-full items-center gap-2.5 px-3 py-1.5 text-left font-mono text-xs lowercase text-fg-2 hover:bg-[rgba(0,255,136,0.04)] hover:text-fg-1 transition"
+                >
+                  <span
+                    aria-hidden
+                    className={`inline-flex h-3.5 w-3.5 shrink-0 items-center justify-center border transition ${
+                      isChecked ? 'border-accent bg-accent' : 'border-[rgba(0,255,140,0.2)] bg-transparent'
+                    }`}
+                  >
+                    {isChecked && <Check className="h-2.5 w-2.5 text-pit" strokeWidth={3} />}
+                  </span>
+                  <span className="truncate">{field.label}</span>
+                </button>
+              )
+            })}
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+function LabelChip({ label }: { label: Schema['tables']['pm_labels']['row'] }) {
+  const color = label.color || '#5a8a72'
+  return (
+    <span
+      className="inline-flex h-5 shrink-0 items-center gap-1 border bg-pit-3 px-1.5 font-mono text-[10px] tracking-label lowercase"
+      style={{
+        borderColor: `${color}55`,
+        color,
+      }}
+      title={label.name}
+    >
+      <span aria-hidden className="block h-1.5 w-1.5 rounded-full" style={{ background: color }} />
+      {label.name.toLowerCase()}
+    </span>
   )
 }
 
@@ -1782,8 +2108,16 @@ function readStoredView(storageKey: string | null): {
   filters: ActiveFilters
   collapsedPriorities: number[]
   collapsedStatuses: string[]
+  sort: SortConfig
+  visibleFields: RowField[]
 } {
-  const empty = { filters: {}, collapsedPriorities: [], collapsedStatuses: [] }
+  const empty = {
+    filters: {} as ActiveFilters,
+    collapsedPriorities: [] as number[],
+    collapsedStatuses: [] as string[],
+    sort: DEFAULT_SORT,
+    visibleFields: DEFAULT_VISIBLE_FIELDS,
+  }
   if (!storageKey || typeof window === 'undefined') return empty
   try {
     const raw = window.localStorage.getItem(storageKey)
@@ -1792,6 +2126,8 @@ function readStoredView(storageKey: string | null): {
       filters?: Record<string, unknown>
       collapsedPriorities?: unknown
       collapsedStatuses?: unknown
+      sort?: { field?: unknown; direction?: unknown }
+      visibleFields?: unknown
     }
 
     const filters: ActiveFilters = {}
@@ -1810,7 +2146,28 @@ function readStoredView(storageKey: string | null): {
       ? parsed.collapsedStatuses.filter((v): v is string => typeof v === 'string')
       : []
 
-    return { filters, collapsedPriorities, collapsedStatuses }
+    const validSortFields = SORT_FIELDS.map((f) => f.value)
+    const sortField =
+      typeof parsed.sort?.field === 'string' && (validSortFields as string[]).includes(parsed.sort.field)
+        ? (parsed.sort.field as SortField)
+        : DEFAULT_SORT.field
+    const sortDirection: SortDirection =
+      parsed.sort?.direction === 'desc' ? 'desc' : 'asc'
+
+    const validRowFields = ROW_FIELDS.map((f) => f.value) as string[]
+    const visibleFields = Array.isArray(parsed.visibleFields)
+      ? (parsed.visibleFields.filter(
+          (v): v is RowField => typeof v === 'string' && validRowFields.includes(v),
+        ) as RowField[])
+      : DEFAULT_VISIBLE_FIELDS
+
+    return {
+      filters,
+      collapsedPriorities,
+      collapsedStatuses,
+      sort: { field: sortField, direction: sortDirection },
+      visibleFields,
+    }
   } catch {
     return empty
   }
@@ -1825,6 +2182,61 @@ function compareIssuesForBucketOrder(
   const updatedDiff = b.updatedAt - a.updatedAt
   if (updatedDiff !== 0) return updatedDiff
   return a.identifier.localeCompare(b.identifier)
+}
+
+function makeIssueComparator(
+  config: SortConfig,
+  statusMap: Map<string, Schema['tables']['pm_statuses']['row']>,
+) {
+  if (config.field === 'manual') return compareIssuesForBucketOrder
+
+  const dir = config.direction === 'desc' ? -1 : 1
+  return (a: Schema['tables']['pm_issues']['row'], b: Schema['tables']['pm_issues']['row']) => {
+    let cmp = 0
+    switch (config.field) {
+      case 'priority': {
+        // urgent (1) → high (2) → medium (3) → low (4) → no priority (0)
+        const rank = (p: number) => (p === 0 ? 99 : p)
+        cmp = rank(a.priority) - rank(b.priority)
+        break
+      }
+      case 'status': {
+        const ra = getStatusBucket(statusMap.get(a.statusId))?.position ?? 99
+        const rb = getStatusBucket(statusMap.get(b.statusId))?.position ?? 99
+        cmp = ra - rb
+        break
+      }
+      case 'identifier':
+        cmp = a.identifier.localeCompare(b.identifier, undefined, { numeric: true })
+        break
+      case 'title':
+        cmp = a.title.localeCompare(b.title)
+        break
+      case 'estimate': {
+        const ea = a.estimate ?? Number.POSITIVE_INFINITY
+        const eb = b.estimate ?? Number.POSITIVE_INFINITY
+        cmp = ea - eb
+        break
+      }
+      case 'updated':
+        cmp = a.updatedAt - b.updatedAt
+        break
+      case 'created':
+        cmp = a.createdAt - b.createdAt
+        break
+      case 'due': {
+        const da = a.dueDate ?? Number.POSITIVE_INFINITY
+        const db = b.dueDate ?? Number.POSITIVE_INFINITY
+        cmp = da - db
+        break
+      }
+    }
+    if (cmp !== 0) return cmp * dir
+    // tie-breakers: stable order via sortOrder then identifier
+    const rankDiff = a.sortOrder - b.sortOrder
+    if (rankDiff !== 0) return rankDiff
+    return a.identifier.localeCompare(b.identifier)
+  }
 }
 
 function getStatusBucket(status?: Schema['tables']['pm_statuses']['row'] | null) {
