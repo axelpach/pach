@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type ComponentType, type ReactNode } from 'react'
 import { Check, Search, X } from 'lucide-react'
+import { closePopupFromOutsideClick } from './popupEvents'
 
 export type ActiveFilters = Record<string, string[]>
 
@@ -37,10 +38,10 @@ export function FilterButton({
   useEffect(() => {
     if (!isOpen) return
     function handleClickOutside(event: MouseEvent) {
-      if (!containerRef.current) return
-      if (containerRef.current.contains(event.target as Node)) return
-      setIsOpen(false)
-      setInitialField(null)
+      closePopupFromOutsideClick(event, [containerRef], () => {
+        setIsOpen(false)
+        setInitialField(null)
+      })
     }
     function handleKey(event: KeyboardEvent) {
       if (event.key === 'Escape') {

@@ -27,6 +27,7 @@ import { StatusIcon } from './StatusIcon'
 import { PRIORITY_META, PriorityIcon } from './PriorityIcon'
 import { LabelMenu } from './LabelMenu'
 import { FilterButton, type ActiveFilters, type FilterFieldConfig } from './IssueFilters'
+import { closePopupFromOutsideClick } from './popupEvents'
 import { useQuery, useZero } from '@rocicorp/zero/react'
 import type { Schema } from '../../zero-schema'
 import type { Mutators } from '../../mutators'
@@ -119,6 +120,12 @@ type Foundation = {
   defaultProjectId?: string
 }
 
+type RowShortcutRequest = {
+  issueId: string
+  control: 'status' | 'labels'
+  nonce: number
+}
+
 export default function Issues() {
   const z = useZero<Schema, Mutators>()
   const { user } = useAuth()
@@ -161,6 +168,8 @@ export default function Issues() {
   const [creatingIssue, setCreatingIssue] = useState(false)
   const [collapsedPriorities, setCollapsedPriorities] = useState<Set<number>>(() => new Set(initialStoredView.collapsedPriorities))
   const [collapsedStatuses, setCollapsedStatuses] = useState<Set<string>>(() => new Set(initialStoredView.collapsedStatuses))
+  const [hoveredIssueId, setHoveredIssueId] = useState<string | null>(null)
+  const [rowShortcutRequest, setRowShortcutRequest] = useState<RowShortcutRequest | null>(null)
   const [projectModal, setProjectModal] = useState<
     | { mode: 'create'; teamId: string }
     | { mode: 'edit'; projectId: string }
@@ -375,6 +384,36 @@ export default function Issues() {
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
   }, [composerOpen])
+
+  useEffect(() => {
+    function handleKeyDown(event: KeyboardEvent) {
+      if (!hoveredIssueId) return
+      if (!event.shiftKey || event.ctrlKey || event.metaKey || event.altKey) return
+
+      const target = event.target
+      if (
+        target instanceof HTMLInputElement ||
+        target instanceof HTMLTextAreaElement ||
+        target instanceof HTMLSelectElement ||
+        (target instanceof HTMLElement && target.isContentEditable)
+      ) {
+        return
+      }
+
+      const key = event.key.toLowerCase()
+      if (key !== 's' && key !== 'l') return
+
+      event.preventDefault()
+      setRowShortcutRequest({
+        issueId: hoveredIssueId,
+        control: key === 's' ? 'status' : 'labels',
+        nonce: Date.now(),
+      })
+    }
+
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [hoveredIssueId])
 
   useEffect(() => {
     if (!composerOpen) return
@@ -1007,7 +1046,14 @@ export default function Issues() {
                                           (!l.companyId || l.companyId === issue.contextCompanyId),
                                         )}
                                         visibleFields={visibleFields}
+                                        shortcutRequest={rowShortcutRequest}
                                         draggable={isManualSort}
+                                        onHoverChange={(hovered) => {
+                                          setHoveredIssueId((current) => {
+                                            if (hovered) return issue.id
+                                            return current === issue.id ? null : current
+                                          })
+                                        }}
                                         onStatusChange={changeIssueStatus}
                                         onProjectChange={changeIssueProject}
                                         onTeamChange={changeIssueTeam}
@@ -1045,7 +1091,9 @@ export default function Issues() {
                         issueLabels={labelsByIssue.get(activeDragIssue.id) ?? []}
                         availableLabels={[]}
                         visibleFields={visibleFields}
+                        shortcutRequest={null}
                         draggable={isManualSort}
+                        onHoverChange={() => {}}
                         onStatusChange={() => {}}
                         onProjectChange={() => {}}
                         onTeamChange={() => {}}
@@ -1725,12 +1773,14 @@ function IssueRow({
   issueLabels,
   availableLabels,
   visibleFields,
+  shortcutRequest,
   onStatusChange,
   onProjectChange,
   onTeamChange,
   onEstimateChange,
   onPriorityChange,
   onToggleLabel,
+  onHoverChange,
 }: {
   issue: Schema['tables']['pm_issues']['row']
   company: Schema['tables']['companies']['row'] | null
@@ -1745,6 +1795,7 @@ function IssueRow({
   issueLabels: Schema['tables']['pm_labels']['row'][]
   availableLabels: Schema['tables']['pm_labels']['row'][]
   visibleFields: Set<RowField>
+  shortcutRequest?: RowShortcutRequest | null
   draggable?: boolean
   onStatusChange: (issueId: string, nextStatusId: string) => void | Promise<void>
   onProjectChange: (issueId: string, nextProjectId: string) => void | Promise<void>
@@ -1752,15 +1803,26 @@ function IssueRow({
   onEstimateChange: (issueId: string, nextEstimate: string) => void | Promise<void>
   onPriorityChange: (issueId: string, nextPriority: string) => void | Promise<void>
   onToggleLabel: (issueId: string, labelId: string) => void | Promise<void>
+  onHoverChange?: (hovered: boolean) => void
 }) {
   const navigate = useNavigate()
   const showCompany = company && company.id !== workspaceCompanyId
   const shows = (field: RowField) => visibleFields.has(field)
+  const statusOpenSignal =
+    shortcutRequest?.issueId === issue.id && shortcutRequest.control === 'status'
+      ? shortcutRequest.nonce
+      : undefined
+  const labelsOpenSignal =
+    shortcutRequest?.issueId === issue.id && shortcutRequest.control === 'labels'
+      ? shortcutRequest.nonce
+      : undefined
 
   return (
     <div
       role="button"
       tabIndex={0}
+      onMouseEnter={() => onHoverChange?.(true)}
+      onMouseLeave={() => onHoverChange?.(false)}
       onClick={() => navigate(`/issues/${issue.id}`)}
       onKeyDown={(event) => {
         if (event.key === 'Enter' || event.key === ' ') {
@@ -1785,6 +1847,7 @@ function IssueRow({
             triggerTitle={status ? `status · ${status.name.toLowerCase()}` : 'change status'}
             triggerClassName="flex h-6 w-6 items-center justify-center border border-transparent hover:border-[rgba(0,255,140,0.25)] hover:bg-[rgba(0,255,136,0.06)] transition"
             popupWidth="200px"
+            openSignal={statusOpenSignal}
           />
         </div>
       )}
@@ -1860,7 +1923,7 @@ function IssueRow({
           />
         </div>
       )}
-      {shows('labels') && issueLabels.length > 0 && (
+      {shows('labels') && (
         <div className="hidden md:block shrink-0" onClick={(event) => event.stopPropagation()}>
           <LabelMenu
             available={availableLabels}
@@ -1868,16 +1931,25 @@ function IssueRow({
             onToggle={(labelId) => onToggleLabel(issue.id, labelId)}
             trigger={
               <span className="inline-flex items-center gap-1">
-                {issueLabels.slice(0, 3).map((label) => (
-                  <LabelChip key={label.id} label={label} />
-                ))}
-                {issueLabels.length > 3 && (
-                  <span className="font-mono text-[10px] text-fg-4">+{issueLabels.length - 3}</span>
+                {issueLabels.length > 0 ? (
+                  <>
+                    {issueLabels.slice(0, 3).map((label) => (
+                      <LabelChip key={label.id} label={label} />
+                    ))}
+                    {issueLabels.length > 3 && (
+                      <span className="font-mono text-[10px] text-fg-4">+{issueLabels.length - 3}</span>
+                    )}
+                  </>
+                ) : (
+                  <span className="inline-flex h-5 items-center border border-[rgba(0,255,140,0.15)] bg-pit-3 px-2 font-mono text-[10px] tracking-label lowercase text-fg-4">
+                    labels
+                  </span>
                 )}
               </span>
             }
             triggerClassName="inline-flex items-center gap-1 p-0 border-0 bg-transparent transition hover:opacity-80"
             popupWidth="240px"
+            openSignal={labelsOpenSignal}
           />
         </div>
       )}
@@ -1923,9 +1995,7 @@ function SortMenu({
   useEffect(() => {
     if (!open) return
     function handleClickOutside(event: MouseEvent) {
-      if (!ref.current) return
-      if (ref.current.contains(event.target as Node)) return
-      setOpen(false)
+      closePopupFromOutsideClick(event, [ref], () => setOpen(false))
     }
     function handleKey(event: KeyboardEvent) {
       if (event.key === 'Escape') setOpen(false)
@@ -2020,9 +2090,7 @@ function DisplayMenu({
   useEffect(() => {
     if (!open) return
     function handleClickOutside(event: MouseEvent) {
-      if (!ref.current) return
-      if (ref.current.contains(event.target as Node)) return
-      setOpen(false)
+      closePopupFromOutsideClick(event, [ref], () => setOpen(false))
     }
     function handleKey(event: KeyboardEvent) {
       if (event.key === 'Escape') setOpen(false)

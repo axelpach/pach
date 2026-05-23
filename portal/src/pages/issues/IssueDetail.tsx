@@ -21,6 +21,7 @@ import { useAuth } from '../../lib/auth'
 import { PachSelect } from './PachSelect'
 import { StatusIcon } from './StatusIcon'
 import { PriorityIcon } from './PriorityIcon'
+import { closePopupFromOutsideClick } from './popupEvents'
 
 const PRIORITY_OPTIONS = [
   { value: 0, label: 'no priority', accent: 'text-fg-3' },
@@ -85,6 +86,7 @@ export default function IssueDetail() {
   const [descFocused, setDescFocused] = useState(false)
   const titleRef = useRef<HTMLTextAreaElement | null>(null)
   const descRef = useRef<HTMLTextAreaElement | null>(null)
+  const descSaveTimerRef = useRef<number | null>(null)
 
   useEffect(() => {
     const el = titleRef.current
@@ -104,6 +106,27 @@ export default function IssueDetail() {
     if (descFocused) return
     setDescDraft(issue.description ?? '')
   }, [descFocused, issue?.description, issue?.id])
+
+  useEffect(() => {
+    if (!descFocused || !issue) return
+    if (descDraft === (issue.description ?? '')) return
+
+    if (descSaveTimerRef.current != null) {
+      window.clearTimeout(descSaveTimerRef.current)
+    }
+
+    descSaveTimerRef.current = window.setTimeout(() => {
+      void commitDescription({ log: false })
+      descSaveTimerRef.current = null
+    }, 700)
+
+    return () => {
+      if (descSaveTimerRef.current != null) {
+        window.clearTimeout(descSaveTimerRef.current)
+        descSaveTimerRef.current = null
+      }
+    }
+  }, [descDraft, descFocused, issue?.description, issue?.id])
 
   async function logActivity(summary: string, type = 'updated', metadata?: Record<string, unknown>) {
     if (!issue) return
@@ -148,12 +171,12 @@ export default function IssueDetail() {
     await patchIssue({ title: next }, `renamed issue to "${next}"`)
   }
 
-  async function commitDescription() {
+  async function commitDescription({ log = true }: { log?: boolean } = {}) {
     if (!issue) return
     const next = descDraft
     const current = issue.description ?? ''
     if (next === current) return
-    await patchIssue({ description: next }, current ? 'updated description' : 'added a description')
+    await patchIssue({ description: next }, log ? (current ? 'updated description' : 'added a description') : undefined)
   }
 
   if (!issueId) {
@@ -251,6 +274,10 @@ export default function IssueDetail() {
                   onChange={setDescDraft}
                   onFocus={() => setDescFocused(true)}
                   onBlur={async () => {
+                    if (descSaveTimerRef.current != null) {
+                      window.clearTimeout(descSaveTimerRef.current)
+                      descSaveTimerRef.current = null
+                    }
                     await commitDescription()
                     setDescFocused(false)
                   }}
@@ -695,9 +722,7 @@ function LabelPicker({
   useEffect(() => {
     if (!open) return
     function handleClickOutside(event: MouseEvent) {
-      if (!ref.current) return
-      if (ref.current.contains(event.target as Node)) return
-      setOpen(false)
+      closePopupFromOutsideClick(event, [ref], () => setOpen(false))
     }
     function handleKey(event: KeyboardEvent) {
       if (event.key === 'Escape') setOpen(false)

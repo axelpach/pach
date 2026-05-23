@@ -2,6 +2,7 @@ import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 're
 import { createPortal } from 'react-dom'
 import { Check } from 'lucide-react'
 import type { Schema } from '../../zero-schema'
+import { closePopupFromOutsideClick } from './popupEvents'
 
 const POPUP_MAX_HEIGHT = 280
 const POPUP_GAP = 4
@@ -14,6 +15,7 @@ export function LabelMenu({
   onToggle,
   trigger,
   triggerClassName,
+  openSignal,
   align = 'left',
   popupWidth = '240px',
 }: {
@@ -22,6 +24,7 @@ export function LabelMenu({
   onToggle: (labelId: string) => void
   trigger: ReactNode
   triggerClassName?: string
+  openSignal?: number
   align?: 'left' | 'right'
   popupWidth?: string
 }) {
@@ -29,6 +32,14 @@ export function LabelMenu({
   const [popupStyle, setPopupStyle] = useState<React.CSSProperties>({})
   const triggerRef = useRef<HTMLButtonElement | null>(null)
   const popupRef = useRef<HTMLDivElement | null>(null)
+  const lastOpenSignalRef = useRef<number | undefined>(undefined)
+
+  useEffect(() => {
+    if (openSignal == null) return
+    if (lastOpenSignalRef.current === openSignal) return
+    lastOpenSignalRef.current = openSignal
+    setOpen(true)
+  }, [openSignal])
 
   useLayoutEffect(() => {
     if (!open) return
@@ -71,10 +82,7 @@ export function LabelMenu({
   useEffect(() => {
     if (!open) return
     function handleClickOutside(event: MouseEvent) {
-      const target = event.target as Node
-      if (triggerRef.current?.contains(target)) return
-      if (popupRef.current?.contains(target)) return
-      setOpen(false)
+      closePopupFromOutsideClick(event, [triggerRef, popupRef], () => setOpen(false))
     }
     function handleKey(event: KeyboardEvent) {
       if (event.key === 'Escape') setOpen(false)

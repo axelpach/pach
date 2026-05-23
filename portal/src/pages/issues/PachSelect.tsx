@@ -1,6 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import { ChevronDown } from 'lucide-react'
+import { closePopupFromOutsideClick } from './popupEvents'
 
 export type PachSelectOption = {
   value: string
@@ -12,6 +13,7 @@ type CommonProps = {
   value: string
   onChange: (next: string) => void
   options: PachSelectOption[]
+  openSignal?: number
   /* popup positioning + width */
   align?: 'left' | 'right'
   popupWidth?: string
@@ -37,18 +39,26 @@ const POPUP_MAX_HEIGHT = 256
 const POPUP_GAP = 4
 
 export function PachSelect(props: Props) {
-  const { value, onChange, options, align = 'left', popupWidth, popupClassName } = props
+  const { value, onChange, options, openSignal, align = 'left', popupWidth, popupClassName } = props
   const [open, setOpen] = useState(false)
   const [highlight, setHighlight] = useState(0)
   const [popupStyle, setPopupStyle] = useState<React.CSSProperties>({})
   const triggerRef = useRef<HTMLButtonElement | null>(null)
   const popupRef = useRef<HTMLDivElement | null>(null)
+  const lastOpenSignalRef = useRef<number | undefined>(undefined)
 
   function openMenu() {
     const idx = options.findIndex((o) => o.value === value)
     setHighlight(idx >= 0 ? idx : 0)
     setOpen(true)
   }
+
+  useEffect(() => {
+    if (openSignal == null) return
+    if (lastOpenSignalRef.current === openSignal) return
+    lastOpenSignalRef.current = openSignal
+    openMenu()
+  }, [openSignal, options, value])
 
   // position the portaled popup relative to the trigger; flip above if needed
   useLayoutEffect(() => {
@@ -98,10 +108,7 @@ export function PachSelect(props: Props) {
     if (!open) return
 
     function handleClickOutside(event: MouseEvent) {
-      const target = event.target as Node
-      if (triggerRef.current?.contains(target)) return
-      if (popupRef.current?.contains(target)) return
-      setOpen(false)
+      closePopupFromOutsideClick(event, [triggerRef, popupRef], () => setOpen(false))
     }
     function handleKey(event: KeyboardEvent) {
       if (event.key === 'Escape') {
