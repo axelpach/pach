@@ -146,6 +146,32 @@ const [companies] = useQuery(z.query.companies.orderBy('name', 'asc'))
 5. Add mutators to both `portal/src/mutators/index.ts` and `server/src/zero/mutators.ts`
 6. Restart Zero dev server
 
+### WhatsApp Video Template Sends
+
+For templates with a video header, do **not** reuse the template `example.headerHandle` / `header_handle` from Meta or Kapso as the send-time media URL. Those are review/sample handles and often resolve to protected `scontent.whatsapp.net` links that fail delivery with `403 Forbidden`.
+
+Send-time video headers need a real WhatsApp media id:
+
+```typescript
+components: [
+  { type: 'header', parameters: [{ type: 'video', video: { id: mediaId } }] },
+  { type: 'body', parameters: [{ type: 'text', parameter_name: 'nombre', text: 'Axel Pacheco' }] },
+]
+```
+
+Workflow for a local MP4:
+
+1. Confirm the MP4 is under WhatsApp limits and encoded as H.264/AAC. If Meta reports `videoCodec=hevc`, transcode it first:
+   ```bash
+   avconvert --source /path/to/source.mp4 --preset PresetAppleM4V720pHD --output /private/tmp/output-h264.m4v --replace --progress
+   ```
+2. Upload the H.264 file through Kapso/WhatsApp media using Doppler env:
+   ```bash
+   doppler run -- pnpm --filter server exec tsx -e "import { readFile } from 'node:fs/promises'; import { getWhatsApp } from './src/services/whatsapp/client.ts'; void (async () => { const bytes = await readFile('/private/tmp/output-h264.m4v'); const { client, phoneNumberId } = getWhatsApp('ardia-mkt'); const upload = await client.media.upload({ phoneNumberId, type: 'video', file: new Blob([bytes], { type: 'video/mp4' }), fileName: 'output-h264.mp4' }); console.log(upload.id); })();"
+   ```
+3. Store/use the returned `mediaId` in the send plan. Current demo mappings live in `portal/src/pages/whatsapp/Templates.tsx` as `TEMPLATE_MEDIA_HEADERS`.
+4. If sending reaches Meta but fails with `not payment-eligible`, the payload/media are fine; fix the WABA payment method in Meta WhatsApp Manager.
+
 ## Creating a New Deck
 
 ### Step 1: Gather context

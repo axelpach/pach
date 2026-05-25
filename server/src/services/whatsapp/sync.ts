@@ -10,6 +10,8 @@ interface RemoteComponent {
   example?: {
     header_handle?: string[]
     header_url?: string[]
+    headerHandle?: string[]
+    headerUrl?: string[]
   }
   buttons?: Array<Record<string, unknown>>
 }
@@ -76,7 +78,10 @@ export async function syncTemplates(projectId: string): Promise<SyncResult> {
     const header = pickComponent(t.components, 'HEADER')
     const body = pickComponent(t.components, 'BODY')
     const footer = pickComponent(t.components, 'FOOTER')
-    const headerSampleUrl = header?.example?.header_url?.[0] ?? header?.example?.header_handle?.[0]
+    const headerSampleUrl = header?.example?.header_url?.[0]
+      ?? header?.example?.headerUrl?.[0]
+      ?? header?.example?.header_handle?.[0]
+      ?? header?.example?.headerHandle?.[0]
 
     const row = {
       companyId: company.id,

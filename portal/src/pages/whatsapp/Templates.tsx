@@ -42,6 +42,17 @@ const HEADER_ICON: Record<string, typeof Image> = {
   TEXT: Type,
 }
 
+const TEMPLATE_MEDIA_HEADERS: Record<string, { type: 'image' | 'video' | 'document'; id: string }> = {
+  ardia_rentas_lanzamiento_2026: {
+    type: 'video',
+    id: '1513902736854020',
+  },
+  ardia_rentas_lanzamiento_2026_2: {
+    type: 'video',
+    id: '1513902736854020',
+  },
+}
+
 function normalizeWhatsAppPhone(raw: string): string {
   const digits = raw.replace(/\D/g, '')
   if (!digits) return ''
@@ -98,6 +109,25 @@ interface ContactOption {
   phone: string | null
 }
 
+interface TemplateExample {
+  header_handle?: string[]
+  header_url?: string[]
+  headerHandle?: string[]
+  headerUrl?: string[]
+}
+
+interface TemplateComponentPayload {
+  type?: string
+  format?: string
+  example?: TemplateExample
+  buttons?: Array<{ type?: string; url?: string }>
+}
+
+function getTemplateComponents(template: RemoteTemplate): TemplateComponentPayload[] {
+  if (!Array.isArray(template.components)) return []
+  return template.components.filter(component => typeof component === 'object' && component != null) as TemplateComponentPayload[]
+}
+
 function extractTemplateVariables(template: RemoteTemplate): string[] {
   if (template.variables.length > 0) return [...template.variables]
   if (!template.bodyText) return []
@@ -111,13 +141,44 @@ function parseTemplateVariableName(variable: string): string {
 }
 
 function hasDynamicUrlButton(template: RemoteTemplate): boolean {
-  if (!Array.isArray(template.components)) return false
-
-  return template.components.some(component => {
-    const buttons = (component as { type?: string; buttons?: Array<{ type?: string; url?: string }> }).buttons
+  return getTemplateComponents(template).some(component => {
+    const buttons = component.buttons
     if (!Array.isArray(buttons)) return false
     return buttons.some(button => button.type?.toUpperCase() === 'URL' && typeof button.url === 'string' && button.url.includes('{{'))
   })
+}
+
+function getHeaderExampleUrl(component: TemplateComponentPayload | undefined): string | null {
+  const example = component?.example
+  return example?.header_url?.[0]
+    ?? example?.headerUrl?.[0]
+    ?? example?.header_handle?.[0]
+    ?? example?.headerHandle?.[0]
+    ?? null
+}
+
+function isTemplateSampleMediaUrl(url: string): boolean {
+  try {
+    const hostname = new URL(url).hostname
+    return hostname === 'scontent.whatsapp.net' || hostname.endsWith('.scontent.whatsapp.net')
+  } catch {
+    return false
+  }
+}
+
+function getTemplateMediaHeader(template: RemoteTemplate): { type: 'image' | 'video' | 'document'; id?: string; url?: string } | null {
+  const configured = TEMPLATE_MEDIA_HEADERS[template.name]
+  if (configured) return configured
+
+  const format = template.headerFormat?.toLowerCase()
+  if (format !== 'image' && format !== 'video' && format !== 'document') return null
+
+  const header = getTemplateComponents(template).find(component => component.type?.toUpperCase() === 'HEADER')
+  const url = template.headerSampleUrl || getHeaderExampleUrl(header)
+  return {
+    type: format,
+    ...(url && !isTemplateSampleMediaUrl(url) ? { url } : {}),
+  }
 }
 
 function resolveTemplateVariable(name: string, contact: ContactOption): string | null {
@@ -142,22 +203,41 @@ function buildSendPlan(template: RemoteTemplate, contact: ContactOption): { comp
     }
   }
 
-  if (variableNames.length === 0) return {}
+  const components: Array<Record<string, unknown>> = []
+  const mediaHeader = getTemplateMediaHeader(template)
 
-  return [
-    {
-      components: [
+  if (mediaHeader) {
+    if (!mediaHeader.id && !mediaHeader.url) {
+      return {
+        error: `template requiere header ${mediaHeader.type} y no hay mediaId/link público configurado`,
+      }
+    }
+
+    components.push({
+      type: 'header',
+      parameters: [
         {
-          type: 'body',
-          parameters: variableNames.map(name => ({
-            type: 'text',
-            parameter_name: name,
-            text: resolveTemplateVariable(name, contact) ?? '',
-          })),
+          type: mediaHeader.type,
+          [mediaHeader.type]: mediaHeader.id ? { id: mediaHeader.id } : { link: mediaHeader.url },
         },
       ],
-    },
-  ][0]
+    })
+  }
+
+  if (variableNames.length > 0) {
+    components.push({
+      type: 'body',
+      parameters: variableNames.map(name => ({
+        type: 'text',
+        parameter_name: name,
+        text: resolveTemplateVariable(name, contact) ?? '',
+      })),
+    })
+  }
+
+  if (components.length === 0) return {}
+
+  return { components }
 }
 
 export default function WhatsAppTemplates() {
