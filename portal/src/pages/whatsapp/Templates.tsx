@@ -182,7 +182,7 @@ function getTemplateMediaHeader(template: RemoteTemplate): { type: 'image' | 'vi
 }
 
 function resolveTemplateVariable(name: string, contact: ContactOption): string | null {
-  if (name === 'nombre') return contact.name.trim() || 'cliente'
+  if (name === 'nombre') return contact.name.trim().split(/\s+/)[0] || ''
   return null
 }
 
