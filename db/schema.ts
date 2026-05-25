@@ -1,4 +1,4 @@
-import { pgTable, uuid, text, timestamp, integer, jsonb } from 'drizzle-orm/pg-core'
+import { boolean, pgTable, uuid, text, timestamp, integer, jsonb } from 'drizzle-orm/pg-core'
 
 /* ─────────────────────────── USERS ─────────────────────────── */
 
@@ -259,6 +259,129 @@ export const pmSavedViews = pgTable('pm_saved_views', {
   position: integer('position').notNull().default(0),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+})
+
+/* ─────────────────────── AGENT WORKERS ─────────────────────── */
+
+export const agentWorkers = pgTable('agent_workers', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  name: text('name').notNull(),
+  /** hetzner | local | manual */
+  provider: text('provider').notNull().default('hetzner'),
+  providerServerId: text('provider_server_id'),
+  hostname: text('hostname'),
+  sshHost: text('ssh_host').notNull(),
+  sshPort: integer('ssh_port').notNull().default(22),
+  sshUser: text('ssh_user').notNull().default('pach'),
+  /** idle | reserved | bootstrapping | running | needs_human | pr_ready | cleanup | offline */
+  status: text('status').notNull().default('idle'),
+  statusMessage: text('status_message'),
+  lastSeenAt: timestamp('last_seen_at', { withTimezone: true }),
+  metadata: jsonb('metadata').$type<Record<string, unknown>>().notNull().default({}),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+})
+
+export const githubRepositories = pgTable('github_repositories', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  projectKey: text('project_key').notNull(),
+  owner: text('owner').notNull(),
+  name: text('name').notNull(),
+  fullName: text('full_name').notNull().unique(),
+  defaultBranch: text('default_branch').notNull().default('main'),
+  localPathTemplate: text('local_path_template'),
+  active: boolean('active').notNull().default(true),
+  metadata: jsonb('metadata').$type<Record<string, unknown>>().notNull().default({}),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+})
+
+export const agentRuns = pgTable('agent_runs', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  issueId: uuid('issue_id').notNull().references(() => pmIssues.id),
+  workerId: uuid('worker_id').references(() => agentWorkers.id),
+  repositoryId: uuid('repository_id').references(() => githubRepositories.id),
+  projectKey: text('project_key').notNull(),
+  repoFullName: text('repo_full_name').notNull(),
+  baseBranch: text('base_branch').notNull().default('main'),
+  branchName: text('branch_name').notNull(),
+  workspacePath: text('workspace_path'),
+  tmuxSession: text('tmux_session'),
+  /** codex | claude | manual */
+  agentKind: text('agent_kind').notNull().default('codex'),
+  /** queued | reserved | bootstrapping | running | needs_human | pr_ready | completed | failed | canceled */
+  status: text('status').notNull().default('queued'),
+  statusMessage: text('status_message'),
+  startedAt: timestamp('started_at', { withTimezone: true }),
+  completedAt: timestamp('completed_at', { withTimezone: true }),
+  metadata: jsonb('metadata').$type<Record<string, unknown>>().notNull().default({}),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+})
+
+export const agentTerminals = pgTable('agent_terminals', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  runId: uuid('run_id').notNull().references(() => agentRuns.id),
+  name: text('name').notNull(),
+  /** agent | app | server | zero | shell | custom */
+  role: text('role').notNull().default('custom'),
+  tmuxWindow: text('tmux_window').notNull(),
+  status: text('status').notNull().default('planned'),
+  sortOrder: integer('sort_order').notNull().default(0),
+  lastTitle: text('last_title'),
+  metadata: jsonb('metadata').$type<Record<string, unknown>>().notNull().default({}),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+})
+
+export const githubBranches = pgTable('github_branches', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  repositoryId: uuid('repository_id').notNull().references(() => githubRepositories.id),
+  agentRunId: uuid('agent_run_id').references(() => agentRuns.id),
+  issueId: uuid('issue_id').references(() => pmIssues.id),
+  name: text('name').notNull(),
+  baseBranch: text('base_branch').notNull().default('main'),
+  /** planned | created | pushed | pr_opened | merged | abandoned */
+  status: text('status').notNull().default('planned'),
+  lastCommitSha: text('last_commit_sha'),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+})
+
+export const githubPullRequests = pgTable('github_pull_requests', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  repositoryId: uuid('repository_id').notNull().references(() => githubRepositories.id),
+  branchId: uuid('branch_id').references(() => githubBranches.id),
+  agentRunId: uuid('agent_run_id').references(() => agentRuns.id),
+  issueId: uuid('issue_id').references(() => pmIssues.id),
+  githubId: text('github_id'),
+  number: integer('number').notNull(),
+  url: text('url').notNull(),
+  title: text('title').notNull(),
+  /** open | closed | merged */
+  state: text('state').notNull().default('open'),
+  isDraft: boolean('is_draft').notNull().default(true),
+  mergeable: boolean('mergeable'),
+  headSha: text('head_sha'),
+  baseBranch: text('base_branch').notNull().default('main'),
+  checksStatus: text('checks_status').notNull().default('unknown'),
+  checksUrl: text('checks_url'),
+  githubCreatedAt: timestamp('github_created_at', { withTimezone: true }),
+  githubUpdatedAt: timestamp('github_updated_at', { withTimezone: true }),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+})
+
+export const githubWebhookEvents = pgTable('github_webhook_events', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  deliveryId: text('delivery_id').notNull().unique(),
+  eventType: text('event_type').notNull(),
+  action: text('action'),
+  repositoryFullName: text('repository_full_name'),
+  githubObjectId: text('github_object_id'),
+  payload: jsonb('payload').$type<Record<string, unknown>>().notNull(),
+  processedAt: timestamp('processed_at', { withTimezone: true }),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
 })
 
 /* ─────────────────────── WHATSAPP ─────────────────────── */
