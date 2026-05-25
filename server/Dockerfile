@@ -14,6 +14,7 @@ COPY pach.config.ts drizzle.config.ts tsconfig.json ./
 COPY db ./db
 COPY server ./server
 
+ENV NODE_ENV=production
 ENV PORT=3002
 EXPOSE 3002
 

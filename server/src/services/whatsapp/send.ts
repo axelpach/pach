@@ -39,7 +39,8 @@ export interface SendTemplateResult {
   }
 }
 
-const isProduction = process.env.NODE_ENV === 'production'
+const isDeployed = Boolean(process.env.RAILWAY_ENVIRONMENT || process.env.RAILWAY_PROJECT_ID || process.env.RAILWAY_SERVICE_ID)
+const isProduction = process.env.NODE_ENV === 'production' || isDeployed
 const DEV_PHONE = process.env.WHATSAPP_DEV_PHONE
 
 function getRecipient(phone: string): string {

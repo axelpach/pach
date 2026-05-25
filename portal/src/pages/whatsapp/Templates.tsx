@@ -667,7 +667,7 @@ function SendTemplateModal({
           )}
 
           <div className="px-6 py-3 border-b border-[rgba(0,255,140,0.10)] text-[11px] text-fg-3 uppercase tracking-label leading-relaxed">
-            › {eligibleContacts.length} contactos con teléfono normalizado · todos vienen preseleccionados · en local dev se enviará a `WHATSAPP_DEV_PHONE`
+            › {eligibleContacts.length} contactos con teléfono normalizado · todos vienen preseleccionados · solo local dev redirige a `WHATSAPP_DEV_PHONE`
             {!canSendFromPach ? '\n› los templates OPS quedan solo de referencia hasta conectar Pach con datos de Ardia' : ''}
           </div>
 
