@@ -6,6 +6,7 @@ import remarkGfm from 'remark-gfm'
 import {
   AlertTriangle,
   ArrowLeft,
+  Bot,
   Building2,
   Check,
   CheckCircle2,
@@ -14,6 +15,7 @@ import {
   Circle,
   FolderKanban,
   Plus,
+  TerminalSquare,
 } from 'lucide-react'
 import type { Schema } from '../../zero-schema'
 import type { Mutators } from '../../mutators'
@@ -33,6 +35,19 @@ const PRIORITY_OPTIONS = [
 
 const ESTIMATE_OPTIONS = [1, 2, 3, 4, 8, 16]
 
+const DEFAULT_REPOSITORIES = [
+  { projectKey: 'pach', owner: 'axelpach', name: 'pach', fullName: 'axelpach/pach', defaultBranch: 'main' },
+  { projectKey: 'ardia', owner: 'axelpach', name: 'ardia', fullName: 'axelpach/ardia', defaultBranch: 'main' },
+] as const
+
+const DEFAULT_TERMINALS = [
+  { name: 'agent', role: 'agent', tmuxWindow: 'agent', sortOrder: 0 },
+  { name: 'portal', role: 'app', tmuxWindow: 'portal', sortOrder: 1 },
+  { name: 'server', role: 'server', tmuxWindow: 'server', sortOrder: 2 },
+  { name: 'zero', role: 'zero', tmuxWindow: 'zero', sortOrder: 3 },
+  { name: 'shell', role: 'shell', tmuxWindow: 'shell', sortOrder: 4 },
+] as const
+
 export default function IssueDetail() {
   const { issueId } = useParams<{ issueId: string }>()
   const navigate = useNavigate()
@@ -46,12 +61,27 @@ export default function IssueDetail() {
   const [projects] = useQuery(z.query.pm_projects.orderBy('name', 'asc'))
   const [statuses] = useQuery(z.query.pm_statuses.orderBy('position', 'asc'))
   const [labels] = useQuery(z.query.pm_labels.orderBy('name', 'asc'))
+  const [workers] = useQuery(z.query.agent_workers.orderBy('name', 'asc'))
+  const [repositories] = useQuery(z.query.github_repositories.orderBy('projectKey', 'asc'))
+  const [agentRuns] = useQuery(
+    z.query.agent_runs.where('issueId', issueId ?? '').orderBy('createdAt', 'desc'),
+  )
   const [issueLabelLinks] = useQuery(z.query.pm_issue_labels.where('issueId', issueId ?? ''))
   const [activity] = useQuery(
     z.query.pm_issue_activity.where('issueId', issueId ?? '').orderBy('createdAt', 'asc'),
   )
 
   const issue = allIssues.find((entry) => entry.id === issueId) ?? null
+  const activeRun = agentRuns[0] ?? null
+  const [activeTerminals] = useQuery(
+    z.query.agent_terminals.where('runId', activeRun?.id ?? '').orderBy('sortOrder', 'asc'),
+  )
+  const [activeBranches] = useQuery(
+    z.query.github_branches.where('agentRunId', activeRun?.id ?? '').orderBy('createdAt', 'desc'),
+  )
+  const [activePullRequests] = useQuery(
+    z.query.github_pull_requests.where('agentRunId', activeRun?.id ?? '').orderBy('updatedAt', 'desc'),
+  )
 
   const team = issue ? teams.find((t) => t.id === issue.teamId) ?? null : null
   const project = issue?.projectId ? projects.find((p) => p.id === issue.projectId) ?? null : null
@@ -162,6 +192,83 @@ export default function IssueDetail() {
       })
       if (label) await logActivity(`added label ${label.name}`)
     }
+  }
+
+  async function seedDefaultRepositories() {
+    for (const repo of DEFAULT_REPOSITORIES) {
+      if (repositories.some((existing) => existing.fullName === repo.fullName)) continue
+      await z.mutate.github_repositories.create({
+        id: crypto.randomUUID(),
+        ...repo,
+      })
+    }
+  }
+
+  async function createAgentRun() {
+    if (!issue) return
+
+    const projectKey = company?.project ?? 'pach'
+    const repo =
+      repositories.find((entry) => entry.projectKey === projectKey && entry.active) ??
+      repositories.find((entry) => entry.projectKey === 'pach' && entry.active) ??
+      repositories.find((entry) => entry.active)
+    const worker = workers.find((entry) => entry.status === 'idle')
+
+    if (!repo || !worker) return
+
+    const runId = crypto.randomUUID()
+    const branchId = crypto.randomUUID()
+    const issueKey = issue.identifier.toLowerCase()
+    const branchName = `ap/${repo.projectKey}-${issueKey}-${slugify(issue.title)}`
+    const tmuxSession = `pach-${issueKey}`
+    const workspacePath = `/workspaces/issues/${issueKey}/${repo.projectKey}`
+
+    await z.mutate.agent_workers.update({
+      id: worker.id,
+      status: 'reserved',
+      statusMessage: `reserved for ${issue.identifier}`,
+    })
+
+    await z.mutate.agent_runs.create({
+      id: runId,
+      issueId: issue.id,
+      workerId: worker.id,
+      repositoryId: repo.id,
+      projectKey: repo.projectKey,
+      repoFullName: repo.fullName,
+      baseBranch: repo.defaultBranch,
+      branchName,
+      workspacePath,
+      tmuxSession,
+      status: 'reserved',
+      statusMessage: 'worker reserved; tmux bootstrap pending',
+    })
+
+    await z.mutate.github_branches.create({
+      id: branchId,
+      repositoryId: repo.id,
+      agentRunId: runId,
+      issueId: issue.id,
+      name: branchName,
+      baseBranch: repo.defaultBranch,
+      status: 'planned',
+    })
+
+    for (const terminal of DEFAULT_TERMINALS) {
+      await z.mutate.agent_terminals.create({
+        id: crypto.randomUUID(),
+        runId,
+        ...terminal,
+      })
+    }
+
+    await logActivity(`reserved ${worker.name} for agent run on ${branchName}`, 'agent_run_created', {
+      runId,
+      workerId: worker.id,
+      branchId,
+      branchName,
+      repository: repo.fullName,
+    })
   }
 
   async function commitTitle() {
@@ -461,6 +568,19 @@ export default function IssueDetail() {
             </div>
 
             <div className="border-b border-[rgba(0,255,140,0.1)] px-5 py-4">
+              <AgentRunPanel
+                run={activeRun}
+                branch={activeBranches[0] ?? null}
+                pullRequest={activePullRequests[0] ?? null}
+                terminals={activeTerminals}
+                workers={workers}
+                repositories={repositories}
+                onSeedRepositories={seedDefaultRepositories}
+                onCreateRun={createAgentRun}
+              />
+            </div>
+
+            <div className="border-b border-[rgba(0,255,140,0.1)] px-5 py-4">
               <div className="mb-3 flex items-center justify-between">
                 <span className="font-mono text-[10px] uppercase tracking-label text-fg-4">◊ labels</span>
                 <LabelPicker
@@ -525,6 +645,129 @@ function NotFound({ onBack }: { onBack: () => void }) {
   )
 }
 
+function AgentRunPanel({
+  run,
+  branch,
+  pullRequest,
+  terminals,
+  workers,
+  repositories,
+  onSeedRepositories,
+  onCreateRun,
+}: {
+  run: Schema['tables']['agent_runs']['row'] | null
+  branch: Schema['tables']['github_branches']['row'] | null
+  pullRequest: Schema['tables']['github_pull_requests']['row'] | null
+  terminals: Schema['tables']['agent_terminals']['row'][]
+  workers: Schema['tables']['agent_workers']['row'][]
+  repositories: Schema['tables']['github_repositories']['row'][]
+  onSeedRepositories: () => void | Promise<void>
+  onCreateRun: () => void | Promise<void>
+}) {
+  const idleWorkers = workers.filter((worker) => worker.status === 'idle')
+  const canCreateRun = repositories.length > 0 && idleWorkers.length > 0 && !run
+
+  return (
+    <div>
+      <div className="mb-3 flex items-center justify-between gap-3">
+        <span className="inline-flex items-center gap-2 font-mono text-[10px] uppercase tracking-label text-fg-4">
+          <Bot className="h-3.5 w-3.5 text-accent" />
+          agent run
+        </span>
+        {!run ? (
+          <button
+            onClick={() => {
+              void onCreateRun()
+            }}
+            disabled={!canCreateRun}
+            className="inline-flex h-7 items-center gap-1.5 border border-[rgba(0,255,140,0.2)] bg-pit-3 px-2 font-mono text-[10px] uppercase tracking-label text-fg-3 transition hover:border-accent hover:text-accent disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:border-[rgba(0,255,140,0.2)] disabled:hover:text-fg-3"
+            title={canCreateRun ? 'reserve idle worker' : 'needs a repository and idle worker'}
+          >
+            <TerminalSquare className="h-3 w-3" />
+            assign
+          </button>
+        ) : null}
+      </div>
+
+      {repositories.length === 0 ? (
+        <button
+          onClick={() => {
+            void onSeedRepositories()
+          }}
+          className="mb-3 w-full border border-[rgba(0,255,140,0.18)] bg-[rgba(0,255,136,0.04)] px-3 py-2 text-left font-mono text-xs text-fg-2 transition hover:border-accent hover:text-accent"
+        >
+          seed default GitHub repos
+        </button>
+      ) : null}
+
+      {!run ? (
+        <div className="space-y-1.5 font-mono text-xs text-fg-4">
+          <div>// no active agent run</div>
+          <div>
+            {idleWorkers.length} idle worker{idleWorkers.length === 1 ? '' : 's'} · {repositories.length} repo
+            {repositories.length === 1 ? '' : 's'}
+          </div>
+        </div>
+      ) : (
+        <div className="space-y-3">
+          <div className="space-y-1 font-mono text-xs">
+            <div className="flex items-center justify-between gap-3">
+              <span className="uppercase tracking-label text-fg-4">status</span>
+              <span className="text-accent">{run.status}</span>
+            </div>
+            <div className="flex items-center justify-between gap-3">
+              <span className="uppercase tracking-label text-fg-4">repo</span>
+              <span className="truncate text-fg-2">{run.repoFullName}</span>
+            </div>
+            <div className="flex items-center justify-between gap-3">
+              <span className="uppercase tracking-label text-fg-4">branch</span>
+              <span className="truncate text-fg-2">{branch?.name ?? run.branchName}</span>
+            </div>
+            <div className="flex items-center justify-between gap-3">
+              <span className="uppercase tracking-label text-fg-4">tmux</span>
+              <span className="truncate text-fg-2">{run.tmuxSession ?? 'pending'}</span>
+            </div>
+          </div>
+
+          {run.statusMessage ? (
+            <div className="border border-[rgba(0,255,140,0.12)] bg-pit-3 px-2.5 py-2 font-mono text-xs text-fg-3">
+              {run.statusMessage}
+            </div>
+          ) : null}
+
+          <div>
+            <div className="mb-1.5 font-mono text-[10px] uppercase tracking-label text-fg-4">terminals</div>
+            <div className="flex flex-wrap gap-1.5">
+              {terminals.map((terminal) => (
+                <span
+                  key={terminal.id}
+                  className="inline-flex items-center gap-1 border border-[rgba(0,255,140,0.14)] bg-pit-3 px-1.5 py-0.5 font-mono text-[10px] lowercase text-fg-3"
+                >
+                  <span className="text-fg-4">▸</span>
+                  {terminal.name}
+                </span>
+              ))}
+            </div>
+          </div>
+
+          {pullRequest ? (
+            <a
+              href={pullRequest.url}
+              target="_blank"
+              rel="noreferrer"
+              className="block truncate border border-[rgba(0,255,140,0.18)] bg-[rgba(0,255,136,0.04)] px-2.5 py-2 font-mono text-xs text-accent hover:border-accent"
+            >
+              PR #{pullRequest.number} · {pullRequest.isDraft ? 'draft' : pullRequest.state}
+            </a>
+          ) : (
+            <div className="font-mono text-xs text-fg-4">// no pull request yet</div>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
 function getWorkspaceStatuses(statuses: Schema['tables']['pm_statuses']['row'][]) {
   const uniqueStatuses = new Map<string, Schema['tables']['pm_statuses']['row']>()
   for (const status of statuses) {
@@ -533,6 +776,18 @@ function getWorkspaceStatuses(statuses: Schema['tables']['pm_statuses']['row'][]
   }
 
   return Array.from(uniqueStatuses.values()).sort((a, b) => a.position - b.position)
+}
+
+function slugify(value: string) {
+  const slug = value
+    .toLowerCase()
+    .normalize('NFKD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 42)
+
+  return slug || 'issue'
 }
 
 function DescriptionView({ source }: { source: string }) {

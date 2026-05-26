@@ -225,6 +225,147 @@ export function createServerMutators() {
       },
     },
 
+    agent_workers: {
+      async create(tx: Tx, args: { id: string; name: string; provider?: string; providerServerId?: string; hostname?: string; sshHost: string; sshPort?: number; sshUser?: string; status?: string; statusMessage?: string; lastSeenAt?: number; metadata?: Record<string, unknown> }) {
+        const now = Date.now()
+        await tx.mutate.agent_workers.insert({
+          provider: 'hetzner',
+          sshPort: 22,
+          sshUser: 'pach',
+          status: 'idle',
+          metadata: {},
+          ...args,
+          createdAt: now,
+          updatedAt: now,
+        })
+      },
+      async update(tx: Tx, args: { id: string; name?: string; provider?: string; providerServerId?: string | null; hostname?: string | null; sshHost?: string; sshPort?: number; sshUser?: string; status?: string; statusMessage?: string | null; lastSeenAt?: number | null; metadata?: Record<string, unknown> }) {
+        const { id, ...updates } = args
+        await tx.mutate.agent_workers.update({ id, ...updates, updatedAt: Date.now() })
+      },
+      async delete(tx: Tx, args: { id: string }) {
+        await tx.mutate.agent_workers.delete({ id: args.id })
+      },
+    },
+
+    github_repositories: {
+      async create(tx: Tx, args: { id: string; projectKey: string; owner: string; name: string; fullName: string; defaultBranch?: string; localPathTemplate?: string; active?: boolean; metadata?: Record<string, unknown> }) {
+        const now = Date.now()
+        await tx.mutate.github_repositories.insert({
+          defaultBranch: 'main',
+          active: true,
+          metadata: {},
+          ...args,
+          createdAt: now,
+          updatedAt: now,
+        })
+      },
+      async update(tx: Tx, args: { id: string; projectKey?: string; owner?: string; name?: string; fullName?: string; defaultBranch?: string; localPathTemplate?: string | null; active?: boolean; metadata?: Record<string, unknown> }) {
+        const { id, ...updates } = args
+        await tx.mutate.github_repositories.update({ id, ...updates, updatedAt: Date.now() })
+      },
+      async delete(tx: Tx, args: { id: string }) {
+        await tx.mutate.github_repositories.delete({ id: args.id })
+      },
+    },
+
+    agent_runs: {
+      async create(tx: Tx, args: { id: string; issueId: string; workerId?: string; repositoryId?: string; projectKey: string; repoFullName: string; baseBranch?: string; branchName: string; workspacePath?: string; tmuxSession?: string; agentKind?: string; status?: string; statusMessage?: string; startedAt?: number; completedAt?: number; metadata?: Record<string, unknown> }) {
+        const now = Date.now()
+        await tx.mutate.agent_runs.insert({
+          baseBranch: 'main',
+          agentKind: 'codex',
+          status: 'queued',
+          metadata: {},
+          ...args,
+          createdAt: now,
+          updatedAt: now,
+        })
+        await tx.mutate.pm_issues.update({ id: args.issueId, lastActivityAt: now, updatedAt: now })
+      },
+      async update(tx: Tx, args: { id: string; workerId?: string | null; repositoryId?: string | null; projectKey?: string; repoFullName?: string; baseBranch?: string; branchName?: string; workspacePath?: string | null; tmuxSession?: string | null; agentKind?: string; status?: string; statusMessage?: string | null; startedAt?: number | null; completedAt?: number | null; metadata?: Record<string, unknown> }) {
+        const { id, ...updates } = args
+        await tx.mutate.agent_runs.update({ id, ...updates, updatedAt: Date.now() })
+      },
+      async delete(tx: Tx, args: { id: string }) {
+        await tx.mutate.agent_runs.delete({ id: args.id })
+      },
+    },
+
+    agent_terminals: {
+      async create(tx: Tx, args: { id: string; runId: string; name: string; role?: string; tmuxWindow: string; status?: string; sortOrder?: number; lastTitle?: string; metadata?: Record<string, unknown> }) {
+        const now = Date.now()
+        await tx.mutate.agent_terminals.insert({
+          role: 'custom',
+          status: 'planned',
+          sortOrder: 0,
+          metadata: {},
+          ...args,
+          createdAt: now,
+          updatedAt: now,
+        })
+      },
+      async update(tx: Tx, args: { id: string; name?: string; role?: string; tmuxWindow?: string; status?: string; sortOrder?: number; lastTitle?: string | null; metadata?: Record<string, unknown> }) {
+        const { id, ...updates } = args
+        await tx.mutate.agent_terminals.update({ id, ...updates, updatedAt: Date.now() })
+      },
+      async delete(tx: Tx, args: { id: string }) {
+        await tx.mutate.agent_terminals.delete({ id: args.id })
+      },
+    },
+
+    github_branches: {
+      async create(tx: Tx, args: { id: string; repositoryId: string; agentRunId?: string; issueId?: string; name: string; baseBranch?: string; status?: string; lastCommitSha?: string }) {
+        const now = Date.now()
+        await tx.mutate.github_branches.insert({
+          baseBranch: 'main',
+          status: 'planned',
+          ...args,
+          createdAt: now,
+          updatedAt: now,
+        })
+      },
+      async update(tx: Tx, args: { id: string; agentRunId?: string | null; issueId?: string | null; name?: string; baseBranch?: string; status?: string; lastCommitSha?: string | null }) {
+        const { id, ...updates } = args
+        await tx.mutate.github_branches.update({ id, ...updates, updatedAt: Date.now() })
+      },
+      async delete(tx: Tx, args: { id: string }) {
+        await tx.mutate.github_branches.delete({ id: args.id })
+      },
+    },
+
+    github_pull_requests: {
+      async create(tx: Tx, args: { id: string; repositoryId: string; branchId?: string; agentRunId?: string; issueId?: string; githubId?: string; number: number; url: string; title: string; state?: string; isDraft?: boolean; mergeable?: boolean; headSha?: string; baseBranch?: string; checksStatus?: string; checksUrl?: string; githubCreatedAt?: number; githubUpdatedAt?: number }) {
+        const now = Date.now()
+        await tx.mutate.github_pull_requests.insert({
+          state: 'open',
+          isDraft: true,
+          baseBranch: 'main',
+          checksStatus: 'unknown',
+          ...args,
+          createdAt: now,
+          updatedAt: now,
+        })
+      },
+      async update(tx: Tx, args: { id: string; branchId?: string | null; agentRunId?: string | null; issueId?: string | null; githubId?: string | null; number?: number; url?: string; title?: string; state?: string; isDraft?: boolean; mergeable?: boolean | null; headSha?: string | null; baseBranch?: string; checksStatus?: string; checksUrl?: string | null; githubCreatedAt?: number | null; githubUpdatedAt?: number | null }) {
+        const { id, ...updates } = args
+        await tx.mutate.github_pull_requests.update({ id, ...updates, updatedAt: Date.now() })
+      },
+      async delete(tx: Tx, args: { id: string }) {
+        await tx.mutate.github_pull_requests.delete({ id: args.id })
+      },
+    },
+
+    github_webhook_events: {
+      async create(tx: Tx, args: { id: string; deliveryId: string; eventType: string; action?: string; repositoryFullName?: string; githubObjectId?: string; payload: Record<string, unknown>; processedAt?: number }) {
+        await tx.mutate.github_webhook_events.insert({ ...args, createdAt: Date.now() })
+      },
+      async update(tx: Tx, args: { id: string; processedAt?: number | null }) {
+        const { id, ...updates } = args
+        await tx.mutate.github_webhook_events.update({ id, ...updates })
+      },
+    },
+
     whatsapp_campaigns: {
       async create(tx: Tx, args: { id: string; companyId: string; templateId: string; name: string; recipientFilter?: Record<string, unknown>; variableValues?: Record<string, string>; mediaId?: string }) {
         const now = Date.now()
