@@ -5,6 +5,7 @@ import zeroPushRoute from './zero/push-route.js'
 import whatsappRoute, { publicWhatsAppRouter } from './routes/whatsapp.js'
 import authRoute from './routes/auth.js'
 import linearRoute from './routes/linear.js'
+import agentRoute from './routes/agent.js'
 import { requireAuth } from './middleware/auth.js'
 
 const app = express()
@@ -20,6 +21,7 @@ app.use('/whatsapp', publicWhatsAppRouter)
 app.use('/zero', requireAuth, zeroPushRoute)
 app.use('/whatsapp', requireAuth, whatsappRoute)
 app.use('/linear', requireAuth, linearRoute)
+app.use('/agent', requireAuth, agentRoute)
 
 app.use((_req, res) => res.status(404).json({ error: 'Not found' }))
 
