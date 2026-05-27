@@ -2,6 +2,10 @@ FROM node:20-slim
 
 WORKDIR /app
 
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends openssh-client \
+  && rm -rf /var/lib/apt/lists/*
+
 RUN npm install -g pnpm@8.15.0
 
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./

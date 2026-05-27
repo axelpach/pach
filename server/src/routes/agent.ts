@@ -1,5 +1,8 @@
 import { Router } from 'express'
 import { execFile } from 'node:child_process'
+import { mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { promisify } from 'node:util'
 import { eq } from 'drizzle-orm'
 import { getDb } from '../db.js'
@@ -191,6 +194,8 @@ function readOptionalString(value: unknown) {
 }
 
 async function runWorkerHealthCheck({ host, port, user }: { host: string; port: number; user: string }) {
+  const key = await prepareSshKey()
+
   const remoteCommand = [
     'printf "hostname=%s\\n" "$(hostname)"',
     'printf "user=%s\\n" "$(whoami)"',
@@ -198,9 +203,8 @@ async function runWorkerHealthCheck({ host, port, user }: { host: string; port: 
     'printf "uptime=%s\\n" "$(uptime -p 2>/dev/null || uptime)"',
   ].join(' && ')
 
-  const { stdout, stderr } = await execFileAsync(
-    'ssh',
-    [
+  try {
+    const sshArgs = [
       '-o',
       'BatchMode=yes',
       '-o',
@@ -209,21 +213,29 @@ async function runWorkerHealthCheck({ host, port, user }: { host: string; port: 
       'StrictHostKeyChecking=accept-new',
       '-p',
       String(port),
+    ]
+
+    if (key?.path) sshArgs.push('-i', key.path)
+
+    sshArgs.push(
       `${user}@${host}`,
       remoteCommand,
-    ],
-    { timeout: 12_000, maxBuffer: 32_000 },
-  )
+    )
 
-  const fields = parseKeyValueOutput(stdout)
-  return {
-    hostname: fields.hostname,
-    remoteUser: fields.user,
-    pwd: fields.pwd,
-    uptime: fields.uptime,
-    stdout,
-    stderr,
-    summary: `${fields.hostname ?? host} as ${fields.user ?? user}`,
+    const { stdout, stderr } = await execFileAsync('ssh', sshArgs, { timeout: 12_000, maxBuffer: 32_000 })
+
+    const fields = parseKeyValueOutput(stdout)
+    return {
+      hostname: fields.hostname,
+      remoteUser: fields.user,
+      pwd: fields.pwd,
+      uptime: fields.uptime,
+      stdout,
+      stderr,
+      summary: `${fields.hostname ?? host} as ${fields.user ?? user}`,
+    }
+  } finally {
+    if (key?.dir) await rm(key.dir, { recursive: true, force: true })
   }
 }
 
@@ -235,6 +247,17 @@ function parseKeyValueOutput(output: string) {
     result[line.slice(0, index)] = line.slice(index + 1)
   }
   return result
+}
+
+async function prepareSshKey() {
+  const rawKey = process.env.PACH_AGENT_SSH_PRIVATE_KEY
+  if (!rawKey) return null
+
+  const dir = await mkdtemp(join(tmpdir(), 'pach-agent-ssh-'))
+  const path = join(dir, 'id')
+  const key = rawKey.includes('\\n') ? rawKey.replace(/\\n/g, '\n') : rawKey
+  await writeFile(path, key.endsWith('\n') ? key : `${key}\n`, { mode: 0o600 })
+  return { dir, path }
 }
 
 export default router
