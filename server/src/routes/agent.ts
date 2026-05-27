@@ -250,7 +250,8 @@ function parseKeyValueOutput(output: string) {
 }
 
 async function prepareSshKey() {
-  const rawKey = process.env.PACH_AGENT_SSH_PRIVATE_KEY
+  const rawKey = readSshPrivateKey()
+
   if (!rawKey) return null
 
   const dir = await mkdtemp(join(tmpdir(), 'pach-agent-ssh-'))
@@ -258,6 +259,25 @@ async function prepareSshKey() {
   const key = rawKey.includes('\\n') ? rawKey.replace(/\\n/g, '\n') : rawKey
   await writeFile(path, key.endsWith('\n') ? key : `${key}\n`, { mode: 0o600 })
   return { dir, path }
+}
+
+function readSshPrivateKey() {
+  if (process.env.PACH_AGENT_SSH_PRIVATE_KEY_B64) {
+    return decodeSshPrivateKey(process.env.PACH_AGENT_SSH_PRIVATE_KEY_B64)
+  }
+
+  const raw = process.env.PACH_AGENT_SSH_PRIVATE_KEY
+  if (!raw) return null
+
+  const normalized = raw.includes('\\n') ? raw.replace(/\\n/g, '\n') : raw
+  if (normalized.includes('PRIVATE KEY')) return normalized
+
+  return decodeSshPrivateKey(normalized)
+}
+
+function decodeSshPrivateKey(value: string) {
+  const decoded = Buffer.from(value.replace(/\s+/g, ''), 'base64').toString('utf8')
+  return decoded.replace(/\r\n/g, '\n')
 }
 
 export default router
