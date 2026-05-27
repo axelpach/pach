@@ -195,6 +195,7 @@ function readOptionalString(value: unknown) {
 
 async function runWorkerHealthCheck({ host, port, user }: { host: string; port: number; user: string }) {
   const key = await prepareSshKey()
+  const keyFingerprint = key?.path ? await readKeyFingerprint(key.path) : null
 
   const remoteCommand = [
     'printf "hostname=%s\\n" "$(hostname)"',
@@ -209,6 +210,8 @@ async function runWorkerHealthCheck({ host, port, user }: { host: string; port: 
       'BatchMode=yes',
       '-o',
       'ConnectTimeout=8',
+      '-o',
+      'IdentitiesOnly=yes',
       '-o',
       'StrictHostKeyChecking=accept-new',
       '-p',
@@ -232,8 +235,14 @@ async function runWorkerHealthCheck({ host, port, user }: { host: string; port: 
       uptime: fields.uptime,
       stdout,
       stderr,
+      keyFingerprint,
       summary: `${fields.hostname ?? host} as ${fields.user ?? user}`,
     }
+  } catch (error) {
+    if (error instanceof Error && keyFingerprint) {
+      error.message = `${error.message}\nLoaded key fingerprint: ${keyFingerprint}`
+    }
+    throw error
   } finally {
     if (key?.dir) await rm(key.dir, { recursive: true, force: true })
   }
@@ -259,6 +268,15 @@ async function prepareSshKey() {
   const key = rawKey.includes('\\n') ? rawKey.replace(/\\n/g, '\n') : rawKey
   await writeFile(path, key.endsWith('\n') ? key : `${key}\n`, { mode: 0o600 })
   return { dir, path }
+}
+
+async function readKeyFingerprint(path: string) {
+  try {
+    const { stdout } = await execFileAsync('ssh-keygen', ['-lf', path], { timeout: 4_000, maxBuffer: 8_000 })
+    return stdout.trim()
+  } catch {
+    return 'unavailable'
+  }
 }
 
 function readSshPrivateKey() {
