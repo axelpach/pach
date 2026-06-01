@@ -25,6 +25,7 @@ export default {
     github_repositories: { row: { select: ['true'], insert: ['true'], update: ['true'], delete: ['true'] } },
     agent_runs: { row: { select: ['true'], insert: ['true'], update: ['true'], delete: ['true'] } },
     agent_terminals: { row: { select: ['true'], insert: ['true'], update: ['true'], delete: ['true'] } },
+    agent_run_artifacts: { row: { select: ['true'], insert: ['true'], update: ['true'], delete: ['true'] } },
     github_branches: { row: { select: ['true'], insert: ['true'], update: ['true'], delete: ['true'] } },
     github_pull_requests: { row: { select: ['true'], insert: ['true'], update: ['true'], delete: ['true'] } },
     github_webhook_events: { row: { select: ['true'], insert: ['true'], update: ['true'], delete: ['true'] } },

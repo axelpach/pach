@@ -305,6 +305,21 @@ export const agentTerminals = pgTable('agent_terminals', {
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
 });
+export const agentRunArtifacts = pgTable('agent_run_artifacts', {
+    id: uuid('id').primaryKey().defaultRandom(),
+    runId: uuid('run_id').notNull().references(() => agentRuns.id),
+    issueId: uuid('issue_id').references(() => pmIssues.id),
+    /** screenshot | video | trace | log | report | file */
+    kind: text('kind').notNull().default('file'),
+    name: text('name').notNull(),
+    url: text('url'),
+    storageKey: text('storage_key'),
+    remotePath: text('remote_path'),
+    mimeType: text('mime_type'),
+    sizeBytes: integer('size_bytes'),
+    metadata: jsonb('metadata').$type().notNull().default({}),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+});
 export const githubBranches = pgTable('github_branches', {
     id: uuid('id').primaryKey().defaultRandom(),
     repositoryId: uuid('repository_id').notNull().references(() => githubRepositories.id),

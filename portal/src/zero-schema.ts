@@ -334,6 +334,23 @@ const agentTerminals = table('agent_terminals')
   })
   .primaryKey('id')
 
+const agentRunArtifacts = table('agent_run_artifacts')
+  .columns({
+    id: string(),
+    runId: string().from('run_id'),
+    issueId: string().optional().from('issue_id'),
+    kind: string(),
+    name: string(),
+    url: string().optional(),
+    storageKey: string().optional().from('storage_key'),
+    remotePath: string().optional().from('remote_path'),
+    mimeType: string().optional().from('mime_type'),
+    sizeBytes: number().optional().from('size_bytes'),
+    metadata: json<Record<string, unknown>>(),
+    createdAt: number().from('created_at'),
+  })
+  .primaryKey('id')
+
 const githubBranches = table('github_branches')
   .columns({
     id: string(),
@@ -471,6 +488,7 @@ export const schema = createSchema({
     githubRepositories,
     agentRuns,
     agentTerminals,
+    agentRunArtifacts,
     githubBranches,
     githubPullRequests,
     githubWebhookEvents,

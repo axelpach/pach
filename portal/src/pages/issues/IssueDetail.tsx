@@ -19,7 +19,8 @@ import {
 } from 'lucide-react'
 import type { Schema } from '../../zero-schema'
 import type { Mutators } from '../../mutators'
-import { useAuth } from '../../lib/auth'
+import { authFetch, useAuth } from '../../lib/auth'
+import { config } from '../../config'
 import { PachSelect } from './PachSelect'
 import { StatusIcon } from './StatusIcon'
 import { PriorityIcon } from './PriorityIcon'
@@ -53,6 +54,8 @@ export default function IssueDetail() {
   const navigate = useNavigate()
   const z = useZero<Schema, Mutators>()
   const { user } = useAuth()
+  const [bootstrappingRunId, setBootstrappingRunId] = useState<string | null>(null)
+  const [agentActionMessage, setAgentActionMessage] = useState<string | null>(null)
 
   const [allIssues] = useQuery(z.query.pm_issues.orderBy('updatedAt', 'desc'))
   const [companies] = useQuery(z.query.companies.orderBy('name', 'asc'))
@@ -81,6 +84,9 @@ export default function IssueDetail() {
   )
   const [activePullRequests] = useQuery(
     z.query.github_pull_requests.where('agentRunId', activeRun?.id ?? '').orderBy('updatedAt', 'desc'),
+  )
+  const [activeArtifacts] = useQuery(
+    z.query.agent_run_artifacts.where('runId', activeRun?.id ?? '').orderBy('createdAt', 'desc'),
   )
 
   const team = issue ? teams.find((t) => t.id === issue.teamId) ?? null : null
@@ -221,7 +227,7 @@ export default function IssueDetail() {
     const issueKey = issue.identifier.toLowerCase()
     const branchName = `ap/${repo.projectKey}-${issueKey}-${slugify(issue.title)}`
     const tmuxSession = `pach-${issueKey}`
-    const workspacePath = `/workspaces/issues/${issueKey}/${repo.projectKey}`
+    const workspacePath = `/home/${worker.sshUser}/workspaces/issues/${issueKey}/${repo.projectKey}`
 
     await z.mutate.agent_workers.update({
       id: worker.id,
@@ -269,6 +275,37 @@ export default function IssueDetail() {
       branchName,
       repository: repo.fullName,
     })
+  }
+
+  async function bootstrapAgentRun() {
+    if (!activeRun) return
+
+    setBootstrappingRunId(activeRun.id)
+    setAgentActionMessage(null)
+
+    try {
+      const res = await authFetch(`${config.apiUrl}/agent/runs/${activeRun.id}/bootstrap-tmux`, {
+        method: 'POST',
+      })
+      const payload = await res.json().catch(() => ({}))
+
+      if (!res.ok) {
+        throw new Error(payload.error ?? 'Failed to bootstrap tmux session')
+      }
+
+      setAgentActionMessage(`tmux ready: ${payload.sessionName}`)
+      await logActivity(`bootstrapped tmux session ${payload.sessionName}`, 'agent_run_bootstrapped', {
+        runId: activeRun.id,
+        workerId: activeRun.workerId,
+        tmuxSession: payload.sessionName,
+        workspacePath: payload.workspacePath,
+      })
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed to bootstrap tmux session'
+      setAgentActionMessage(message)
+    } finally {
+      setBootstrappingRunId(null)
+    }
   }
 
   async function commitTitle() {
@@ -573,10 +610,14 @@ export default function IssueDetail() {
                 branch={activeBranches[0] ?? null}
                 pullRequest={activePullRequests[0] ?? null}
                 terminals={activeTerminals}
+                artifacts={activeArtifacts}
                 workers={workers}
                 repositories={repositories}
                 onSeedRepositories={seedDefaultRepositories}
                 onCreateRun={createAgentRun}
+                onBootstrapRun={bootstrapAgentRun}
+                bootstrapping={bootstrappingRunId === activeRun?.id}
+                actionMessage={agentActionMessage}
               />
             </div>
 
@@ -650,22 +691,31 @@ function AgentRunPanel({
   branch,
   pullRequest,
   terminals,
+  artifacts,
   workers,
   repositories,
   onSeedRepositories,
   onCreateRun,
+  onBootstrapRun,
+  bootstrapping,
+  actionMessage,
 }: {
   run: Schema['tables']['agent_runs']['row'] | null
   branch: Schema['tables']['github_branches']['row'] | null
   pullRequest: Schema['tables']['github_pull_requests']['row'] | null
   terminals: Schema['tables']['agent_terminals']['row'][]
+  artifacts: Schema['tables']['agent_run_artifacts']['row'][]
   workers: Schema['tables']['agent_workers']['row'][]
   repositories: Schema['tables']['github_repositories']['row'][]
   onSeedRepositories: () => void | Promise<void>
   onCreateRun: () => void | Promise<void>
+  onBootstrapRun: () => void | Promise<void>
+  bootstrapping: boolean
+  actionMessage: string | null
 }) {
   const idleWorkers = workers.filter((worker) => worker.status === 'idle')
   const canCreateRun = repositories.length > 0 && idleWorkers.length > 0 && !run
+  const canBootstrapRun = Boolean(run && ['reserved', 'failed'].includes(run.status))
 
   return (
     <div>
@@ -729,6 +779,24 @@ function AgentRunPanel({
             </div>
           </div>
 
+          {canBootstrapRun ? (
+            <button
+              onClick={() => {
+                void onBootstrapRun()
+              }}
+              disabled={bootstrapping}
+              className="w-full border border-[rgba(0,255,140,0.18)] bg-[rgba(0,255,136,0.04)] px-2.5 py-2 text-left font-mono text-xs uppercase tracking-label text-accent transition hover:border-accent disabled:cursor-wait disabled:opacity-50"
+            >
+              {bootstrapping ? 'bootstrapping tmux...' : 'bootstrap tmux on worker'}
+            </button>
+          ) : null}
+
+          {actionMessage ? (
+            <div className="border border-[rgba(0,255,140,0.12)] bg-pit-3 px-2.5 py-2 font-mono text-xs text-fg-3">
+              {actionMessage}
+            </div>
+          ) : null}
+
           {run.statusMessage ? (
             <div className="border border-[rgba(0,255,140,0.12)] bg-pit-3 px-2.5 py-2 font-mono text-xs text-fg-3">
               {run.statusMessage}
@@ -762,6 +830,45 @@ function AgentRunPanel({
           ) : (
             <div className="font-mono text-xs text-fg-4">// no pull request yet</div>
           )}
+
+          <div>
+            <div className="mb-1.5 font-mono text-[10px] uppercase tracking-label text-fg-4">artifacts</div>
+            {artifacts.length > 0 ? (
+              <div className="space-y-1.5">
+                {artifacts.map((artifact) => {
+                  const label = `${artifact.kind} · ${artifact.name}`
+                  const body = (
+                    <span className="flex min-w-0 items-center justify-between gap-2">
+                      <span className="truncate">{label}</span>
+                      <span className="shrink-0 text-fg-4">{artifact.mimeType ?? 'file'}</span>
+                    </span>
+                  )
+
+                  return artifact.url ? (
+                    <a
+                      key={artifact.id}
+                      href={artifact.url}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="block border border-[rgba(0,255,140,0.14)] bg-pit-3 px-2 py-1.5 font-mono text-[11px] text-fg-3 transition hover:border-accent hover:text-accent"
+                    >
+                      {body}
+                    </a>
+                  ) : (
+                    <div
+                      key={artifact.id}
+                      className="border border-[rgba(0,255,140,0.1)] bg-pit-3 px-2 py-1.5 font-mono text-[11px] text-fg-3"
+                      title={artifact.remotePath ?? undefined}
+                    >
+                      {body}
+                    </div>
+                  )
+                })}
+              </div>
+            ) : (
+              <div className="font-mono text-xs text-fg-4">// no screenshots or videos yet</div>
+            )}
+          </div>
         </div>
       )}
     </div>

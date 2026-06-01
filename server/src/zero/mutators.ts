@@ -314,6 +314,24 @@ export function createServerMutators() {
       },
     },
 
+    agent_run_artifacts: {
+      async create(tx: Tx, args: { id: string; runId: string; issueId?: string; kind?: string; name: string; url?: string; storageKey?: string; remotePath?: string; mimeType?: string; sizeBytes?: number; metadata?: Record<string, unknown> }) {
+        await tx.mutate.agent_run_artifacts.insert({
+          kind: 'file',
+          metadata: {},
+          ...args,
+          createdAt: Date.now(),
+        })
+      },
+      async update(tx: Tx, args: { id: string; issueId?: string | null; kind?: string; name?: string; url?: string | null; storageKey?: string | null; remotePath?: string | null; mimeType?: string | null; sizeBytes?: number | null; metadata?: Record<string, unknown> }) {
+        const { id, ...updates } = args
+        await tx.mutate.agent_run_artifacts.update({ id, ...updates })
+      },
+      async delete(tx: Tx, args: { id: string }) {
+        await tx.mutate.agent_run_artifacts.delete({ id: args.id })
+      },
+    },
+
     github_branches: {
       async create(tx: Tx, args: { id: string; repositoryId: string; agentRunId?: string; issueId?: string; name: string; baseBranch?: string; status?: string; lastCommitSha?: string }) {
         const now = Date.now()
