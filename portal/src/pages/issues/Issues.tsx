@@ -43,6 +43,7 @@ const PRIORITY_GROUPS = [
 ] as const
 
 const ESTIMATES = [2, 4, 8, 16]
+const ACTIVE_AGENT_RUN_STATUSES = new Set<string>(['queued', 'reserved', 'bootstrapping', 'running', 'needs_human', 'pr_ready'])
 
 const STATUS_BUCKETS = [
   { key: 'backlog', label: 'backlog', type: 'backlog' },
@@ -139,6 +140,7 @@ export default function Issues() {
   const [issues] = useQuery(z.query.pm_issues.orderBy('updatedAt', 'desc'))
   const [labels] = useQuery(z.query.pm_labels.orderBy('name', 'asc'))
   const [issueLabels] = useQuery(z.query.pm_issue_labels)
+  const [agentRuns] = useQuery(z.query.agent_runs.orderBy('createdAt', 'desc'))
 
   const storageKey = user ? `pach:issues:view:${user.id}` : null
   const scrollStorageKey = user ? `pach:issues:scroll:${user.id}` : null
@@ -271,6 +273,11 @@ export default function Issues() {
   const projectMap = new Map(projects.map((project) => [project.id, project]))
   const userMap = new Map(users.map((entry) => [entry.id, entry]))
   const labelMap = new Map(labels.map((entry) => [entry.id, entry]))
+  const activeAgentRunIssueIds = new Set(
+    agentRuns
+      .filter((run) => ACTIVE_AGENT_RUN_STATUSES.has(run.status))
+      .map((run) => run.issueId),
+  )
   const labelsByIssue = new Map<string, Schema['tables']['pm_labels']['row'][]>()
   for (const link of issueLabels) {
     const label = labelMap.get(link.labelId)
@@ -1045,6 +1052,7 @@ export default function Issues() {
                                           (!l.teamId || l.teamId === issue.teamId) &&
                                           (!l.companyId || l.companyId === issue.contextCompanyId),
                                         )}
+                                        hasActiveAgentRun={activeAgentRunIssueIds.has(issue.id)}
                                         visibleFields={visibleFields}
                                         shortcutRequest={rowShortcutRequest}
                                         draggable={isManualSort}
@@ -1090,6 +1098,7 @@ export default function Issues() {
                         allTeams={teams}
                         issueLabels={labelsByIssue.get(activeDragIssue.id) ?? []}
                         availableLabels={[]}
+                        hasActiveAgentRun={activeAgentRunIssueIds.has(activeDragIssue.id)}
                         visibleFields={visibleFields}
                         shortcutRequest={null}
                         draggable={isManualSort}
@@ -1772,6 +1781,7 @@ function IssueRow({
   allTeams,
   issueLabels,
   availableLabels,
+  hasActiveAgentRun,
   visibleFields,
   shortcutRequest,
   onStatusChange,
@@ -1794,6 +1804,7 @@ function IssueRow({
   allTeams: Schema['tables']['pm_teams']['row'][]
   issueLabels: Schema['tables']['pm_labels']['row'][]
   availableLabels: Schema['tables']['pm_labels']['row'][]
+  hasActiveAgentRun: boolean
   visibleFields: Set<RowField>
   shortcutRequest?: RowShortcutRequest | null
   draggable?: boolean
@@ -1872,6 +1883,16 @@ function IssueRow({
       {shows('identifier') && (
         <div className="shrink-0 font-mono text-xs text-accent/80 tabular-nums">{issue.identifier}</div>
       )}
+      {hasActiveAgentRun ? (
+        <div
+          className="relative flex h-5 w-5 shrink-0 items-center justify-center"
+          title="active VPS agent run"
+          aria-label="active VPS agent run"
+        >
+          <span className="absolute h-2.5 w-2.5 animate-ping rounded-full bg-accent opacity-40" />
+          <span className="h-2 w-2 rounded-full bg-accent shadow-[0_0_12px_rgba(0,255,136,0.95)]" />
+        </div>
+      ) : null}
       {shows('company') && showCompany && (
         <span className="hidden md:inline-flex shrink-0 h-5 items-center gap-1 border border-[rgba(0,255,140,0.15)] bg-pit-3 px-2 font-mono text-[10px] uppercase tracking-label text-fg-3">
           <Building2 className="h-3 w-3" />

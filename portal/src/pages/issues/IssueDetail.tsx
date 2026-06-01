@@ -56,6 +56,7 @@ export default function IssueDetail() {
   const { user } = useAuth()
   const [bootstrappingRunId, setBootstrappingRunId] = useState<string | null>(null)
   const [agentActionMessage, setAgentActionMessage] = useState<string | null>(null)
+  const [mainTab, setMainTab] = useState<'activity' | 'agent'>('activity')
 
   const [allIssues] = useQuery(z.query.pm_issues.orderBy('updatedAt', 'desc'))
   const [companies] = useQuery(z.query.companies.orderBy('name', 'asc'))
@@ -451,19 +452,48 @@ export default function IssueDetail() {
               )}
 
               <div className="mt-10 border-t border-[rgba(0,255,140,0.12)] pt-6">
-                <div className="mb-4 flex items-center gap-2 font-mono text-[10px] uppercase tracking-label text-fg-3">
-                  <span className="text-fg-4">◊</span> activity
-                  <span className="text-fg-4">· {activity.length}</span>
+                <div className="mb-5 flex items-center gap-2 border border-[rgba(0,255,140,0.12)] bg-[rgba(0,255,136,0.025)] p-1">
+                  <IssueDetailTab
+                    active={mainTab === 'activity'}
+                    label="activity"
+                    meta={activity.length}
+                    onClick={() => setMainTab('activity')}
+                  />
+                  <IssueDetailTab
+                    active={mainTab === 'agent'}
+                    label="agent run"
+                    tone={activeRun ? 'online' : 'muted'}
+                    meta={activeRun ? activeRun.status : undefined}
+                    onClick={() => setMainTab('agent')}
+                  />
                 </div>
 
-                <div className="space-y-3">
-                  {activity.length === 0 ? (
-                    <div className="font-mono text-xs text-fg-4">// no activity yet</div>
-                  ) : (
-                    activity.map((entry) => <ActivityEntry key={entry.id} entry={entry} />)
-                  )}
-                </div>
-
+                {mainTab === 'activity' ? (
+                  <div className="space-y-3">
+                    {activity.length === 0 ? (
+                      <div className="font-mono text-xs text-fg-4">// no activity yet</div>
+                    ) : (
+                      activity.map((entry) => <ActivityEntry key={entry.id} entry={entry} />)
+                    )}
+                  </div>
+                ) : (
+                  <div className="border border-[rgba(0,255,140,0.12)] bg-[rgba(0,255,136,0.025)] p-4">
+                    <AgentRunPanel
+                      run={activeRun}
+                      branch={activeBranches[0] ?? null}
+                      pullRequest={activePullRequests[0] ?? null}
+                      terminals={activeTerminals}
+                      artifacts={activeArtifacts}
+                      workers={workers}
+                      repositories={repositories}
+                      onSeedRepositories={seedDefaultRepositories}
+                      onCreateRun={createAgentRun}
+                      onBootstrapRun={bootstrapAgentRun}
+                      bootstrapping={bootstrappingRunId === activeRun?.id}
+                      actionMessage={agentActionMessage}
+                    />
+                  </div>
+                )}
               </div>
             </div>
           </div>
@@ -605,23 +635,6 @@ export default function IssueDetail() {
             </div>
 
             <div className="border-b border-[rgba(0,255,140,0.1)] px-5 py-4">
-              <AgentRunPanel
-                run={activeRun}
-                branch={activeBranches[0] ?? null}
-                pullRequest={activePullRequests[0] ?? null}
-                terminals={activeTerminals}
-                artifacts={activeArtifacts}
-                workers={workers}
-                repositories={repositories}
-                onSeedRepositories={seedDefaultRepositories}
-                onCreateRun={createAgentRun}
-                onBootstrapRun={bootstrapAgentRun}
-                bootstrapping={bootstrappingRunId === activeRun?.id}
-                actionMessage={agentActionMessage}
-              />
-            </div>
-
-            <div className="border-b border-[rgba(0,255,140,0.1)] px-5 py-4">
               <div className="mb-3 flex items-center justify-between">
                 <span className="font-mono text-[10px] uppercase tracking-label text-fg-4">◊ labels</span>
                 <LabelPicker
@@ -683,6 +696,44 @@ function NotFound({ onBack }: { onBack: () => void }) {
         </div>
       </div>
     </div>
+  )
+}
+
+function IssueDetailTab({
+  active,
+  label,
+  meta,
+  tone = 'muted',
+  onClick,
+}: {
+  active: boolean
+  label: string
+  meta?: number | string
+  tone?: 'muted' | 'online'
+  onClick: () => void
+}) {
+  return (
+    <button
+      onClick={onClick}
+      className={`flex min-w-0 flex-1 items-center justify-between gap-3 px-3 py-2 text-left font-mono text-[10px] uppercase tracking-label transition ${
+        active
+          ? 'bg-[rgba(0,255,136,0.08)] text-accent shadow-[inset_0_0_0_1px_rgba(0,255,140,0.24),0_0_18px_rgba(0,255,136,0.08)]'
+          : 'text-fg-4 hover:bg-[rgba(0,255,136,0.04)] hover:text-fg-2'
+      }`}
+    >
+      <span className="inline-flex min-w-0 items-center gap-2">
+        {tone === 'online' ? (
+          <span className="relative flex h-2 w-2 shrink-0">
+            <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-accent opacity-50" />
+            <span className="relative inline-flex h-2 w-2 rounded-full bg-accent shadow-[0_0_10px_rgba(0,255,136,0.9)]" />
+          </span>
+        ) : (
+          <span className="text-fg-4">◊</span>
+        )}
+        <span className="truncate">{label}</span>
+      </span>
+      {meta !== undefined ? <span className="shrink-0 text-fg-4">· {meta}</span> : null}
+    </button>
   )
 }
 
@@ -791,7 +842,7 @@ function AgentRunPanel({
             </button>
           ) : null}
 
-          {actionMessage ? (
+          {actionMessage && actionMessage !== run.statusMessage ? (
             <div className="border border-[rgba(0,255,140,0.12)] bg-pit-3 px-2.5 py-2 font-mono text-xs text-fg-3">
               {actionMessage}
             </div>
