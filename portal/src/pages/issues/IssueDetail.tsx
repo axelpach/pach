@@ -767,6 +767,72 @@ function AgentRunPanel({
   const idleWorkers = workers.filter((worker) => worker.status === 'idle')
   const canCreateRun = repositories.length > 0 && idleWorkers.length > 0 && !run
   const canBootstrapRun = Boolean(run && ['reserved', 'failed'].includes(run.status))
+  const [selectedTerminalId, setSelectedTerminalId] = useState<string | null>(null)
+  const [terminalOutput, setTerminalOutput] = useState('')
+  const [terminalInput, setTerminalInput] = useState('')
+  const [terminalBusy, setTerminalBusy] = useState(false)
+  const [terminalMessage, setTerminalMessage] = useState<string | null>(null)
+  const selectedTerminal =
+    terminals.find((terminal) => terminal.id === selectedTerminalId) ??
+    terminals[0] ??
+    null
+
+  useEffect(() => {
+    if (terminals.length === 0) {
+      setSelectedTerminalId(null)
+      return
+    }
+    if (!selectedTerminalId || !terminals.some((terminal) => terminal.id === selectedTerminalId)) {
+      setSelectedTerminalId(terminals[0].id)
+    }
+  }, [selectedTerminalId, terminals])
+
+  async function captureTerminal(terminal = selectedTerminal) {
+    if (!run || !terminal) return
+    setTerminalBusy(true)
+    setTerminalMessage(null)
+
+    try {
+      const res = await authFetch(`${config.apiUrl}/agent/runs/${run.id}/terminals/${terminal.id}/capture`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ lines: 220 }),
+      })
+      const payload = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error(payload.error ?? 'Failed to capture tmux output')
+      setTerminalOutput(payload.output ?? '')
+      setTerminalMessage(`captured ${terminal.name}`)
+    } catch (error) {
+      setTerminalMessage(error instanceof Error ? error.message : 'Failed to capture tmux output')
+    } finally {
+      setTerminalBusy(false)
+    }
+  }
+
+  async function sendTerminalInput() {
+    if (!run || !selectedTerminal) return
+    const input = terminalInput.trim()
+    if (!input) return
+    setTerminalBusy(true)
+    setTerminalMessage(null)
+
+    try {
+      const res = await authFetch(`${config.apiUrl}/agent/runs/${run.id}/terminals/${selectedTerminal.id}/send-input`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ input, enter: true }),
+      })
+      const payload = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error(payload.error ?? 'Failed to send tmux input')
+      setTerminalOutput(payload.output ?? '')
+      setTerminalInput('')
+      setTerminalMessage(`sent to ${selectedTerminal.name}`)
+    } catch (error) {
+      setTerminalMessage(error instanceof Error ? error.message : 'Failed to send tmux input')
+    } finally {
+      setTerminalBusy(false)
+    }
+  }
 
   return (
     <div>
@@ -858,15 +924,70 @@ function AgentRunPanel({
             <div className="mb-1.5 font-mono text-[10px] uppercase tracking-label text-fg-4">terminals</div>
             <div className="flex flex-wrap gap-1.5">
               {terminals.map((terminal) => (
-                <span
+                <button
                   key={terminal.id}
-                  className="inline-flex items-center gap-1 border border-[rgba(0,255,140,0.14)] bg-pit-3 px-1.5 py-0.5 font-mono text-[10px] lowercase text-fg-3"
+                  onClick={() => {
+                    setSelectedTerminalId(terminal.id)
+                    void captureTerminal(terminal)
+                  }}
+                  className={`inline-flex items-center gap-1 border px-1.5 py-0.5 font-mono text-[10px] lowercase transition ${
+                    selectedTerminal?.id === terminal.id
+                      ? 'border-accent bg-[rgba(0,255,136,0.08)] text-accent shadow-glow-xs'
+                      : 'border-[rgba(0,255,140,0.14)] bg-pit-3 text-fg-3 hover:border-[rgba(0,255,140,0.3)] hover:text-fg-1'
+                  }`}
                 >
                   <span className="text-fg-4">▸</span>
                   {terminal.name}
-                </span>
+                </button>
               ))}
             </div>
+          </div>
+
+          <div className="border border-[rgba(0,255,140,0.12)] bg-[rgba(0,0,0,0.18)]">
+            <div className="flex items-center justify-between gap-3 border-b border-[rgba(0,255,140,0.1)] px-3 py-2">
+              <div className="min-w-0 font-mono text-[10px] uppercase tracking-label text-fg-4">
+                tmux · {selectedTerminal?.name ?? 'no terminal'}
+              </div>
+              <button
+                onClick={() => void captureTerminal()}
+                disabled={!selectedTerminal || terminalBusy}
+                className="shrink-0 border border-[rgba(0,255,140,0.18)] bg-pit-3 px-2 py-1 font-mono text-[10px] uppercase tracking-label text-fg-3 transition hover:border-accent hover:text-accent disabled:cursor-wait disabled:opacity-40"
+              >
+                {terminalBusy ? 'busy' : 'capture'}
+              </button>
+            </div>
+
+            <pre className="min-h-32 max-h-80 overflow-auto whitespace-pre-wrap break-words px-3 py-3 font-mono text-[11px] leading-relaxed text-fg-2">
+              {terminalOutput || '// capture a terminal to read tmux output'}
+            </pre>
+
+            <form
+              className="border-t border-[rgba(0,255,140,0.1)] p-2"
+              onSubmit={(event) => {
+                event.preventDefault()
+                void sendTerminalInput()
+              }}
+            >
+              <div className="flex gap-2">
+                <input
+                  value={terminalInput}
+                  onChange={(event) => setTerminalInput(event.target.value)}
+                  disabled={!selectedTerminal || terminalBusy}
+                  placeholder={selectedTerminal ? `send command to ${selectedTerminal.name}` : 'select a terminal'}
+                  className="min-w-0 flex-1 border border-[rgba(0,255,140,0.12)] bg-pit-3 px-2 py-1.5 font-mono text-xs text-fg-2 outline-none placeholder:text-fg-4 focus:border-accent"
+                />
+                <button
+                  type="submit"
+                  disabled={!selectedTerminal || terminalBusy || !terminalInput.trim()}
+                  className="shrink-0 border border-[rgba(0,255,140,0.18)] bg-[rgba(0,255,136,0.04)] px-3 py-1.5 font-mono text-[10px] uppercase tracking-label text-accent transition hover:border-accent disabled:cursor-not-allowed disabled:opacity-40"
+                >
+                  send
+                </button>
+              </div>
+              {terminalMessage ? (
+                <div className="mt-2 font-mono text-[10px] lowercase text-fg-4">{terminalMessage}</div>
+              ) : null}
+            </form>
           </div>
 
           {pullRequest ? (

@@ -295,6 +295,98 @@ router.post('/runs/:id/bootstrap-tmux', async (req, res) => {
   }
 })
 
+router.post('/runs/:id/terminals/:terminalId/capture', async (req, res) => {
+  const { id, terminalId } = req.params
+
+  try {
+    const { run, terminal, worker } = await readRunTerminalWorker(id, terminalId)
+    const lines = readPositiveInteger((req.body as Record<string, unknown> | undefined)?.lines, 180, 20, 1000)
+    const result = await runSshCommand(
+      {
+        host: worker.sshHost,
+        port: worker.sshPort,
+        user: worker.sshUser,
+      },
+      buildTmuxCaptureCommand({
+        sessionName: sanitizeTmuxName(run.tmuxSession ?? '', 'tmux session'),
+        windowName: sanitizeTmuxName(terminal.tmuxWindow, 'tmux window'),
+        lines,
+      }),
+      { timeout: 12_000, maxBuffer: 512_000 },
+    )
+
+    res.json({
+      ok: true,
+      runId: run.id,
+      terminalId: terminal.id,
+      terminalName: terminal.name,
+      tmuxWindow: terminal.tmuxWindow,
+      output: result.stdout,
+      stderr: result.stderr,
+      keyFingerprint: result.keyFingerprint,
+    })
+  } catch (error) {
+    res.status(502).json({
+      ok: false,
+      runId: id,
+      terminalId,
+      error: error instanceof Error ? error.message : 'Unknown tmux capture error',
+    })
+  }
+})
+
+router.post('/runs/:id/terminals/:terminalId/send-input', async (req, res) => {
+  const { id, terminalId } = req.params
+
+  try {
+    const { run, terminal, worker } = await readRunTerminalWorker(id, terminalId)
+    const input = readTerminalInput(req.body)
+    const enter = readBoolean((req.body as Record<string, unknown> | undefined)?.enter, true)
+    const result = await runSshCommand(
+      {
+        host: worker.sshHost,
+        port: worker.sshPort,
+        user: worker.sshUser,
+      },
+      buildTmuxSendInputCommand({
+        sessionName: sanitizeTmuxName(run.tmuxSession ?? '', 'tmux session'),
+        windowName: sanitizeTmuxName(terminal.tmuxWindow, 'tmux window'),
+        input,
+        enter,
+        captureLines: 100,
+      }),
+      { timeout: 12_000, maxBuffer: 512_000 },
+    )
+
+    const now = new Date()
+    await getDb()
+      .update(agentTerminals)
+      .set({
+        status: 'active',
+        updatedAt: now,
+      })
+      .where(eq(agentTerminals.id, terminal.id))
+
+    res.json({
+      ok: true,
+      runId: run.id,
+      terminalId: terminal.id,
+      terminalName: terminal.name,
+      tmuxWindow: terminal.tmuxWindow,
+      output: result.stdout,
+      stderr: result.stderr,
+      keyFingerprint: result.keyFingerprint,
+    })
+  } catch (error) {
+    res.status(502).json({
+      ok: false,
+      runId: id,
+      terminalId,
+      error: error instanceof Error ? error.message : 'Unknown tmux send input error',
+    })
+  }
+})
+
 router.post('/runs/:id/artifacts', async (req, res) => {
   const { id } = req.params
 
@@ -352,6 +444,26 @@ async function findExistingWorker(worker: WorkerConfig) {
     existing.find((entry) => entry.name === worker.name) ??
     null
   )
+}
+
+async function readRunTerminalWorker(runId: string, terminalId: string) {
+  const db = getDb()
+  const [run] = await db.select().from(agentRuns).where(eq(agentRuns.id, runId))
+
+  if (!run) throw new Error('Agent run not found')
+  if (!run.workerId) throw new Error('Agent run has no assigned worker')
+  if (!run.tmuxSession) throw new Error('Agent run has no tmux session yet')
+
+  const [worker] = await db.select().from(agentWorkers).where(eq(agentWorkers.id, run.workerId))
+  if (!worker) throw new Error('Assigned worker not found')
+
+  const [terminal] = await db
+    .select()
+    .from(agentTerminals)
+    .where(and(eq(agentTerminals.id, terminalId), eq(agentTerminals.runId, run.id)))
+  if (!terminal) throw new Error('Terminal not found for this agent run')
+
+  return { run, terminal, worker }
 }
 
 function readArtifactConfigs(body: unknown): ArtifactConfig[] {
@@ -422,6 +534,28 @@ function readString(value: unknown, field: string, subject = 'worker') {
 
 function readOptionalString(value: unknown) {
   return typeof value === 'string' && value.trim() ? value.trim() : undefined
+}
+
+function readPositiveInteger(value: unknown, fallback: number, min: number, max: number) {
+  if (value == null) return fallback
+  const parsed = Number(value)
+  if (!Number.isInteger(parsed) || parsed < min || parsed > max) {
+    throw new Error(`Expected an integer between ${min} and ${max}`)
+  }
+  return parsed
+}
+
+function readBoolean(value: unknown, fallback: boolean) {
+  return typeof value === 'boolean' ? value : fallback
+}
+
+function readTerminalInput(body: unknown) {
+  if (!body || typeof body !== 'object') throw new Error('Missing terminal input')
+  const input = (body as Record<string, unknown>).input
+  if (typeof input !== 'string') throw new Error('Terminal input must be a string')
+  if (!input.trim()) throw new Error('Terminal input cannot be empty')
+  if (input.length > 8_000) throw new Error('Terminal input is too long')
+  return input
 }
 
 async function runWorkerHealthCheck({ host, port, user }: { host: string; port: number; user: string }) {
@@ -518,6 +652,55 @@ function buildTmuxBootstrapCommand({
   commands.push(`printf "tmux_session=%s\\n" ${session}`)
   commands.push(`printf "workspace=%s\\n" ${workspace}`)
   commands.push(`printf "windows=%s\\n" ${shellQuote(uniqueWindows.join(','))}`)
+
+  return commands.join('\n')
+}
+
+function buildTmuxCaptureCommand({
+  sessionName,
+  windowName,
+  lines,
+}: {
+  sessionName: string
+  windowName: string
+  lines: number
+}) {
+  const session = shellQuote(sessionName)
+  const target = shellQuote(`${sessionName}:${windowName}`)
+
+  return [
+    'set -eu',
+    'command -v tmux >/dev/null 2>&1 || { echo "missing tmux"; exit 42; }',
+    `tmux has-session -t ${session}`,
+    `tmux capture-pane -p -J -S -${lines} -t ${target}`,
+  ].join('\n')
+}
+
+function buildTmuxSendInputCommand({
+  sessionName,
+  windowName,
+  input,
+  enter,
+  captureLines,
+}: {
+  sessionName: string
+  windowName: string
+  input: string
+  enter: boolean
+  captureLines: number
+}) {
+  const session = shellQuote(sessionName)
+  const target = shellQuote(`${sessionName}:${windowName}`)
+  const commands = [
+    'set -eu',
+    'command -v tmux >/dev/null 2>&1 || { echo "missing tmux"; exit 42; }',
+    `tmux has-session -t ${session}`,
+    `tmux send-keys -t ${target} -l ${shellQuote(input)}`,
+  ]
+
+  if (enter) commands.push(`tmux send-keys -t ${target} C-m`)
+  commands.push('sleep 0.15')
+  commands.push(`tmux capture-pane -p -J -S -${captureLines} -t ${target}`)
 
   return commands.join('\n')
 }
