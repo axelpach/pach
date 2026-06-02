@@ -6,7 +6,7 @@ import { join } from 'node:path'
 import { promisify } from 'node:util'
 import { and, eq, inArray } from 'drizzle-orm'
 import { getDb } from '../db.js'
-import { agentRunArtifacts, agentRuns, agentTerminals, agentWorkers } from '../../../db/schema.js'
+import { agentRunArtifacts, agentRuns, agentTerminals, agentWorkers, githubBranches } from '../../../db/schema.js'
 
 const router = Router()
 const execFileAsync = promisify(execFile)
@@ -295,6 +295,115 @@ router.post('/runs/:id/bootstrap-tmux', async (req, res) => {
   }
 })
 
+router.post('/runs/:id/prepare-repo', async (req, res) => {
+  const { id } = req.params
+
+  try {
+    const db = getDb()
+    const { run, worker } = await readRunWorker(id)
+    const terminals = await db.select().from(agentTerminals).where(eq(agentTerminals.runId, run.id))
+    const repo = parseRepoFullName(run.repoFullName)
+    const workspacePath = normalizeWorkspacePath(
+      run.workspacePath ?? `/home/${worker.sshUser}/workspaces/issues/${run.id}/${repo.name}`,
+      worker.sshUser,
+    )
+    const repoCachePath = `/home/${worker.sshUser}/workspaces/repos/${repo.owner}/${repo.name}`
+    const sessionName = run.tmuxSession ? sanitizeTmuxName(run.tmuxSession, 'tmux session') : null
+    const windows = terminals
+      .sort((a, b) => a.sortOrder - b.sortOrder)
+      .map((terminal) => sanitizeTmuxName(terminal.tmuxWindow, 'tmux window'))
+    const githubToken = readGithubToken()
+
+    const startedAt = new Date()
+    await db
+      .update(agentRuns)
+      .set({
+        status: 'bootstrapping',
+        statusMessage: `preparing ${run.repoFullName} worktree`,
+        workspacePath,
+        updatedAt: startedAt,
+      })
+      .where(eq(agentRuns.id, run.id))
+
+    const result = await runSshCommand(
+      {
+        host: worker.sshHost,
+        port: worker.sshPort,
+        user: worker.sshUser,
+      },
+      buildPrepareRepoCommand({
+        repoFullName: run.repoFullName,
+        repoUrl: `https://github.com/${run.repoFullName}.git`,
+        repoCachePath,
+        workspacePath,
+        baseBranch: run.baseBranch,
+        branchName: run.branchName,
+        githubToken,
+        sessionName,
+        windows,
+      }),
+      { timeout: 180_000, maxBuffer: 2_000_000 },
+    )
+
+    const finishedAt = new Date()
+    const nextMetadata = {
+      ...(run.metadata ?? {}),
+      repoCachePath,
+      repoPreparedAt: finishedAt.toISOString(),
+    }
+
+    await db
+      .update(agentRuns)
+      .set({
+        status: 'running',
+        statusMessage: `repo ready: ${run.branchName}`,
+        workspacePath,
+        metadata: nextMetadata,
+        updatedAt: finishedAt,
+      })
+      .where(eq(agentRuns.id, run.id))
+
+    await db
+      .update(githubBranches)
+      .set({
+        status: 'created',
+        updatedAt: finishedAt,
+      })
+      .where(eq(githubBranches.agentRunId, run.id))
+
+    res.json({
+      ok: true,
+      runId: run.id,
+      workerId: worker.id,
+      repoCachePath,
+      workspacePath,
+      branchName: run.branchName,
+      stdout: result.stdout,
+      stderr: result.stderr,
+      keyFingerprint: result.keyFingerprint,
+      usedGithubToken: Boolean(githubToken),
+    })
+  } catch (error) {
+    const now = new Date()
+    const message = error instanceof Error ? error.message : 'Unknown repo preparation error'
+
+    await getDb()
+      .update(agentRuns)
+      .set({
+        status: 'failed',
+        statusMessage: message,
+        updatedAt: now,
+      })
+      .where(eq(agentRuns.id, id))
+
+    res.status(502).json({
+      ok: false,
+      runId: id,
+      error: message,
+    })
+  }
+})
+
 router.post('/runs/:id/terminals/:terminalId/capture', async (req, res) => {
   const { id, terminalId } = req.params
 
@@ -447,16 +556,10 @@ async function findExistingWorker(worker: WorkerConfig) {
 }
 
 async function readRunTerminalWorker(runId: string, terminalId: string) {
-  const db = getDb()
-  const [run] = await db.select().from(agentRuns).where(eq(agentRuns.id, runId))
-
-  if (!run) throw new Error('Agent run not found')
-  if (!run.workerId) throw new Error('Agent run has no assigned worker')
+  const { run, worker } = await readRunWorker(runId)
   if (!run.tmuxSession) throw new Error('Agent run has no tmux session yet')
 
-  const [worker] = await db.select().from(agentWorkers).where(eq(agentWorkers.id, run.workerId))
-  if (!worker) throw new Error('Assigned worker not found')
-
+  const db = getDb()
   const [terminal] = await db
     .select()
     .from(agentTerminals)
@@ -464,6 +567,25 @@ async function readRunTerminalWorker(runId: string, terminalId: string) {
   if (!terminal) throw new Error('Terminal not found for this agent run')
 
   return { run, terminal, worker }
+}
+
+async function readRunWorker(runId: string) {
+  const db = getDb()
+  const [run] = await db.select().from(agentRuns).where(eq(agentRuns.id, runId))
+
+  if (!run) throw new Error('Agent run not found')
+  if (!run.workerId) throw new Error('Agent run has no assigned worker')
+
+  const [worker] = await db.select().from(agentWorkers).where(eq(agentWorkers.id, run.workerId))
+  if (!worker) throw new Error('Assigned worker not found')
+
+  return { run, worker }
+}
+
+function parseRepoFullName(fullName: string) {
+  const match = /^([A-Za-z0-9_.-]+)\/([A-Za-z0-9_.-]+)$/.exec(fullName)
+  if (!match) throw new Error(`Invalid repo full name: ${fullName}`)
+  return { owner: match[1], name: match[2] }
 }
 
 function readArtifactConfigs(body: unknown): ArtifactConfig[] {
@@ -705,6 +827,91 @@ function buildTmuxSendInputCommand({
   return commands.join('\n')
 }
 
+function buildPrepareRepoCommand({
+  repoFullName,
+  repoUrl,
+  repoCachePath,
+  workspacePath,
+  baseBranch,
+  branchName,
+  githubToken,
+  sessionName,
+  windows,
+}: {
+  repoFullName: string
+  repoUrl: string
+  repoCachePath: string
+  workspacePath: string
+  baseBranch: string
+  branchName: string
+  githubToken: string | null
+  sessionName: string | null
+  windows: string[]
+}) {
+  const repoCache = shellQuote(repoCachePath)
+  const repoParent = shellQuote(parentDir(repoCachePath))
+  const workspace = shellQuote(workspacePath)
+  const workspaceParent = shellQuote(parentDir(workspacePath))
+  const remote = shellQuote(repoUrl)
+  const base = shellQuote(baseBranch)
+  const branch = shellQuote(branchName)
+  const remoteBranchRef = shellQuote(`refs/remotes/origin/${branchName}`)
+  const localBranchRef = shellQuote(`refs/heads/${branchName}`)
+  const remoteBranch = shellQuote(`origin/${branchName}`)
+  const remoteBase = shellQuote(`origin/${baseBranch}`)
+  const authSetup = githubToken
+    ? [
+        `PACH_GITHUB_TOKEN=${shellQuote(githubToken)}`,
+        'export PACH_GITHUB_TOKEN',
+        'ASKPASS="$(mktemp)"',
+        'cat > "$ASKPASS" <<\'PACH_ASKPASS\'',
+        '#!/bin/sh',
+        'case "$1" in',
+        '  *Username*) printf "%s\\n" "x-access-token" ;;',
+        '  *) printf "%s\\n" "$PACH_GITHUB_TOKEN" ;;',
+        'esac',
+        'PACH_ASKPASS',
+        'chmod 700 "$ASKPASS"',
+        'export GIT_ASKPASS="$ASKPASS"',
+        'export GIT_TERMINAL_PROMPT=0',
+      ]
+    : [
+        'export GIT_TERMINAL_PROMPT=0',
+      ]
+  const commands = [
+    'set -eu',
+    'command -v git >/dev/null 2>&1 || { echo "missing git"; exit 42; }',
+    ...authSetup,
+    'cleanup() { [ -n "${ASKPASS:-}" ] && rm -f "$ASKPASS"; }',
+    'trap cleanup EXIT',
+    `mkdir -p ${repoParent} ${workspaceParent}`,
+    `if [ ! -d ${repoCache}/.git ]; then git clone ${remote} ${repoCache}; fi`,
+    `git -C ${repoCache} remote set-url origin ${remote}`,
+    `git -C ${repoCache} fetch origin --prune`,
+    `git -C ${repoCache} fetch origin ${base}`,
+    `if git -C ${repoCache} ls-remote --exit-code --heads origin ${branch} >/dev/null 2>&1; then git -C ${repoCache} fetch origin ${branch}; fi`,
+    `if [ -e ${workspace} ] && [ ! -d ${workspace}/.git ] && [ ! -f ${workspace}/.git ]; then if [ "$(find ${workspace} -mindepth 1 -maxdepth 1 | wc -l | tr -d ' ')" -gt 0 ]; then echo "workspace exists and is not empty: ${workspacePath}"; exit 43; fi; rmdir ${workspace} 2>/dev/null || true; fi`,
+    `if [ -d ${workspace}/.git ] || [ -f ${workspace}/.git ]; then git -C ${workspace} fetch origin --prune; git -C ${workspace} checkout ${branch}; else if git -C ${repoCache} show-ref --verify --quiet ${remoteBranchRef}; then git -C ${repoCache} branch --track ${branch} ${remoteBranch} 2>/dev/null || true; elif ! git -C ${repoCache} show-ref --verify --quiet ${localBranchRef}; then git -C ${repoCache} branch ${branch} ${remoteBase}; fi; git -C ${repoCache} worktree add ${workspace} ${branch}; fi`,
+    `git -C ${workspace} status --short --branch`,
+    `printf "repo_cache=%s\\n" ${repoCache}`,
+    `printf "workspace=%s\\n" ${workspace}`,
+    `printf "branch=%s\\n" ${branch}`,
+  ]
+
+  if (sessionName) {
+    const session = shellQuote(sessionName)
+    commands.push(`if tmux has-session -t ${session} 2>/dev/null; then`)
+    for (const window of Array.from(new Set(windows))) {
+      commands.push(`  if tmux list-windows -t ${session} -F '#W' | grep -Fxq ${shellQuote(window)}; then tmux send-keys -t ${shellQuote(`${sessionName}:${window}`)} ${shellQuote(`cd ${shellQuote(workspacePath)}`)} C-m; fi`)
+    }
+    commands.push('fi')
+  }
+
+  commands.push(`printf "prepared=%s\\n" ${shellQuote(repoFullName)}`)
+
+  return commands.join('\n')
+}
+
 function sanitizeTmuxName(value: string, label: string) {
   const trimmed = value.trim()
   if (!/^[a-zA-Z0-9_.-]+$/.test(trimmed)) {
@@ -722,6 +929,12 @@ function normalizeWorkspacePath(path: string, sshUser: string) {
 
 function shellQuote(value: string) {
   return `'${value.replace(/'/g, `'\\''`)}'`
+}
+
+function parentDir(path: string) {
+  const index = path.lastIndexOf('/')
+  if (index <= 0) return '/'
+  return path.slice(0, index)
 }
 
 function parseKeyValueOutput(output: string) {
@@ -767,6 +980,10 @@ function readSshPrivateKey() {
   if (normalized.includes('PRIVATE KEY')) return normalized
 
   return decodeSshPrivateKey(normalized)
+}
+
+function readGithubToken() {
+  return process.env.PACH_AGENT_GITHUB_TOKEN?.trim() || process.env.GITHUB_TOKEN?.trim() || null
 }
 
 function decodeSshPrivateKey(value: string) {

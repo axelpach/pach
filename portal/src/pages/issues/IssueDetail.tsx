@@ -772,6 +772,8 @@ function AgentRunPanel({
   const [terminalInput, setTerminalInput] = useState('')
   const [terminalBusy, setTerminalBusy] = useState(false)
   const [terminalMessage, setTerminalMessage] = useState<string | null>(null)
+  const [repoBusy, setRepoBusy] = useState(false)
+  const [repoMessage, setRepoMessage] = useState<string | null>(null)
   const selectedTerminal =
     terminals.find((terminal) => terminal.id === selectedTerminalId) ??
     terminals[0] ??
@@ -831,6 +833,26 @@ function AgentRunPanel({
       setTerminalMessage(error instanceof Error ? error.message : 'Failed to send tmux input')
     } finally {
       setTerminalBusy(false)
+    }
+  }
+
+  async function prepareRepoWorktree() {
+    if (!run) return
+    setRepoBusy(true)
+    setRepoMessage(null)
+
+    try {
+      const res = await authFetch(`${config.apiUrl}/agent/runs/${run.id}/prepare-repo`, {
+        method: 'POST',
+      })
+      const payload = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error(payload.error ?? 'Failed to prepare repo worktree')
+      setRepoMessage(`repo ready: ${payload.branchName}`)
+      setTerminalOutput(payload.stdout ?? '')
+    } catch (error) {
+      setRepoMessage(error instanceof Error ? error.message : 'Failed to prepare repo worktree')
+    } finally {
+      setRepoBusy(false)
     }
   }
 
@@ -919,6 +941,19 @@ function AgentRunPanel({
               {run.statusMessage}
             </div>
           ) : null}
+
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              onClick={() => {
+                void prepareRepoWorktree()
+              }}
+              disabled={repoBusy || !run.workerId}
+              className="border border-[rgba(0,255,140,0.18)] bg-[rgba(0,255,136,0.04)] px-2.5 py-2 font-mono text-[10px] uppercase tracking-label text-accent transition hover:border-accent disabled:cursor-wait disabled:opacity-50"
+            >
+              {repoBusy ? 'preparing repo...' : 'prepare repo worktree'}
+            </button>
+            {repoMessage ? <span className="font-mono text-[10px] lowercase text-fg-4">{repoMessage}</span> : null}
+          </div>
 
           <div>
             <div className="mb-1.5 font-mono text-[10px] uppercase tracking-label text-fg-4">terminals</div>
