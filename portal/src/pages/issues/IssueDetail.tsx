@@ -1015,6 +1015,14 @@ function AgentRunPanel({
                   ctrl+c
                 </button>
                 <button
+                  onClick={() => void sendTerminalKey('ENTER', 'enter')}
+                  disabled={!selectedTerminal || terminalBusy}
+                  className="border border-[rgba(0,255,140,0.18)] bg-pit-3 px-2 py-1 font-mono text-[10px] uppercase tracking-label text-fg-3 transition hover:border-accent hover:text-accent disabled:cursor-wait disabled:opacity-40"
+                  title="send enter"
+                >
+                  enter
+                </button>
+                <button
                   onClick={() => void captureTerminal()}
                   disabled={!selectedTerminal || terminalBusy}
                   className="border border-[rgba(0,255,140,0.18)] bg-pit-3 px-2 py-1 font-mono text-[10px] uppercase tracking-label text-fg-3 transition hover:border-accent hover:text-accent disabled:cursor-wait disabled:opacity-40"
@@ -1039,6 +1047,12 @@ function AgentRunPanel({
                 <input
                   value={terminalInput}
                   onChange={(event) => setTerminalInput(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key !== 'Enter') return
+                    if (terminalInput.trim()) return
+                    event.preventDefault()
+                    void sendTerminalKey('ENTER', 'enter')
+                  }}
                   disabled={!selectedTerminal || terminalBusy}
                   placeholder={selectedTerminal ? `send command to ${selectedTerminal.name}` : 'select a terminal'}
                   className="min-w-0 flex-1 border border-[rgba(0,255,140,0.12)] bg-pit-3 px-2 py-1.5 font-mono text-xs text-fg-2 outline-none placeholder:text-fg-4 focus:border-accent"
