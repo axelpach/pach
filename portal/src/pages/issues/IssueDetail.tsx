@@ -836,6 +836,28 @@ function AgentRunPanel({
     }
   }
 
+  async function sendTerminalKey(key: string, label: string) {
+    if (!run || !selectedTerminal) return
+    setTerminalBusy(true)
+    setTerminalMessage(null)
+
+    try {
+      const res = await authFetch(`${config.apiUrl}/agent/runs/${run.id}/terminals/${selectedTerminal.id}/send-input`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ key }),
+      })
+      const payload = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error(payload.error ?? `Failed to send ${label}`)
+      setTerminalOutput(payload.output ?? '')
+      setTerminalMessage(`sent ${label} to ${selectedTerminal.name}`)
+    } catch (error) {
+      setTerminalMessage(error instanceof Error ? error.message : `Failed to send ${label}`)
+    } finally {
+      setTerminalBusy(false)
+    }
+  }
+
   async function prepareRepoWorktree() {
     if (!run) return
     setRepoBusy(true)
@@ -983,13 +1005,23 @@ function AgentRunPanel({
               <div className="min-w-0 font-mono text-[10px] uppercase tracking-label text-fg-4">
                 tmux · {selectedTerminal?.name ?? 'no terminal'}
               </div>
-              <button
-                onClick={() => void captureTerminal()}
-                disabled={!selectedTerminal || terminalBusy}
-                className="shrink-0 border border-[rgba(0,255,140,0.18)] bg-pit-3 px-2 py-1 font-mono text-[10px] uppercase tracking-label text-fg-3 transition hover:border-accent hover:text-accent disabled:cursor-wait disabled:opacity-40"
-              >
-                {terminalBusy ? 'busy' : 'capture'}
-              </button>
+              <div className="flex shrink-0 items-center gap-1.5">
+                <button
+                  onClick={() => void sendTerminalKey('CTRL_C', 'ctrl+c')}
+                  disabled={!selectedTerminal || terminalBusy}
+                  className="border border-[rgba(255,92,92,0.22)] bg-[rgba(255,92,92,0.04)] px-2 py-1 font-mono text-[10px] uppercase tracking-label text-fg-3 transition hover:border-fail hover:text-fail disabled:cursor-wait disabled:opacity-40"
+                  title="interrupt current process"
+                >
+                  ctrl+c
+                </button>
+                <button
+                  onClick={() => void captureTerminal()}
+                  disabled={!selectedTerminal || terminalBusy}
+                  className="border border-[rgba(0,255,140,0.18)] bg-pit-3 px-2 py-1 font-mono text-[10px] uppercase tracking-label text-fg-3 transition hover:border-accent hover:text-accent disabled:cursor-wait disabled:opacity-40"
+                >
+                  {terminalBusy ? 'busy' : 'capture'}
+                </button>
+              </div>
             </div>
 
             <pre className="min-h-32 max-h-80 overflow-auto whitespace-pre-wrap break-words px-3 py-3 font-mono text-[11px] leading-relaxed text-fg-2">

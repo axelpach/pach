@@ -449,7 +449,7 @@ router.post('/runs/:id/terminals/:terminalId/send-input', async (req, res) => {
 
   try {
     const { run, terminal, worker } = await readRunTerminalWorker(id, terminalId)
-    const input = readTerminalInput(req.body)
+    const { input, key } = readTerminalInput(req.body)
     const enter = readBoolean((req.body as Record<string, unknown> | undefined)?.enter, true)
     const result = await runSshCommand(
       {
@@ -461,6 +461,7 @@ router.post('/runs/:id/terminals/:terminalId/send-input', async (req, res) => {
         sessionName: sanitizeTmuxName(run.tmuxSession ?? '', 'tmux session'),
         windowName: sanitizeTmuxName(terminal.tmuxWindow, 'tmux window'),
         input,
+        key,
         enter,
         captureLines: 100,
       }),
@@ -673,11 +674,19 @@ function readBoolean(value: unknown, fallback: boolean) {
 
 function readTerminalInput(body: unknown) {
   if (!body || typeof body !== 'object') throw new Error('Missing terminal input')
-  const input = (body as Record<string, unknown>).input
+  const raw = body as Record<string, unknown>
+  const input = raw.input
+  const key = raw.key
+
+  if (typeof key === 'string' && key.trim()) {
+    const normalized = normalizeTmuxKey(key)
+    return { input: null, key: normalized }
+  }
+
   if (typeof input !== 'string') throw new Error('Terminal input must be a string')
   if (!input.trim()) throw new Error('Terminal input cannot be empty')
   if (input.length > 8_000) throw new Error('Terminal input is too long')
-  return input
+  return { input, key: null }
 }
 
 async function runWorkerHealthCheck({ host, port, user }: { host: string; port: number; user: string }) {
@@ -802,12 +811,14 @@ function buildTmuxSendInputCommand({
   sessionName,
   windowName,
   input,
+  key,
   enter,
   captureLines,
 }: {
   sessionName: string
   windowName: string
-  input: string
+  input: string | null
+  key: string | null
   enter: boolean
   captureLines: number
 }) {
@@ -817,10 +828,15 @@ function buildTmuxSendInputCommand({
     'set -eu',
     'command -v tmux >/dev/null 2>&1 || { echo "missing tmux"; exit 42; }',
     `tmux has-session -t ${session}`,
-    `tmux send-keys -t ${target} -l ${shellQuote(input)}`,
   ]
 
-  if (enter) commands.push(`tmux send-keys -t ${target} C-m`)
+  if (key) {
+    commands.push(`tmux send-keys -t ${target} ${shellQuote(key)}`)
+  } else if (input) {
+    commands.push(`tmux send-keys -t ${target} -l ${shellQuote(input)}`)
+    if (enter) commands.push(`tmux send-keys -t ${target} C-m`)
+  }
+
   commands.push('sleep 0.15')
   commands.push(`tmux capture-pane -p -J -S -${captureLines} -t ${target}`)
 
@@ -918,6 +934,22 @@ function sanitizeTmuxName(value: string, label: string) {
     throw new Error(`Invalid ${label}: use letters, numbers, dots, underscores, or hyphens`)
   }
   return trimmed
+}
+
+function normalizeTmuxKey(key: string) {
+  const normalized = key.trim().toUpperCase()
+  const allowed: Record<string, string> = {
+    CTRL_C: 'C-c',
+    'CTRL-C': 'C-c',
+    'C-C': 'C-c',
+    ESC: 'Escape',
+    ESCAPE: 'Escape',
+    ENTER: 'C-m',
+  }
+
+  const tmuxKey = allowed[normalized]
+  if (!tmuxKey) throw new Error(`Unsupported terminal key: ${key}`)
+  return tmuxKey
 }
 
 function normalizeWorkspacePath(path: string, sshUser: string) {
