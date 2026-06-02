@@ -1360,22 +1360,25 @@ function buildStartCodexCommand({
 }) {
   const session = shellQuote(sessionName)
   const target = shellQuote(`${sessionName}:${windowName}`)
-  const command = `cd ${shellQuote(workspacePath)} && codex ${shellQuote(prompt)}`
+  const workspace = shellQuote(workspacePath)
+  const command = [
+    'export NVM_DIR="$HOME/.nvm"',
+    '[ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh"',
+    `cd ${workspace}`,
+    `exec codex ${shellQuote(prompt)}`,
+  ].join('; ')
   const commands = [
     'set -eu',
     'command -v tmux >/dev/null 2>&1 || { echo "missing tmux"; exit 42; }',
-    'command -v codex >/dev/null 2>&1 || { echo "missing codex"; exit 43; }',
     `tmux has-session -t ${session}`,
   ]
 
   if (interruptCurrent) {
-    commands.push(`tmux send-keys -t ${target} C-c`)
-    commands.push('sleep 0.15')
+    commands.push(`tmux send-keys -t ${target} C-c 2>/dev/null || true`)
   }
 
-  commands.push(`tmux send-keys -t ${target} -l ${shellQuote(command)}`)
-  commands.push(`tmux send-keys -t ${target} C-m`)
-  commands.push('sleep 0.25')
+  commands.push(`tmux respawn-pane -k -t ${target} -c ${workspace} ${shellQuote(`bash -lc ${shellQuote(command)}`)}`)
+  commands.push('sleep 0.75')
   commands.push(`tmux capture-pane -p -J -S -${captureLines} -t ${target}`)
 
   return commands.join('\n')
