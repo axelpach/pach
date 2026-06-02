@@ -9,7 +9,15 @@ import { WebSocket, WebSocketServer } from 'ws'
 import { and, eq, inArray } from 'drizzle-orm'
 import { getDb } from '../db.js'
 import { verifyToken } from '../lib/auth.js'
-import { agentRunArtifacts, agentRuns, agentTerminals, agentWorkers, githubBranches } from '../../../db/schema.js'
+import {
+  agentRunArtifacts,
+  agentRuns,
+  agentTerminals,
+  agentWorkers,
+  githubBranches,
+  githubPullRequests,
+  pmIssues,
+} from '../../../db/schema.js'
 
 const router = Router()
 const execFileAsync = promisify(execFile)
@@ -415,6 +423,152 @@ router.post('/runs/:id/prepare-repo', async (req, res) => {
   }
 })
 
+router.post('/runs/:id/plan-work', async (req, res) => {
+  const { id } = req.params
+
+  try {
+    const goal = readAgentGoal(req.body)
+    const db = getDb()
+    const { run: initialRun, worker } = await readRunWorker(id)
+    const terminals = await db.select().from(agentTerminals).where(eq(agentTerminals.runId, initialRun.id))
+    const agentTerminal = findAgentTerminal(terminals)
+    const githubToken = readGithubToken()
+
+    let run = initialRun
+    if (!run.tmuxSession) {
+      const sessionName = sanitizeTmuxName(run.tmuxSession ?? `pach-${run.id.slice(0, 8)}`, 'tmux session')
+      const workspacePath = normalizeWorkspacePath(
+        run.workspacePath ?? defaultRunWorkspacePath(run, worker.sshUser),
+        worker.sshUser,
+      )
+      const now = new Date()
+
+      await db
+        .update(agentRuns)
+        .set({
+          status: 'bootstrapping',
+          statusMessage: 'creating tmux session on worker',
+          tmuxSession: sessionName,
+          workspacePath,
+          updatedAt: now,
+        })
+        .where(eq(agentRuns.id, run.id))
+
+      await runSshCommand(
+        { host: worker.sshHost, port: worker.sshPort, user: worker.sshUser },
+        buildTmuxBootstrapCommand({
+          sessionName,
+          workspacePath,
+          windows: terminals
+            .sort((a, b) => a.sortOrder - b.sortOrder)
+            .map((terminal) => sanitizeTmuxName(terminal.tmuxWindow, 'tmux window')),
+        }),
+        { timeout: 20_000, maxBuffer: 64_000 },
+      )
+
+      const [updatedRun] = await db
+        .update(agentRuns)
+        .set({
+          status: 'running',
+          statusMessage: `tmux ready: ${sessionName}`,
+          tmuxSession: sessionName,
+          workspacePath,
+          startedAt: run.startedAt ?? new Date(),
+          updatedAt: new Date(),
+        })
+        .where(eq(agentRuns.id, run.id))
+        .returning()
+      run = updatedRun
+    }
+
+    const repo = parseRepoFullName(run.repoFullName)
+    const workspacePath = normalizeWorkspacePath(
+      run.workspacePath ?? `/home/${worker.sshUser}/workspaces/issues/${run.id}/${repo.name}`,
+      worker.sshUser,
+    )
+    const repoCachePath = `/home/${worker.sshUser}/workspaces/repos/${repo.owner}/${repo.name}`
+    const sessionName = sanitizeTmuxName(run.tmuxSession ?? '', 'tmux session')
+    const windows = terminals
+      .sort((a, b) => a.sortOrder - b.sortOrder)
+      .map((terminal) => sanitizeTmuxName(terminal.tmuxWindow, 'tmux window'))
+
+    await db
+      .update(agentRuns)
+      .set({
+        status: 'bootstrapping',
+        statusMessage: `preparing ${run.repoFullName} worktree`,
+        workspacePath,
+        updatedAt: new Date(),
+      })
+      .where(eq(agentRuns.id, run.id))
+
+    await runSshCommand(
+      { host: worker.sshHost, port: worker.sshPort, user: worker.sshUser },
+      buildPrepareRepoCommand({
+        repoFullName: run.repoFullName,
+        repoUrl: `https://github.com/${run.repoFullName}.git`,
+        repoCachePath,
+        workspacePath,
+        baseBranch: run.baseBranch,
+        branchName: run.branchName,
+        githubToken,
+        sessionName,
+        windows,
+      }),
+      { timeout: 180_000, maxBuffer: 2_000_000 },
+    )
+
+    const result = await runSshCommand(
+      { host: worker.sshHost, port: worker.sshPort, user: worker.sshUser },
+      buildStartCodexCommand({
+        sessionName,
+        windowName: sanitizeTmuxName(agentTerminal.tmuxWindow, 'tmux window'),
+        workspacePath,
+        prompt: buildCodexPlanPrompt({ run, goal }),
+        captureLines: 160,
+        interruptCurrent: true,
+      }),
+      { timeout: 15_000, maxBuffer: 768_000 },
+    )
+
+    const finishedAt = new Date()
+    await db
+      .update(agentRuns)
+      .set({
+        status: 'needs_human',
+        statusMessage: 'planning started; waiting for plan approval',
+        workspacePath,
+        metadata: {
+          ...(run.metadata ?? {}),
+          repoCachePath,
+          repoPreparedAt: finishedAt.toISOString(),
+          latestGoal: goal,
+          workflowPhase: 'planning',
+          codexPlanStartedAt: finishedAt.toISOString(),
+        },
+        updatedAt: finishedAt,
+      })
+      .where(eq(agentRuns.id, run.id))
+
+    await db.update(githubBranches).set({ status: 'created', updatedAt: finishedAt }).where(eq(githubBranches.agentRunId, run.id))
+    await db.update(agentTerminals).set({ status: 'active', updatedAt: finishedAt }).where(eq(agentTerminals.id, agentTerminal.id))
+
+    res.json({
+      ok: true,
+      runId: run.id,
+      terminalId: agentTerminal.id,
+      phase: 'planning',
+      output: result.stdout,
+      stderr: result.stderr,
+      keyFingerprint: result.keyFingerprint,
+    })
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Unknown agent planning error'
+    await getDb().update(agentRuns).set({ status: 'failed', statusMessage: message, updatedAt: new Date() }).where(eq(agentRuns.id, id))
+    res.status(502).json({ ok: false, runId: id, error: message })
+  }
+})
+
 router.post('/runs/:id/terminals/:terminalId/capture', async (req, res) => {
   const { id, terminalId } = req.params
 
@@ -504,6 +658,275 @@ router.post('/runs/:id/terminals/:terminalId/send-input', async (req, res) => {
       runId: id,
       terminalId,
       error: error instanceof Error ? error.message : 'Unknown tmux send input error',
+    })
+  }
+})
+
+router.post('/runs/:id/start-codex', async (req, res) => {
+  const { id } = req.params
+
+  try {
+    const goal = readAgentGoal(req.body)
+    const db = getDb()
+    const { run, worker } = await readRunWorker(id)
+    if (!run.workspacePath) throw new Error('Prepare the repo worktree before starting Codex')
+    if (!run.tmuxSession) throw new Error('Bootstrap tmux before starting Codex')
+
+    const [agentTerminal] = await db
+      .select()
+      .from(agentTerminals)
+      .where(and(eq(agentTerminals.runId, run.id), eq(agentTerminals.role, 'agent')))
+
+    if (!agentTerminal) throw new Error('Agent terminal not found for this run')
+
+    const startedAt = new Date()
+    const result = await runSshCommand(
+      {
+        host: worker.sshHost,
+        port: worker.sshPort,
+        user: worker.sshUser,
+      },
+      buildStartCodexCommand({
+        sessionName: sanitizeTmuxName(run.tmuxSession, 'tmux session'),
+        windowName: sanitizeTmuxName(agentTerminal.tmuxWindow, 'tmux window'),
+        workspacePath: normalizeWorkspacePath(run.workspacePath, worker.sshUser),
+        prompt: buildCodexPrompt({ run, goal }),
+        captureLines: 120,
+      }),
+      { timeout: 15_000, maxBuffer: 768_000 },
+    )
+
+    await db
+      .update(agentRuns)
+      .set({
+        status: 'running',
+        statusMessage: 'codex started from issue goal',
+        metadata: {
+          ...(run.metadata ?? {}),
+          latestGoal: goal,
+          codexStartedAt: startedAt.toISOString(),
+        },
+        updatedAt: startedAt,
+      })
+      .where(eq(agentRuns.id, run.id))
+
+    await db
+      .update(agentTerminals)
+      .set({ status: 'active', updatedAt: startedAt })
+      .where(eq(agentTerminals.id, agentTerminal.id))
+
+    res.json({
+      ok: true,
+      runId: run.id,
+      terminalId: agentTerminal.id,
+      output: result.stdout,
+      stderr: result.stderr,
+      keyFingerprint: result.keyFingerprint,
+    })
+  } catch (error) {
+    res.status(502).json({
+      ok: false,
+      runId: id,
+      error: error instanceof Error ? error.message : 'Unknown Codex start error',
+    })
+  }
+})
+
+router.post('/runs/:id/approve-plan', async (req, res) => {
+  const { id } = req.params
+
+  try {
+    const db = getDb()
+    const { run, worker } = await readRunWorker(id)
+    if (!run.workspacePath) throw new Error('Prepare the repo worktree before approving execution')
+    if (!run.tmuxSession) throw new Error('Bootstrap tmux before approving execution')
+
+    const terminals = await db.select().from(agentTerminals).where(eq(agentTerminals.runId, run.id))
+    const agentTerminal = findAgentTerminal(terminals)
+    const goal = readMetadataString(run.metadata, 'latestGoal') ?? readOptionalGoal(req.body) ?? 'Implement the approved plan.'
+    const now = new Date()
+
+    const result = await runSshCommand(
+      { host: worker.sshHost, port: worker.sshPort, user: worker.sshUser },
+      buildTmuxSendInputCommand({
+        sessionName: sanitizeTmuxName(run.tmuxSession, 'tmux session'),
+        windowName: sanitizeTmuxName(agentTerminal.tmuxWindow, 'tmux window'),
+        input: buildCodexApprovalInstruction({ run, goal }),
+        key: null,
+        enter: true,
+        captureLines: 160,
+      }),
+      { timeout: 15_000, maxBuffer: 768_000 },
+    )
+
+    await db
+      .update(agentRuns)
+      .set({
+        status: 'running',
+        statusMessage: 'plan approved; codex executing',
+        metadata: {
+          ...(run.metadata ?? {}),
+          latestGoal: goal,
+          workflowPhase: 'executing',
+          codexExecutionStartedAt: now.toISOString(),
+        },
+        updatedAt: now,
+      })
+      .where(eq(agentRuns.id, run.id))
+
+    await db.update(agentTerminals).set({ status: 'active', updatedAt: now }).where(eq(agentTerminals.id, agentTerminal.id))
+
+    res.json({
+      ok: true,
+      runId: run.id,
+      terminalId: agentTerminal.id,
+      phase: 'executing',
+      output: result.stdout,
+      stderr: result.stderr,
+      keyFingerprint: result.keyFingerprint,
+    })
+  } catch (error) {
+    res.status(502).json({
+      ok: false,
+      runId: id,
+      error: error instanceof Error ? error.message : 'Unknown plan approval error',
+    })
+  }
+})
+
+router.post('/runs/:id/create-draft-pr', async (req, res) => {
+  const { id } = req.params
+
+  try {
+    const githubToken = readGithubToken()
+    if (!githubToken) throw new Error('Missing PACH_AGENT_GITHUB_TOKEN or GITHUB_TOKEN')
+
+    const db = getDb()
+    const { run, worker } = await readRunWorker(id)
+    if (!run.repositoryId) throw new Error('Agent run has no repositoryId')
+    if (!run.workspacePath) throw new Error('Agent run has no prepared workspacePath')
+
+    const [issue] = await db.select().from(pmIssues).where(eq(pmIssues.id, run.issueId))
+    const [branch] = await db.select().from(githubBranches).where(eq(githubBranches.agentRunId, run.id))
+    const title = readOptionalString((req.body as Record<string, unknown> | undefined)?.title) ?? issue?.title ?? run.branchName
+    const body = buildPullRequestBody({ run, issue })
+    const now = new Date()
+
+    const pushResult = await runSshCommand(
+      { host: worker.sshHost, port: worker.sshPort, user: worker.sshUser },
+      buildFinalizeBranchCommand({
+        workspacePath: normalizeWorkspacePath(run.workspacePath, worker.sshUser),
+        branchName: run.branchName,
+        commitMessage: title,
+        githubToken,
+      }),
+      { timeout: 180_000, maxBuffer: 2_000_000 },
+    )
+
+    const existingPr = await fetchGithubPullRequestForBranch({
+      repoFullName: run.repoFullName,
+      branchName: run.branchName,
+      token: githubToken,
+    })
+    const pr = existingPr ?? await createGithubDraftPullRequest({
+      repoFullName: run.repoFullName,
+      branchName: run.branchName,
+      baseBranch: run.baseBranch,
+      title,
+      body,
+      token: githubToken,
+    })
+
+    const saved = await upsertPullRequest({
+      run,
+      branchId: branch?.id,
+      pr,
+      now,
+    })
+
+    if (branch) {
+      await db
+        .update(githubBranches)
+        .set({ status: saved.state === 'merged' ? 'merged' : 'pr_opened', updatedAt: now })
+        .where(eq(githubBranches.id, branch.id))
+    }
+
+    await db
+      .update(agentRuns)
+      .set({
+        status: 'pr_ready',
+        statusMessage: `draft PR ready: #${saved.number}`,
+        metadata: {
+          ...(run.metadata ?? {}),
+          workflowPhase: 'pr_ready',
+          draftPrCreatedAt: now.toISOString(),
+        },
+        updatedAt: now,
+      })
+      .where(eq(agentRuns.id, run.id))
+
+    res.json({
+      ok: true,
+      runId: run.id,
+      pullRequest: saved,
+      stdout: pushResult.stdout,
+      stderr: pushResult.stderr,
+      keyFingerprint: pushResult.keyFingerprint,
+    })
+  } catch (error) {
+    res.status(502).json({
+      ok: false,
+      runId: id,
+      error: error instanceof Error ? error.message : 'Unknown draft PR creation error',
+    })
+  }
+})
+
+router.post('/runs/:id/sync-pull-request', async (req, res) => {
+  const { id } = req.params
+
+  try {
+    const githubToken = readGithubToken()
+    if (!githubToken) throw new Error('Missing PACH_AGENT_GITHUB_TOKEN or GITHUB_TOKEN')
+
+    const db = getDb()
+    const [run] = await db.select().from(agentRuns).where(eq(agentRuns.id, id))
+    if (!run) throw new Error('Agent run not found')
+    if (!run.repositoryId) throw new Error('Agent run has no repositoryId')
+
+    const [branch] = await db.select().from(githubBranches).where(eq(githubBranches.agentRunId, run.id))
+    const pr = await fetchGithubPullRequestForBranch({
+      repoFullName: run.repoFullName,
+      branchName: run.branchName,
+      token: githubToken,
+    })
+
+    if (!pr) {
+      res.json({ ok: true, runId: run.id, pullRequest: null })
+      return
+    }
+
+    const now = new Date()
+    const saved = await upsertPullRequest({
+      run,
+      branchId: branch?.id,
+      pr,
+      now,
+    })
+
+    if (branch) {
+      await db
+        .update(githubBranches)
+        .set({ status: saved.state === 'merged' ? 'merged' : 'pr_opened', updatedAt: now })
+        .where(eq(githubBranches.id, branch.id))
+    }
+
+    res.json({ ok: true, runId: run.id, pullRequest: saved })
+  } catch (error) {
+    res.status(502).json({
+      ok: false,
+      runId: id,
+      error: error instanceof Error ? error.message : 'Unknown pull request sync error',
     })
   }
 })
@@ -677,6 +1100,17 @@ async function readRunWorker(runId: string) {
   return { run, worker }
 }
 
+function findAgentTerminal(terminals: (typeof agentTerminals.$inferSelect)[]) {
+  const terminal = terminals.find((entry) => entry.role === 'agent') ?? terminals[0]
+  if (!terminal) throw new Error('Agent terminal not found for this run')
+  return terminal
+}
+
+function defaultRunWorkspacePath(run: typeof agentRuns.$inferSelect, sshUser: string) {
+  const repo = parseRepoFullName(run.repoFullName)
+  return `/home/${sshUser}/workspaces/issues/${run.id}/${repo.name}`
+}
+
 function parseRepoFullName(fullName: string) {
   const match = /^([A-Za-z0-9_.-]+)\/([A-Za-z0-9_.-]+)$/.exec(fullName)
   if (!match) throw new Error(`Invalid repo full name: ${fullName}`)
@@ -783,6 +1217,30 @@ function readTerminalInput(body: unknown) {
   return { input, key: null }
 }
 
+function readAgentGoal(body: unknown) {
+  if (!body || typeof body !== 'object') throw new Error('Missing agent goal')
+  const raw = body as Record<string, unknown>
+  const goal = raw.goal
+  if (typeof goal !== 'string' || !goal.trim()) throw new Error('Agent goal cannot be empty')
+  if (goal.length > 12_000) throw new Error('Agent goal is too long')
+  return goal.trim()
+}
+
+function readOptionalGoal(body: unknown) {
+  if (!body || typeof body !== 'object') return null
+  const raw = body as Record<string, unknown>
+  const goal = raw.goal
+  if (typeof goal !== 'string' || !goal.trim()) return null
+  if (goal.length > 12_000) throw new Error('Agent goal is too long')
+  return goal.trim()
+}
+
+function readMetadataString(metadata: unknown, key: string) {
+  if (!metadata || typeof metadata !== 'object') return null
+  const value = (metadata as Record<string, unknown>)[key]
+  return typeof value === 'string' && value.trim() ? value : null
+}
+
 async function runWorkerHealthCheck({ host, port, user }: { host: string; port: number; user: string }) {
   const remoteCommand = [
     'printf "hostname=%s\\n" "$(hostname)"',
@@ -885,6 +1343,123 @@ function buildTmuxBootstrapCommand({
   return commands.join('\n')
 }
 
+function buildStartCodexCommand({
+  sessionName,
+  windowName,
+  workspacePath,
+  prompt,
+  captureLines,
+  interruptCurrent = false,
+}: {
+  sessionName: string
+  windowName: string
+  workspacePath: string
+  prompt: string
+  captureLines: number
+  interruptCurrent?: boolean
+}) {
+  const session = shellQuote(sessionName)
+  const target = shellQuote(`${sessionName}:${windowName}`)
+  const command = `cd ${shellQuote(workspacePath)} && codex ${shellQuote(prompt)}`
+  const commands = [
+    'set -eu',
+    'command -v tmux >/dev/null 2>&1 || { echo "missing tmux"; exit 42; }',
+    'command -v codex >/dev/null 2>&1 || { echo "missing codex"; exit 43; }',
+    `tmux has-session -t ${session}`,
+  ]
+
+  if (interruptCurrent) {
+    commands.push(`tmux send-keys -t ${target} C-c`)
+    commands.push('sleep 0.15')
+  }
+
+  commands.push(`tmux send-keys -t ${target} -l ${shellQuote(command)}`)
+  commands.push(`tmux send-keys -t ${target} C-m`)
+  commands.push('sleep 0.25')
+  commands.push(`tmux capture-pane -p -J -S -${captureLines} -t ${target}`)
+
+  return commands.join('\n')
+}
+
+function buildCodexPrompt({
+  run,
+  goal,
+}: {
+  run: typeof agentRuns.$inferSelect
+  goal: string
+}) {
+  return [
+    `You are working inside Pach agent run ${run.id}.`,
+    `Repository: ${run.repoFullName}`,
+    `Branch: ${run.branchName}`,
+    `Base branch: ${run.baseBranch}`,
+    '',
+    'Goal:',
+    goal,
+    '',
+    'Workflow:',
+    '- Inspect the codebase before editing.',
+    '- Make the requested changes on the current branch only.',
+    '- Run the most relevant checks you can.',
+    '- If you need human input, stop and ask clearly.',
+    '- When ready, summarize the changes, tests, and whether a PR should be opened.',
+  ].join('\n')
+}
+
+function buildCodexPlanPrompt({
+  run,
+  goal,
+}: {
+  run: typeof agentRuns.$inferSelect
+  goal: string
+}) {
+  return [
+    `You are planning work for Pach agent run ${run.id}.`,
+    `Repository: ${run.repoFullName}`,
+    `Branch: ${run.branchName}`,
+    `Base branch: ${run.baseBranch}`,
+    '',
+    'Issue goal and context:',
+    goal,
+    '',
+    'Planning mode instructions:',
+    '- Inspect the codebase enough to understand the change.',
+    '- Do not edit files yet.',
+    '- Lay out a concise implementation plan.',
+    '- Include the expected UX/product behavior in the plan.',
+    '- Include the checks/tests you intend to run.',
+    '- Call out any ambiguity or risk that needs human confirmation.',
+    '- End with exactly: PACH_PLAN_READY',
+  ].join('\n')
+}
+
+function buildCodexApprovalInstruction({
+  run,
+  goal,
+}: {
+  run: typeof agentRuns.$inferSelect
+  goal: string
+}) {
+  return [
+    'Approved. Please execute the plan now.',
+    '',
+    `Repository: ${run.repoFullName}`,
+    `Branch: ${run.branchName}`,
+    '',
+    'Original goal:',
+    goal,
+    '',
+    'Execution instructions:',
+    '- Implement the approved plan on the current branch.',
+    '- Keep changes scoped to this issue.',
+    '- Run the most relevant checks available.',
+    '- If blocked, stop and explain the blocker clearly.',
+    '- When implementation is complete, summarize changes, checks, and any risks.',
+    '- Do not merge anything.',
+    '- End with exactly: PACH_READY_FOR_PR',
+  ].join('\n')
+}
+
 function buildTmuxCaptureCommand({
   sessionName,
   windowName,
@@ -939,6 +1514,167 @@ function buildTmuxSendInputCommand({
   commands.push(`tmux capture-pane -p -J -S -${captureLines} -t ${target}`)
 
   return commands.join('\n')
+}
+
+type GithubPullRequestResponse = {
+  id: number
+  number: number
+  html_url: string
+  title: string
+  state: string
+  draft?: boolean
+  mergeable?: boolean | null
+  merged_at?: string | null
+  created_at?: string | null
+  updated_at?: string | null
+  head?: {
+    sha?: string
+  }
+  base?: {
+    ref?: string
+  }
+}
+
+async function fetchGithubPullRequestForBranch({
+  repoFullName,
+  branchName,
+  token,
+}: {
+  repoFullName: string
+  branchName: string
+  token: string
+}) {
+  const { owner } = parseRepoFullName(repoFullName)
+  const url = new URL(`https://api.github.com/repos/${repoFullName}/pulls`)
+  url.searchParams.set('state', 'all')
+  url.searchParams.set('head', `${owner}:${branchName}`)
+  url.searchParams.set('per_page', '1')
+
+  const response = await fetch(url, {
+    headers: {
+      Authorization: `Bearer ${token}`,
+      Accept: 'application/vnd.github+json',
+      'X-GitHub-Api-Version': '2022-11-28',
+    },
+  })
+
+  if (!response.ok) {
+    const body = await response.text()
+    throw new Error(`GitHub PR sync failed: ${response.status} ${body.slice(0, 240)}`)
+  }
+
+  const prs = (await response.json()) as GithubPullRequestResponse[]
+  return prs[0] ?? null
+}
+
+async function createGithubDraftPullRequest({
+  repoFullName,
+  branchName,
+  baseBranch,
+  title,
+  body,
+  token,
+}: {
+  repoFullName: string
+  branchName: string
+  baseBranch: string
+  title: string
+  body: string
+  token: string
+}) {
+  const response = await fetch(`https://api.github.com/repos/${repoFullName}/pulls`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${token}`,
+      Accept: 'application/vnd.github+json',
+      'Content-Type': 'application/json',
+      'X-GitHub-Api-Version': '2022-11-28',
+    },
+    body: JSON.stringify({
+      title,
+      body,
+      head: branchName,
+      base: baseBranch,
+      draft: true,
+    }),
+  })
+
+  if (!response.ok) {
+    const responseBody = await response.text()
+    throw new Error(`GitHub draft PR creation failed: ${response.status} ${responseBody.slice(0, 240)}`)
+  }
+
+  return (await response.json()) as GithubPullRequestResponse
+}
+
+async function upsertPullRequest({
+  run,
+  branchId,
+  pr,
+  now,
+}: {
+  run: typeof agentRuns.$inferSelect
+  branchId?: string
+  pr: GithubPullRequestResponse
+  now: Date
+}) {
+  if (!run.repositoryId) throw new Error('Agent run has no repositoryId')
+
+  const db = getDb()
+  const values = {
+    repositoryId: run.repositoryId,
+    branchId,
+    agentRunId: run.id,
+    issueId: run.issueId,
+    githubId: String(pr.id),
+    number: pr.number,
+    url: pr.html_url,
+    title: pr.title,
+    state: pr.merged_at ? 'merged' : pr.state,
+    isDraft: Boolean(pr.draft),
+    mergeable: pr.mergeable,
+    headSha: pr.head?.sha,
+    baseBranch: pr.base?.ref ?? run.baseBranch,
+    checksStatus: 'unknown',
+    githubCreatedAt: pr.created_at ? new Date(pr.created_at) : undefined,
+    githubUpdatedAt: pr.updated_at ? new Date(pr.updated_at) : undefined,
+    updatedAt: now,
+  }
+
+  const [existing] = await db
+    .select()
+    .from(githubPullRequests)
+    .where(and(eq(githubPullRequests.repositoryId, run.repositoryId), eq(githubPullRequests.number, pr.number)))
+
+  const [saved] = existing
+    ? await db.update(githubPullRequests).set(values).where(eq(githubPullRequests.id, existing.id)).returning()
+    : await db.insert(githubPullRequests).values({ ...values, createdAt: now }).returning()
+
+  return saved
+}
+
+function buildPullRequestBody({
+  run,
+  issue,
+}: {
+  run: typeof agentRuns.$inferSelect
+  issue?: typeof pmIssues.$inferSelect
+}) {
+  const goal = readMetadataString(run.metadata, 'latestGoal')
+  return [
+    issue ? `Pach issue: ${issue.identifier}` : null,
+    '',
+    goal ? `Goal:\n${goal}` : null,
+    '',
+    'Created by Pach agent workflow.',
+    '',
+    'Review checklist:',
+    '- [ ] Review implementation',
+    '- [ ] Confirm relevant checks',
+    '- [ ] Mark ready for review when validated',
+  ]
+    .filter((line): line is string => line !== null)
+    .join('\n')
 }
 
 function buildPrepareRepoCommand({
@@ -1022,6 +1758,50 @@ function buildPrepareRepoCommand({
   }
 
   commands.push(`printf "prepared=%s\\n" ${shellQuote(repoFullName)}`)
+
+  return commands.join('\n')
+}
+
+function buildFinalizeBranchCommand({
+  workspacePath,
+  branchName,
+  commitMessage,
+  githubToken,
+}: {
+  workspacePath: string
+  branchName: string
+  commitMessage: string
+  githubToken: string
+}) {
+  const workspace = shellQuote(workspacePath)
+  const branch = shellQuote(branchName)
+  const message = shellQuote(commitMessage)
+  const commands = [
+    'set -eu',
+    'command -v git >/dev/null 2>&1 || { echo "missing git"; exit 42; }',
+    `PACH_GITHUB_TOKEN=${shellQuote(githubToken)}`,
+    'export PACH_GITHUB_TOKEN',
+    'ASKPASS="$(mktemp)"',
+    'cat > "$ASKPASS" <<\'PACH_ASKPASS\'',
+    '#!/bin/sh',
+    'case "$1" in',
+    '  *Username*) printf "%s\\n" "x-access-token" ;;',
+    '  *) printf "%s\\n" "$PACH_GITHUB_TOKEN" ;;',
+    'esac',
+    'PACH_ASKPASS',
+    'chmod 700 "$ASKPASS"',
+    'export GIT_ASKPASS="$ASKPASS"',
+    'export GIT_TERMINAL_PROMPT=0',
+    'cleanup() { rm -f "$ASKPASS"; }',
+    'trap cleanup EXIT',
+    `git -C ${workspace} checkout ${branch}`,
+    `git -C ${workspace} config user.name "Pach Agent"`,
+    `git -C ${workspace} config user.email "agent@pach.world"`,
+    `git -C ${workspace} add -A`,
+    `if ! git -C ${workspace} diff --cached --quiet; then git -C ${workspace} commit -m ${message}; fi`,
+    `git -C ${workspace} push -u origin ${branch}`,
+    `git -C ${workspace} status --short --branch`,
+  ]
 
   return commands.join('\n')
 }

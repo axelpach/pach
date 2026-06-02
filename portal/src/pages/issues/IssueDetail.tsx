@@ -494,6 +494,7 @@ export default function IssueDetail() {
                       workers={workers}
                       repositories={repositories}
                       authToken={token}
+                      defaultGoal={buildDefaultAgentGoal({ issue, team, project, company })}
                       onSeedRepositories={seedDefaultRepositories}
                       onCreateRun={createAgentRun}
                       onBootstrapRun={bootstrapAgentRun}
@@ -754,6 +755,7 @@ function AgentRunPanel({
   workers,
   repositories,
   authToken,
+  defaultGoal,
   onSeedRepositories,
   onCreateRun,
   onBootstrapRun,
@@ -768,6 +770,7 @@ function AgentRunPanel({
   workers: Schema['tables']['agent_workers']['row'][]
   repositories: Schema['tables']['github_repositories']['row'][]
   authToken: string | null
+  defaultGoal: string
   onSeedRepositories: () => void | Promise<void>
   onCreateRun: () => void | Promise<void>
   onBootstrapRun: () => void | Promise<void>
@@ -784,6 +787,10 @@ function AgentRunPanel({
   const [terminalMessage, setTerminalMessage] = useState<string | null>(null)
   const [liveTerminalOpen, setLiveTerminalOpen] = useState(false)
   const [liveTerminalStatus, setLiveTerminalStatus] = useState<'idle' | 'connecting' | 'connected' | 'closed'>('idle')
+  const [agentGoal, setAgentGoal] = useState(defaultGoal)
+  const [goalBusy, setGoalBusy] = useState(false)
+  const [goalMessage, setGoalMessage] = useState<string | null>(null)
+  const [prBusy, setPrBusy] = useState(false)
   const [repoBusy, setRepoBusy] = useState(false)
   const [repoMessage, setRepoMessage] = useState<string | null>(null)
   const liveTerminalElementRef = useRef<HTMLDivElement | null>(null)
@@ -794,6 +801,13 @@ function AgentRunPanel({
     terminals.find((terminal) => terminal.id === selectedTerminalId) ??
     terminals[0] ??
     null
+  const agentTerminal = terminals.find((terminal) => terminal.role === 'agent') ?? terminals[0] ?? null
+  const workflowPhase = readMetadataString(run?.metadata, 'workflowPhase')
+
+  useEffect(() => {
+    const latestGoal = readMetadataString(run?.metadata, 'latestGoal')
+    setAgentGoal(latestGoal ?? defaultGoal)
+  }, [defaultGoal, run?.id])
 
   useEffect(() => {
     if (terminals.length === 0) {
@@ -986,6 +1000,94 @@ function AgentRunPanel({
     }
   }
 
+  async function planAgentWork() {
+    if (!run) return
+    const goal = agentGoal.trim()
+    if (!goal) return
+    setGoalBusy(true)
+    setGoalMessage(null)
+
+    try {
+      const res = await authFetch(`${config.apiUrl}/agent/runs/${run.id}/plan-work`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ goal }),
+      })
+      const payload = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error(payload.error ?? 'Failed to plan agent work')
+      if (agentTerminal) setSelectedTerminalId(agentTerminal.id)
+      setTerminalOutput(payload.output ?? '')
+      setGoalMessage('planning started; review codex plan')
+    } catch (error) {
+      setGoalMessage(error instanceof Error ? error.message : 'Failed to plan agent work')
+    } finally {
+      setGoalBusy(false)
+    }
+  }
+
+  async function approveAgentPlan() {
+    if (!run) return
+    setGoalBusy(true)
+    setGoalMessage(null)
+
+    try {
+      const res = await authFetch(`${config.apiUrl}/agent/runs/${run.id}/approve-plan`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ goal: agentGoal.trim() }),
+      })
+      const payload = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error(payload.error ?? 'Failed to approve agent plan')
+      if (agentTerminal) setSelectedTerminalId(agentTerminal.id)
+      setTerminalOutput(payload.output ?? '')
+      setGoalMessage('approved; codex executing')
+    } catch (error) {
+      setGoalMessage(error instanceof Error ? error.message : 'Failed to approve agent plan')
+    } finally {
+      setGoalBusy(false)
+    }
+  }
+
+  async function createDraftPullRequest() {
+    if (!run) return
+    setPrBusy(true)
+    setGoalMessage(null)
+
+    try {
+      const res = await authFetch(`${config.apiUrl}/agent/runs/${run.id}/create-draft-pr`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ title: agentGoal.split('\n')[0]?.replace(/^Issue:\s*/i, '').trim() || run.branchName }),
+      })
+      const payload = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error(payload.error ?? 'Failed to create draft PR')
+      setGoalMessage(payload.pullRequest ? `draft PR ready: #${payload.pullRequest.number}` : 'draft PR created')
+      setTerminalOutput(payload.stdout ?? '')
+    } catch (error) {
+      setGoalMessage(error instanceof Error ? error.message : 'Failed to create draft PR')
+    } finally {
+      setPrBusy(false)
+    }
+  }
+
+  async function syncPullRequest() {
+    if (!run) return
+    setPrBusy(true)
+
+    try {
+      const res = await authFetch(`${config.apiUrl}/agent/runs/${run.id}/sync-pull-request`, {
+        method: 'POST',
+      })
+      const payload = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error(payload.error ?? 'Failed to sync pull request')
+      setGoalMessage(payload.pullRequest ? 'pull request synced' : 'no pull request found for branch yet')
+    } catch (error) {
+      setGoalMessage(error instanceof Error ? error.message : 'Failed to sync pull request')
+    } finally {
+      setPrBusy(false)
+    }
+  }
+
   return (
     <div>
       <div className="mb-3 flex items-center justify-between gap-3">
@@ -1083,6 +1185,60 @@ function AgentRunPanel({
               {repoBusy ? 'preparing repo...' : 'prepare repo worktree'}
             </button>
             {repoMessage ? <span className="font-mono text-[10px] lowercase text-fg-4">{repoMessage}</span> : null}
+          </div>
+
+          <div className="border border-[rgba(0,255,140,0.12)] bg-[rgba(0,255,136,0.025)] p-3">
+            <div className="mb-2 flex items-center justify-between gap-3">
+              <div>
+                <div className="font-mono text-[10px] uppercase tracking-label text-fg-4">development goal</div>
+                <div className="mt-1 font-mono text-[10px] lowercase text-fg-4">
+                  phase: {workflowPhase ?? (run.workspacePath ? 'ready' : 'setup')}
+                </div>
+              </div>
+              <div className="flex flex-wrap justify-end gap-1.5">
+                <button
+                  onClick={() => {
+                    void planAgentWork()
+                  }}
+                  disabled={goalBusy || !agentGoal.trim()}
+                  className="border border-[rgba(0,255,140,0.24)] bg-[rgba(0,255,136,0.08)] px-2.5 py-1.5 font-mono text-[10px] uppercase tracking-label text-accent transition hover:border-accent disabled:cursor-not-allowed disabled:opacity-40"
+                  title="prepare worker, prepare worktree, and start codex in planning mode"
+                >
+                  {goalBusy ? 'working...' : 'plan agent work'}
+                </button>
+                <button
+                  onClick={() => {
+                    void approveAgentPlan()
+                  }}
+                  disabled={goalBusy || !run.workspacePath}
+                  className="border border-[rgba(0,255,140,0.18)] bg-pit-3 px-2.5 py-1.5 font-mono text-[10px] uppercase tracking-label text-fg-3 transition hover:border-accent hover:text-accent disabled:cursor-not-allowed disabled:opacity-40"
+                  title="send approval to codex so it can implement the plan"
+                >
+                  approve + execute
+                </button>
+                <button
+                  onClick={() => {
+                    void createDraftPullRequest()
+                  }}
+                  disabled={prBusy || !run.workspacePath}
+                  className="border border-[rgba(0,255,140,0.18)] bg-pit-3 px-2.5 py-1.5 font-mono text-[10px] uppercase tracking-label text-fg-3 transition hover:border-accent hover:text-accent disabled:cursor-wait disabled:opacity-40"
+                  title="commit, push, and create or sync a draft GitHub PR"
+                >
+                  {prBusy ? 'creating...' : 'create draft pr'}
+                </button>
+              </div>
+            </div>
+            <textarea
+              value={agentGoal}
+              onChange={(event) => setAgentGoal(event.target.value)}
+              rows={5}
+              className="w-full resize-y border border-[rgba(0,255,140,0.12)] bg-pit-3 px-2.5 py-2 font-mono text-xs leading-relaxed text-fg-2 outline-none placeholder:text-fg-4 focus:border-accent"
+              placeholder="Describe what Codex should build, fix, or investigate for this issue..."
+            />
+            <div className="mt-2 flex flex-wrap items-center justify-between gap-2 font-mono text-[10px] lowercase text-fg-4">
+              <span>plan first, approve after reviewing codex output, create PR once implementation is ready</span>
+              {goalMessage ? <span>{goalMessage}</span> : null}
+            </div>
           </div>
 
           <div>
@@ -1216,18 +1372,30 @@ function AgentRunPanel({
             </form>
           </div>
 
-          {pullRequest ? (
-            <a
-              href={pullRequest.url}
-              target="_blank"
-              rel="noreferrer"
-              className="block truncate border border-[rgba(0,255,140,0.18)] bg-[rgba(0,255,136,0.04)] px-2.5 py-2 font-mono text-xs text-accent hover:border-accent"
+          <div className="flex items-center gap-2">
+            {pullRequest ? (
+              <a
+                href={pullRequest.url}
+                target="_blank"
+                rel="noreferrer"
+                className="min-w-0 flex-1 truncate border border-[rgba(0,255,140,0.18)] bg-[rgba(0,255,136,0.04)] px-2.5 py-2 font-mono text-xs text-accent hover:border-accent"
+              >
+                PR #{pullRequest.number} · {pullRequest.isDraft ? 'draft' : pullRequest.state}
+              </a>
+            ) : (
+              <div className="min-w-0 flex-1 font-mono text-xs text-fg-4">// no pull request yet</div>
+            )}
+            <button
+              onClick={() => {
+                void syncPullRequest()
+              }}
+              disabled={prBusy}
+              className="shrink-0 border border-[rgba(0,255,140,0.18)] bg-pit-3 px-2.5 py-2 font-mono text-[10px] uppercase tracking-label text-fg-3 transition hover:border-accent hover:text-accent disabled:cursor-wait disabled:opacity-40"
+              title="check GitHub for a PR matching this branch"
             >
-              PR #{pullRequest.number} · {pullRequest.isDraft ? 'draft' : pullRequest.state}
-            </a>
-          ) : (
-            <div className="font-mono text-xs text-fg-4">// no pull request yet</div>
-          )}
+              {prBusy ? 'syncing...' : 'sync pr'}
+            </button>
+          </div>
 
           <div>
             <div className="mb-1.5 font-mono text-[10px] uppercase tracking-label text-fg-4">artifacts</div>
@@ -1290,6 +1458,37 @@ function buildAgentTerminalWsUrl({
   url.searchParams.set('terminalId', terminalId)
   url.searchParams.set('token', token)
   return url.toString()
+}
+
+function buildDefaultAgentGoal({
+  issue,
+  team,
+  project,
+  company,
+}: {
+  issue: Schema['tables']['pm_issues']['row'] | null
+  team: Schema['tables']['pm_teams']['row'] | null
+  project: Schema['tables']['pm_projects']['row'] | null
+  company: Schema['tables']['companies']['row'] | null
+}) {
+  if (!issue) return ''
+
+  return [
+    `Issue: ${team?.key ?? 'ISS'}-${issue.number} ${issue.title}`,
+    project ? `Project: ${project.name}` : null,
+    company ? `Company/context: ${company.name}` : null,
+    issue.description ? `Description:\n${issue.description}` : null,
+    '',
+    'Please implement this issue, run the relevant checks, and prepare the branch for a draft PR.',
+  ]
+    .filter((line): line is string => Boolean(line))
+    .join('\n')
+}
+
+function readMetadataString(metadata: unknown, key: string) {
+  if (!metadata || typeof metadata !== 'object') return null
+  const value = (metadata as Record<string, unknown>)[key]
+  return typeof value === 'string' && value.trim() ? value : null
 }
 
 function getWorkspaceStatuses(statuses: Schema['tables']['pm_statuses']['row'][]) {
