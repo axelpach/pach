@@ -3,6 +3,9 @@ import { Link, useNavigate, useParams } from 'react-router-dom'
 import { useQuery, useZero } from '@rocicorp/zero/react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
+import { Terminal as XTerm } from '@xterm/xterm'
+import { FitAddon } from '@xterm/addon-fit'
+import '@xterm/xterm/css/xterm.css'
 import {
   AlertTriangle,
   ArrowLeft,
@@ -53,7 +56,7 @@ export default function IssueDetail() {
   const { issueId } = useParams<{ issueId: string }>()
   const navigate = useNavigate()
   const z = useZero<Schema, Mutators>()
-  const { user } = useAuth()
+  const { user, token } = useAuth()
   const [bootstrappingRunId, setBootstrappingRunId] = useState<string | null>(null)
   const [agentActionMessage, setAgentActionMessage] = useState<string | null>(null)
   const [mainTab, setMainTab] = useState<'activity' | 'agent'>('activity')
@@ -89,6 +92,10 @@ export default function IssueDetail() {
   const [activeArtifacts] = useQuery(
     z.query.agent_run_artifacts.where('runId', activeRun?.id ?? '').orderBy('createdAt', 'desc'),
   )
+
+  useEffect(() => {
+    setMainTab(activeRun ? 'agent' : 'activity')
+  }, [issueId, activeRun?.id])
 
   const team = issue ? teams.find((t) => t.id === issue.teamId) ?? null : null
   const project = issue?.projectId ? projects.find((p) => p.id === issue.projectId) ?? null : null
@@ -486,6 +493,7 @@ export default function IssueDetail() {
                       artifacts={activeArtifacts}
                       workers={workers}
                       repositories={repositories}
+                      authToken={token}
                       onSeedRepositories={seedDefaultRepositories}
                       onCreateRun={createAgentRun}
                       onBootstrapRun={bootstrapAgentRun}
@@ -745,6 +753,7 @@ function AgentRunPanel({
   artifacts,
   workers,
   repositories,
+  authToken,
   onSeedRepositories,
   onCreateRun,
   onBootstrapRun,
@@ -758,6 +767,7 @@ function AgentRunPanel({
   artifacts: Schema['tables']['agent_run_artifacts']['row'][]
   workers: Schema['tables']['agent_workers']['row'][]
   repositories: Schema['tables']['github_repositories']['row'][]
+  authToken: string | null
   onSeedRepositories: () => void | Promise<void>
   onCreateRun: () => void | Promise<void>
   onBootstrapRun: () => void | Promise<void>
@@ -772,8 +782,14 @@ function AgentRunPanel({
   const [terminalInput, setTerminalInput] = useState('')
   const [terminalBusy, setTerminalBusy] = useState(false)
   const [terminalMessage, setTerminalMessage] = useState<string | null>(null)
+  const [liveTerminalOpen, setLiveTerminalOpen] = useState(false)
+  const [liveTerminalStatus, setLiveTerminalStatus] = useState<'idle' | 'connecting' | 'connected' | 'closed'>('idle')
   const [repoBusy, setRepoBusy] = useState(false)
   const [repoMessage, setRepoMessage] = useState<string | null>(null)
+  const liveTerminalElementRef = useRef<HTMLDivElement | null>(null)
+  const liveSocketRef = useRef<WebSocket | null>(null)
+  const liveXtermRef = useRef<XTerm | null>(null)
+  const liveFitAddonRef = useRef<FitAddon | null>(null)
   const selectedTerminal =
     terminals.find((terminal) => terminal.id === selectedTerminalId) ??
     terminals[0] ??
@@ -788,6 +804,98 @@ function AgentRunPanel({
       setSelectedTerminalId(terminals[0].id)
     }
   }, [selectedTerminalId, terminals])
+
+  useEffect(() => {
+    if (!liveTerminalOpen) return
+    if (!run || !selectedTerminal || !authToken || !liveTerminalElementRef.current) {
+      setLiveTerminalStatus('closed')
+      return
+    }
+
+    const term = new XTerm({
+      cursorBlink: true,
+      fontFamily: '"JetBrains Mono", "SFMono-Regular", ui-monospace, monospace',
+      fontSize: 12,
+      lineHeight: 1.25,
+      scrollback: 5_000,
+      theme: {
+        background: '#020602',
+        foreground: '#b8ffd2',
+        cursor: '#00ff88',
+        selectionBackground: '#00ff8844',
+        black: '#020602',
+        green: '#00ff88',
+        brightGreen: '#8dffc0',
+      },
+    })
+    const fitAddon = new FitAddon()
+    const socket = new WebSocket(
+      buildAgentTerminalWsUrl({
+        apiUrl: config.apiUrl,
+        runId: run.id,
+        terminalId: selectedTerminal.id,
+        token: authToken,
+      }),
+    )
+
+    liveXtermRef.current = term
+    liveFitAddonRef.current = fitAddon
+    liveSocketRef.current = socket
+    setLiveTerminalStatus('connecting')
+
+    term.loadAddon(fitAddon)
+    term.open(liveTerminalElementRef.current)
+    fitAddon.fit()
+    term.focus()
+
+    const dataSubscription = term.onData((data) => {
+      if (socket.readyState === WebSocket.OPEN) socket.send(data)
+    })
+    const fitToContainer = () => {
+      try {
+        fitAddon.fit()
+      } catch {
+        // xterm can throw while the element is being removed during navigation.
+      }
+    }
+
+    socket.binaryType = 'arraybuffer'
+    socket.onopen = () => {
+      setLiveTerminalStatus('connected')
+      fitToContainer()
+      term.focus()
+    }
+    socket.onmessage = (event) => {
+      if (typeof event.data === 'string') {
+        term.write(event.data)
+      } else {
+        term.write(new Uint8Array(event.data))
+      }
+    }
+    socket.onerror = () => {
+      setLiveTerminalStatus('closed')
+      term.writeln('\r\n[terminal socket error]')
+    }
+    socket.onclose = () => {
+      setLiveTerminalStatus('closed')
+    }
+
+    window.addEventListener('resize', fitToContainer)
+
+    return () => {
+      window.removeEventListener('resize', fitToContainer)
+      dataSubscription.dispose()
+      if (socket.readyState === WebSocket.OPEN || socket.readyState === WebSocket.CONNECTING) socket.close()
+      term.dispose()
+      if (liveSocketRef.current === socket) liveSocketRef.current = null
+      if (liveXtermRef.current === term) liveXtermRef.current = null
+      if (liveFitAddonRef.current === fitAddon) liveFitAddonRef.current = null
+    }
+  }, [authToken, liveTerminalOpen, run?.id, selectedTerminal?.id])
+
+  useEffect(() => {
+    setLiveTerminalOpen(false)
+  }, [run?.id, selectedTerminal?.id])
 
   async function captureTerminal(terminal = selectedTerminal) {
     if (!run || !terminal) return
@@ -1006,6 +1114,30 @@ function AgentRunPanel({
                 tmux · {selectedTerminal?.name ?? 'no terminal'}
               </div>
               <div className="flex shrink-0 items-center gap-1.5">
+                {liveTerminalOpen ? (
+                  <button
+                    onClick={() => {
+                      setLiveTerminalOpen(false)
+                      setLiveTerminalStatus('closed')
+                    }}
+                    disabled={!selectedTerminal}
+                    className="border border-[rgba(255,92,92,0.22)] bg-[rgba(255,92,92,0.04)] px-2 py-1 font-mono text-[10px] uppercase tracking-label text-fg-3 transition hover:border-fail hover:text-fail disabled:cursor-not-allowed disabled:opacity-40"
+                    title="close live websocket terminal"
+                  >
+                    disconnect
+                  </button>
+                ) : (
+                  <button
+                    onClick={() => {
+                      setLiveTerminalOpen(true)
+                    }}
+                    disabled={!selectedTerminal || !authToken}
+                    className="border border-[rgba(0,255,140,0.24)] bg-[rgba(0,255,136,0.08)] px-2 py-1 font-mono text-[10px] uppercase tracking-label text-accent transition hover:border-accent disabled:cursor-not-allowed disabled:opacity-40"
+                    title="open live terminal session"
+                  >
+                    connect live
+                  </button>
+                )}
                 <button
                   onClick={() => void sendTerminalKey('CTRL_C', 'ctrl+c')}
                   disabled={!selectedTerminal || terminalBusy}
@@ -1032,9 +1164,22 @@ function AgentRunPanel({
               </div>
             </div>
 
-            <pre className="min-h-32 max-h-80 overflow-auto whitespace-pre-wrap break-words px-3 py-3 font-mono text-[11px] leading-relaxed text-fg-2">
-              {terminalOutput || '// capture a terminal to read tmux output'}
-            </pre>
+            {liveTerminalOpen ? (
+              <div className="relative">
+                <div
+                  ref={liveTerminalElementRef}
+                  className="h-[360px] overflow-hidden bg-[#020602] px-2 py-2"
+                  onClick={() => liveXtermRef.current?.focus()}
+                />
+                <div className="pointer-events-none absolute right-3 top-2 font-mono text-[9px] uppercase tracking-label text-fg-4">
+                  live · {liveTerminalStatus}
+                </div>
+              </div>
+            ) : (
+              <pre className="min-h-32 max-h-80 overflow-auto whitespace-pre-wrap break-words px-3 py-3 font-mono text-[11px] leading-relaxed text-fg-2">
+                {terminalOutput || '// capture a terminal to read tmux output'}
+              </pre>
+            )}
 
             <form
               className="border-t border-[rgba(0,255,140,0.1)] p-2"
@@ -1126,6 +1271,25 @@ function AgentRunPanel({
       )}
     </div>
   )
+}
+
+function buildAgentTerminalWsUrl({
+  apiUrl,
+  runId,
+  terminalId,
+  token,
+}: {
+  apiUrl: string
+  runId: string
+  terminalId: string
+  token: string
+}) {
+  const url = new URL('/agent/terminal/ws', apiUrl)
+  url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:'
+  url.searchParams.set('runId', runId)
+  url.searchParams.set('terminalId', terminalId)
+  url.searchParams.set('token', token)
+  return url.toString()
 }
 
 function getWorkspaceStatuses(statuses: Schema['tables']['pm_statuses']['row'][]) {

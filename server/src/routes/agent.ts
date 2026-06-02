@@ -1,11 +1,14 @@
 import { Router } from 'express'
-import { execFile } from 'node:child_process'
+import { execFile, spawn } from 'node:child_process'
 import { mkdtemp, rm, writeFile } from 'node:fs/promises'
+import type { Server as HttpServer, IncomingMessage } from 'node:http'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { promisify } from 'node:util'
+import { WebSocket, WebSocketServer } from 'ws'
 import { and, eq, inArray } from 'drizzle-orm'
 import { getDb } from '../db.js'
+import { verifyToken } from '../lib/auth.js'
 import { agentRunArtifacts, agentRuns, agentTerminals, agentWorkers, githubBranches } from '../../../db/schema.js'
 
 const router = Router()
@@ -40,6 +43,14 @@ type WorkerConnection = {
   host: string
   port: number
   user: string
+}
+
+export function attachAgentTerminalWebSocket(server: HttpServer) {
+  const wss = new WebSocketServer({ server, path: '/agent/terminal/ws' })
+
+  wss.on('connection', (socket, req) => {
+    void handleAgentTerminalSocket(socket, req)
+  })
 }
 
 router.post('/workers/sync', async (req, res) => {
@@ -546,6 +557,89 @@ router.post('/runs/:id/artifacts', async (req, res) => {
   }
 })
 
+async function handleAgentTerminalSocket(socket: WebSocket, req: IncomingMessage) {
+  let key: Awaited<ReturnType<typeof prepareSshKey>> | null = null
+  let sshProcess: ReturnType<typeof spawn> | null = null
+
+  const closeSocket = (code: number, reason: string) => {
+    if (socket.readyState === WebSocket.OPEN) socket.close(code, reason.slice(0, 120))
+  }
+
+  try {
+    const url = new URL(req.url ?? '', 'http://localhost')
+    const token = url.searchParams.get('token')
+    const runId = url.searchParams.get('runId')
+    const terminalId = url.searchParams.get('terminalId')
+
+    if (!token) throw new Error('Missing auth token')
+    verifyToken(token)
+    if (!runId || !terminalId) throw new Error('Missing runId or terminalId')
+
+    const { run, terminal, worker } = await readRunTerminalWorker(runId, terminalId)
+    const sessionName = sanitizeTmuxName(run.tmuxSession ?? '', 'tmux session')
+    const windowName = sanitizeTmuxName(terminal.tmuxWindow, 'tmux window')
+    const target = `${sessionName}:${windowName}`
+
+    key = await prepareSshKey()
+    const connection = {
+      host: worker.sshHost,
+      port: worker.sshPort,
+      user: worker.sshUser,
+    }
+    const sshArgs = buildSshArgs(connection, key?.path ?? null)
+    sshArgs.push('-tt')
+    sshArgs.push(`${connection.user}@${connection.host}`, `TERM=xterm-256color tmux attach-session -t ${shellQuote(target)}`)
+
+    const child = spawn('ssh', sshArgs, { stdio: ['pipe', 'pipe', 'pipe'] })
+    if (!child.stdin || !child.stdout || !child.stderr) throw new Error('Failed to open SSH terminal streams')
+    sshProcess = child
+
+    await getDb()
+      .update(agentTerminals)
+      .set({ status: 'active', updatedAt: new Date() })
+      .where(eq(agentTerminals.id, terminal.id))
+
+    socket.send(`connected to ${target}\r\n`)
+
+    child.stdout.on('data', (chunk: Buffer) => {
+      if (socket.readyState === WebSocket.OPEN) socket.send(chunk)
+    })
+    child.stderr.on('data', (chunk: Buffer) => {
+      if (socket.readyState === WebSocket.OPEN) socket.send(chunk)
+    })
+    child.on('error', (error) => {
+      if (socket.readyState === WebSocket.OPEN) socket.send(`\r\nssh error: ${error.message}\r\n`)
+      closeSocket(1011, 'ssh error')
+    })
+    child.on('close', (code) => {
+      if (socket.readyState === WebSocket.OPEN) socket.send(`\r\nssh disconnected${code == null ? '' : ` (${code})`}\r\n`)
+      closeSocket(1000, 'ssh disconnected')
+    })
+
+    socket.on('message', (data) => {
+      if (!child.stdin.writable) return
+      if (typeof data === 'string') {
+        child.stdin.write(data)
+      } else if (Buffer.isBuffer(data)) {
+        child.stdin.write(data)
+      } else if (Array.isArray(data)) {
+        child.stdin.write(Buffer.concat(data))
+      } else {
+        child.stdin.write(Buffer.from(data))
+      }
+    })
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Unknown terminal socket error'
+    if (socket.readyState === WebSocket.OPEN) socket.send(`terminal connection failed: ${message}\r\n`)
+    closeSocket(1008, message)
+  }
+
+  socket.on('close', () => {
+    if (sshProcess && !sshProcess.killed) sshProcess.kill('SIGTERM')
+    if (key?.dir) void rm(key.dir, { recursive: true, force: true })
+  })
+}
+
 async function findExistingWorker(worker: WorkerConfig) {
   const db = getDb()
   const existing = await db.select().from(agentWorkers)
@@ -724,21 +818,7 @@ async function runSshCommand(
   const keyFingerprint = key?.path ? await readKeyFingerprint(key.path) : null
 
   try {
-    const sshArgs = [
-      '-o',
-      'BatchMode=yes',
-      '-o',
-      'ConnectTimeout=8',
-      '-o',
-      'IdentitiesOnly=yes',
-      '-o',
-      'StrictHostKeyChecking=accept-new',
-      '-p',
-      String(port),
-    ]
-
-    if (key?.path) sshArgs.push('-i', key.path)
-
+    const sshArgs = buildSshArgs({ host, port, user }, key?.path ?? null)
     sshArgs.push(`${user}@${host}`, remoteCommand)
 
     const { stdout, stderr } = await execFileAsync('ssh', sshArgs, options)
@@ -751,6 +831,24 @@ async function runSshCommand(
   } finally {
     if (key?.dir) await rm(key.dir, { recursive: true, force: true })
   }
+}
+
+function buildSshArgs({ port }: WorkerConnection, keyPath: string | null) {
+  const sshArgs = [
+    '-o',
+    'BatchMode=yes',
+    '-o',
+    'ConnectTimeout=8',
+    '-o',
+    'IdentitiesOnly=yes',
+    '-o',
+    'StrictHostKeyChecking=accept-new',
+    '-p',
+    String(port),
+  ]
+
+  if (keyPath) sshArgs.push('-i', keyPath)
+  return sshArgs
 }
 
 function buildTmuxBootstrapCommand({
