@@ -3,6 +3,8 @@ import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../lib/auth'
 import { GlyphRain, Scanlines } from '../components/pach'
 
+const HOME_PATH = '/issues'
+
 export default function Login() {
   const { login, loading } = useAuth()
   const navigate = useNavigate()
@@ -15,7 +17,7 @@ export default function Login() {
     setError(null)
     try {
       await login(email, password)
-      navigate('/', { replace: true })
+      navigate(HOME_PATH, { replace: true })
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Login failed')
     }

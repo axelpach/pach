@@ -1893,13 +1893,13 @@ function IssueRow({
           <span className="h-2 w-2 rounded-full bg-accent shadow-[0_0_12px_rgba(0,255,136,0.95)]" />
         </div>
       ) : null}
+      <div className="min-w-0 flex-1 truncate text-sm text-fg-1">{issue.title}</div>
       {shows('company') && showCompany && (
         <span className="hidden md:inline-flex shrink-0 h-5 items-center gap-1 border border-[rgba(0,255,140,0.15)] bg-pit-3 px-2 font-mono text-[10px] uppercase tracking-label text-fg-3">
           <Building2 className="h-3 w-3" />
           {company.name}
         </span>
       )}
-      <div className="min-w-0 flex-1 truncate text-sm text-fg-1">{issue.title}</div>
       {shows('project') && (
         <div className="hidden md:block shrink-0" onClick={(event) => event.stopPropagation()}>
           <PachSelect

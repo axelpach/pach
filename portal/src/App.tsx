@@ -21,6 +21,8 @@ import CampaignDetail from './pages/whatsapp/CampaignDetail'
 import { GlyphRain, Scanlines, LiveClock } from './components/pach'
 import { SearchPalette } from './components/SearchPalette'
 
+const HOME_PATH = '/issues'
+
 const OUTER_NAV_ITEMS = [
   { label: 'Issues', path: '/issues' },
   { label: 'CRM', path: '/crm' },
@@ -250,7 +252,7 @@ function AppShell() {
       }
 
       const currentIndex = OUTER_NAV_ITEMS.findIndex((item) => {
-        if (item.path === '/crm') return location.pathname === '/' || location.pathname.startsWith('/crm')
+        if (item.path === '/crm') return location.pathname.startsWith('/crm')
         if (item.path === '/decks') return location.pathname.startsWith('/decks')
         if (item.path === '/issues') return location.pathname.startsWith('/issues')
         if (item.path === '/whatsapp/templates') return location.pathname.startsWith('/whatsapp')
@@ -282,7 +284,7 @@ function AppShell() {
           <Sidebar />
           <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
             <Routes>
-              <Route path="/" element={<CRM />} />
+              <Route path="/" element={<Navigate to={HOME_PATH} replace />} />
               <Route path="/crm/*" element={<CRM />} />
               <Route path="/issues" element={<IssuesLayout />}>
                 <Route index element={<Issues />} />
@@ -315,7 +317,7 @@ function GatedApp() {
     return <Navigate to="/login" replace />
   }
 
-  if (location.pathname === '/login') return <Navigate to="/" replace />
+  if (location.pathname === '/login') return <Navigate to={HOME_PATH} replace />
 
   return (
     <ZeroProvider
