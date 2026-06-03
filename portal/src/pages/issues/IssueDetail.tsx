@@ -37,7 +37,7 @@ const PRIORITY_OPTIONS = [
   { value: 4, label: 'low', accent: 'text-accent' },
 ] as const
 
-const ESTIMATE_OPTIONS = [1, 2, 3, 4, 8, 16]
+const ESTIMATE_OPTIONS = [1, 2, 4, 8, 16]
 
 const DEFAULT_REPOSITORIES = [
   { projectKey: 'pach', owner: 'axelpach', name: 'pach', fullName: 'axelpach/pach', defaultBranch: 'main' },

@@ -42,7 +42,7 @@ const PRIORITY_GROUPS = [
   { value: 0, label: 'unprioritized', accent: 'text-fg-3' },
 ] as const
 
-const ESTIMATES = [2, 4, 8, 16]
+const ESTIMATES = [1, 2, 4, 8, 16]
 const ACTIVE_AGENT_RUN_STATUSES = new Set<string>(['queued', 'reserved', 'bootstrapping', 'running', 'needs_human', 'pr_ready'])
 
 const STATUS_BUCKETS = [
@@ -1718,7 +1718,7 @@ function SelectField({
   )
 }
 
-const ESTIMATE_VALUES = [1, 2, 3, 4, 8, 16]
+const ESTIMATE_VALUES = [1, 2, 4, 8, 16]
 
 function SortableIssueRow(props: React.ComponentProps<typeof IssueRow>) {
   const draggable = props.draggable !== false
