@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { AlertTriangle, ArrowDown, ArrowUp, ArrowUpDown, Building2, CheckCircle2, Check, ChevronDown, ChevronRight, Circle, FolderKanban, Plus, Settings2 } from 'lucide-react'
+import { AlertTriangle, ArrowDown, ArrowUp, ArrowUpDown, BookmarkPlus, Building2, CheckCircle2, Check, ChevronDown, ChevronRight, Circle, FolderKanban, Plus, Settings2 } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import {
   DndContext,
@@ -127,6 +127,14 @@ type RowShortcutRequest = {
   nonce: number
 }
 
+type IssueViewState = {
+  filters: ActiveFilters
+  collapsedPriorities: number[]
+  collapsedStatuses: string[]
+  sort: SortConfig
+  visibleFields: RowField[]
+}
+
 export default function Issues() {
   const z = useZero<Schema, Mutators>()
   const { user } = useAuth()
@@ -141,6 +149,7 @@ export default function Issues() {
   const [labels] = useQuery(z.query.pm_labels.orderBy('name', 'asc'))
   const [issueLabels] = useQuery(z.query.pm_issue_labels)
   const [agentRuns] = useQuery(z.query.agent_runs.orderBy('createdAt', 'desc'))
+  const [savedViews] = useQuery(z.query.pm_saved_views.orderBy('position', 'asc'))
 
   const storageKey = user ? `pach:issues:view:${user.id}` : null
   const scrollStorageKey = user ? `pach:issues:scroll:${user.id}` : null
@@ -181,6 +190,32 @@ export default function Issues() {
   const [projectDraftDescription, setProjectDraftDescription] = useState('')
   const [projectDraftStatus, setProjectDraftStatus] = useState('active')
   const [savingProject, setSavingProject] = useState(false)
+  const [saveViewModalOpen, setSaveViewModalOpen] = useState(false)
+  const [saveViewName, setSaveViewName] = useState('')
+  const [savingView, setSavingView] = useState(false)
+
+  const activeSavedView =
+    section.kind === 'view'
+      ? savedViews.find((view) => view.id === section.viewId && view.ownerId === user?.id) ?? null
+      : null
+
+  function applyIssueViewState(viewState: IssueViewState) {
+    setActiveFilters(viewState.filters)
+    setCollapsedPriorities(new Set(viewState.collapsedPriorities))
+    setCollapsedStatuses(new Set(viewState.collapsedStatuses))
+    setSortConfig(viewState.sort)
+    setVisibleFields(new Set(viewState.visibleFields))
+  }
+
+  function getCurrentIssueViewState(): IssueViewState {
+    return {
+      filters: copyActiveFilters(activeFilters),
+      collapsedPriorities: [...collapsedPriorities],
+      collapsedStatuses: [...collapsedStatuses],
+      sort: sortConfig,
+      visibleFields: [...visibleFields],
+    }
+  }
 
   function togglePriority(value: number) {
     setCollapsedPriorities((prev) => {
@@ -341,11 +376,87 @@ export default function Issues() {
     }
   }, [composerAssigneeId, user, users])
 
+  function openSaveViewModal() {
+    if (!user) return
+    setSaveViewName('')
+    setSaveViewModalOpen(true)
+  }
+
+  function closeSaveViewModal() {
+    setSaveViewModalOpen(false)
+    setSaveViewName('')
+    setSavingView(false)
+  }
+
+  async function submitSavedView() {
+    if (!user) return
+    const name = saveViewName.trim()
+    if (!name) return
+
+    setSavingView(true)
+    try {
+      const id = crypto.randomUUID()
+      const state = getCurrentIssueViewState()
+      const existingSlugs = new Set(
+        savedViews
+          .filter((view) => view.ownerId === user.id && view.scope === 'personal')
+          .map((view) => view.slug),
+      )
+      await z.mutate.pm_saved_views.create({
+        id,
+        ownerId: user.id,
+        name,
+        slug: makeUniqueSlug(slugifySavedViewName(name), existingSlugs),
+        scope: 'personal',
+        filters: state.filters,
+        display: {
+          sort: state.sort,
+          visibleFields: state.visibleFields,
+          collapsedPriorities: state.collapsedPriorities,
+          collapsedStatuses: state.collapsedStatuses,
+        },
+        position: savedViews.filter((view) => view.ownerId === user.id && view.scope === 'personal').length,
+      })
+      closeSaveViewModal()
+      setSection({ kind: 'view', viewId: id })
+    } finally {
+      setSavingView(false)
+    }
+  }
+
+  const appliedSavedViewRef = useRef<string | null>(null)
+  const wasViewingSavedViewRef = useRef(section.kind === 'view')
+  const skipNextLocalViewPersistRef = useRef(false)
+  useEffect(() => {
+    if (section.kind !== 'view') {
+      appliedSavedViewRef.current = null
+      if (wasViewingSavedViewRef.current) {
+        wasViewingSavedViewRef.current = false
+        skipNextLocalViewPersistRef.current = true
+        applyIssueViewState(readStoredView(storageKey))
+      }
+      return
+    }
+
+    wasViewingSavedViewRef.current = true
+    if (!activeSavedView) return
+
+    const revisionKey = `${activeSavedView.id}:${activeSavedView.updatedAt}`
+    if (appliedSavedViewRef.current === revisionKey) return
+    appliedSavedViewRef.current = revisionKey
+    applyIssueViewState(readSavedIssueView(activeSavedView))
+  }, [section, activeSavedView, storageKey])
+
   // save to localStorage on change — initial state is already hydrated via the
   // useState lazy initializers above (see `readStoredView`), so no separate
   // hydrate effect is needed and there's no risk of clobbering with defaults.
   useEffect(() => {
     if (!storageKey) return
+    if (section.kind === 'view') return
+    if (skipNextLocalViewPersistRef.current) {
+      skipNextLocalViewPersistRef.current = false
+      return
+    }
     try {
       localStorage.setItem(
         storageKey,
@@ -360,7 +471,7 @@ export default function Issues() {
     } catch {
       // ignore quota / serialization errors
     }
-  }, [storageKey, activeFilters, collapsedPriorities, collapsedStatuses, sortConfig, visibleFields])
+  }, [storageKey, section.kind, activeFilters, collapsedPriorities, collapsedStatuses, sortConfig, visibleFields])
 
   const lastComposerRequestRef = useRef(composerRequestId)
   useEffect(() => {
@@ -446,8 +557,25 @@ export default function Issues() {
     return () => window.removeEventListener('keydown', handleEscape)
   }, [projectModal])
 
+  useEffect(() => {
+    if (!saveViewModalOpen) return
+    function handleEscape(event: KeyboardEvent) {
+      if (event.key !== 'Escape') return
+      event.preventDefault()
+      closeSaveViewModal()
+    }
+    window.addEventListener('keydown', handleEscape)
+    return () => window.removeEventListener('keydown', handleEscape)
+  }, [saveViewModalOpen])
+
   const filteredIssues = issues.filter((issue) => {
-    if (section.kind === 'team' && issue.teamId !== section.teamId) return false
+    const sectionTeamId =
+      section.kind === 'team'
+        ? section.teamId
+        : section.kind === 'view'
+          ? activeSavedView?.teamId
+          : undefined
+    if (sectionTeamId && issue.teamId !== sectionTeamId) return false
 
     // multiselect filters
     for (const [field, values] of Object.entries(activeFilters)) {
@@ -962,6 +1090,16 @@ export default function Issues() {
                   </div>
                   {!(section.kind === 'team' && section.tab === 'projects') && (
                     <>
+                      {section.kind === 'all' && (
+                        <button
+                          onClick={openSaveViewModal}
+                          disabled={!user}
+                          title={user ? 'save as view' : 'sign in to save view'}
+                          className="flex h-6 w-6 items-center justify-center border border-[rgba(0,255,140,0.15)] bg-pit-3 text-fg-3 transition hover:border-[rgba(0,255,140,0.25)] hover:text-fg-1 disabled:opacity-40 disabled:hover:border-[rgba(0,255,140,0.15)] disabled:hover:text-fg-3"
+                        >
+                          <BookmarkPlus className="h-3 w-3" />
+                        </button>
+                      )}
                       <SortMenu value={sortConfig} onChange={setSortConfig} />
                       <DisplayMenu value={visibleFields} onChange={setVisibleFields} />
                     </>
@@ -1173,6 +1311,16 @@ export default function Issues() {
         saving={savingProject}
         onClose={closeProjectModal}
         onSubmit={submitProjectModal}
+      />
+    )}
+
+    {saveViewModalOpen && (
+      <SaveViewModal
+        name={saveViewName}
+        saving={savingView}
+        onNameChange={setSaveViewName}
+        onClose={closeSaveViewModal}
+        onSubmit={submitSavedView}
       />
     )}
     </>
@@ -1587,6 +1735,79 @@ function ComposerPill({ icon, label }: { icon: React.ReactNode; label: string })
 }
 
 const PROJECT_STATUS_OPTIONS = ['planned', 'active', 'paused', 'completed', 'canceled']
+
+function SaveViewModal({
+  name,
+  saving,
+  onNameChange,
+  onClose,
+  onSubmit,
+}: {
+  name: string
+  saving: boolean
+  onNameChange: (value: string) => void
+  onClose: () => void
+  onSubmit: () => void
+}) {
+  function handleSubmit(event: React.FormEvent) {
+    event.preventDefault()
+    if (!name.trim() || saving) return
+    onSubmit()
+  }
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-[rgba(0,0,0,0.7)] px-4 backdrop-blur-sm"
+      onClick={onClose}
+    >
+      <form
+        className="w-full max-w-lg border border-[rgba(0,255,140,0.2)] bg-pit-2 shadow-[0_30px_80px_rgba(0,0,0,0.5)]"
+        onClick={(event) => event.stopPropagation()}
+        onSubmit={handleSubmit}
+      >
+        <div className="border-b border-[rgba(0,255,140,0.12)] px-6 py-5">
+          <div className="text-[10px] uppercase tracking-label text-fg-3">
+            ◊ views · save
+          </div>
+          <div className="mt-1.5 font-mono text-xl lowercase text-fg-1">
+            save as view
+          </div>
+        </div>
+
+        <div className="px-6 py-5">
+          <label className="block">
+            <div className="mb-2 font-mono text-[10px] uppercase tracking-label text-fg-3">view name</div>
+            <input
+              autoFocus
+              value={name}
+              onChange={(event) => onNameChange(event.target.value)}
+              placeholder="$ my open work"
+              className="w-full bg-rim border border-[rgba(0,255,140,0.15)] px-3 py-2 text-sm text-fg-1 outline-none focus:border-accent focus:shadow-glow-xs placeholder:text-fg-4"
+            />
+          </label>
+        </div>
+
+        <div className="flex items-center justify-between border-t border-[rgba(0,255,140,0.12)] px-6 py-4">
+          <button
+            type="button"
+            onClick={onClose}
+            className="px-3 py-2 font-mono text-xs uppercase tracking-label text-fg-3 transition hover:text-fg-1"
+          >
+            [cancel]
+          </button>
+          <button
+            type="submit"
+            disabled={!name.trim() || saving}
+            className="inline-flex items-center gap-2 border border-[rgba(0,255,140,0.3)] bg-[rgba(0,255,136,0.08)] px-4 py-2 font-mono text-xs uppercase tracking-label text-accent transition hover:bg-[rgba(0,255,136,0.16)] hover:shadow-glow-xs disabled:opacity-40 disabled:hover:bg-[rgba(0,255,136,0.08)] disabled:hover:shadow-none"
+          >
+            <BookmarkPlus className="h-3.5 w-3.5" />
+            {saving ? 'saving…' : 'save view'}
+          </button>
+        </div>
+      </form>
+    </div>
+  )
+}
 
 function ProjectModal({
   mode,
@@ -2230,13 +2451,7 @@ function getWorkspaceStatuses(statuses: Schema['tables']['pm_statuses']['row'][]
   })
 }
 
-function readStoredView(storageKey: string | null): {
-  filters: ActiveFilters
-  collapsedPriorities: number[]
-  collapsedStatuses: string[]
-  sort: SortConfig
-  visibleFields: RowField[]
-} {
+function readStoredView(storageKey: string | null): IssueViewState {
   const empty = {
     filters: {} as ActiveFilters,
     collapsedPriorities: [] as number[],
@@ -2248,55 +2463,91 @@ function readStoredView(storageKey: string | null): {
   try {
     const raw = window.localStorage.getItem(storageKey)
     if (!raw) return empty
-    const parsed = JSON.parse(raw) as {
-      filters?: Record<string, unknown>
-      collapsedPriorities?: unknown
-      collapsedStatuses?: unknown
-      sort?: { field?: unknown; direction?: unknown }
-      visibleFields?: unknown
-    }
-
-    const filters: ActiveFilters = {}
-    if (parsed.filters && typeof parsed.filters === 'object') {
-      for (const [field, values] of Object.entries(parsed.filters)) {
-        if (!Array.isArray(values)) continue
-        const stringValues = values.filter((v): v is string => typeof v === 'string')
-        if (stringValues.length) filters[field] = stringValues
-      }
-    }
-
-    const collapsedPriorities = Array.isArray(parsed.collapsedPriorities)
-      ? parsed.collapsedPriorities.filter((v): v is number => typeof v === 'number')
-      : []
-    const collapsedStatuses = Array.isArray(parsed.collapsedStatuses)
-      ? parsed.collapsedStatuses.filter((v): v is string => typeof v === 'string')
-      : []
-
-    const validSortFields = SORT_FIELDS.map((f) => f.value)
-    const sortField =
-      typeof parsed.sort?.field === 'string' && (validSortFields as string[]).includes(parsed.sort.field)
-        ? (parsed.sort.field as SortField)
-        : DEFAULT_SORT.field
-    const sortDirection: SortDirection =
-      parsed.sort?.direction === 'desc' ? 'desc' : 'asc'
-
-    const validRowFields = ROW_FIELDS.map((f) => f.value) as string[]
-    const visibleFields = Array.isArray(parsed.visibleFields)
-      ? (parsed.visibleFields.filter(
-          (v): v is RowField => typeof v === 'string' && validRowFields.includes(v),
-        ) as RowField[])
-      : DEFAULT_VISIBLE_FIELDS
-
-    return {
-      filters,
-      collapsedPriorities,
-      collapsedStatuses,
-      sort: { field: sortField, direction: sortDirection },
-      visibleFields,
-    }
+    return parseIssueViewState(JSON.parse(raw))
   } catch {
     return empty
   }
+}
+
+function readSavedIssueView(view: Schema['tables']['pm_saved_views']['row']): IssueViewState {
+  return parseIssueViewState({
+    filters: view.filters,
+    display: view.display,
+  })
+}
+
+function parseIssueViewState(raw: unknown): IssueViewState {
+  const parsed = isRecord(raw) ? raw : {}
+  const display = isRecord(parsed.display) ? parsed.display : parsed
+  const filters = isRecord(parsed.filters) ? parseActiveFilters(parsed.filters) : {}
+
+  const collapsedPriorities = Array.isArray(display.collapsedPriorities)
+    ? display.collapsedPriorities.filter((v): v is number => typeof v === 'number')
+    : []
+  const collapsedStatuses = Array.isArray(display.collapsedStatuses)
+    ? display.collapsedStatuses.filter((v): v is string => typeof v === 'string')
+    : []
+
+  const sortRaw = isRecord(display.sort) ? display.sort : {}
+  const validSortFields = SORT_FIELDS.map((f) => f.value)
+  const sortField =
+    typeof sortRaw.field === 'string' && (validSortFields as string[]).includes(sortRaw.field)
+      ? (sortRaw.field as SortField)
+      : DEFAULT_SORT.field
+  const sortDirection: SortDirection = sortRaw.direction === 'desc' ? 'desc' : 'asc'
+
+  const validRowFields = ROW_FIELDS.map((f) => f.value) as string[]
+  const visibleFields = Array.isArray(display.visibleFields)
+    ? (display.visibleFields.filter(
+        (v): v is RowField => typeof v === 'string' && validRowFields.includes(v),
+      ) as RowField[])
+    : DEFAULT_VISIBLE_FIELDS
+
+  return {
+    filters,
+    collapsedPriorities,
+    collapsedStatuses,
+    sort: { field: sortField, direction: sortDirection },
+    visibleFields,
+  }
+}
+
+function parseActiveFilters(raw: Record<string, unknown>): ActiveFilters {
+  const filters: ActiveFilters = {}
+  for (const [field, values] of Object.entries(raw)) {
+    if (!Array.isArray(values)) continue
+    const stringValues = values.filter((v): v is string => typeof v === 'string')
+    if (stringValues.length) filters[field] = stringValues
+  }
+  return filters
+}
+
+function copyActiveFilters(filters: ActiveFilters): ActiveFilters {
+  const copy: ActiveFilters = {}
+  for (const [field, values] of Object.entries(filters)) {
+    if (values.length) copy[field] = [...values]
+  }
+  return copy
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+function slugifySavedViewName(value: string) {
+  return value
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 48) || 'view'
+}
+
+function makeUniqueSlug(base: string, existingSlugs: Set<string>) {
+  if (!existingSlugs.has(base)) return base
+  let counter = 2
+  while (existingSlugs.has(`${base}-${counter}`)) counter += 1
+  return `${base}-${counter}`
 }
 
 function compareIssuesForBucketOrder(

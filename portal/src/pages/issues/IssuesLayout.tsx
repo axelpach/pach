@@ -8,6 +8,7 @@ import { useAuth } from '../../lib/auth'
 
 export type TrackerSection =
   | { kind: 'all' }
+  | { kind: 'view'; viewId: string }
   | { kind: 'team'; teamId: string; tab: 'issues' | 'projects' }
 
 export type TrackerContext = {
@@ -35,6 +36,7 @@ export default function IssuesLayout() {
   const [teams] = useQuery(z.query.pm_teams.orderBy('position', 'asc'))
   const [issues] = useQuery(z.query.pm_issues)
   const [statuses] = useQuery(z.query.pm_statuses)
+  const [savedViews] = useQuery(z.query.pm_saved_views.orderBy('position', 'asc'))
 
   const sidebarStorageKey = user ? `pach:issues:sidebar:${user.id}` : null
   const initialSidebar = readStoredSidebar(sidebarStorageKey)
@@ -47,6 +49,13 @@ export default function IssuesLayout() {
   const [savingTeam, setSavingTeam] = useState(false)
   const [composerRequestId, setComposerRequestId] = useState(0)
   const [mobileTrackerOpen, setMobileTrackerOpen] = useState(false)
+  const personalSavedViews = savedViews
+    .filter((view) => view.scope === 'personal' && view.ownerId === user?.id && view.slug !== 'all-issues')
+    .sort((a, b) => {
+      const positionDiff = a.position - b.position
+      if (positionDiff !== 0) return positionDiff
+      return a.name.localeCompare(b.name)
+    })
 
   // close mobile tracker on route change
   useEffect(() => {
@@ -213,6 +222,13 @@ export default function IssuesLayout() {
     setSectionState({ kind: 'all' })
   }, [section, teams])
 
+  // keep section valid if saved view disappears
+  useEffect(() => {
+    if (section.kind !== 'view') return
+    if (personalSavedViews.some((view) => view.id === section.viewId)) return
+    setSectionState({ kind: 'all' })
+  }, [section, personalSavedViews])
+
   useEffect(() => {
     if (!teamModal) return
     function handleEscape(event: KeyboardEvent) {
@@ -299,6 +315,18 @@ export default function IssuesLayout() {
               meta={`${issues.length}`}
               onClick={() => setSection({ kind: 'all' })}
             />
+            {personalSavedViews.map((view) => (
+              <TrackerNavButton
+                key={view.id}
+                active={location.pathname === '/issues' && section.kind === 'view' && section.viewId === view.id}
+                label={view.name.toLowerCase()}
+                onClick={() => setSection({ kind: 'view', viewId: view.id })}
+              />
+            ))}
+          </div>
+
+          <div className="mt-6 space-y-1">
+            <div className="px-3 pb-1 font-mono text-[10px] uppercase tracking-label text-fg-4">manage</div>
             <TrackerNavButton
               active={location.pathname === '/issues/labels'}
               label="labels"
