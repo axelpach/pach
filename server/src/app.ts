@@ -5,6 +5,7 @@ import cors from 'cors'
 import zeroPushRoute from './zero/push-route.js'
 import whatsappRoute, { publicWhatsAppRouter } from './routes/whatsapp.js'
 import authRoute from './routes/auth.js'
+import inboundRoute from './routes/inbound.js'
 import linearRoute from './routes/linear.js'
 import agentRoute, { attachAgentTerminalWebSocket } from './routes/agent.js'
 import { requireAuth } from './middleware/auth.js'
@@ -19,6 +20,7 @@ app.get('/health', (_req, res) => res.json({ ok: true }))
 
 app.use('/auth', authRoute)
 app.use('/whatsapp', publicWhatsAppRouter)
+app.use('/inbound', inboundRoute)
 app.use('/zero', requireAuth, zeroPushRoute)
 app.use('/whatsapp', requireAuth, whatsappRoute)
 app.use('/linear', requireAuth, linearRoute)
