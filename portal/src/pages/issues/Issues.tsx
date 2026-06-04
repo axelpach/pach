@@ -306,7 +306,14 @@ export default function Issues() {
   const teamMap = new Map(teams.map((team) => [team.id, team]))
   const statusMap = new Map(statuses.map((status) => [status.id, status]))
   const projectMap = new Map(projects.map((project) => [project.id, project]))
-  const userMap = new Map(users.map((entry) => [entry.id, entry]))
+  const authUserRow: Schema['tables']['users']['row'] | null = user
+    ? { id: user.id, email: user.email, name: user.name ?? undefined, createdAt: 0, updatedAt: 0 }
+    : null
+  const assignableUsers =
+    authUserRow && !users.some((entry) => entry.id === authUserRow.id)
+      ? [...users, authUserRow]
+      : users
+  const userMap = new Map(assignableUsers.map((entry) => [entry.id, entry]))
   const labelMap = new Map(labels.map((entry) => [entry.id, entry]))
   const activeAgentRunIssueIds = new Set(
     agentRuns
@@ -371,10 +378,10 @@ export default function Issues() {
       setComposerAssigneeId(user.id)
       return
     }
-    if (composerAssigneeId && !users.some((u) => u.id === composerAssigneeId)) {
+    if (composerAssigneeId && !assignableUsers.some((u) => u.id === composerAssigneeId)) {
       setComposerAssigneeId(user?.id ?? '')
     }
-  }, [composerAssigneeId, user, users])
+  }, [assignableUsers, composerAssigneeId, user])
 
   function openSaveViewModal() {
     if (!user) return
@@ -649,7 +656,7 @@ export default function Issues() {
       icon: Circle,
       options: [
         { value: '__none', label: 'unassigned' },
-        ...users.map((u) => ({ value: u.id, label: u.name ?? u.email })),
+        ...assignableUsers.map((u) => ({ value: u.id, label: u.name ?? u.email })),
       ],
     },
     {
@@ -1291,7 +1298,7 @@ export default function Issues() {
         teams={teams}
         projects={composerProjects}
         statuses={workspaceStatuses}
-        users={users}
+        users={assignableUsers}
         team={selectedComposerTeam}
         creating={creatingIssue}
         onClose={() => setComposerOpen(false)}

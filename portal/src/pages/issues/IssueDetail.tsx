@@ -100,7 +100,14 @@ export default function IssueDetail() {
   const team = issue ? teams.find((t) => t.id === issue.teamId) ?? null : null
   const project = issue?.projectId ? projects.find((p) => p.id === issue.projectId) ?? null : null
   const status = issue ? statuses.find((s) => s.id === issue.statusId) ?? null : null
-  const assignee = issue?.assigneeId ? users.find((u) => u.id === issue.assigneeId) ?? null : null
+  const authUserRow: Schema['tables']['users']['row'] | null = user
+    ? { id: user.id, email: user.email, name: user.name ?? undefined, createdAt: 0, updatedAt: 0 }
+    : null
+  const assignableUsers =
+    authUserRow && !users.some((entry) => entry.id === authUserRow.id)
+      ? [...users, authUserRow]
+      : users
+  const assignee = issue?.assigneeId ? assignableUsers.find((u) => u.id === issue.assigneeId) ?? null : null
   const company = issue?.contextCompanyId
     ? companies.find((c) => c.id === issue.contextCompanyId) ?? null
     : null
@@ -556,7 +563,7 @@ export default function IssueDetail() {
                   value={issue.assigneeId ?? ''}
                   onChange={async (next) => {
                     if ((next || undefined) === (issue.assigneeId ?? undefined)) return
-                    const target = users.find((u) => u.id === next)
+                    const target = assignableUsers.find((u) => u.id === next)
                     await patchIssue(
                       { assigneeId: next || undefined },
                       next ? `assigned to ${target?.name ?? target?.email ?? 'user'}` : 'unassigned',
@@ -564,7 +571,7 @@ export default function IssueDetail() {
                   }}
                   options={[
                     { value: '', label: 'unassigned' },
-                    ...users.map((u) => ({ value: u.id, label: (u.name ?? u.email).toLowerCase() })),
+                    ...assignableUsers.map((u) => ({ value: u.id, label: (u.name ?? u.email).toLowerCase() })),
                   ]}
                   display={(assignee?.name ?? assignee?.email)?.toLowerCase() ?? 'unassigned'}
                 />
