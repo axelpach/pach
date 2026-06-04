@@ -2431,7 +2431,7 @@ function getStatusBuckets(
   }
 
   return Array.from(uniqueStatuses.values()).sort((a, b) => {
-    const rankDiff = statusRank(a.type) - statusRank(b.type)
+    const rankDiff = issueSectionStatusRank(a.type) - issueSectionStatusRank(b.type)
     if (rankDiff !== 0) return rankDiff
     return a.position - b.position
   })
@@ -2649,6 +2649,16 @@ function statusRank(statusType: string) {
   if (statusType === 'unstarted') return 1
   if (statusType === 'started') return 2
   if (statusType === 'blocked') return 3
+  if (statusType === 'completed') return 4
+  if (statusType === 'canceled') return 5
+  return 99
+}
+
+function issueSectionStatusRank(statusType: string) {
+  if (statusType === 'blocked') return 0
+  if (statusType === 'started') return 1
+  if (statusType === 'unstarted') return 2
+  if (statusType === 'backlog') return 3
   if (statusType === 'completed') return 4
   if (statusType === 'canceled') return 5
   return 99
