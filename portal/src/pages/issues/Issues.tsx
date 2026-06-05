@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { AlertTriangle, ArrowDown, ArrowUp, ArrowUpDown, BookmarkPlus, Bot, Building2, CheckCircle2, Check, ChevronDown, ChevronRight, Circle, FolderKanban, GripVertical, Plus, Settings2 } from 'lucide-react'
+import { AlertTriangle, ArrowDown, ArrowUp, ArrowUpDown, BookmarkPlus, Bot, Building2, CheckCircle2, Check, ChevronDown, ChevronRight, Circle, FolderKanban, GripVertical, Plus, Save, Settings2 } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import {
   DndContext,
@@ -193,6 +193,7 @@ export default function Issues() {
   const [saveViewModalOpen, setSaveViewModalOpen] = useState(false)
   const [saveViewName, setSaveViewName] = useState('')
   const [savingView, setSavingView] = useState(false)
+  const [updatingView, setUpdatingView] = useState(false)
 
   const activeSavedView =
     section.kind === 'view'
@@ -216,6 +217,10 @@ export default function Issues() {
       visibleFields: [...visibleFields],
     }
   }
+
+  const activeSavedViewIsDirty = activeSavedView
+    ? !issueViewStatesEqual(getCurrentIssueViewState(), readSavedIssueView(activeSavedView))
+    : false
 
   function togglePriority(value: number) {
     setCollapsedPriorities((prev) => {
@@ -416,18 +421,29 @@ export default function Issues() {
         slug: makeUniqueSlug(slugifySavedViewName(name), existingSlugs),
         scope: 'personal',
         filters: state.filters,
-        display: {
-          sort: state.sort,
-          visibleFields: state.visibleFields,
-          collapsedPriorities: state.collapsedPriorities,
-          collapsedStatuses: state.collapsedStatuses,
-        },
+        display: getIssueViewDisplay(state),
         position: savedViews.filter((view) => view.ownerId === user.id && view.scope === 'personal').length,
       })
       closeSaveViewModal()
       setSection({ kind: 'view', viewId: id })
     } finally {
       setSavingView(false)
+    }
+  }
+
+  async function updateActiveSavedView() {
+    if (!activeSavedView || !activeSavedViewIsDirty) return
+
+    setUpdatingView(true)
+    try {
+      const state = getCurrentIssueViewState()
+      await z.mutate.pm_saved_views.update({
+        id: activeSavedView.id,
+        filters: state.filters,
+        display: getIssueViewDisplay(state),
+      })
+    } finally {
+      setUpdatingView(false)
     }
   }
 
@@ -1145,6 +1161,24 @@ export default function Issues() {
                           className="flex h-6 w-6 items-center justify-center border border-[rgba(0,255,140,0.15)] bg-pit-3 text-fg-3 transition hover:border-[rgba(0,255,140,0.25)] hover:text-fg-1 disabled:opacity-40 disabled:hover:border-[rgba(0,255,140,0.15)] disabled:hover:text-fg-3"
                         >
                           <BookmarkPlus className="h-3 w-3" />
+                        </button>
+                      )}
+                      {section.kind === 'view' && activeSavedView && (
+                        <button
+                          onClick={updateActiveSavedView}
+                          disabled={!activeSavedViewIsDirty || updatingView}
+                          title={
+                            activeSavedViewIsDirty
+                              ? `update view · ${activeSavedView.name.toLowerCase()}`
+                              : 'view is up to date'
+                          }
+                          className={`flex h-6 w-6 items-center justify-center border transition ${
+                            activeSavedViewIsDirty
+                              ? 'border-[rgba(0,255,140,0.3)] bg-[rgba(0,255,136,0.08)] text-accent hover:bg-[rgba(0,255,136,0.16)] hover:shadow-glow-xs'
+                              : 'border-[rgba(0,255,140,0.12)] bg-pit-3 text-fg-4 opacity-60'
+                          } disabled:cursor-not-allowed`}
+                        >
+                          <Save className="h-3 w-3" />
                         </button>
                       )}
                       <SortMenu value={sortConfig} onChange={setSortConfig} />
@@ -2562,6 +2596,39 @@ function readSavedIssueView(view: Schema['tables']['pm_saved_views']['row']): Is
     filters: view.filters,
     display: view.display,
   })
+}
+
+function getIssueViewDisplay(state: IssueViewState): Record<string, unknown> {
+  return {
+    sort: state.sort,
+    visibleFields: state.visibleFields,
+    collapsedPriorities: state.collapsedPriorities,
+    collapsedStatuses: state.collapsedStatuses,
+  }
+}
+
+function issueViewStatesEqual(a: IssueViewState, b: IssueViewState) {
+  return JSON.stringify(normalizeIssueViewState(a)) === JSON.stringify(normalizeIssueViewState(b))
+}
+
+function normalizeIssueViewState(state: IssueViewState) {
+  const filterEntries = Object.entries(state.filters)
+    .filter(([, values]) => values.length > 0)
+    .map(([field, values]) => [field, [...values].sort()] as const)
+    .sort(([a], [b]) => a.localeCompare(b))
+
+  const visibleFieldSet = new Set(state.visibleFields)
+  const visibleFields = ROW_FIELDS
+    .map((field) => field.value)
+    .filter((field) => visibleFieldSet.has(field))
+
+  return {
+    filters: Object.fromEntries(filterEntries),
+    collapsedPriorities: [...state.collapsedPriorities].sort((a, b) => a - b),
+    collapsedStatuses: [...state.collapsedStatuses].sort(),
+    sort: state.sort,
+    visibleFields,
+  }
 }
 
 function parseIssueViewState(raw: unknown): IssueViewState {
