@@ -225,6 +225,44 @@ export function createServerMutators() {
       },
     },
 
+    pm_task_triggers: {
+      async create(tx: Tx, args: { id: string; name: string; kind?: string; frequency?: string; timezone?: string; schedule?: Record<string, unknown>; enabled?: boolean; nextRunAt: number; lastRunAt?: number; companyId?: string; teamId: string; projectId?: string; statusId: string; assigneeId?: string; creatorId?: string; title: string; description?: string; priority?: number; estimate?: number; metadata?: Record<string, unknown> }) {
+        const now = Date.now()
+        await tx.mutate.pm_task_triggers.insert({
+          kind: 'recurring',
+          timezone: 'America/Mexico_City',
+          schedule: {},
+          enabled: true,
+          priority: 2,
+          metadata: {},
+          ...args,
+          createdAt: now,
+          updatedAt: now,
+        })
+      },
+      async update(tx: Tx, args: { id: string; name?: string; kind?: string; frequency?: string | null; timezone?: string; schedule?: Record<string, unknown>; enabled?: boolean; nextRunAt?: number; lastRunAt?: number | null; companyId?: string | null; teamId?: string; projectId?: string | null; statusId?: string; assigneeId?: string | null; creatorId?: string | null; title?: string; description?: string | null; priority?: number; estimate?: number | null; metadata?: Record<string, unknown> }) {
+        const { id, ...updates } = args
+        await tx.mutate.pm_task_triggers.update({ id, ...updates, updatedAt: Date.now() })
+      },
+      async delete(tx: Tx, args: { id: string }) {
+        await tx.mutate.pm_task_triggers.delete({ id: args.id })
+      },
+    },
+
+    pm_task_trigger_runs: {
+      async create(tx: Tx, args: { id: string; triggerId: string; issueId?: string; periodKey: string; status?: string; message?: string; metadata?: Record<string, unknown> }) {
+        await tx.mutate.pm_task_trigger_runs.insert({
+          status: 'created',
+          metadata: {},
+          ...args,
+          createdAt: Date.now(),
+        })
+      },
+      async delete(tx: Tx, args: { id: string }) {
+        await tx.mutate.pm_task_trigger_runs.delete({ id: args.id })
+      },
+    },
+
     agent_workers: {
       async create(tx: Tx, args: { id: string; name: string; provider?: string; providerServerId?: string; hostname?: string; sshHost: string; sshPort?: number; sshUser?: string; status?: string; statusMessage?: string; lastSeenAt?: number; metadata?: Record<string, unknown> }) {
         const now = Date.now()

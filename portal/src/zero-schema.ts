@@ -260,6 +260,46 @@ const pmSavedViews = table('pm_saved_views')
   })
   .primaryKey('id')
 
+const pmTaskTriggers = table('pm_task_triggers')
+  .columns({
+    id: string(),
+    name: string(),
+    kind: string(),
+    frequency: string().optional(),
+    timezone: string(),
+    schedule: json<Record<string, unknown>>(),
+    enabled: boolean(),
+    nextRunAt: number().from('next_run_at'),
+    lastRunAt: number().optional().from('last_run_at'),
+    companyId: string().optional().from('company_id'),
+    teamId: string().from('team_id'),
+    projectId: string().optional().from('project_id'),
+    statusId: string().from('status_id'),
+    assigneeId: string().optional().from('assignee_id'),
+    creatorId: string().optional().from('creator_id'),
+    title: string(),
+    description: string().optional(),
+    priority: number(),
+    estimate: number().optional(),
+    metadata: json<Record<string, unknown>>(),
+    createdAt: number().from('created_at'),
+    updatedAt: number().from('updated_at'),
+  })
+  .primaryKey('id')
+
+const pmTaskTriggerRuns = table('pm_task_trigger_runs')
+  .columns({
+    id: string(),
+    triggerId: string().from('trigger_id'),
+    issueId: string().optional().from('issue_id'),
+    periodKey: string().from('period_key'),
+    status: string(),
+    message: string().optional(),
+    metadata: json<Record<string, unknown>>(),
+    createdAt: number().from('created_at'),
+  })
+  .primaryKey('id')
+
 const agentWorkers = table('agent_workers')
   .columns({
     id: string(),
@@ -484,6 +524,8 @@ export const schema = createSchema({
     pmIssueLabels,
     pmIssueActivity,
     pmSavedViews,
+    pmTaskTriggers,
+    pmTaskTriggerRuns,
     agentWorkers,
     githubRepositories,
     agentRuns,

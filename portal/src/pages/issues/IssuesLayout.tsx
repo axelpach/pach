@@ -332,6 +332,11 @@ export default function IssuesLayout() {
               label="labels"
               onClick={() => navigate('/issues/labels')}
             />
+            <TrackerNavButton
+              active={location.pathname === '/issues/triggers'}
+              label="triggers"
+              onClick={() => navigate('/issues/triggers')}
+            />
           </div>
 
           <div className="mt-6 space-y-1">

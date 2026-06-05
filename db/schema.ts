@@ -1,4 +1,4 @@
-import { boolean, pgTable, uuid, text, timestamp, integer, jsonb } from 'drizzle-orm/pg-core'
+import { boolean, index, pgTable, uniqueIndex, uuid, text, timestamp, integer, jsonb } from 'drizzle-orm/pg-core'
 
 /* ─────────────────────────── USERS ─────────────────────────── */
 
@@ -260,6 +260,62 @@ export const pmSavedViews = pgTable('pm_saved_views', {
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
 })
+
+export type TaskTriggerSchedule = {
+  kind: 'once' | 'recurring'
+  frequency?: 'weekly' | 'monthly' | 'quarterly'
+  /** 0 = Sunday, 1 = Monday, etc. */
+  dayOfWeek?: number
+  /** 1-31; values past the end of a month clamp to that month's final day. */
+  dayOfMonth?: number
+  /** HH:mm in the trigger timezone. */
+  time?: string
+}
+
+export const pmTaskTriggers = pgTable('pm_task_triggers', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  name: text('name').notNull(),
+  /** once | recurring */
+  kind: text('kind').notNull().default('recurring'),
+  /** weekly | monthly | quarterly; null for one-off dated triggers. */
+  frequency: text('frequency'),
+  timezone: text('timezone').notNull().default('America/Mexico_City'),
+  schedule: jsonb('schedule').$type<TaskTriggerSchedule>().notNull().default({ kind: 'recurring', frequency: 'monthly', dayOfMonth: 1, time: '09:00' }),
+  enabled: boolean('enabled').notNull().default(true),
+  nextRunAt: timestamp('next_run_at', { withTimezone: true }).notNull(),
+  lastRunAt: timestamp('last_run_at', { withTimezone: true }),
+  companyId: uuid('company_id').references(() => companies.id),
+  teamId: uuid('team_id').notNull().references(() => pmTeams.id),
+  projectId: uuid('project_id').references(() => pmProjects.id),
+  statusId: uuid('status_id').notNull().references(() => pmStatuses.id),
+  assigneeId: uuid('assignee_id').references(() => users.id),
+  creatorId: uuid('creator_id').references(() => users.id),
+  title: text('title').notNull(),
+  description: text('description'),
+  priority: integer('priority').notNull().default(2),
+  estimate: integer('estimate'),
+  metadata: jsonb('metadata').$type<Record<string, unknown>>().notNull().default({}),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+}, (table) => ({
+  nextRunAtIdx: index('pm_task_triggers_next_run_at_idx').on(table.nextRunAt),
+  enabledNextRunAtIdx: index('pm_task_triggers_enabled_next_run_at_idx').on(table.enabled, table.nextRunAt),
+}))
+
+export const pmTaskTriggerRuns = pgTable('pm_task_trigger_runs', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  triggerId: uuid('trigger_id').notNull().references(() => pmTaskTriggers.id),
+  issueId: uuid('issue_id').references(() => pmIssues.id),
+  periodKey: text('period_key').notNull(),
+  /** created | skipped | failed */
+  status: text('status').notNull().default('created'),
+  message: text('message'),
+  metadata: jsonb('metadata').$type<Record<string, unknown>>().notNull().default({}),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+}, (table) => ({
+  triggerPeriodIdx: uniqueIndex('pm_task_trigger_runs_trigger_period_idx').on(table.triggerId, table.periodKey),
+  triggerIdIdx: index('pm_task_trigger_runs_trigger_id_idx').on(table.triggerId),
+}))
 
 /* ─────────────────────── AGENT WORKERS ─────────────────────── */
 
