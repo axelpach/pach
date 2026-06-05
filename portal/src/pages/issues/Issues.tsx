@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { AlertTriangle, ArrowDown, ArrowUp, ArrowUpDown, BookmarkPlus, Building2, CheckCircle2, Check, ChevronDown, ChevronRight, Circle, FolderKanban, Plus, Settings2 } from 'lucide-react'
+import { AlertTriangle, ArrowDown, ArrowUp, ArrowUpDown, BookmarkPlus, Bot, Building2, CheckCircle2, Check, ChevronDown, ChevronRight, Circle, FolderKanban, GripVertical, Plus, Settings2 } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import {
   DndContext,
@@ -317,7 +317,7 @@ export default function Issues() {
   const labelMap = new Map(labels.map((entry) => [entry.id, entry]))
   const activeAgentRunIssueIds = new Set(
     agentRuns
-      .filter((run) => ACTIVE_AGENT_RUN_STATUSES.has(run.status))
+      .filter((run) => ACTIVE_AGENT_RUN_STATUSES.has(run.status) && run.workerId)
       .map((run) => run.issueId),
   )
   const labelsByIssue = new Map<string, Schema['tables']['pm_labels']['row'][]>()
@@ -608,6 +608,10 @@ export default function Issues() {
         case 'company':
           if (!values.includes(issue.contextCompanyId ?? '__none')) return false
           break
+        case 'agent':
+          if (values.includes('assigned') && !activeAgentRunIssueIds.has(issue.id)) return false
+          if (values.includes('unassigned') && activeAgentRunIssueIds.has(issue.id)) return false
+          break
       }
     }
 
@@ -666,6 +670,23 @@ export default function Issues() {
       options: [
         { value: '__none', label: 'no company' },
         ...contextCompanies.map((c) => ({ value: c.id, label: c.name })),
+      ],
+    },
+    {
+      field: 'agent',
+      label: 'agent',
+      icon: Bot,
+      options: [
+        {
+          value: 'assigned',
+          label: 'assigned to vps',
+          icon: <AgentRunDot />,
+        },
+        {
+          value: 'unassigned',
+          label: 'no vps agent',
+          icon: <span className="h-2 w-2 rounded-full border border-[rgba(0,255,140,0.25)]" />,
+        },
       ],
     },
   ]
@@ -741,6 +762,14 @@ export default function Issues() {
     return maxSortOrder + 1024
   }
 
+  function getTopSortOrder(priority: number, statusId: string, excludeIssueId?: string) {
+    const bucket = issues
+      .filter((issue) => issue.priority === priority && issue.statusId === statusId && issue.id !== excludeIssueId)
+      .sort(compareIssuesForBucketOrder)
+    const minSortOrder = bucket[0]?.sortOrder
+    return minSortOrder == null ? 1000 : minSortOrder - 1024
+  }
+
   async function logActivity(issueId: string, summary: string, type = 'created') {
     await z.mutate.pm_issue_activity.create({
       id: crypto.randomUUID(),
@@ -772,13 +801,25 @@ export default function Issues() {
     const activeIssue = issues.find((entry) => entry.id === active.id)
     if (!activeIssue) return
 
-    // figure out destination container (group key "<priority>:<statusBucketKey>")
+    // figure out destination bucket. In some builds dnd-kit reports the row
+    // under the cursor without sortable container metadata, so infer from that
+    // row instead of requiring containerId to be present.
     const overContainerRaw = (over.data.current?.sortable as { containerId?: string } | undefined)?.containerId
-    const overContainer = overContainerRaw ?? (typeof over.id === 'string' ? over.id : null)
-    if (!overContainer) return
+    const overContainer = overContainerRaw ?? (typeof over.id === 'string' && over.id.includes(':') ? over.id : null)
+    const overIssue = issues.find((entry) => entry.id === over.id)
 
-    const [priorityStr, statusKey] = overContainer.split(':')
-    const targetPriority = Number(priorityStr)
+    let targetPriority: number
+    let statusKey: string | undefined
+    if (overContainer) {
+      const [priorityStr, parsedStatusKey] = overContainer.split(':')
+      targetPriority = Number(priorityStr)
+      statusKey = parsedStatusKey
+    } else if (overIssue) {
+      targetPriority = overIssue.priority
+      statusKey = getStatusBucket(statusMap.get(overIssue.statusId))?.key
+    } else {
+      return
+    }
     if (Number.isNaN(targetPriority) || !statusKey) return
 
     // resolve target statusId — pick a status from the active issue's team that maps to this bucket
@@ -1059,7 +1100,7 @@ export default function Issues() {
         description: composerDescription.trim() || undefined,
         priority: composerPriority,
         estimate: composerEstimate,
-        sortOrder: getNextSortOrder(composerPriority, statusId),
+        sortOrder: getTopSortOrder(composerPriority, statusId),
       })
 
       await logActivity(issueId, `Created issue ${team.key}-${nextNumber}`)
@@ -1069,7 +1110,6 @@ export default function Issues() {
         // keep the modal open for quick successive creation
       } else {
         setComposerOpen(false)
-        setSection({ kind: 'all' })
       }
     } finally {
       setCreatingIssue(false)
@@ -1950,6 +1990,7 @@ const ESTIMATE_VALUES = [1, 2, 4, 8, 16]
 
 function SortableIssueRow(props: React.ComponentProps<typeof IssueRow>) {
   const draggable = props.draggable !== false
+  const didDragRef = useRef(false)
   const {
     attributes,
     listeners,
@@ -1959,6 +2000,10 @@ function SortableIssueRow(props: React.ComponentProps<typeof IssueRow>) {
     index,
     activeIndex,
   } = useSortable({ id: props.issue.id, disabled: !draggable })
+
+  useEffect(() => {
+    if (isDragging) didDragRef.current = true
+  }, [isDragging])
 
   // determine if this row should show a drop indicator and where
   let indicator: 'above' | 'below' | null = null
@@ -1977,9 +2022,18 @@ function SortableIssueRow(props: React.ComponentProps<typeof IssueRow>) {
       {...(draggable ? listeners : {})}
       className="relative"
       style={{ opacity: isDragging ? 0.35 : 1 }}
+      onClickCapture={(event) => {
+        if (!didDragRef.current) return
+        didDragRef.current = false
+        event.preventDefault()
+        event.stopPropagation()
+      }}
     >
       {indicator === 'above' && <DropIndicator position="top" />}
-      <IssueRow {...props} />
+      <IssueRow
+        {...props}
+        dragHandleProps={draggable ? {} : undefined}
+      />
       {indicator === 'below' && <DropIndicator position="bottom" />}
     </div>
   )
@@ -1993,6 +2047,15 @@ function DropIndicator({ position }: { position: 'top' | 'bottom' }) {
         position === 'top' ? '-top-px' : '-bottom-px'
       }`}
     />
+  )
+}
+
+function AgentRunDot() {
+  return (
+    <>
+      <span className="absolute h-2.5 w-2.5 animate-ping rounded-full bg-accent opacity-40" />
+      <span className="h-2 w-2 rounded-full bg-accent shadow-[0_0_12px_rgba(0,255,136,0.95)]" />
+    </>
   )
 }
 
@@ -2019,6 +2082,7 @@ function IssueRow({
   onPriorityChange,
   onToggleLabel,
   onHoverChange,
+  dragHandleProps,
 }: {
   issue: Schema['tables']['pm_issues']['row']
   company: Schema['tables']['companies']['row'] | null
@@ -2036,6 +2100,7 @@ function IssueRow({
   visibleFields: Set<RowField>
   shortcutRequest?: RowShortcutRequest | null
   draggable?: boolean
+  dragHandleProps?: React.ButtonHTMLAttributes<HTMLButtonElement>
   onStatusChange: (issueId: string, nextStatusId: string) => void | Promise<void>
   onProjectChange: (issueId: string, nextProjectId: string) => void | Promise<void>
   onTeamChange: (issueId: string, nextTeamId: string) => void | Promise<void>
@@ -2047,13 +2112,14 @@ function IssueRow({
   const navigate = useNavigate()
   const showCompany = company && company.id !== workspaceCompanyId
   const shows = (field: RowField) => visibleFields.has(field)
+  const currentShortcut = shortcutRequest?.issueId === issue.id ? shortcutRequest : null
   const statusOpenSignal =
-    shortcutRequest?.issueId === issue.id && shortcutRequest.control === 'status'
-      ? shortcutRequest.nonce
+    currentShortcut?.control === 'status'
+      ? currentShortcut.nonce
       : undefined
   const labelsOpenSignal =
-    shortcutRequest?.issueId === issue.id && shortcutRequest.control === 'labels'
-      ? shortcutRequest.nonce
+    currentShortcut?.control === 'labels'
+      ? currentShortcut.nonce
       : undefined
 
   return (
@@ -2071,6 +2137,22 @@ function IssueRow({
       }}
       className="flex items-center gap-2 px-3 md:px-4 py-2 border-t border-[rgba(0,255,140,0.06)] transition hover:bg-[rgba(0,255,136,0.04)] cursor-pointer focus:outline-none focus-visible:bg-[rgba(0,255,136,0.06)]"
     >
+      {dragHandleProps ? (
+        <button
+          type="button"
+          {...dragHandleProps}
+          onClick={(event) => event.stopPropagation()}
+          onKeyDown={(event) => {
+            event.stopPropagation()
+            dragHandleProps.onKeyDown?.(event)
+          }}
+          className="flex h-6 w-5 shrink-0 items-center justify-center text-fg-4 transition hover:text-accent"
+          title="drag issue"
+          aria-label="drag issue"
+        >
+          <GripVertical className="h-3.5 w-3.5" strokeWidth={1.5} />
+        </button>
+      ) : null}
       {shows('status') && (
         <div className="shrink-0" onClick={(event) => event.stopPropagation()}>
           <PachSelect
@@ -2117,8 +2199,7 @@ function IssueRow({
           title="active VPS agent run"
           aria-label="active VPS agent run"
         >
-          <span className="absolute h-2.5 w-2.5 animate-ping rounded-full bg-accent opacity-40" />
-          <span className="h-2 w-2 rounded-full bg-accent shadow-[0_0_12px_rgba(0,255,136,0.95)]" />
+          <AgentRunDot />
         </div>
       ) : null}
       <div className="min-w-0 flex-1 truncate text-sm text-fg-1">{issue.title}</div>
