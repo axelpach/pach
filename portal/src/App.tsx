@@ -19,7 +19,7 @@ import WhatsAppLayout from './pages/whatsapp/WhatsAppLayout'
 import WhatsAppTemplates from './pages/whatsapp/Templates'
 import Campaigns from './pages/whatsapp/Campaigns'
 import CampaignDetail from './pages/whatsapp/CampaignDetail'
-import { GlyphRain, Scanlines, LiveClock } from './components/pach'
+import { Scanlines, LiveClock } from './components/pach'
 import { SearchPalette } from './components/SearchPalette'
 
 const HOME_PATH = '/issues'
@@ -274,7 +274,6 @@ function AppShell() {
 
   return (
     <div className="relative flex flex-col h-screen bg-pit text-fg-1 overflow-hidden">
-      <GlyphRain density={20} opacity={0.06} />
       <Scanlines opacity={0.4} />
       <div className="relative z-10 flex flex-col h-full">
         <Topbar />

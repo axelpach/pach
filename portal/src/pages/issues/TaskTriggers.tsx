@@ -70,6 +70,7 @@ const WEEKDAYS = [
 ] as const
 
 const ESTIMATES = [1, 2, 4, 8, 16]
+const TRIGGER_STATUS_KEYS = ['todo', 'backlog', 'blocked', 'in_progress', 'done'] as const
 
 export default function TaskTriggers() {
   const z = useZero<Schema, Mutators>()
@@ -391,7 +392,7 @@ function TriggerModal({
   onSubmit: () => void
   onDelete?: () => void
 }) {
-  const statusOptions = statuses.filter((status) => !status.teamId || status.teamId === draft.teamId)
+  const statusOptions = getTriggerStatusOptions(statuses)
   const projectOptions = projects.filter((project) => !project.teamId || project.teamId === draft.teamId)
   const currentTeam = teams.find((team) => team.id === draft.teamId) ?? teams[0] ?? null
   const currentStatus = statusOptions.find((status) => status.id === draft.statusId)
@@ -404,10 +405,15 @@ function TriggerModal({
   }
 
   function changeTeam(teamId: string) {
-    const nextStatus = pickStatus(statuses, teamId)
     const nextProject = projects.find((project) => project.teamId === teamId)?.id ?? ''
-    patch({ teamId, statusId: nextStatus, projectId: nextProject })
+    patch({ teamId, projectId: nextProject })
   }
+
+  useEffect(() => {
+    if (statusOptions.some((status) => status.id === draft.statusId)) return
+    const fallbackStatusId = pickStatus(statusOptions)
+    if (fallbackStatusId) patch({ statusId: fallbackStatusId })
+  }, [draft.statusId, statusOptions])
 
   function handleKeyDown(event: React.KeyboardEvent) {
     if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') {
@@ -824,7 +830,7 @@ function makeDefaultDraft({
     timezone: DEFAULT_TIMEZONE,
     enabled: true,
     teamId,
-    statusId: pickStatus(statuses, teamId),
+    statusId: pickStatus(getTriggerStatusOptions(statuses)),
     projectId: projects.find((project) => project.teamId === teamId)?.id ?? '',
     companyId: '',
     assigneeId: '',
@@ -894,12 +900,25 @@ function hasScheduleChanged(trigger: TriggerRow, schedule: Schedule) {
   return JSON.stringify(scheduleFromTrigger(trigger)) !== JSON.stringify(schedule)
 }
 
-function pickStatus(statuses: StatusRow[], teamId: string) {
+function getTriggerStatusOptions(statuses: StatusRow[]) {
+  const byKey = new Map<string, StatusRow>()
+
+  for (const key of TRIGGER_STATUS_KEYS) {
+    const workspaceStatus = statuses.find((status) => !status.teamId && status.key === key)
+    const fallbackStatus = statuses.find((status) => status.key === key)
+    const status = workspaceStatus ?? fallbackStatus
+    if (status) byKey.set(key, status)
+  }
+
+  return TRIGGER_STATUS_KEYS
+    .map((key) => byKey.get(key))
+    .filter((status): status is StatusRow => Boolean(status))
+}
+
+function pickStatus(statuses: StatusRow[]) {
   return (
-    statuses.find((status) => status.teamId === teamId && status.key === 'todo')?.id ??
-    statuses.find((status) => !status.teamId && status.key === 'todo')?.id ??
-    statuses.find((status) => status.teamId === teamId)?.id ??
-    statuses.find((status) => !status.teamId)?.id ??
+    statuses.find((status) => status.key === 'todo')?.id ??
+    statuses[0]?.id ??
     ''
   )
 }
