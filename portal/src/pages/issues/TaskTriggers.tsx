@@ -5,7 +5,7 @@ import type { Schema } from '../../zero-schema'
 import type { Mutators } from '../../mutators'
 import { authFetch, useAuth } from '../../lib/auth'
 import { config } from '../../config'
-import { PachSelect } from './PachSelect'
+import { PachSelect } from '../../components/PachSelect'
 import { PRIORITY_META, PriorityIcon } from './PriorityIcon'
 import { StatusIcon } from './StatusIcon'
 
@@ -13,7 +13,7 @@ type TriggerRow = Schema['tables']['pm_task_triggers']['row']
 type TeamRow = Schema['tables']['pm_teams']['row']
 type StatusRow = Schema['tables']['pm_statuses']['row']
 type ProjectRow = Schema['tables']['pm_projects']['row']
-type CompanyRow = Schema['tables']['companies']['row']
+type CompanyRow = Schema['tables']['organizations']['row']
 type UserRow = Schema['tables']['users']['row']
 type RunRow = Schema['tables']['pm_task_trigger_runs']['row']
 
@@ -80,8 +80,14 @@ export default function TaskTriggers() {
   const [teams] = useQuery(z.query.pm_teams.orderBy('position', 'asc'))
   const [statuses] = useQuery(z.query.pm_statuses.orderBy('position', 'asc'))
   const [projects] = useQuery(z.query.pm_projects.orderBy('name', 'asc'))
-  const [companies] = useQuery(z.query.companies.orderBy('name', 'asc'))
+  const [companies] = useQuery(z.query.organizations.orderBy('name', 'asc'))
   const [users] = useQuery(z.query.users.orderBy('name', 'asc'))
+  const accessibleOrganizationIds = useMemo(() => new Set(user?.organizationIds ?? []), [user?.organizationIds])
+  const canAccessUnscoped = user?.canAccessUnscoped ?? false
+  const canAccessOrganization = (organizationId: string | null | undefined) =>
+    organizationId ? accessibleOrganizationIds.has(organizationId) : canAccessUnscoped
+  const scopedCompanies = companies.filter((company) => canAccessOrganization(company.id))
+  const scopedTriggers = triggers.filter((trigger) => canAccessOrganization(trigger.companyId))
 
   const [modal, setModal] = useState<ModalState>(null)
   const [draft, setDraft] = useState<Draft>(() => makeDefaultDraft({ teams, statuses, projects }))
@@ -90,24 +96,29 @@ export default function TaskTriggers() {
   const [runMessage, setRunMessage] = useState<string | null>(null)
 
   const runsByTrigger = useMemo(() => {
+    const visibleTriggerIds = new Set(scopedTriggers.map((trigger) => trigger.id))
     const grouped = new Map<string, RunRow[]>()
     for (const run of runs) {
+      if (!visibleTriggerIds.has(run.triggerId)) continue
       const entries = grouped.get(run.triggerId) ?? []
       if (entries.length < 3) entries.push(run)
       grouped.set(run.triggerId, entries)
     }
     return grouped
-  }, [runs])
+  }, [runs, scopedTriggers])
 
-  const sortedTriggers = [...triggers].sort((a, b) => {
+  const sortedTriggers = [...scopedTriggers].sort((a, b) => {
     if (a.enabled !== b.enabled) return a.enabled ? -1 : 1
     return a.nextRunAt - b.nextRunAt
   })
 
-  const activeCount = triggers.filter((trigger) => trigger.enabled).length
+  const activeCount = scopedTriggers.filter((trigger) => trigger.enabled).length
 
   function openCreate() {
-    setDraft(makeDefaultDraft({ teams, statuses, projects }))
+    setDraft({
+      ...makeDefaultDraft({ teams, statuses, projects }),
+      companyId: !canAccessUnscoped && scopedCompanies.length === 1 ? scopedCompanies[0].id : '',
+    })
     setModal({ mode: 'create' })
   }
 
@@ -123,6 +134,8 @@ export default function TaskTriggers() {
 
   async function submit() {
     if (!modal || !draft.name.trim() || !draft.title.trim() || !draft.teamId || !draft.statusId) return
+    if (!draft.companyId && !canAccessUnscoped) return
+    if (draft.companyId && !canAccessOrganization(draft.companyId)) return
 
     const schedule = scheduleFromDraft(draft)
     const nextRunAt = computeNextRunAt(schedule).getTime()
@@ -152,7 +165,7 @@ export default function TaskTriggers() {
           estimate,
         })
       } else {
-        const original = triggers.find((trigger) => trigger.id === modal.triggerId)
+        const original = scopedTriggers.find((trigger) => trigger.id === modal.triggerId)
         const scheduleChanged = original ? hasScheduleChanged(original, schedule) : true
         const shouldRecompute = !original || scheduleChanged || (draft.enabled && !original.enabled)
         await z.mutate.pm_task_triggers.update({
@@ -235,18 +248,20 @@ export default function TaskTriggers() {
             </p>
           </div>
           <div className="flex items-center gap-2">
-            <button
-              onClick={runDueNow}
-              disabled={running}
-              className="inline-flex items-center gap-1.5 border border-[rgba(0,255,140,0.2)] bg-pit-3 px-3 py-1.5 font-mono text-[10px] uppercase tracking-label text-fg-2 transition hover:border-[rgba(0,255,140,0.35)] hover:text-accent disabled:opacity-40"
-              title="run due triggers now"
-            >
-              <RefreshCw className={`h-3 w-3 ${running ? 'animate-spin' : ''}`} />
-              run due
-            </button>
+            {canAccessUnscoped && (
+              <button
+                onClick={runDueNow}
+                disabled={running}
+                className="inline-flex items-center gap-1.5 border border-[rgba(0,255,140,0.2)] bg-pit-3 px-3 py-1.5 font-mono text-[10px] uppercase tracking-label text-fg-2 transition hover:border-[rgba(0,255,140,0.35)] hover:text-accent disabled:opacity-40"
+                title="run due triggers now"
+              >
+                <RefreshCw className={`h-3 w-3 ${running ? 'animate-spin' : ''}`} />
+                run due
+              </button>
+            )}
             <button
               onClick={openCreate}
-              disabled={teams.length === 0}
+              disabled={teams.length === 0 || (!canAccessUnscoped && scopedCompanies.length === 0)}
               className="inline-flex items-center gap-1.5 border border-[rgba(0,255,140,0.3)] bg-[rgba(0,255,136,0.08)] px-3 py-1.5 font-mono text-[10px] uppercase tracking-label text-accent transition hover:bg-[rgba(0,255,136,0.16)] hover:shadow-glow-xs disabled:opacity-40"
             >
               <Plus className="h-3 w-3" />
@@ -260,7 +275,7 @@ export default function TaskTriggers() {
             active <span className="text-accent">· {activeCount}</span>
           </span>
           <span className="border border-[rgba(0,255,140,0.15)] bg-pit-3 px-2.5 py-1 text-fg-3">
-            total <span className="text-fg-2">· {triggers.length}</span>
+            total <span className="text-fg-2">· {scopedTriggers.length}</span>
           </span>
           {runMessage && <span className="text-fg-4">{runMessage}</span>}
         </div>
@@ -276,7 +291,7 @@ export default function TaskTriggers() {
               </div>
               <button
                 onClick={openCreate}
-                disabled={teams.length === 0}
+                disabled={teams.length === 0 || (!canAccessUnscoped && scopedCompanies.length === 0)}
                 className="mt-5 inline-flex items-center gap-2 border border-[rgba(0,255,140,0.3)] bg-[rgba(0,255,136,0.08)] px-3 py-1.5 font-mono text-[10px] uppercase tracking-label text-accent transition hover:bg-[rgba(0,255,136,0.16)] hover:shadow-glow-xs disabled:opacity-40"
               >
                 <Plus className="h-3 w-3" />
@@ -346,7 +361,8 @@ export default function TaskTriggers() {
           teams={teams}
           statuses={statuses}
           projects={projects}
-          companies={companies}
+          companies={scopedCompanies}
+          allowNoOrganization={canAccessUnscoped}
           users={users}
           saving={saving}
           onClose={closeModal}
@@ -354,7 +370,7 @@ export default function TaskTriggers() {
           onDelete={
             modal.mode === 'edit'
               ? () => {
-                  const trigger = triggers.find((entry) => entry.id === modal.triggerId)
+                  const trigger = scopedTriggers.find((entry) => entry.id === modal.triggerId)
                   if (trigger) remove(trigger)
                 }
               : undefined
@@ -373,6 +389,7 @@ function TriggerModal({
   statuses,
   projects,
   companies,
+  allowNoOrganization,
   users,
   saving,
   onClose,
@@ -386,6 +403,7 @@ function TriggerModal({
   statuses: StatusRow[]
   projects: ProjectRow[]
   companies: CompanyRow[]
+  allowNoOrganization: boolean
   users: UserRow[]
   saving: boolean
   onClose: () => void
@@ -418,7 +436,7 @@ function TriggerModal({
   function handleKeyDown(event: React.KeyboardEvent) {
     if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') {
       event.preventDefault()
-      if (draft.name.trim() && draft.title.trim() && !saving) onSubmit()
+      if (draft.name.trim() && draft.title.trim() && (allowNoOrganization || draft.companyId) && !saving) onSubmit()
     }
   }
 
@@ -590,16 +608,16 @@ function TriggerModal({
             value={draft.companyId}
             onChange={(value) => patch({ companyId: value })}
             options={[
-              { value: '', label: 'no company' },
+              ...(allowNoOrganization ? [{ value: '', label: 'no organization' }] : []),
               ...companies.map((company) => ({ value: company.id, label: company.name })),
             ]}
             trigger={
               <ComposerPill
                 icon={<Building2 className="h-3 w-3" />}
-                label={currentCompany?.name?.toLowerCase() ?? 'company'}
+                label={currentCompany?.name?.toLowerCase() ?? 'organization'}
               />
             }
-            triggerTitle="company context"
+            triggerTitle="organization context"
             triggerClassName="transition"
             popupWidth="220px"
           />
@@ -738,7 +756,7 @@ function TriggerModal({
           </div>
           <button
             onClick={onSubmit}
-            disabled={!draft.name.trim() || !draft.title.trim() || !draft.teamId || !draft.statusId || saving}
+            disabled={!draft.name.trim() || !draft.title.trim() || !draft.teamId || !draft.statusId || (!allowNoOrganization && !draft.companyId) || saving}
             className="inline-flex items-center gap-2 border border-[rgba(0,255,140,0.3)] bg-[rgba(0,255,136,0.08)] px-4 py-2 font-mono text-xs uppercase tracking-label text-accent transition hover:bg-[rgba(0,255,136,0.16)] hover:shadow-glow-xs disabled:opacity-40 disabled:hover:bg-[rgba(0,255,136,0.08)] disabled:hover:shadow-none"
           >
             {mode === 'create' ? <CalendarClock className="h-3.5 w-3.5" /> : <Save className="h-3.5 w-3.5" />}

@@ -24,7 +24,7 @@ import type { Schema } from '../../zero-schema'
 import type { Mutators } from '../../mutators'
 import { authFetch, useAuth } from '../../lib/auth'
 import { config } from '../../config'
-import { PachSelect } from './PachSelect'
+import { PachSelect } from '../../components/PachSelect'
 import { StatusIcon } from './StatusIcon'
 import { PriorityIcon } from './PriorityIcon'
 import { closePopupFromOutsideClick } from './popupEvents'
@@ -62,7 +62,7 @@ export default function IssueDetail() {
   const [mainTab, setMainTab] = useState<'activity' | 'agent'>('activity')
 
   const [allIssues] = useQuery(z.query.pm_issues.orderBy('updatedAt', 'desc'))
-  const [companies] = useQuery(z.query.companies.orderBy('name', 'asc'))
+  const [companies] = useQuery(z.query.organizations.orderBy('name', 'asc'))
   const [users] = useQuery(z.query.users.orderBy('email', 'asc'))
   const [teams] = useQuery(z.query.pm_teams.orderBy('position', 'asc'))
   const [projects] = useQuery(z.query.pm_projects.orderBy('name', 'asc'))
@@ -78,7 +78,12 @@ export default function IssueDetail() {
     z.query.pm_issue_activity.where('issueId', issueId ?? '').orderBy('createdAt', 'asc'),
   )
 
-  const issue = allIssues.find((entry) => entry.id === issueId) ?? null
+  const accessibleOrganizationIds = new Set(user?.organizationIds ?? [])
+  const canAccessOrganization = (organizationId: string | null | undefined) =>
+    organizationId ? accessibleOrganizationIds.has(organizationId) : user?.canAccessUnscoped ?? false
+  const scopedCompanies = companies.filter((company) => canAccessOrganization(company.id))
+  const scopedLabels = labels.filter((label) => canAccessOrganization(label.companyId))
+  const issue = allIssues.find((entry) => entry.id === issueId && canAccessOrganization(entry.contextCompanyId)) ?? null
   const activeRun = agentRuns[0] ?? null
   const [activeTerminals] = useQuery(
     z.query.agent_terminals.where('runId', activeRun?.id ?? '').orderBy('sortOrder', 'asc'),
@@ -109,12 +114,12 @@ export default function IssueDetail() {
       : users
   const assignee = issue?.assigneeId ? assignableUsers.find((u) => u.id === issue.assigneeId) ?? null : null
   const company = issue?.contextCompanyId
-    ? companies.find((c) => c.id === issue.contextCompanyId) ?? null
+    ? scopedCompanies.find((c) => c.id === issue.contextCompanyId) ?? null
     : null
 
   const workspaceStatuses = getWorkspaceStatuses(statuses)
   const teamProjects = team ? projects.filter((p) => p.teamId === team.id) : []
-  const labelMap = new Map(labels.map((l) => [l.id, l]))
+  const labelMap = new Map(scopedLabels.map((l) => [l.id, l]))
   const currentLabels = issueLabelLinks
     .map((link) => ({ link, label: labelMap.get(link.labelId) }))
     .filter((entry): entry is { link: typeof entry.link; label: Schema['tables']['pm_labels']['row'] } => Boolean(entry.label))
@@ -630,22 +635,22 @@ export default function IssueDetail() {
                 />
               </PropertyRow>
 
-              <PropertyRow label="company" icon={<Building2 className="h-3.5 w-3.5 text-amber" />}>
+              <PropertyRow label="organization" icon={<Building2 className="h-3.5 w-3.5 text-amber" />}>
                 <InlineSelect
                   value={issue.contextCompanyId ?? ''}
                   onChange={async (next) => {
                     if ((next || undefined) === (issue.contextCompanyId ?? undefined)) return
-                    const target = companies.find((c) => c.id === next)
+                    const target = scopedCompanies.find((c) => c.id === next)
                     await patchIssue(
                       { contextCompanyId: next || undefined },
-                      next ? `linked company ${target?.name ?? '—'}` : 'unlinked company',
+                      next ? `linked organization ${target?.name ?? '—'}` : 'unlinked organization',
                     )
                   }}
                   options={[
-                    { value: '', label: 'no company' },
-                    ...companies.map((c) => ({ value: c.id, label: c.name })),
+                    ...(user?.canAccessUnscoped ? [{ value: '', label: 'no organization' }] : []),
+                    ...scopedCompanies.map((c) => ({ value: c.id, label: c.name })),
                   ]}
-                  display={company?.name ?? 'no company'}
+                  display={company?.name ?? 'no organization'}
                 />
               </PropertyRow>
             </div>
@@ -1476,14 +1481,14 @@ function buildDefaultAgentGoal({
   issue: Schema['tables']['pm_issues']['row'] | null
   team: Schema['tables']['pm_teams']['row'] | null
   project: Schema['tables']['pm_projects']['row'] | null
-  company: Schema['tables']['companies']['row'] | null
+  company: Schema['tables']['organizations']['row'] | null
 }) {
   if (!issue) return ''
 
   return [
     `Issue: ${team?.key ?? 'ISS'}-${issue.number} ${issue.title}`,
     project ? `Project: ${project.name}` : null,
-    company ? `Company/context: ${company.name}` : null,
+    company ? `Organization/context: ${company.name}` : null,
     issue.description ? `Description:\n${issue.description}` : null,
     '',
     'Please implement this issue, run the relevant checks, and prepare the branch for a draft PR.',

@@ -10,7 +10,7 @@ export default function NewCampaignModal({ onClose }: { onClose: () => void }) {
   const z = useZero<Schema, Mutators>()
   const navigate = useNavigate()
   const [templates] = useQuery(z.query.whatsapp_templates.where('status', 'APPROVED').orderBy('name', 'asc'))
-  const [companiesList] = useQuery(z.query.companies)
+  const [companiesList] = useQuery(z.query.organizations)
   const [name, setName] = useState('')
   const [templateId, setTemplateId] = useState<string | null>(null)
 
@@ -18,13 +18,13 @@ export default function NewCampaignModal({ onClose }: { onClose: () => void }) {
     if (!templateId || !name.trim()) return
     const template = templates.find(t => t.id === templateId)
     if (!template) return
-    const company = companiesList.find(c => c.id === template.companyId)
+    const company = companiesList.find(c => c.id === template.organizationId)
     if (!company) return
 
     const id = crypto.randomUUID()
     await z.mutate.whatsapp_campaigns.create({
       id,
-      companyId: company.id,
+      organizationId: company.id,
       templateId,
       name: name.trim(),
     })

@@ -1,6 +1,6 @@
 import { eq } from 'drizzle-orm'
 import { getDb } from '../../db.js'
-import { companies, whatsappMessages } from '../../../../db/schema.js'
+import { organizations, whatsappMessages } from '../../../../db/schema.js'
 import { getWhatsApp } from './client.js'
 import { normalizeWhatsAppPhone } from './phone.js'
 
@@ -52,11 +52,11 @@ function getRecipient(phone: string): string {
 async function resolveCompanyId(projectId: string): Promise<string> {
   const db = getDb()
   const [company] = await db
-    .select({ id: companies.id })
-    .from(companies)
-    .where(eq(companies.project, projectId))
+    .select({ id: organizations.id })
+    .from(organizations)
+    .where(eq(organizations.project, projectId))
     .limit(1)
-  if (!company) throw new Error(`No company found with project=${projectId}`)
+  if (!company) throw new Error(`No organization found with project=${projectId}`)
   return company.id
 }
 
@@ -64,7 +64,7 @@ export async function sendTemplate(input: SendTemplateInput): Promise<SendTempla
   const db = getDb()
   const normalizedTo = normalizeWhatsAppPhone(input.to)
   const recipient = getRecipient(input.to)
-  const companyId = await resolveCompanyId(input.projectId)
+  const organizationId = await resolveCompanyId(input.projectId)
 
   const { client, phoneNumberId, wabaId, defaultLanguageCode } = getWhatsApp(input.projectId)
   const languageCode = input.languageCode || defaultLanguageCode
@@ -86,7 +86,7 @@ export async function sendTemplate(input: SendTemplateInput): Promise<SendTempla
     const messageId = (result as { messages?: Array<{ id?: string }> })?.messages?.[0]?.id
 
     await db.insert(whatsappMessages).values({
-      companyId,
+      organizationId,
       campaignId: input.campaignId,
       contactId: input.contactId,
       phone: normalizedTo,
@@ -116,7 +116,7 @@ export async function sendTemplate(input: SendTemplateInput): Promise<SendTempla
     const message = error instanceof Error ? error.message : String(error)
 
     await db.insert(whatsappMessages).values({
-      companyId,
+      organizationId,
       campaignId: input.campaignId,
       contactId: input.contactId,
       phone: normalizedTo,

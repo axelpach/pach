@@ -6,6 +6,7 @@ import { boolean, createSchema, json, number, string, table } from '@rocicorp/ze
 const decks = table('decks')
   .columns({
     id: string(),
+    organizationId: string().optional().from('organization_id'),
     project: string(),
     title: string(),
     description: string().optional(),
@@ -22,12 +23,13 @@ const users = table('users')
     id: string(),
     email: string(),
     name: string().optional(),
+    canAccessUnscoped: boolean().from('can_access_unscoped'),
     createdAt: number().from('created_at'),
     updatedAt: number().from('updated_at'),
   })
   .primaryKey('id')
 
-const companies = table('companies')
+const organizations = table('organizations')
   .columns({
     id: string(),
     name: string(),
@@ -41,9 +43,21 @@ const companies = table('companies')
   })
   .primaryKey('id')
 
+const organizationMemberships = table('organization_memberships')
+  .columns({
+    id: string(),
+    organizationId: string().from('organization_id'),
+    userId: string().from('user_id'),
+    role: string(),
+    createdAt: number().from('created_at'),
+    updatedAt: number().from('updated_at'),
+  })
+  .primaryKey('id')
+
 const crmCompanies = table('crm_companies')
   .columns({
     id: string(),
+    organizationId: string().optional().from('organization_id'),
     name: string(),
     website: string().optional(),
     instagram: string().optional(),
@@ -60,7 +74,8 @@ const crmCompanies = table('crm_companies')
 const crmContacts = table('crm_contacts')
   .columns({
     id: string(),
-    companyId: string().optional().from('company_id'),
+    organizationId: string().optional().from('organization_id'),
+    crmCompanyId: string().optional().from('crm_company_id'),
     name: string(),
     email: string().optional(),
     phone: string().optional(),
@@ -75,6 +90,7 @@ const crmContacts = table('crm_contacts')
 const crmDealContacts = table('crm_deal_contacts')
   .columns({
     id: string(),
+    organizationId: string().optional().from('organization_id'),
     dealId: string().from('deal_id'),
     contactId: string().from('contact_id'),
     createdAt: number().from('created_at'),
@@ -84,7 +100,8 @@ const crmDealContacts = table('crm_deal_contacts')
 const crmDeals = table('crm_deals')
   .columns({
     id: string(),
-    companyId: string().optional().from('company_id'),
+    organizationId: string().optional().from('organization_id'),
+    crmCompanyId: string().optional().from('crm_company_id'),
     title: string(),
     stage: string(),
     value: number().optional(),
@@ -99,6 +116,7 @@ const crmDeals = table('crm_deals')
 const crmNotes = table('crm_notes')
   .columns({
     id: string(),
+    organizationId: string().optional().from('organization_id'),
     dealId: string().optional().from('deal_id'),
     contactId: string().optional().from('contact_id'),
     body: string(),
@@ -110,6 +128,7 @@ const crmNotes = table('crm_notes')
 const crmBoards = table('crm_boards')
   .columns({
     id: string(),
+    organizationId: string().optional().from('organization_id'),
     name: string(),
     slug: string(),
     entityType: string().from('entity_type'),
@@ -123,6 +142,7 @@ const crmBoards = table('crm_boards')
 const crmBoardColumns = table('crm_board_columns')
   .columns({
     id: string(),
+    organizationId: string().optional().from('organization_id'),
     boardId: string().from('board_id'),
     label: string(),
     position: number(),
@@ -448,7 +468,7 @@ const githubWebhookEvents = table('github_webhook_events')
 const whatsappTemplates = table('whatsapp_templates')
   .columns({
     id: string(),
-    companyId: string().from('company_id'),
+    organizationId: string().from('company_id'),
     metaId: string().from('meta_id'),
     name: string(),
     language: string(),
@@ -470,7 +490,7 @@ const whatsappTemplates = table('whatsapp_templates')
 const whatsappCampaigns = table('whatsapp_campaigns')
   .columns({
     id: string(),
-    companyId: string().from('company_id'),
+    organizationId: string().from('company_id'),
     templateId: string().from('template_id'),
     name: string(),
     status: string(),
@@ -486,7 +506,7 @@ const whatsappCampaigns = table('whatsapp_campaigns')
 const whatsappMessages = table('whatsapp_messages')
   .columns({
     id: string(),
-    companyId: string().from('company_id'),
+    organizationId: string().from('company_id'),
     campaignId: string().optional().from('campaign_id'),
     contactId: string().optional().from('contact_id'),
     phone: string(),
@@ -508,7 +528,8 @@ export const schema = createSchema({
   tables: [
     decks,
     users,
-    companies,
+    organizations,
+    organizationMemberships,
     crmCompanies,
     crmContacts,
     crmDealContacts,

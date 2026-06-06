@@ -1,6 +1,6 @@
 import { eq, and, desc } from 'drizzle-orm'
 import { getDb } from '../../db.js'
-import { companies, whatsappMessages } from '../../../../db/schema.js'
+import { organizations, whatsappMessages } from '../../../../db/schema.js'
 import { getWhatsApp } from './client.js'
 import { normalizeWhatsAppPhone } from './phone.js'
 
@@ -30,20 +30,20 @@ export async function sendText(input: SendTextInput): Promise<SendTextResult> {
 
   // Resolve company for this project
   const [company] = await db
-    .select({ id: companies.id })
-    .from(companies)
-    .where(eq(companies.project, input.projectId))
+    .select({ id: organizations.id })
+    .from(organizations)
+    .where(eq(organizations.project, input.projectId))
     .limit(1)
   if (!company) {
-    return { success: false, to: phone, error: `No company found for project=${input.projectId}` }
+    return { success: false, to: phone, error: `No organization found for project=${input.projectId}` }
   }
 
-  // Enforce 24h reply window: find most recent inbound from this phone for this company
+  // Enforce 24h reply window: find most recent inbound from this phone for this organization
   const [lastInbound] = await db
     .select({ createdAt: whatsappMessages.createdAt })
     .from(whatsappMessages)
     .where(and(
-      eq(whatsappMessages.companyId, company.id),
+      eq(whatsappMessages.organizationId, company.id),
       eq(whatsappMessages.phone, phone),
       eq(whatsappMessages.direction, 'inbound'),
     ))
@@ -69,7 +69,7 @@ export async function sendText(input: SendTextInput): Promise<SendTextResult> {
     const messageId = (result as { messages?: Array<{ id?: string }> })?.messages?.[0]?.id
 
     await db.insert(whatsappMessages).values({
-      companyId: company.id,
+      organizationId: company.id,
       contactId: input.contactId,
       phone,
       direction: 'outbound',
@@ -85,7 +85,7 @@ export async function sendText(input: SendTextInput): Promise<SendTextResult> {
     const message = error instanceof Error ? error.message : String(error)
 
     await db.insert(whatsappMessages).values({
-      companyId: company.id,
+      organizationId: company.id,
       contactId: input.contactId,
       phone,
       direction: 'outbound',

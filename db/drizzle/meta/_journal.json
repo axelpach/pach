@@ -113,6 +113,20 @@
       "when": 1780000200000,
       "tag": "0015_pm_task_triggers",
       "breakpoints": true
+    },
+    {
+      "idx": 16,
+      "version": "7",
+      "when": 1780745297832,
+      "tag": "0016_organizations",
+      "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "7",
+      "when": 1780746000000,
+      "tag": "0017_crm_board_column_organizations",
+      "breakpoints": true
     }
   ]
 }

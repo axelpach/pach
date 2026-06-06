@@ -12,6 +12,8 @@ export interface JWTPayload {
   sub: string
   email: string
   name: string | null
+  canAccessUnscoped: boolean
+  organizationIds: string[]
   iat?: number
   exp?: number
 }

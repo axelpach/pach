@@ -9,7 +9,7 @@ import inboundRoute from './routes/inbound.js'
 import linearRoute from './routes/linear.js'
 import taskTriggersRoute from './routes/task-triggers.js'
 import agentRoute, { attachAgentTerminalWebSocket } from './routes/agent.js'
-import { requireAuth } from './middleware/auth.js'
+import { requireAuth, requireUnscopedAccess } from './middleware/auth.js'
 import { startTaskTriggerRunner } from './services/task-triggers/runner.js'
 
 const app = express()
@@ -25,9 +25,9 @@ app.use('/whatsapp', publicWhatsAppRouter)
 app.use('/inbound', inboundRoute)
 app.use('/zero', requireAuth, zeroPushRoute)
 app.use('/whatsapp', requireAuth, whatsappRoute)
-app.use('/linear', requireAuth, linearRoute)
-app.use('/task-triggers', requireAuth, taskTriggersRoute)
-app.use('/agent', requireAuth, agentRoute)
+app.use('/linear', requireAuth, requireUnscopedAccess, linearRoute)
+app.use('/task-triggers', requireAuth, requireUnscopedAccess, taskTriggersRoute)
+app.use('/agent', requireAuth, requireUnscopedAccess, agentRoute)
 
 app.use((_req, res) => res.status(404).json({ error: 'Not found' }))
 

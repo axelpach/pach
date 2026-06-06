@@ -1,9 +1,9 @@
 import { Routes, Route, NavLink, Navigate, useLocation, useNavigate } from 'react-router-dom'
-import { ZeroProvider } from '@rocicorp/zero/react'
+import { useQuery, useZero, ZeroProvider } from '@rocicorp/zero/react'
 import { FolderKanban, LayoutTemplate, LogOut, MessageCircleMore, Menu, Rows3, X } from 'lucide-react'
-import { useEffect, useState, type ComponentType } from 'react'
+import { useEffect, useMemo, useState, type ComponentType } from 'react'
 import { schema } from './zero-schema'
-import { mutators } from './mutators'
+import { mutators, type Mutators } from './mutators'
 import { config } from './config'
 import { AuthProvider, useAuth } from './lib/auth'
 import Decks from './pages/Decks'
@@ -23,11 +23,12 @@ import { Scanlines, LiveClock } from './components/pach'
 import { SearchPalette } from './components/SearchPalette'
 
 const HOME_PATH = '/issues'
+const WHATSAPP_PROJECTS = new Set(['ardia', 'ardia-mkt'])
 
 const OUTER_NAV_ITEMS = [
   { label: 'Issues', path: '/issues' },
   { label: 'CRM', path: '/crm' },
-  { label: 'WhatsApp', path: '/whatsapp/templates' },
+  { label: 'WhatsApp', path: '/whatsapp/templates', requiresWhatsApp: true },
   { label: 'Decks', path: '/decks' },
 ] as const
 
@@ -95,13 +96,13 @@ function NavItem({
 }
 
 function Sidebar() {
+  const items = useVisibleOuterNavItems()
   return (
     <nav className="hidden md:flex w-[68px] flex-shrink-0 py-3 font-mono text-xs relative z-10 flex-col items-center bg-void border-r border-[rgba(0,255,140,0.12)]">
       <div className="flex flex-col items-center gap-2">
-        <NavItem to="/issues" icon={Rows3} label="Issues" />
-        <NavItem to="/crm" icon={FolderKanban} label="CRM" />
-        <NavItem to="/whatsapp/templates" icon={MessageCircleMore} label="WhatsApp" />
-        <NavItem to="/decks" icon={LayoutTemplate} label="Decks" />
+        {items.map((item) => (
+          <NavItem key={item.path} to={item.path} icon={item.icon} label={item.label} />
+        ))}
       </div>
 
       <div className="mt-auto pt-4">
@@ -118,10 +119,11 @@ const MOBILE_NAV_ITEMS: Array<{
   to: string
   label: string
   icon: ComponentType<{ className?: string }>
+  requiresWhatsApp?: boolean
 }> = [
   { to: '/issues', label: 'issues', icon: Rows3 },
   { to: '/crm', label: 'crm', icon: FolderKanban },
-  { to: '/whatsapp/templates', label: 'whatsapp', icon: MessageCircleMore },
+  { to: '/whatsapp/templates', label: 'whatsapp', icon: MessageCircleMore, requiresWhatsApp: true },
   { to: '/decks', label: 'decks', icon: LayoutTemplate },
 ]
 
@@ -145,6 +147,7 @@ function MobileHeader({ onMenuClick }: { onMenuClick: () => void }) {
 function MobileMenu({ open, onClose }: { open: boolean; onClose: () => void }) {
   const { user, logout } = useAuth()
   const location = useLocation()
+  const items = useVisibleMobileNavItems()
 
   useEffect(() => {
     if (!open) return
@@ -192,7 +195,7 @@ function MobileMenu({ open, onClose }: { open: boolean; onClose: () => void }) {
         </div>
 
         <nav className="flex-1 overflow-auto px-2 py-2 space-y-1">
-          {MOBILE_NAV_ITEMS.map((item) => {
+          {items.map((item) => {
             const Icon = item.icon
             return (
               <NavLink
@@ -233,6 +236,8 @@ function MobileMenu({ open, onClose }: { open: boolean; onClose: () => void }) {
 
 /* ---------------- Shell ---------------- */
 function AppShell() {
+  const canAccessWhatsApp = useCanAccessWhatsApp()
+  const visibleOuterNavItems = useVisibleOuterNavItems()
   const location = useLocation()
   const navigate = useNavigate()
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
@@ -252,7 +257,7 @@ function AppShell() {
         return
       }
 
-      const currentIndex = OUTER_NAV_ITEMS.findIndex((item) => {
+      const currentIndex = visibleOuterNavItems.findIndex((item) => {
         if (item.path === '/crm') return location.pathname.startsWith('/crm')
         if (item.path === '/decks') return location.pathname.startsWith('/decks')
         if (item.path === '/issues') return location.pathname.startsWith('/issues')
@@ -264,13 +269,17 @@ function AppShell() {
 
       event.preventDefault()
       const direction = event.key === 'ArrowDown' ? 1 : -1
-      const nextIndex = (currentIndex + direction + OUTER_NAV_ITEMS.length) % OUTER_NAV_ITEMS.length
-      navigate(OUTER_NAV_ITEMS[nextIndex].path)
+      const nextIndex = (currentIndex + direction + visibleOuterNavItems.length) % visibleOuterNavItems.length
+      navigate(visibleOuterNavItems[nextIndex].path)
     }
 
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [location.pathname, navigate])
+  }, [location.pathname, navigate, visibleOuterNavItems])
+
+  if (!canAccessWhatsApp && location.pathname.startsWith('/whatsapp')) {
+    return <Navigate to={HOME_PATH} replace />
+  }
 
   return (
     <div className="relative flex flex-col h-screen bg-pit text-fg-1 overflow-hidden">
@@ -292,12 +301,14 @@ function AppShell() {
                 <Route path="triggers" element={<TaskTriggers />} />
                 <Route path=":issueId" element={<IssueDetail />} />
               </Route>
-              <Route path="/whatsapp" element={<WhatsAppLayout />}>
-                <Route index element={<WhatsAppTemplates />} />
-                <Route path="templates" element={<WhatsAppTemplates />} />
-                <Route path="campaigns" element={<Campaigns />} />
-                <Route path="campaigns/:id" element={<CampaignDetail />} />
-              </Route>
+              {canAccessWhatsApp && (
+                <Route path="/whatsapp" element={<WhatsAppLayout />}>
+                  <Route index element={<WhatsAppTemplates />} />
+                  <Route path="templates" element={<WhatsAppTemplates />} />
+                  <Route path="campaigns" element={<Campaigns />} />
+                  <Route path="campaigns/:id" element={<CampaignDetail />} />
+                </Route>
+              )}
               <Route path="/decks" element={<Decks />} />
               <Route path="/decks/:slug" element={<DeckViewer />} />
             </Routes>
@@ -305,6 +316,44 @@ function AppShell() {
         </div>
       </div>
     </div>
+  )
+}
+
+function useCanAccessWhatsApp() {
+  const z = useZero<Schema, Mutators>()
+  const { user } = useAuth()
+  const [organizations] = useQuery(z.query.organizations.orderBy('name', 'asc'))
+  const accessibleIds = useMemo(() => new Set(user?.organizationIds ?? []), [user?.organizationIds])
+
+  return organizations.some((organization) => {
+    if (!WHATSAPP_PROJECTS.has(organization.project ?? '')) return false
+    return accessibleIds.has(organization.id)
+  })
+}
+
+function useVisibleOuterNavItems() {
+  const canAccessWhatsApp = useCanAccessWhatsApp()
+  return useMemo(
+    () =>
+      OUTER_NAV_ITEMS
+        .filter((item) => !item.requiresWhatsApp || canAccessWhatsApp)
+        .map((item) => ({
+          ...item,
+          icon:
+            item.path === '/issues' ? Rows3 :
+            item.path === '/crm' ? FolderKanban :
+            item.path === '/whatsapp/templates' ? MessageCircleMore :
+            LayoutTemplate,
+        })),
+    [canAccessWhatsApp],
+  )
+}
+
+function useVisibleMobileNavItems() {
+  const canAccessWhatsApp = useCanAccessWhatsApp()
+  return useMemo(
+    () => MOBILE_NAV_ITEMS.filter((item) => !item.requiresWhatsApp || canAccessWhatsApp),
+    [canAccessWhatsApp],
   )
 }
 

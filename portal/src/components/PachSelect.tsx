@@ -14,7 +14,6 @@ type CommonProps = {
   onChange: (next: string) => void
   options: PachSelectOption[]
   openSignal?: number
-  /* popup positioning + width */
   align?: 'left' | 'right'
   popupWidth?: string
   popupClassName?: string
@@ -60,7 +59,6 @@ export function PachSelect(props: Props) {
     openMenu()
   }, [openSignal, options, value])
 
-  // position the portaled popup relative to the trigger; flip above if needed
   useLayoutEffect(() => {
     if (!open) return
     const trigger = triggerRef.current
@@ -70,19 +68,14 @@ export function PachSelect(props: Props) {
       const t = triggerRef.current
       if (!t) return
       const rect = t.getBoundingClientRect()
-      const width = popupWidth
-        ? parseFloat(popupWidth)
-        : (props.variant === 'button' ? 200 : rect.width)
+      const width = popupWidth ? parseFloat(popupWidth) : (props.variant === 'button' ? 200 : rect.width)
       const spaceBelow = window.innerHeight - rect.bottom
       const spaceAbove = rect.top
       const placeAbove = spaceBelow < POPUP_MAX_HEIGHT + POPUP_GAP + 8 && spaceAbove > spaceBelow
 
-      const top = placeAbove
-        ? Math.max(8, rect.top - POPUP_GAP)
-        : rect.bottom + POPUP_GAP
+      const top = placeAbove ? Math.max(8, rect.top - POPUP_GAP) : rect.bottom + POPUP_GAP
 
       let left = align === 'right' ? rect.right - width : rect.left
-      // keep on screen horizontally
       left = Math.max(8, Math.min(left, window.innerWidth - width - 8))
 
       setPopupStyle({
@@ -140,6 +133,7 @@ export function PachSelect(props: Props) {
   function handleTriggerClick(event: React.MouseEvent) {
     event.preventDefault()
     event.stopPropagation()
+    if (options.length === 0) return
     open ? setOpen(false) : openMenu()
   }
 

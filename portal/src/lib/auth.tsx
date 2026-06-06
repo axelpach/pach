@@ -5,6 +5,8 @@ interface User {
   id: string
   email: string
   name: string | null
+  canAccessUnscoped: boolean
+  organizationIds: string[]
 }
 
 interface AuthContextValue {
@@ -24,9 +26,27 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [token, setToken] = useState<string | null>(() => localStorage.getItem(TOKEN_KEY))
   const [user, setUser] = useState<User | null>(() => {
     const raw = localStorage.getItem(USER_KEY)
-    return raw ? JSON.parse(raw) : null
+    if (!raw) return null
+    const parsed = JSON.parse(raw)
+    return {
+      ...parsed,
+      canAccessUnscoped: parsed.canAccessUnscoped ?? false,
+      organizationIds: parsed.organizationIds ?? [],
+    }
   })
   const [loading, setLoading] = useState(false)
+
+  function storeSession(newToken: string, newUser: User) {
+    const normalizedUser = {
+      ...newUser,
+      canAccessUnscoped: newUser.canAccessUnscoped ?? false,
+      organizationIds: newUser.organizationIds ?? [],
+    }
+    localStorage.setItem(TOKEN_KEY, newToken)
+    localStorage.setItem(USER_KEY, JSON.stringify(normalizedUser))
+    setToken(newToken)
+    setUser(normalizedUser)
+  }
 
   async function login(email: string, password: string) {
     setLoading(true)
@@ -41,10 +61,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         throw new Error(error || 'Login failed')
       }
       const { token: newToken, user: newUser } = await res.json()
-      localStorage.setItem(TOKEN_KEY, newToken)
-      localStorage.setItem(USER_KEY, JSON.stringify(newUser))
-      setToken(newToken)
-      setUser(newUser)
+      storeSession(newToken, newUser)
     } finally {
       setLoading(false)
     }
@@ -61,9 +78,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (!token) return
     fetch(`${config.apiUrl}/auth/me`, {
       headers: { Authorization: `Bearer ${token}` },
-    }).then((res) => {
-      if (res.status === 401) logout()
     })
+      .then(async (res) => {
+        if (res.status === 401) {
+          logout()
+          return
+        }
+        if (!res.ok) return
+        const { token: refreshedToken, user: refreshedUser } = await res.json()
+        if (refreshedToken && refreshedUser) storeSession(refreshedToken, refreshedUser)
+      })
+      .catch(() => {
+        // Keep the current session if the refresh endpoint is temporarily unavailable.
+      })
   }, [token])
 
   return (

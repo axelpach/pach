@@ -1,7 +1,7 @@
-import { Router } from 'express'
+import { Router, type Request } from 'express'
 import { eq } from 'drizzle-orm'
 import { getDb } from '../db.js'
-import { crmContacts } from '../../../db/schema.js'
+import { crmContacts, organizations, whatsappCampaigns } from '../../../db/schema.js'
 import { sendTemplate, type TemplateComponent } from '../services/whatsapp/send.js'
 import { sendText } from '../services/whatsapp/send-text.js'
 import { syncTemplates } from '../services/whatsapp/sync.js'
@@ -10,6 +10,26 @@ import { fireCampaign } from '../services/whatsapp/fire.js'
 
 export const publicWhatsAppRouter = Router()
 const router = Router()
+
+function requireOrganizationAccess(req: Request, organizationId: string | null | undefined) {
+  if (!organizationId) {
+    if (!req.user?.canAccessUnscoped) throw new Error('Not authorized for no-organization content')
+    return
+  }
+  if (!req.user?.organizationIds.includes(organizationId)) {
+    throw new Error('Not authorized for this organization')
+  }
+}
+
+async function organizationIdForProject(projectId: string) {
+  const db = getDb()
+  const [organization] = await db
+    .select({ id: organizations.id })
+    .from(organizations)
+    .where(eq(organizations.project, projectId))
+    .limit(1)
+  return organization?.id
+}
 
 interface SendTemplateBody {
   projectId: string
@@ -31,14 +51,24 @@ router.post('/send-template', async (req, res) => {
   }
 
   let to = body.to
+  const organizationId = await organizationIdForProject(body.projectId)
+  if (!organizationId) return res.status(404).json({ error: `No organization found for project=${body.projectId}` })
+
+  try {
+    requireOrganizationAccess(req, organizationId)
+  } catch (error) {
+    return res.status(403).json({ error: error instanceof Error ? error.message : 'Not authorized' })
+  }
+
   if (!to && body.contactId) {
     const db = getDb()
     const [contact] = await db
-      .select({ phone: crmContacts.phone })
+      .select({ phone: crmContacts.phone, organizationId: crmContacts.organizationId })
       .from(crmContacts)
       .where(eq(crmContacts.id, body.contactId))
       .limit(1)
     if (!contact) return res.status(404).json({ error: 'contact not found' })
+    if (contact.organizationId !== organizationId) return res.status(403).json({ error: 'Contact is not in this organization' })
     if (!contact.phone) return res.status(400).json({ error: 'contact has no phone' })
     to = contact.phone
   }
@@ -85,11 +115,14 @@ router.post('/templates/sync', async (req, res) => {
   const projectId = (req.body?.projectId || req.query?.projectId) as string | undefined
   if (!projectId) return res.status(400).json({ error: 'projectId is required' })
   try {
+    const organizationId = await organizationIdForProject(projectId)
+    if (!organizationId) return res.status(404).json({ error: `No organization found for project=${projectId}` })
+    requireOrganizationAccess(req, organizationId)
     const result = await syncTemplates(projectId)
     return res.json(result)
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error)
-    return res.status(500).json({ error: message })
+    return res.status(message.includes('Not authorized') ? 403 : 500).json({ error: message })
   }
 })
 
@@ -103,14 +136,24 @@ router.post('/send-text', async (req, res) => {
   }
 
   let to = body.to
+  const organizationId = await organizationIdForProject(body.projectId)
+  if (!organizationId) return res.status(404).json({ error: `No organization found for project=${body.projectId}` })
+
+  try {
+    requireOrganizationAccess(req, organizationId)
+  } catch (error) {
+    return res.status(403).json({ error: error instanceof Error ? error.message : 'Not authorized' })
+  }
+
   if (!to && body.contactId) {
     const db = getDb()
     const [contact] = await db
-      .select({ phone: crmContacts.phone })
+      .select({ phone: crmContacts.phone, organizationId: crmContacts.organizationId })
       .from(crmContacts)
       .where(eq(crmContacts.id, body.contactId))
       .limit(1)
     if (!contact) return res.status(404).json({ error: 'contact not found' })
+    if (contact.organizationId !== organizationId) return res.status(403).json({ error: 'Contact is not in this organization' })
     if (!contact.phone) return res.status(400).json({ error: 'contact has no phone' })
     to = contact.phone
   }
@@ -132,11 +175,19 @@ router.post('/send-text', async (req, res) => {
 router.post('/campaigns/:id/fire', async (req, res) => {
   const id = req.params.id
   try {
+    const db = getDb()
+    const [campaign] = await db
+      .select({ organizationId: whatsappCampaigns.organizationId })
+      .from(whatsappCampaigns)
+      .where(eq(whatsappCampaigns.id, id))
+      .limit(1)
+    if (!campaign) return res.status(404).json({ error: 'campaign not found' })
+    requireOrganizationAccess(req, campaign.organizationId)
     const result = await fireCampaign(id)
     return res.json(result)
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error)
-    return res.status(500).json({ error: message })
+    return res.status(message.includes('Not authorized') ? 403 : 500).json({ error: message })
   }
 })
 

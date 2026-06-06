@@ -1,6 +1,6 @@
 import { eq, inArray } from 'drizzle-orm'
 import { getDb } from '../../db.js'
-import { companies, crmContacts, whatsappCampaigns, whatsappTemplates } from '../../../../db/schema.js'
+import { organizations, crmContacts, whatsappCampaigns, whatsappTemplates } from '../../../../db/schema.js'
 import { sendTemplate, type TemplateComponent } from './send.js'
 
 export interface FireResult {
@@ -47,7 +47,7 @@ export async function fireCampaign(campaignId: string): Promise<FireResult> {
   const [template] = await db.select().from(whatsappTemplates).where(eq(whatsappTemplates.id, campaign.templateId)).limit(1)
   if (!template) throw new Error('template not found')
 
-  const [company] = await db.select().from(companies).where(eq(companies.id, campaign.companyId)).limit(1)
+  const [company] = await db.select().from(organizations).where(eq(organizations.id, campaign.organizationId)).limit(1)
   if (!company?.project) throw new Error('company has no project')
 
   const filter = (campaign.recipientFilter || {}) as RecipientFilter

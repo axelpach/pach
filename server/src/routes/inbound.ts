@@ -2,7 +2,7 @@ import { Router } from 'express'
 import { and, desc, eq, or } from 'drizzle-orm'
 import { getDb } from '../db.js'
 import {
-  companies,
+  organizations,
   crmCompanies,
   crmContacts,
   crmDealContacts,
@@ -52,12 +52,13 @@ router.post('/ardia/lead', async (req, res) => {
     const result = await db.transaction(async (tx) => {
       const now = new Date()
       const contextCompany = await findOrCreateContextCompany(tx, payload.contextCompany, now)
-      const crmCompany = payload.company ? await findOrCreateCrmCompany(tx, payload, now) : null
-      const contact = await findOrCreateCrmContact(tx, payload, crmCompany?.id, now)
-      const deal = await createProspectDeal(tx, payload, crmCompany?.id, now)
+      const crmCompany = payload.company ? await findOrCreateCrmCompany(tx, payload, contextCompany.id, now) : null
+      const contact = await findOrCreateCrmContact(tx, payload, contextCompany.id, crmCompany?.id, now)
+      const deal = await createProspectDeal(tx, payload, contextCompany.id, crmCompany?.id, now)
 
       await tx.insert(crmDealContacts).values({
         id: crypto.randomUUID(),
+        organizationId: contextCompany.id,
         dealId: deal.id,
         contactId: contact.id,
         createdAt: now,
@@ -65,6 +66,7 @@ router.post('/ardia/lead', async (req, res) => {
 
       await tx.insert(crmNotes).values({
         id: crypto.randomUUID(),
+        organizationId: contextCompany.id,
         dealId: deal.id,
         contactId: contact.id,
         body: buildLeadNote(payload),
@@ -140,7 +142,7 @@ type Tx = Parameters<Parameters<ReturnType<typeof getDb>['transaction']>[0]>[0]
 
 async function findOrCreateContextCompany(tx: Tx, contextCompany: string, now: Date) {
   const normalizedContextCompany = contextCompany.trim().toLowerCase()
-  const existingCompanies = await tx.select().from(companies)
+  const existingCompanies = await tx.select().from(organizations)
   const existing = existingCompanies.find((company) => {
     const project = company.project?.trim().toLowerCase()
     const name = company.name.trim().toLowerCase()
@@ -150,7 +152,7 @@ async function findOrCreateContextCompany(tx: Tx, contextCompany: string, now: D
   if (existing) return existing
 
   const [created] = await tx
-    .insert(companies)
+    .insert(organizations)
     .values({
       id: crypto.randomUUID(),
       name: contextCompany,
@@ -164,19 +166,20 @@ async function findOrCreateContextCompany(tx: Tx, contextCompany: string, now: D
   return created
 }
 
-async function findOrCreateCrmCompany(tx: Tx, payload: ValidLeadPayload, now: Date) {
+async function findOrCreateCrmCompany(tx: Tx, payload: ValidLeadPayload, organizationId: string, now: Date) {
   if (!payload.company) return null
 
   const [existing] = await tx
     .select()
     .from(crmCompanies)
-    .where(eq(crmCompanies.name, payload.company))
+    .where(and(eq(crmCompanies.organizationId, organizationId), eq(crmCompanies.name, payload.company)))
     .limit(1)
 
   if (existing) {
     await tx
       .update(crmCompanies)
       .set({
+        organizationId,
         phone: existing.phone ?? payload.phone,
         city: existing.city ?? payload.city,
         updatedAt: now,
@@ -189,6 +192,7 @@ async function findOrCreateCrmCompany(tx: Tx, payload: ValidLeadPayload, now: Da
     .insert(crmCompanies)
     .values({
       id: crypto.randomUUID(),
+      organizationId,
       name: payload.company,
       phone: payload.phone,
       city: payload.city,
@@ -205,10 +209,11 @@ async function findOrCreateCrmCompany(tx: Tx, payload: ValidLeadPayload, now: Da
 async function findOrCreateCrmContact(
   tx: Tx,
   payload: ValidLeadPayload,
-  companyId: string | undefined,
+  organizationId: string,
+  crmCompanyId: string | undefined,
   now: Date,
 ) {
-  const where =
+  const identityWhere =
     payload.email && payload.phone
       ? or(eq(crmContacts.email, payload.email), eq(crmContacts.phone, payload.phone))
       : payload.email
@@ -216,6 +221,7 @@ async function findOrCreateCrmContact(
         : payload.phone
           ? eq(crmContacts.phone, payload.phone)
           : undefined
+  const where = identityWhere ? and(eq(crmContacts.organizationId, organizationId), identityWhere) : undefined
 
   const [existing] = where
     ? await tx.select().from(crmContacts).where(where).limit(1)
@@ -225,7 +231,8 @@ async function findOrCreateCrmContact(
     await tx
       .update(crmContacts)
       .set({
-        companyId: companyId ?? existing.companyId,
+        organizationId,
+        crmCompanyId: crmCompanyId ?? existing.crmCompanyId,
         name: payload.name,
         email: payload.email ?? existing.email,
         phone: payload.phone ?? existing.phone,
@@ -240,7 +247,8 @@ async function findOrCreateCrmContact(
     .insert(crmContacts)
     .values({
       id: crypto.randomUUID(),
-      ...(companyId ? { companyId } : {}),
+      organizationId,
+      ...(crmCompanyId ? { crmCompanyId } : {}),
       name: payload.name,
       email: payload.email,
       phone: payload.phone,
@@ -256,14 +264,16 @@ async function findOrCreateCrmContact(
 async function createProspectDeal(
   tx: Tx,
   payload: ValidLeadPayload,
-  companyId: string | undefined,
+  organizationId: string,
+  crmCompanyId: string | undefined,
   now: Date,
 ) {
   const [deal] = await tx
     .insert(crmDeals)
     .values({
       id: crypto.randomUUID(),
-      ...(companyId ? { companyId } : {}),
+      organizationId,
+      ...(crmCompanyId ? { crmCompanyId } : {}),
       title: payload.name,
       stage: 'prospecto',
       temperature: 'hot',

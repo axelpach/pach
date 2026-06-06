@@ -15,11 +15,12 @@ const tempColors: Record<string, string> = Object.fromEntries(TEMPERATURES.map((
 
 interface BoardViewProps {
   boardId: string
+  organizationId: string | null
   search: string
   onDealClick: (dealId: string) => void
 }
 
-export default function BoardView({ boardId, search, onDealClick }: BoardViewProps) {
+export default function BoardView({ boardId, organizationId, search, onDealClick }: BoardViewProps) {
   const z = useZero<Schema, Mutators>()
   const [boards] = useQuery(z.query.crm_boards.where('id', boardId))
   const [columns] = useQuery(z.query.crm_board_columns.where('boardId', boardId).orderBy('position', 'asc'))
@@ -65,16 +66,20 @@ export default function BoardView({ boardId, search, onDealClick }: BoardViewPro
   if (!board) return null
 
   const baseFilter: Record<string, string[]> = (board.baseFilter as Record<string, string[]>) || {}
-  const companyMap = new Map(companies.map((c) => [c.id, c]))
+  const visibleCompanies = companies.filter((company) =>
+    organizationId ? company.organizationId === organizationId : !company.organizationId,
+  )
+  const companyMap = new Map(visibleCompanies.map((c) => [c.id, c]))
   const searchLower = search.toLowerCase()
 
   const filteredDeals = allDeals.filter((deal) => {
+    if (organizationId ? deal.organizationId !== organizationId : deal.organizationId) return false
     for (const [field, allowedValues] of Object.entries(baseFilter)) {
       const dealValue = (deal as Record<string, unknown>)[field]
       if (!allowedValues.includes(dealValue as string)) return false
     }
     if (searchLower) {
-      const company = deal.companyId ? companyMap.get(deal.companyId) : null
+      const company = deal.crmCompanyId ? companyMap.get(deal.crmCompanyId) : null
       const searchable = [deal.title, company?.name, deal.description].filter(Boolean).join(' ').toLowerCase()
       if (!searchable.includes(searchLower)) return false
     }
@@ -97,9 +102,10 @@ export default function BoardView({ boardId, search, onDealClick }: BoardViewPro
     const id = crypto.randomUUID()
     z.mutate.crm_deals.create({
       id,
+      organizationId: organizationId ?? undefined,
       title: 'new deal',
       [groupBy]: columnValue,
-    } as { id: string; title: string; stage?: string; temperature?: string })
+    } as { id: string; organizationId?: string; title: string; stage?: string; temperature?: string })
     onDealClick(id)
   }
 
@@ -232,7 +238,7 @@ function KanbanColumn({
   label: string
   color: string
   value: string
-  deals: Array<{ id: string; title: string; companyId?: string | null; value?: number | null; temperature?: string | null }>
+  deals: Array<{ id: string; title: string; crmCompanyId?: string | null; value?: number | null; temperature?: string | null }>
   companyMap: Map<string, { id: string; name: string }>
   onDrop: (dealId: string, newValue: string) => void
   onAddDeal: (value: string) => void
@@ -330,12 +336,12 @@ function DealCard({
   onClick,
   onHover,
 }: {
-  deal: { id: string; title: string; companyId?: string | null; value?: number | null; temperature?: string | null }
+  deal: { id: string; title: string; crmCompanyId?: string | null; value?: number | null; temperature?: string | null }
   companyMap: Map<string, { id: string; name: string }>
   onClick: () => void
   onHover: (dealId: string | null) => void
 }) {
-  const company = deal.companyId ? companyMap.get(deal.companyId) : null
+  const company = deal.crmCompanyId ? companyMap.get(deal.crmCompanyId) : null
   const handleDragStart = (e: React.DragEvent) => {
     e.dataTransfer.setData('application/deal-id', deal.id)
     e.dataTransfer.effectAllowed = 'move'

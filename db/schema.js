@@ -5,24 +5,12 @@ export const users = pgTable('users', {
     email: text('email').notNull().unique(),
     passwordHash: text('password_hash').notNull(),
     name: text('name'),
+    canAccessUnscoped: boolean('can_access_unscoped').notNull().default(false),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
 });
-/* ─────────────────────────── DECKS ─────────────────────────── */
-export const decks = pgTable('decks', {
-    id: uuid('id').primaryKey().defaultRandom(),
-    project: text('project').notNull(),
-    title: text('title').notNull(),
-    description: text('description'),
-    slug: text('slug').notNull().unique(),
-    slideCount: integer('slide_count').notNull().default(0),
-    theme: text('theme').notNull().default('dark'),
-    metadata: jsonb('metadata').$type(),
-    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
-    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
-});
-/* ─────────────────────── PACHI COMPANIES ─────────────────────── */
-export const companies = pgTable('companies', {
+/* ─────────────────────── ORGANIZATIONS ─────────────────────── */
+export const organizations = pgTable('organizations', {
     id: uuid('id').primaryKey().defaultRandom(),
     name: text('name').notNull(),
     /** Razón social */
@@ -37,9 +25,37 @@ export const companies = pgTable('companies', {
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
 });
+export const organizationMemberships = pgTable('organization_memberships', {
+    id: uuid('id').primaryKey().defaultRandom(),
+    organizationId: uuid('organization_id').notNull().references(() => organizations.id),
+    userId: uuid('user_id').notNull().references(() => users.id),
+    /** owner for now; future roles can expand from here. */
+    role: text('role').notNull().default('owner'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+}, (table) => ({
+    userOrganizationIdx: uniqueIndex('organization_memberships_user_organization_idx').on(table.userId, table.organizationId),
+    organizationIdIdx: index('organization_memberships_organization_idx').on(table.organizationId),
+    userIdIdx: index('organization_memberships_user_idx').on(table.userId),
+}));
+/* ─────────────────────────── DECKS ─────────────────────────── */
+export const decks = pgTable('decks', {
+    id: uuid('id').primaryKey().defaultRandom(),
+    organizationId: uuid('organization_id').references(() => organizations.id),
+    project: text('project').notNull(),
+    title: text('title').notNull(),
+    description: text('description'),
+    slug: text('slug').notNull().unique(),
+    slideCount: integer('slide_count').notNull().default(0),
+    theme: text('theme').notNull().default('dark'),
+    metadata: jsonb('metadata').$type(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+});
 /* ─────────────────────────── CRM ─────────────────────────── */
 export const crmCompanies = pgTable('crm_companies', {
     id: uuid('id').primaryKey().defaultRandom(),
+    organizationId: uuid('organization_id').references(() => organizations.id),
     name: text('name').notNull(),
     website: text('website'),
     instagram: text('instagram'),
@@ -54,7 +70,8 @@ export const crmCompanies = pgTable('crm_companies', {
 });
 export const crmContacts = pgTable('crm_contacts', {
     id: uuid('id').primaryKey().defaultRandom(),
-    companyId: uuid('company_id').references(() => crmCompanies.id),
+    organizationId: uuid('organization_id').references(() => organizations.id),
+    crmCompanyId: uuid('crm_company_id').references(() => crmCompanies.id),
     name: text('name').notNull(),
     email: text('email'),
     phone: text('phone'),
@@ -66,13 +83,15 @@ export const crmContacts = pgTable('crm_contacts', {
 });
 export const crmDealContacts = pgTable('crm_deal_contacts', {
     id: uuid('id').primaryKey().defaultRandom(),
+    organizationId: uuid('organization_id').references(() => organizations.id),
     dealId: uuid('deal_id').notNull(),
     contactId: uuid('contact_id').notNull().references(() => crmContacts.id),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
 });
 export const crmDeals = pgTable('crm_deals', {
     id: uuid('id').primaryKey().defaultRandom(),
-    companyId: uuid('company_id').references(() => crmCompanies.id),
+    organizationId: uuid('organization_id').references(() => organizations.id),
+    crmCompanyId: uuid('crm_company_id').references(() => crmCompanies.id),
     title: text('title').notNull(),
     /**
      * prospecto | contactado | propuesta | negociacion |
@@ -92,6 +111,7 @@ export const crmDeals = pgTable('crm_deals', {
 /* ─────────────────────────── BOARDS ─────────────────────────── */
 export const crmBoards = pgTable('crm_boards', {
     id: uuid('id').primaryKey().defaultRandom(),
+    organizationId: uuid('organization_id').references(() => organizations.id),
     name: text('name').notNull(),
     slug: text('slug').notNull().unique(),
     /** 'deals' | 'contacts' */
@@ -105,6 +125,7 @@ export const crmBoards = pgTable('crm_boards', {
 });
 export const crmBoardColumns = pgTable('crm_board_columns', {
     id: uuid('id').primaryKey().defaultRandom(),
+    organizationId: uuid('organization_id').references(() => organizations.id),
     boardId: uuid('board_id').notNull().references(() => crmBoards.id),
     label: text('label').notNull(),
     /** Display order */
@@ -118,7 +139,7 @@ export const crmBoardColumns = pgTable('crm_board_columns', {
 export const pmTeams = pgTable('pm_teams', {
     id: uuid('id').primaryKey().defaultRandom(),
     /** Optional legacy link if a team is explicitly tied to one company context. */
-    companyId: uuid('company_id').references(() => companies.id),
+    companyId: uuid('company_id').references(() => organizations.id),
     /** Short issue prefix, e.g. PAC or PRD */
     key: text('key').notNull(),
     name: text('name').notNull(),
@@ -132,7 +153,7 @@ export const pmTeams = pgTable('pm_teams', {
 export const pmProjects = pgTable('pm_projects', {
     id: uuid('id').primaryKey().defaultRandom(),
     /** Optional legacy link if a project is explicitly tied to one company context. */
-    companyId: uuid('company_id').references(() => companies.id),
+    companyId: uuid('company_id').references(() => organizations.id),
     teamId: uuid('team_id').references(() => pmTeams.id),
     name: text('name').notNull(),
     slug: text('slug').notNull(),
@@ -148,7 +169,7 @@ export const pmProjects = pgTable('pm_projects', {
 export const pmStatuses = pgTable('pm_statuses', {
     id: uuid('id').primaryKey().defaultRandom(),
     /** Optional legacy link if a status workflow is explicitly tied to one company context. */
-    companyId: uuid('company_id').references(() => companies.id),
+    companyId: uuid('company_id').references(() => organizations.id),
     /** Null means a workspace-global status shared across all teams/projects. */
     teamId: uuid('team_id').references(() => pmTeams.id),
     name: text('name').notNull(),
@@ -165,7 +186,7 @@ export const pmStatuses = pgTable('pm_statuses', {
 export const pmLabels = pgTable('pm_labels', {
     id: uuid('id').primaryKey().defaultRandom(),
     /** Optional legacy link if a label is explicitly tied to one company context. */
-    companyId: uuid('company_id').references(() => companies.id),
+    companyId: uuid('company_id').references(() => organizations.id),
     teamId: uuid('team_id').references(() => pmTeams.id),
     name: text('name').notNull(),
     color: text('color'),
@@ -176,7 +197,7 @@ export const pmLabels = pgTable('pm_labels', {
 export const pmIssues = pgTable('pm_issues', {
     id: uuid('id').primaryKey().defaultRandom(),
     /** Optional issue context, e.g. Ardia or another tracked company. */
-    contextCompanyId: uuid('context_company_id').references(() => companies.id),
+    contextCompanyId: uuid('context_company_id').references(() => organizations.id),
     teamId: uuid('team_id').notNull().references(() => pmTeams.id),
     projectId: uuid('project_id').references(() => pmProjects.id),
     statusId: uuid('status_id').notNull().references(() => pmStatuses.id),
@@ -222,7 +243,7 @@ export const pmIssueActivity = pgTable('pm_issue_activity', {
 export const pmSavedViews = pgTable('pm_saved_views', {
     id: uuid('id').primaryKey().defaultRandom(),
     /** Optional legacy link if a saved view is explicitly tied to one company context. */
-    companyId: uuid('company_id').references(() => companies.id),
+    companyId: uuid('company_id').references(() => organizations.id),
     teamId: uuid('team_id').references(() => pmTeams.id),
     ownerId: uuid('owner_id').references(() => users.id),
     name: text('name').notNull(),
@@ -249,7 +270,7 @@ export const pmTaskTriggers = pgTable('pm_task_triggers', {
     enabled: boolean('enabled').notNull().default(true),
     nextRunAt: timestamp('next_run_at', { withTimezone: true }).notNull(),
     lastRunAt: timestamp('last_run_at', { withTimezone: true }),
-    companyId: uuid('company_id').references(() => companies.id),
+    companyId: uuid('company_id').references(() => organizations.id),
     teamId: uuid('team_id').notNull().references(() => pmTeams.id),
     projectId: uuid('project_id').references(() => pmProjects.id),
     statusId: uuid('status_id').notNull().references(() => pmStatuses.id),
@@ -413,7 +434,7 @@ export const githubWebhookEvents = pgTable('github_webhook_events', {
 /* ─────────────────────── WHATSAPP ─────────────────────── */
 export const whatsappTemplates = pgTable('whatsapp_templates', {
     id: uuid('id').primaryKey().defaultRandom(),
-    companyId: uuid('company_id').notNull().references(() => companies.id),
+    organizationId: uuid('company_id').notNull().references(() => organizations.id),
     /** Meta's template id */
     metaId: text('meta_id').notNull(),
     name: text('name').notNull(),
@@ -439,7 +460,7 @@ export const whatsappTemplates = pgTable('whatsapp_templates', {
 });
 export const whatsappCampaigns = pgTable('whatsapp_campaigns', {
     id: uuid('id').primaryKey().defaultRandom(),
-    companyId: uuid('company_id').notNull().references(() => companies.id),
+    organizationId: uuid('company_id').notNull().references(() => organizations.id),
     templateId: uuid('template_id').notNull().references(() => whatsappTemplates.id),
     name: text('name').notNull(),
     /** draft | sending | sent | failed */
@@ -456,7 +477,7 @@ export const whatsappCampaigns = pgTable('whatsapp_campaigns', {
 });
 export const whatsappMessages = pgTable('whatsapp_messages', {
     id: uuid('id').primaryKey().defaultRandom(),
-    companyId: uuid('company_id').notNull().references(() => companies.id),
+    organizationId: uuid('company_id').notNull().references(() => organizations.id),
     /** Null for manual one-off sends */
     campaignId: uuid('campaign_id').references(() => whatsappCampaigns.id),
     contactId: uuid('contact_id').references(() => crmContacts.id),
@@ -482,6 +503,7 @@ export const whatsappMessages = pgTable('whatsapp_messages', {
 /* ─────────────────────────── NOTES ─────────────────────────── */
 export const crmNotes = pgTable('crm_notes', {
     id: uuid('id').primaryKey().defaultRandom(),
+    organizationId: uuid('organization_id').references(() => organizations.id),
     dealId: uuid('deal_id').references(() => crmDeals.id),
     contactId: uuid('contact_id').references(() => crmContacts.id),
     body: text('body').notNull(),

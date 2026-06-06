@@ -1,7 +1,7 @@
 import { Router } from 'express'
 import { getDb } from '../db.js'
 import { importLinearWorkspace } from '../services/linear/import.js'
-import { companies, pmSavedViews } from '../../../db/schema.js'
+import { organizations, pmSavedViews } from '../../../db/schema.js'
 
 const router = Router()
 
@@ -20,7 +20,7 @@ router.post('/import', async (req, res) => {
 
   try {
     const db = getDb()
-    const allCompanies = await db.select().from(companies)
+    const allCompanies = await db.select().from(organizations)
     const defaultCompany =
       allCompanies.find((company) => company.project?.trim().toLowerCase() === 'ardia') ??
       allCompanies.find((company) => company.name.trim().toLowerCase() === 'ardia') ??

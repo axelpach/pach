@@ -1,10 +1,11 @@
 // Zero schema for server-side push processing.
 // Keep in sync with portal/src/zero-schema.ts
 // Generated via: pnpm --filter server zero:generate
-import { boolean, createSchema, definePermissions, json, number, string, table } from '@rocicorp/zero';
+import { boolean, createSchema, definePermissions, json, number, string, table, NOBODY_CAN } from '@rocicorp/zero';
 const decks = table('decks')
     .columns({
     id: string(),
+    organizationId: string().optional().from('organization_id'),
     project: string(),
     title: string(),
     description: string().optional(),
@@ -20,11 +21,12 @@ const users = table('users')
     id: string(),
     email: string(),
     name: string().optional(),
+    canAccessUnscoped: boolean().from('can_access_unscoped'),
     createdAt: number().from('created_at'),
     updatedAt: number().from('updated_at'),
 })
     .primaryKey('id');
-const companies = table('companies')
+const organizations = table('organizations')
     .columns({
     id: string(),
     name: string(),
@@ -37,9 +39,20 @@ const companies = table('companies')
     updatedAt: number().from('updated_at'),
 })
     .primaryKey('id');
+const organizationMemberships = table('organization_memberships')
+    .columns({
+    id: string(),
+    organizationId: string().from('organization_id'),
+    userId: string().from('user_id'),
+    role: string(),
+    createdAt: number().from('created_at'),
+    updatedAt: number().from('updated_at'),
+})
+    .primaryKey('id');
 const crmCompanies = table('crm_companies')
     .columns({
     id: string(),
+    organizationId: string().optional().from('organization_id'),
     name: string(),
     website: string().optional(),
     instagram: string().optional(),
@@ -55,7 +68,8 @@ const crmCompanies = table('crm_companies')
 const crmContacts = table('crm_contacts')
     .columns({
     id: string(),
-    companyId: string().optional().from('company_id'),
+    organizationId: string().optional().from('organization_id'),
+    crmCompanyId: string().optional().from('crm_company_id'),
     name: string(),
     email: string().optional(),
     phone: string().optional(),
@@ -69,6 +83,7 @@ const crmContacts = table('crm_contacts')
 const crmDealContacts = table('crm_deal_contacts')
     .columns({
     id: string(),
+    organizationId: string().optional().from('organization_id'),
     dealId: string().from('deal_id'),
     contactId: string().from('contact_id'),
     createdAt: number().from('created_at'),
@@ -77,7 +92,8 @@ const crmDealContacts = table('crm_deal_contacts')
 const crmDeals = table('crm_deals')
     .columns({
     id: string(),
-    companyId: string().optional().from('company_id'),
+    organizationId: string().optional().from('organization_id'),
+    crmCompanyId: string().optional().from('crm_company_id'),
     title: string(),
     stage: string(),
     value: number().optional(),
@@ -91,6 +107,7 @@ const crmDeals = table('crm_deals')
 const crmNotes = table('crm_notes')
     .columns({
     id: string(),
+    organizationId: string().optional().from('organization_id'),
     dealId: string().optional().from('deal_id'),
     contactId: string().optional().from('contact_id'),
     body: string(),
@@ -101,6 +118,7 @@ const crmNotes = table('crm_notes')
 const crmBoards = table('crm_boards')
     .columns({
     id: string(),
+    organizationId: string().optional().from('organization_id'),
     name: string(),
     slug: string(),
     entityType: string().from('entity_type'),
@@ -113,6 +131,7 @@ const crmBoards = table('crm_boards')
 const crmBoardColumns = table('crm_board_columns')
     .columns({
     id: string(),
+    organizationId: string().optional().from('organization_id'),
     boardId: string().from('board_id'),
     label: string(),
     position: number(),
@@ -419,7 +438,7 @@ const githubWebhookEvents = table('github_webhook_events')
 const whatsappTemplates = table('whatsapp_templates')
     .columns({
     id: string(),
-    companyId: string().from('company_id'),
+    organizationId: string().from('company_id'),
     metaId: string().from('meta_id'),
     name: string(),
     language: string(),
@@ -440,7 +459,7 @@ const whatsappTemplates = table('whatsapp_templates')
 const whatsappCampaigns = table('whatsapp_campaigns')
     .columns({
     id: string(),
-    companyId: string().from('company_id'),
+    organizationId: string().from('company_id'),
     templateId: string().from('template_id'),
     name: string(),
     status: string(),
@@ -455,7 +474,7 @@ const whatsappCampaigns = table('whatsapp_campaigns')
 const whatsappMessages = table('whatsapp_messages')
     .columns({
     id: string(),
-    companyId: string().from('company_id'),
+    organizationId: string().from('company_id'),
     campaignId: string().optional().from('campaign_id'),
     contactId: string().optional().from('contact_id'),
     phone: string(),
@@ -476,7 +495,8 @@ export const schema = createSchema({
     tables: [
         decks,
         users,
-        companies,
+        organizations,
+        organizationMemberships,
         crmCompanies,
         crmContacts,
         crmDealContacts,
@@ -507,47 +527,54 @@ export const schema = createSchema({
         whatsappMessages,
     ],
 });
-const allowIfAuthenticated = (authData, { cmpLit }) => cmpLit(authData.sub, 'IS NOT', null);
-const AUTHENTICATED_CAN_DO_ANYTHING = {
+const allowIfUnscopedAccess = (authData, { cmpLit }) => cmpLit(authData.canAccessUnscoped, '=', true);
+const allowOwnUser = (authData, { cmp }) => cmp('id', authData.sub);
+const allowOrganization = (authData, { cmp }) => cmp('id', 'IN', authData.organizationIds);
+const allowOrganizationMembership = (authData, { cmp }) => cmp('organizationId', 'IN', authData.organizationIds);
+const allowScopedField = (field) => (authData, { and, cmp, cmpLit, or }) => or(cmp(field, 'IN', authData.organizationIds), and(cmp(field, 'IS', null), cmpLit(authData.canAccessUnscoped, '=', true)));
+const readOnly = (select) => ({
     row: {
-        select: [allowIfAuthenticated],
-        insert: [allowIfAuthenticated],
-        update: { preMutation: [allowIfAuthenticated], postMutation: [allowIfAuthenticated] },
-        delete: [allowIfAuthenticated],
+        select,
+        insert: NOBODY_CAN,
+        update: { preMutation: NOBODY_CAN, postMutation: NOBODY_CAN },
+        delete: NOBODY_CAN,
     },
-};
+});
+const organizationScoped = (field = 'organizationId') => readOnly([allowScopedField(field)]);
+const unscopedOnly = readOnly([allowIfUnscopedAccess]);
 export const permissions = definePermissions(schema, () => {
     return {
-        decks: AUTHENTICATED_CAN_DO_ANYTHING,
-        users: AUTHENTICATED_CAN_DO_ANYTHING,
-        companies: AUTHENTICATED_CAN_DO_ANYTHING,
-        crm_companies: AUTHENTICATED_CAN_DO_ANYTHING,
-        crm_contacts: AUTHENTICATED_CAN_DO_ANYTHING,
-        crm_deal_contacts: AUTHENTICATED_CAN_DO_ANYTHING,
-        crm_deals: AUTHENTICATED_CAN_DO_ANYTHING,
-        crm_notes: AUTHENTICATED_CAN_DO_ANYTHING,
-        crm_boards: AUTHENTICATED_CAN_DO_ANYTHING,
-        crm_board_columns: AUTHENTICATED_CAN_DO_ANYTHING,
-        pm_teams: AUTHENTICATED_CAN_DO_ANYTHING,
-        pm_projects: AUTHENTICATED_CAN_DO_ANYTHING,
-        pm_statuses: AUTHENTICATED_CAN_DO_ANYTHING,
-        pm_labels: AUTHENTICATED_CAN_DO_ANYTHING,
-        pm_issues: AUTHENTICATED_CAN_DO_ANYTHING,
-        pm_issue_labels: AUTHENTICATED_CAN_DO_ANYTHING,
-        pm_issue_activity: AUTHENTICATED_CAN_DO_ANYTHING,
-        pm_saved_views: AUTHENTICATED_CAN_DO_ANYTHING,
-        pm_task_triggers: AUTHENTICATED_CAN_DO_ANYTHING,
-        pm_task_trigger_runs: AUTHENTICATED_CAN_DO_ANYTHING,
-        agent_workers: AUTHENTICATED_CAN_DO_ANYTHING,
-        github_repositories: AUTHENTICATED_CAN_DO_ANYTHING,
-        agent_runs: AUTHENTICATED_CAN_DO_ANYTHING,
-        agent_terminals: AUTHENTICATED_CAN_DO_ANYTHING,
-        agent_run_artifacts: AUTHENTICATED_CAN_DO_ANYTHING,
-        github_branches: AUTHENTICATED_CAN_DO_ANYTHING,
-        github_pull_requests: AUTHENTICATED_CAN_DO_ANYTHING,
-        github_webhook_events: AUTHENTICATED_CAN_DO_ANYTHING,
-        whatsapp_templates: AUTHENTICATED_CAN_DO_ANYTHING,
-        whatsapp_campaigns: AUTHENTICATED_CAN_DO_ANYTHING,
-        whatsapp_messages: AUTHENTICATED_CAN_DO_ANYTHING,
+        decks: organizationScoped(),
+        users: readOnly([allowOwnUser]),
+        organizations: readOnly([allowOrganization]),
+        organization_memberships: readOnly([allowOrganizationMembership]),
+        crm_companies: organizationScoped(),
+        crm_contacts: organizationScoped(),
+        crm_deal_contacts: organizationScoped(),
+        crm_deals: organizationScoped(),
+        crm_notes: organizationScoped(),
+        crm_boards: organizationScoped(),
+        crm_board_columns: organizationScoped(),
+        pm_teams: organizationScoped('companyId'),
+        pm_projects: organizationScoped('companyId'),
+        pm_statuses: organizationScoped('companyId'),
+        pm_labels: organizationScoped('companyId'),
+        pm_issues: organizationScoped('contextCompanyId'),
+        pm_issue_labels: unscopedOnly,
+        pm_issue_activity: unscopedOnly,
+        pm_saved_views: organizationScoped('companyId'),
+        pm_task_triggers: organizationScoped('companyId'),
+        pm_task_trigger_runs: unscopedOnly,
+        agent_workers: unscopedOnly,
+        github_repositories: unscopedOnly,
+        agent_runs: unscopedOnly,
+        agent_terminals: unscopedOnly,
+        agent_run_artifacts: unscopedOnly,
+        github_branches: unscopedOnly,
+        github_pull_requests: unscopedOnly,
+        github_webhook_events: unscopedOnly,
+        whatsapp_templates: organizationScoped(),
+        whatsapp_campaigns: organizationScoped(),
+        whatsapp_messages: organizationScoped(),
     };
 });

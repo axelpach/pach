@@ -28,10 +28,11 @@ const LABEL_CLS = 'text-[10px] uppercase tracking-label text-fg-3 mb-1.5 flex it
 
 interface DealSidebarProps {
   dealId: string
+  organizationId: string | null
   onClose: () => void
 }
 
-export default function DealSidebar({ dealId, onClose }: DealSidebarProps) {
+export default function DealSidebar({ dealId, organizationId, onClose }: DealSidebarProps) {
   const z = useZero<Schema, Mutators>()
   const [deals] = useQuery(z.query.crm_deals.where('id', dealId))
   const [notes] = useQuery(z.query.crm_notes.where('dealId', dealId).orderBy('createdAt', 'desc'))
@@ -49,10 +50,17 @@ export default function DealSidebar({ dealId, onClose }: DealSidebarProps) {
   const deal = deals[0]
   if (!deal) return null
 
-  const company = deal.companyId ? allCompanies.find((c) => c.id === deal.companyId) : null
+  const dealOrganizationId = deal.organizationId ?? organizationId
+  const scopedCompanies = allCompanies.filter((c) =>
+    dealOrganizationId ? c.organizationId === dealOrganizationId : !c.organizationId,
+  )
+  const scopedContacts = allContacts.filter((c) =>
+    dealOrganizationId ? c.organizationId === dealOrganizationId : !c.organizationId,
+  )
+  const company = deal.crmCompanyId ? scopedCompanies.find((c) => c.id === deal.crmCompanyId) : null
   const linkedContactIds = new Set(dealContactLinks.map((dc) => dc.contactId))
-  const linkedContacts = allContacts.filter((c) => linkedContactIds.has(c.id))
-  const companyContacts = deal.companyId ? allContacts.filter((c) => c.companyId === deal.companyId) : []
+  const linkedContacts = scopedContacts.filter((c) => linkedContactIds.has(c.id))
+  const companyContacts = deal.crmCompanyId ? scopedContacts.filter((c) => c.crmCompanyId === deal.crmCompanyId) : []
 
   const handleUpdateField = (field: string, value: string | number | undefined) => {
     z.mutate.crm_deals.update({ id: dealId, [field]: value } as any)
@@ -60,7 +68,7 @@ export default function DealSidebar({ dealId, onClose }: DealSidebarProps) {
 
   const handleAddNote = () => {
     if (!newNote.trim()) return
-    z.mutate.crm_notes.create({ id: crypto.randomUUID(), dealId, body: newNote.trim(), type: 'manual' })
+    z.mutate.crm_notes.create({ id: crypto.randomUUID(), organizationId: dealOrganizationId ?? undefined, dealId, body: newNote.trim(), type: 'manual' })
     setNewNote('')
   }
 
@@ -77,30 +85,35 @@ export default function DealSidebar({ dealId, onClose }: DealSidebarProps) {
     onClose()
   }
 
-  const handleLinkCompany = (companyId: string) => {
-    z.mutate.crm_deals.update({ id: dealId, companyId } as any)
+  const handleLinkCompany = (crmCompanyId: string) => {
+    z.mutate.crm_deals.update({ id: dealId, crmCompanyId } as any)
     setShowCompanyPicker(false)
     setCompanySearch('')
   }
   const handleCreateCompany = (name: string) => {
     const id = crypto.randomUUID()
-    z.mutate.crm_companies.create({ id, name })
-    z.mutate.crm_deals.update({ id: dealId, companyId: id } as any)
+    z.mutate.crm_companies.create({ id, organizationId: dealOrganizationId ?? undefined, name })
+    z.mutate.crm_deals.update({ id: dealId, crmCompanyId: id } as any)
     setShowCompanyPicker(false)
     setCompanySearch('')
   }
-  const handleUnlinkCompany = () => z.mutate.crm_deals.update({ id: dealId, companyId: undefined } as any)
+  const handleUnlinkCompany = () => z.mutate.crm_deals.update({ id: dealId, crmCompanyId: null } as any)
 
   const handleLinkContact = (contactId: string) => {
     if (linkedContactIds.has(contactId)) return
-    z.mutate.crm_deal_contacts.create({ id: crypto.randomUUID(), dealId, contactId })
+    z.mutate.crm_deal_contacts.create({ id: crypto.randomUUID(), organizationId: dealOrganizationId ?? undefined, dealId, contactId })
     setShowContactPicker(false)
     setContactSearch('')
   }
   const handleCreateContact = (name: string) => {
     const contactId = crypto.randomUUID()
-    z.mutate.crm_contacts.create({ id: contactId, name, companyId: deal.companyId || undefined })
-    z.mutate.crm_deal_contacts.create({ id: crypto.randomUUID(), dealId, contactId })
+    z.mutate.crm_contacts.create({
+      id: contactId,
+      organizationId: dealOrganizationId ?? undefined,
+      name,
+      crmCompanyId: deal.crmCompanyId || undefined,
+    })
+    z.mutate.crm_deal_contacts.create({ id: crypto.randomUUID(), organizationId: dealOrganizationId ?? undefined, dealId, contactId })
     setShowContactPicker(false)
     setContactSearch('')
   }
@@ -109,10 +122,10 @@ export default function DealSidebar({ dealId, onClose }: DealSidebarProps) {
     if (link) z.mutate.crm_deal_contacts.delete({ id: link.id })
   }
 
-  const filteredCompanies = allCompanies.filter((c) =>
+  const filteredCompanies = scopedCompanies.filter((c) =>
     c.name.toLowerCase().includes(companySearch.toLowerCase()),
   )
-  const filteredContacts = (deal.companyId ? companyContacts : allContacts).filter(
+  const filteredContacts = (deal.crmCompanyId ? companyContacts : scopedContacts).filter(
     (c) => !linkedContactIds.has(c.id) && c.name.toLowerCase().includes(contactSearch.toLowerCase()),
   )
 

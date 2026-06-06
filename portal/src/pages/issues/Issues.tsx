@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { AlertTriangle, ArrowDown, ArrowUp, ArrowUpDown, BookmarkPlus, Bot, Building2, CheckCircle2, Check, ChevronDown, ChevronRight, Circle, FolderKanban, GripVertical, Plus, Save, Settings2 } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import {
@@ -22,7 +22,7 @@ import {
 
 // rows stay put while dragging — we show an indicator line + DragOverlay ghost instead
 const noShiftStrategy: SortingStrategy = () => null
-import { PachSelect } from './PachSelect'
+import { PachSelect } from '../../components/PachSelect'
 import { StatusIcon } from './StatusIcon'
 import { PRIORITY_META, PriorityIcon } from './PriorityIcon'
 import { LabelMenu } from './LabelMenu'
@@ -94,7 +94,7 @@ const ROW_FIELDS: Array<{ value: RowField; label: string }> = [
   { value: 'status', label: 'status' },
   { value: 'priority', label: 'priority' },
   { value: 'identifier', label: 'identifier' },
-  { value: 'company', label: 'company' },
+  { value: 'company', label: 'organization' },
   { value: 'project', label: 'project' },
   { value: 'team', label: 'team' },
   { value: 'labels', label: 'labels' },
@@ -140,7 +140,7 @@ export default function Issues() {
   const { user } = useAuth()
   const { section, setSection, composerRequestId } = useTrackerContext()
 
-  const [companies] = useQuery(z.query.companies.orderBy('name', 'asc'))
+  const [companies] = useQuery(z.query.organizations.orderBy('name', 'asc'))
   const [users] = useQuery(z.query.users.orderBy('email', 'asc'))
   const [teams] = useQuery(z.query.pm_teams.orderBy('position', 'asc'))
   const [projects] = useQuery(z.query.pm_projects.orderBy('name', 'asc'))
@@ -150,6 +150,14 @@ export default function Issues() {
   const [issueLabels] = useQuery(z.query.pm_issue_labels)
   const [agentRuns] = useQuery(z.query.agent_runs.orderBy('createdAt', 'desc'))
   const [savedViews] = useQuery(z.query.pm_saved_views.orderBy('position', 'asc'))
+  const accessibleOrganizationIds = useMemo(() => new Set(user?.organizationIds ?? []), [user?.organizationIds])
+  const canAccessUnscoped = user?.canAccessUnscoped ?? false
+  const canAccessOrganization = (organizationId: string | null | undefined) =>
+    organizationId ? accessibleOrganizationIds.has(organizationId) : canAccessUnscoped
+  const scopedCompanies = companies.filter((company) => canAccessOrganization(company.id))
+  const scopedIssues = issues.filter((issue) => canAccessOrganization(issue.contextCompanyId))
+  const scopedLabels = labels.filter((label) => canAccessOrganization(label.companyId))
+  const scopedSavedViews = savedViews.filter((view) => canAccessOrganization(view.companyId))
 
   const storageKey = user ? `pach:issues:view:${user.id}` : null
   const scrollStorageKey = user ? `pach:issues:scroll:${user.id}` : null
@@ -197,7 +205,7 @@ export default function Issues() {
 
   const activeSavedView =
     section.kind === 'view'
-      ? savedViews.find((view) => view.id === section.viewId && view.ownerId === user?.id) ?? null
+      ? scopedSavedViews.find((view) => view.id === section.viewId && view.ownerId === user?.id) ?? null
       : null
 
   function applyIssueViewState(viewState: IssueViewState) {
@@ -303,11 +311,11 @@ export default function Issues() {
   }
 
   const workspaceCompany =
-    companies.find((company) => company.project === 'pach') ??
-    companies.find((company) => company.name.trim().toLowerCase() === 'pach') ??
+    scopedCompanies.find((company) => company.project === 'pach') ??
+    scopedCompanies.find((company) => company.name.trim().toLowerCase() === 'pach') ??
     null
 
-  const companyMap = new Map(companies.map((company) => [company.id, company]))
+  const companyMap = new Map(scopedCompanies.map((company) => [company.id, company]))
   const teamMap = new Map(teams.map((team) => [team.id, team]))
   const statusMap = new Map(statuses.map((status) => [status.id, status]))
   const projectMap = new Map(projects.map((project) => [project.id, project]))
@@ -319,7 +327,7 @@ export default function Issues() {
       ? [...users, authUserRow]
       : users
   const userMap = new Map(assignableUsers.map((entry) => [entry.id, entry]))
-  const labelMap = new Map(labels.map((entry) => [entry.id, entry]))
+  const labelMap = new Map(scopedLabels.map((entry) => [entry.id, entry]))
   const activeAgentRunIssueIds = new Set(
     agentRuns
       .filter((run) => ACTIVE_AGENT_RUN_STATUSES.has(run.status) && run.workerId)
@@ -335,9 +343,9 @@ export default function Issues() {
   }
   const workspaceStatuses = getWorkspaceStatuses(statuses)
 
-  const contextCompanies = companies.filter((company) => company.id !== workspaceCompany?.id)
+  const contextCompanies = scopedCompanies.filter((company) => company.id !== workspaceCompany?.id)
   const selectedTeam = section.kind === 'team' ? teams.find((team) => team.id === section.teamId) ?? null : null
-  const selectedTeamIssues = selectedTeam ? issues.filter((issue) => issue.teamId === selectedTeam.id) : []
+  const selectedTeamIssues = selectedTeam ? scopedIssues.filter((issue) => issue.teamId === selectedTeam.id) : []
   const selectedTeamProjects = selectedTeam ? projects.filter((project) => project.teamId === selectedTeam.id) : []
 
   const selectedComposerTeam = teams.find((team) => team.id === composerTeamId) ?? teams[0] ?? null
@@ -372,11 +380,15 @@ export default function Issues() {
   }, [composerStatusId, workspaceStatuses, defaultComposerStatusId])
 
   useEffect(() => {
-    // company context is optional — leave blank by default; clear if invalid
+    if (!composerCompanyId && !canAccessUnscoped && contextCompanies.length === 1) {
+      setComposerCompanyId(contextCompanies[0].id)
+      return
+    }
+    // organization context is optional only for users who can access unscoped content.
     if (!composerCompanyId) return
     if (contextCompanies.some((company) => company.id === composerCompanyId)) return
     setComposerCompanyId('')
-  }, [composerCompanyId, contextCompanies])
+  }, [canAccessUnscoped, composerCompanyId, contextCompanies])
 
   useEffect(() => {
     if (!composerAssigneeId && user?.id) {
@@ -410,7 +422,7 @@ export default function Issues() {
       const id = crypto.randomUUID()
       const state = getCurrentIssueViewState()
       const existingSlugs = new Set(
-        savedViews
+        scopedSavedViews
           .filter((view) => view.ownerId === user.id && view.scope === 'personal')
           .map((view) => view.slug),
       )
@@ -422,7 +434,7 @@ export default function Issues() {
         scope: 'personal',
         filters: state.filters,
         display: getIssueViewDisplay(state),
-        position: savedViews.filter((view) => view.ownerId === user.id && view.scope === 'personal').length,
+        position: scopedSavedViews.filter((view) => view.ownerId === user.id && view.scope === 'personal').length,
       })
       closeSaveViewModal()
       setSection({ kind: 'view', viewId: id })
@@ -591,7 +603,7 @@ export default function Issues() {
     return () => window.removeEventListener('keydown', handleEscape)
   }, [saveViewModalOpen])
 
-  const filteredIssues = issues.filter((issue) => {
+  const filteredIssues = scopedIssues.filter((issue) => {
     const sectionTeamId =
       section.kind === 'team'
         ? section.teamId
@@ -681,10 +693,10 @@ export default function Issues() {
     },
     {
       field: 'company',
-      label: 'company',
+      label: 'organization',
       icon: Building2,
       options: [
-        { value: '__none', label: 'no company' },
+        ...(canAccessUnscoped ? [{ value: '__none', label: 'no organization' }] : []),
         ...contextCompanies.map((c) => ({ value: c.id, label: c.name })),
       ],
     },
@@ -724,18 +736,18 @@ export default function Issues() {
     issues: filteredIssues.filter((issue) => issue.priority === group.value),
   })).filter((group) => group.issues.length > 0)
 
-  const openCount = issues.filter((issue) => {
+  const openCount = scopedIssues.filter((issue) => {
     const status = statusMap.get(issue.statusId)
     return status?.type !== 'completed' && status?.type !== 'canceled'
   }).length
 
-  const blockedCount = issues.filter((issue) => statusMap.get(issue.statusId)?.type === 'blocked').length
+  const blockedCount = scopedIssues.filter((issue) => statusMap.get(issue.statusId)?.type === 'blocked').length
 
   // restore scroll once the list has rendered (issues query loaded)
   useEffect(() => {
     if (scrollRestoredRef.current) return
     if (!scrollStorageKey) return
-    if (issues.length === 0) return
+    if (scopedIssues.length === 0) return
     const el = scrollContainerRef.current
     if (!el) return
 
@@ -755,7 +767,7 @@ export default function Issues() {
         el.scrollTop = target
       })
     }
-  }, [scrollStorageKey, issues.length, groupedIssues.length])
+  }, [scrollStorageKey, scopedIssues.length, groupedIssues.length])
 
   function handleScroll(event: React.UIEvent<HTMLDivElement>) {
     if (!scrollStorageKey || !scrollRestoredRef.current) return
@@ -771,7 +783,7 @@ export default function Issues() {
   }
 
   function getNextSortOrder(priority: number, statusId: string, excludeIssueId?: string) {
-    const bucket = issues
+    const bucket = scopedIssues
       .filter((issue) => issue.priority === priority && issue.statusId === statusId && issue.id !== excludeIssueId)
       .sort(compareIssuesForBucketOrder)
     const maxSortOrder = bucket[bucket.length - 1]?.sortOrder ?? 0
@@ -779,7 +791,7 @@ export default function Issues() {
   }
 
   function getTopSortOrder(priority: number, statusId: string, excludeIssueId?: string) {
-    const bucket = issues
+    const bucket = scopedIssues
       .filter((issue) => issue.priority === priority && issue.statusId === statusId && issue.id !== excludeIssueId)
       .sort(compareIssuesForBucketOrder)
     const minSortOrder = bucket[0]?.sortOrder
@@ -798,7 +810,7 @@ export default function Issues() {
   }
 
   const [activeDragId, setActiveDragId] = useState<string | null>(null)
-  const activeDragIssue = activeDragId ? issues.find((entry) => entry.id === activeDragId) ?? null : null
+  const activeDragIssue = activeDragId ? scopedIssues.find((entry) => entry.id === activeDragId) ?? null : null
 
   function handleDragStart(event: DragStartEvent) {
     setActiveDragId(String(event.active.id))
@@ -814,7 +826,7 @@ export default function Issues() {
     setActiveDragId(null)
     const { active, over } = event
     if (!over) return
-    const activeIssue = issues.find((entry) => entry.id === active.id)
+    const activeIssue = scopedIssues.find((entry) => entry.id === active.id)
     if (!activeIssue) return
 
     // figure out destination bucket. In some builds dnd-kit reports the row
@@ -822,7 +834,7 @@ export default function Issues() {
     // row instead of requiring containerId to be present.
     const overContainerRaw = (over.data.current?.sortable as { containerId?: string } | undefined)?.containerId
     const overContainer = overContainerRaw ?? (typeof over.id === 'string' && over.id.includes(':') ? over.id : null)
-    const overIssue = issues.find((entry) => entry.id === over.id)
+    const overIssue = scopedIssues.find((entry) => entry.id === over.id)
 
     let targetPriority: number
     let statusKey: string | undefined
@@ -848,7 +860,7 @@ export default function Issues() {
     if (!targetStatus) return
 
     // build the destination list including the active issue, sorted by sortOrder
-    const fullList = issues
+    const fullList = scopedIssues
       .filter((entry) => entry.priority === targetPriority)
       .filter((entry) => getStatusBucket(statusMap.get(entry.statusId))?.key === statusKey)
       .sort(compareIssuesForBucketOrder)
@@ -928,7 +940,7 @@ export default function Issues() {
   }
 
   async function changeIssuePriority(issueId: string, nextRaw: string) {
-    const issue = issues.find((entry) => entry.id === issueId)
+    const issue = scopedIssues.find((entry) => entry.id === issueId)
     if (!issue) return
     const next = Number(nextRaw)
     if (next === issue.priority) return
@@ -945,7 +957,7 @@ export default function Issues() {
   }
 
   async function changeIssueEstimate(issueId: string, nextRaw: string) {
-    const issue = issues.find((entry) => entry.id === issueId)
+    const issue = scopedIssues.find((entry) => entry.id === issueId)
     if (!issue) return
     const next = nextRaw === '' ? undefined : Number(nextRaw)
     if (next === issue.estimate) return
@@ -958,7 +970,7 @@ export default function Issues() {
   }
 
   async function changeIssueProject(issueId: string, nextProjectId: string) {
-    const issue = issues.find((entry) => entry.id === issueId)
+    const issue = scopedIssues.find((entry) => entry.id === issueId)
     if (!issue) return
     const target = nextProjectId || undefined
     if (target === issue.projectId) return
@@ -972,15 +984,15 @@ export default function Issues() {
   }
 
   async function changeIssueTeam(issueId: string, nextTeamId: string) {
-    const issue = issues.find((entry) => entry.id === issueId)
+    const issue = scopedIssues.find((entry) => entry.id === issueId)
     if (!issue || issue.teamId === nextTeamId) return
     const fromTeam = teams.find((t) => t.id === issue.teamId)
     const toTeam = teams.find((t) => t.id === nextTeamId)
     if (!toTeam) return
 
     const nextNumber =
-      issues
-        .filter((entry) => entry.teamId === nextTeamId)
+      scopedIssues
+        .filter((entry) => entry.teamId === nextTeamId && canAccessOrganization(entry.contextCompanyId))
         .reduce((max, entry) => Math.max(max, entry.number), 0) + 1
 
     await z.mutate.pm_issues.update({
@@ -998,7 +1010,7 @@ export default function Issues() {
   }
 
   async function changeIssueStatus(issueId: string, nextStatusId: string) {
-    const issue = issues.find((entry) => entry.id === issueId)
+    const issue = scopedIssues.find((entry) => entry.id === issueId)
     if (!issue || issue.statusId === nextStatusId) return
     const current = statusMap.get(issue.statusId)
     const next = statusMap.get(nextStatusId)
@@ -1081,6 +1093,7 @@ export default function Issues() {
 
   async function createIssue() {
     if (!composerTitle.trim() || !user) return
+    if (!composerCompanyId && !canAccessUnscoped) return
 
     setCreatingIssue(true)
     try {
@@ -1099,7 +1112,7 @@ export default function Issues() {
         foundation.defaultStatusId
 
       const nextNumber =
-        issues.filter((issue) => issue.teamId === teamId).reduce((max, issue) => Math.max(max, issue.number), 0) + 1
+        scopedIssues.filter((issue) => issue.teamId === teamId).reduce((max, issue) => Math.max(max, issue.number), 0) + 1
 
       const issueId = crypto.randomUUID()
       await z.mutate.pm_issues.create({
@@ -1192,7 +1205,7 @@ export default function Issues() {
                 <TeamProjectsPanel
                   team={selectedTeam}
                   projects={selectedTeamProjects}
-                  issues={issues}
+                  issues={scopedIssues}
                   onCreate={(teamId) => openCreateProject(teamId)}
                   onEdit={openEditProject}
                 />
@@ -1267,7 +1280,7 @@ export default function Issues() {
                                         teamProjects={projects.filter((p) => p.teamId === issue.teamId)}
                                         allTeams={teams}
                                         issueLabels={labelsByIssue.get(issue.id) ?? []}
-                                        availableLabels={labels.filter((l) =>
+                                        availableLabels={scopedLabels.filter((l) =>
                                           (!l.teamId || l.teamId === issue.teamId) &&
                                           (!l.companyId || l.companyId === issue.contextCompanyId),
                                         )}
@@ -1335,8 +1348,8 @@ export default function Issues() {
                 </DndContext>
               ) : (
                 <EmptyState
-                  title={issues.length ? 'no issues match this view yet' : 'start by creating your first issue'}
-                  body={issues.length
+                  title={scopedIssues.length ? 'no issues match this view yet' : 'start by creating your first issue'}
+                  body={scopedIssues.length
                     ? 'try another team or search term, or create a new issue to seed the tracker.'
                     : 'you do not need to initialize a whole workspace first. create one issue and we can refine from there.'}
                   actionLabel="create issue"
@@ -1375,6 +1388,7 @@ export default function Issues() {
         users={assignableUsers}
         team={selectedComposerTeam}
         creating={creatingIssue}
+        organizationRequired={!canAccessUnscoped}
         onClose={() => setComposerOpen(false)}
         onCreate={createIssue}
       />
@@ -1546,6 +1560,7 @@ function IssueComposerModal({
   users,
   team,
   creating,
+  organizationRequired,
   onClose,
   onCreate,
 }: {
@@ -1569,13 +1584,14 @@ function IssueComposerModal({
   onEstimateChange: (value: number) => void
   createMore: boolean
   onCreateMoreChange: (value: boolean) => void
-  companies: Schema['tables']['companies']['row'][]
+  companies: Schema['tables']['organizations']['row'][]
   teams: Schema['tables']['pm_teams']['row'][]
   projects: Schema['tables']['pm_projects']['row'][]
   statuses: Schema['tables']['pm_statuses']['row'][]
   users: Schema['tables']['users']['row'][]
   team: Schema['tables']['pm_teams']['row'] | null
   creating: boolean
+  organizationRequired: boolean
   onClose: () => void
   onCreate: () => void
 }) {
@@ -1587,7 +1603,7 @@ function IssueComposerModal({
   function handleKeyDown(event: React.KeyboardEvent) {
     if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') {
       event.preventDefault()
-      if (title.trim() && !creating) onCreate()
+      if (title.trim() && (!organizationRequired || companyId) && !creating) onCreate()
     }
   }
 
@@ -1750,16 +1766,16 @@ function IssueComposerModal({
             value={companyId}
             onChange={onCompanyChange}
             options={[
-              { value: '', label: 'no company' },
+              { value: '', label: 'no organization' },
               ...companies.map((c) => ({ value: c.id, label: c.name })),
             ]}
             trigger={
               <ComposerPill
                 icon={<Building2 className="h-3 w-3" />}
-                label={currentCompany?.name?.toLowerCase() ?? 'company'}
+                label={currentCompany?.name?.toLowerCase() ?? 'organization'}
               />
             }
-            triggerTitle="company context"
+            triggerTitle="organization context"
             triggerClassName="transition"
             popupWidth="220px"
           />
@@ -1793,7 +1809,7 @@ function IssueComposerModal({
             </button>
             <button
               onClick={onCreate}
-              disabled={!title.trim() || creating}
+              disabled={!title.trim() || (organizationRequired && !companyId) || creating}
               className="inline-flex items-center gap-2 border border-[rgba(0,255,140,0.3)] bg-[rgba(0,255,136,0.08)] px-3 py-1.5 font-mono text-xs uppercase tracking-label text-accent transition hover:bg-[rgba(0,255,136,0.16)] hover:shadow-glow-xs disabled:opacity-40 disabled:hover:bg-[rgba(0,255,136,0.08)] disabled:hover:shadow-none"
             >
               <Plus className="h-3.5 w-3.5" />
@@ -2119,7 +2135,7 @@ function IssueRow({
   dragHandleProps,
 }: {
   issue: Schema['tables']['pm_issues']['row']
-  company: Schema['tables']['companies']['row'] | null
+  company: Schema['tables']['organizations']['row'] | null
   workspaceCompanyId: string | null
   team: Schema['tables']['pm_teams']['row'] | null
   project: Schema['tables']['pm_projects']['row'] | null | undefined

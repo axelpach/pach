@@ -4,7 +4,8 @@ export default {
   zeroImportPath: '@rocicorp/zero',
   permissions: {
     users: { row: { select: ['true'], insert: ['true'], update: ['true'], delete: ['true'] } },
-    companies: { row: { select: ['true'], insert: ['true'], update: ['true'], delete: ['true'] } },
+    organizations: { row: { select: ['true'], insert: ['true'], update: ['true'], delete: ['true'] } },
+    organization_memberships: { row: { select: ['true'], insert: ['true'], update: ['true'], delete: ['true'] } },
     crm_companies: { row: { select: ['true'], insert: ['true'], update: ['true'], delete: ['true'] } },
     crm_contacts: { row: { select: ['true'], insert: ['true'], update: ['true'], delete: ['true'] } },
     crm_deal_contacts: { row: { select: ['true'], insert: ['true'], update: ['true'], delete: ['true'] } },

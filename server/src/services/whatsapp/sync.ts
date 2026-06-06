@@ -1,6 +1,6 @@
 import { eq, and } from 'drizzle-orm'
 import { getDb } from '../../db.js'
-import { companies, whatsappTemplates } from '../../../../db/schema.js'
+import { organizations, whatsappTemplates } from '../../../../db/schema.js'
 import { getWhatsApp } from './client.js'
 
 interface RemoteComponent {
@@ -40,18 +40,18 @@ export interface SyncResult {
   created: number
   updated: number
   unchanged: number
-  companyId: string
+  organizationId: string
 }
 
 export async function syncTemplates(projectId: string): Promise<SyncResult> {
   const db = getDb()
 
   const [company] = await db
-    .select({ id: companies.id })
-    .from(companies)
-    .where(eq(companies.project, projectId))
+    .select({ id: organizations.id })
+    .from(organizations)
+    .where(eq(organizations.project, projectId))
     .limit(1)
-  if (!company) throw new Error(`No company found with project=${projectId}`)
+  if (!company) throw new Error(`No organization found with project=${projectId}`)
 
   const { client, wabaId } = getWhatsApp(projectId)
 
@@ -84,7 +84,7 @@ export async function syncTemplates(projectId: string): Promise<SyncResult> {
       ?? header?.example?.headerHandle?.[0]
 
     const row = {
-      companyId: company.id,
+      organizationId: company.id,
       metaId: t.id,
       name: t.name,
       language: t.language,
@@ -105,7 +105,7 @@ export async function syncTemplates(projectId: string): Promise<SyncResult> {
       .select({ id: whatsappTemplates.id, metaId: whatsappTemplates.metaId, status: whatsappTemplates.status, bodyText: whatsappTemplates.bodyText })
       .from(whatsappTemplates)
       .where(and(
-        eq(whatsappTemplates.companyId, company.id),
+        eq(whatsappTemplates.organizationId, company.id),
         eq(whatsappTemplates.name, t.name),
         eq(whatsappTemplates.language, t.language),
       ))
@@ -122,5 +122,5 @@ export async function syncTemplates(projectId: string): Promise<SyncResult> {
     }
   }
 
-  return { total: remote.length, created, updated, unchanged, companyId: company.id }
+  return { total: remote.length, created, updated, unchanged, organizationId: company.id }
 }

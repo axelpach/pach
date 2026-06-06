@@ -4,26 +4,40 @@ import type { Schema } from '../zero-schema'
 type Tx = Transaction<Schema>
 
 export const mutators = {
-  companies: {
+  organizations: {
     async create(tx: Tx, args: { id: string; name: string; legalName?: string; taxId?: string; taxRegime?: string; project?: string; description?: string }) {
       const now = Date.now()
-      await tx.mutate.companies.insert({ ...args, createdAt: now, updatedAt: now })
+      await tx.mutate.organizations.insert({ ...args, createdAt: now, updatedAt: now })
     },
     async update(tx: Tx, args: { id: string; name?: string; legalName?: string; taxId?: string; taxRegime?: string; project?: string; description?: string }) {
       const { id, ...updates } = args
-      await tx.mutate.companies.update({ id, ...updates, updatedAt: Date.now() })
+      await tx.mutate.organizations.update({ id, ...updates, updatedAt: Date.now() })
     },
     async delete(tx: Tx, args: { id: string }) {
-      await tx.mutate.companies.delete({ id: args.id })
+      await tx.mutate.organizations.delete({ id: args.id })
+    },
+  },
+
+  organization_memberships: {
+    async create(tx: Tx, args: { id: string; organizationId: string; userId: string; role?: string }) {
+      const now = Date.now()
+      await tx.mutate.organization_memberships.insert({ role: 'owner', ...args, createdAt: now, updatedAt: now })
+    },
+    async update(tx: Tx, args: { id: string; role?: string }) {
+      const { id, ...updates } = args
+      await tx.mutate.organization_memberships.update({ id, ...updates, updatedAt: Date.now() })
+    },
+    async delete(tx: Tx, args: { id: string }) {
+      await tx.mutate.organization_memberships.delete({ id: args.id })
     },
   },
 
   crm_companies: {
-    async create(tx: Tx, args: { id: string; name: string; website?: string; instagram?: string; phone?: string; city?: string; industry?: string; size?: string; description?: string }) {
+    async create(tx: Tx, args: { id: string; organizationId?: string; name: string; website?: string; instagram?: string; phone?: string; city?: string; industry?: string; size?: string; description?: string }) {
       const now = Date.now()
       await tx.mutate.crm_companies.insert({ ...args, createdAt: now, updatedAt: now })
     },
-    async update(tx: Tx, args: { id: string; name?: string; website?: string; instagram?: string; phone?: string; city?: string; industry?: string; size?: string; description?: string }) {
+    async update(tx: Tx, args: { id: string; organizationId?: string | null; name?: string; website?: string; instagram?: string; phone?: string; city?: string; industry?: string; size?: string; description?: string }) {
       const { id, ...updates } = args
       await tx.mutate.crm_companies.update({ id, ...updates, updatedAt: Date.now() })
     },
@@ -33,11 +47,11 @@ export const mutators = {
   },
 
   crm_contacts: {
-    async create(tx: Tx, args: { id: string; companyId?: string; name: string; email?: string; phone?: string; instagram?: string; linkedin?: string; role?: string }) {
+    async create(tx: Tx, args: { id: string; organizationId?: string; crmCompanyId?: string; name: string; email?: string; phone?: string; instagram?: string; linkedin?: string; role?: string }) {
       const now = Date.now()
       await tx.mutate.crm_contacts.insert({ ...args, createdAt: now, updatedAt: now })
     },
-    async update(tx: Tx, args: { id: string; companyId?: string; name?: string; email?: string; phone?: string; instagram?: string; linkedin?: string; role?: string }) {
+    async update(tx: Tx, args: { id: string; organizationId?: string | null; crmCompanyId?: string | null; name?: string; email?: string; phone?: string; instagram?: string; linkedin?: string; role?: string }) {
       const { id, ...updates } = args
       await tx.mutate.crm_contacts.update({ id, ...updates, updatedAt: Date.now() })
     },
@@ -47,7 +61,7 @@ export const mutators = {
   },
 
   crm_deal_contacts: {
-    async create(tx: Tx, args: { id: string; dealId: string; contactId: string }) {
+    async create(tx: Tx, args: { id: string; organizationId?: string; dealId: string; contactId: string }) {
       await tx.mutate.crm_deal_contacts.insert({ ...args, createdAt: Date.now() })
     },
     async delete(tx: Tx, args: { id: string }) {
@@ -56,11 +70,11 @@ export const mutators = {
   },
 
   crm_deals: {
-    async create(tx: Tx, args: { id: string; companyId?: string; title: string; stage?: string; value?: number; temperature?: string; project?: string; description?: string }) {
+    async create(tx: Tx, args: { id: string; organizationId?: string; crmCompanyId?: string; title: string; stage?: string; value?: number; temperature?: string; project?: string; description?: string }) {
       const now = Date.now()
       await tx.mutate.crm_deals.insert({ stage: 'prospecto', ...args, createdAt: now, updatedAt: now })
     },
-    async update(tx: Tx, args: { id: string; companyId?: string; title?: string; stage?: string; value?: number; temperature?: string; project?: string; description?: string }) {
+    async update(tx: Tx, args: { id: string; organizationId?: string | null; crmCompanyId?: string | null; title?: string; stage?: string; value?: number; temperature?: string; project?: string; description?: string }) {
       const { id, ...updates } = args
       await tx.mutate.crm_deals.update({ id, ...updates, updatedAt: Date.now() })
     },
@@ -70,7 +84,7 @@ export const mutators = {
   },
 
   crm_notes: {
-    async create(tx: Tx, args: { id: string; dealId?: string; contactId?: string; body: string; type?: string }) {
+    async create(tx: Tx, args: { id: string; organizationId?: string; dealId?: string; contactId?: string; body: string; type?: string }) {
       await tx.mutate.crm_notes.insert({ type: 'manual', ...args, createdAt: Date.now() })
     },
     async delete(tx: Tx, args: { id: string }) {
@@ -79,11 +93,11 @@ export const mutators = {
   },
 
   crm_boards: {
-    async create(tx: Tx, args: { id: string; name: string; slug: string; entityType?: string; groupBy: string; baseFilter?: Record<string, string[]> }) {
+    async create(tx: Tx, args: { id: string; organizationId?: string; name: string; slug: string; entityType?: string; groupBy: string; baseFilter?: Record<string, string[]> }) {
       const now = Date.now()
       await tx.mutate.crm_boards.insert({ entityType: 'deals', baseFilter: {}, ...args, createdAt: now, updatedAt: now })
     },
-    async update(tx: Tx, args: { id: string; name?: string; groupBy?: string; baseFilter?: Record<string, string[]> }) {
+    async update(tx: Tx, args: { id: string; organizationId?: string | null; name?: string; groupBy?: string; baseFilter?: Record<string, string[]> }) {
       const { id, ...updates } = args
       await tx.mutate.crm_boards.update({ id, ...updates, updatedAt: Date.now() })
     },
@@ -93,7 +107,7 @@ export const mutators = {
   },
 
   crm_board_columns: {
-    async create(tx: Tx, args: { id: string; boardId: string; label: string; position: number; value: string; color?: string }) {
+    async create(tx: Tx, args: { id: string; organizationId?: string; boardId: string; label: string; position: number; value: string; color?: string }) {
       await tx.mutate.crm_board_columns.insert(args)
     },
     async update(tx: Tx, args: { id: string; label?: string; position?: number; color?: string }) {
@@ -420,7 +434,7 @@ export const mutators = {
   },
 
   whatsapp_campaigns: {
-    async create(tx: Tx, args: { id: string; companyId: string; templateId: string; name: string; recipientFilter?: Record<string, unknown>; variableValues?: Record<string, string>; mediaId?: string }) {
+    async create(tx: Tx, args: { id: string; organizationId: string; templateId: string; name: string; recipientFilter?: Record<string, unknown>; variableValues?: Record<string, string>; mediaId?: string }) {
       const now = Date.now()
       await tx.mutate.whatsapp_campaigns.insert({
         status: 'draft',

@@ -1,6 +1,6 @@
-import { eq } from 'drizzle-orm'
+import { and, eq } from 'drizzle-orm'
 import { getDb } from '../../db.js'
-import { companies, crmContacts, whatsappMessages, whatsappTemplates } from '../../../../db/schema.js'
+import { organizations, crmContacts, whatsappMessages, whatsappTemplates } from '../../../../db/schema.js'
 import { projects } from '../../../../pach.config.js'
 import { normalizeWhatsAppPhone } from './phone.js'
 import { sendMarketingWhatsAppReplyAlert } from '../discord.js'
@@ -100,12 +100,12 @@ export async function handleWebhook(payload: WebhookPayload): Promise<void> {
           continue
         }
         const [company] = await db
-          .select({ id: companies.id })
-          .from(companies)
-          .where(eq(companies.project, projectId))
+          .select({ id: organizations.id })
+          .from(organizations)
+          .where(eq(organizations.project, projectId))
           .limit(1)
         if (!company) {
-          console.warn(`[whatsapp webhook] no company row for project ${projectId}, skipping inbound`)
+          console.warn(`[whatsapp webhook] no organization row for project ${projectId}, skipping inbound`)
           continue
         }
 
@@ -134,19 +134,19 @@ export async function handleWebhook(payload: WebhookPayload): Promise<void> {
           const [existing] = await db
             .select({ id: crmContacts.id })
             .from(crmContacts)
-            .where(eq(crmContacts.phone, phone))
+            .where(and(eq(crmContacts.organizationId, company.id), eq(crmContacts.phone, phone)))
             .limit(1)
           let contactId = existing?.id
           if (!contactId) {
             const [created] = await db
               .insert(crmContacts)
-              .values({ name: profileName || phone, phone })
+              .values({ organizationId: company.id, name: profileName || phone, phone })
               .returning({ id: crmContacts.id })
             contactId = created.id
           }
 
           await db.insert(whatsappMessages).values({
-            companyId: company.id,
+            organizationId: company.id,
             contactId,
             phone,
             direction: 'inbound',

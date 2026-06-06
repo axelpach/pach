@@ -21,9 +21,18 @@ export function requireAuth(req: Request, res: Response, next: NextFunction): vo
   const token = authHeader.slice(7)
 
   try {
-    req.user = verifyToken(token)
+    const user = verifyToken(token)
+    req.user = { ...user, organizationIds: user.organizationIds ?? [] }
     next()
   } catch {
     res.status(401).json({ error: 'Invalid or expired token' })
   }
+}
+
+export function requireUnscopedAccess(req: Request, res: Response, next: NextFunction): void {
+  if (!req.user?.canAccessUnscoped) {
+    res.status(403).json({ error: 'Not authorized for workspace-level content' })
+    return
+  }
+  next()
 }

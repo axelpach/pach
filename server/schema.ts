@@ -2,11 +2,12 @@
 // Keep in sync with portal/src/zero-schema.ts
 // Generated via: pnpm --filter server zero:generate
 
-import { boolean, createSchema, definePermissions, json, number, string, table, ANYONE_CAN, NOBODY_CAN, type ExpressionBuilder, type PermissionsConfig } from '@rocicorp/zero'
+import { boolean, createSchema, definePermissions, json, number, string, table, NOBODY_CAN, type Condition, type ExpressionBuilder, type PermissionsConfig } from '@rocicorp/zero'
 
 const decks = table('decks')
   .columns({
     id: string(),
+    organizationId: string().optional().from('organization_id'),
     project: string(),
     title: string(),
     description: string().optional(),
@@ -23,12 +24,13 @@ const users = table('users')
     id: string(),
     email: string(),
     name: string().optional(),
+    canAccessUnscoped: boolean().from('can_access_unscoped'),
     createdAt: number().from('created_at'),
     updatedAt: number().from('updated_at'),
   })
   .primaryKey('id')
 
-const companies = table('companies')
+const organizations = table('organizations')
   .columns({
     id: string(),
     name: string(),
@@ -42,9 +44,21 @@ const companies = table('companies')
   })
   .primaryKey('id')
 
+const organizationMemberships = table('organization_memberships')
+  .columns({
+    id: string(),
+    organizationId: string().from('organization_id'),
+    userId: string().from('user_id'),
+    role: string(),
+    createdAt: number().from('created_at'),
+    updatedAt: number().from('updated_at'),
+  })
+  .primaryKey('id')
+
 const crmCompanies = table('crm_companies')
   .columns({
     id: string(),
+    organizationId: string().optional().from('organization_id'),
     name: string(),
     website: string().optional(),
     instagram: string().optional(),
@@ -61,7 +75,8 @@ const crmCompanies = table('crm_companies')
 const crmContacts = table('crm_contacts')
   .columns({
     id: string(),
-    companyId: string().optional().from('company_id'),
+    organizationId: string().optional().from('organization_id'),
+    crmCompanyId: string().optional().from('crm_company_id'),
     name: string(),
     email: string().optional(),
     phone: string().optional(),
@@ -76,6 +91,7 @@ const crmContacts = table('crm_contacts')
 const crmDealContacts = table('crm_deal_contacts')
   .columns({
     id: string(),
+    organizationId: string().optional().from('organization_id'),
     dealId: string().from('deal_id'),
     contactId: string().from('contact_id'),
     createdAt: number().from('created_at'),
@@ -85,7 +101,8 @@ const crmDealContacts = table('crm_deal_contacts')
 const crmDeals = table('crm_deals')
   .columns({
     id: string(),
-    companyId: string().optional().from('company_id'),
+    organizationId: string().optional().from('organization_id'),
+    crmCompanyId: string().optional().from('crm_company_id'),
     title: string(),
     stage: string(),
     value: number().optional(),
@@ -100,6 +117,7 @@ const crmDeals = table('crm_deals')
 const crmNotes = table('crm_notes')
   .columns({
     id: string(),
+    organizationId: string().optional().from('organization_id'),
     dealId: string().optional().from('deal_id'),
     contactId: string().optional().from('contact_id'),
     body: string(),
@@ -111,6 +129,7 @@ const crmNotes = table('crm_notes')
 const crmBoards = table('crm_boards')
   .columns({
     id: string(),
+    organizationId: string().optional().from('organization_id'),
     name: string(),
     slug: string(),
     entityType: string().from('entity_type'),
@@ -124,6 +143,7 @@ const crmBoards = table('crm_boards')
 const crmBoardColumns = table('crm_board_columns')
   .columns({
     id: string(),
+    organizationId: string().optional().from('organization_id'),
     boardId: string().from('board_id'),
     label: string(),
     position: number(),
@@ -449,7 +469,7 @@ const githubWebhookEvents = table('github_webhook_events')
 const whatsappTemplates = table('whatsapp_templates')
   .columns({
     id: string(),
-    companyId: string().from('company_id'),
+    organizationId: string().from('company_id'),
     metaId: string().from('meta_id'),
     name: string(),
     language: string(),
@@ -471,7 +491,7 @@ const whatsappTemplates = table('whatsapp_templates')
 const whatsappCampaigns = table('whatsapp_campaigns')
   .columns({
     id: string(),
-    companyId: string().from('company_id'),
+    organizationId: string().from('company_id'),
     templateId: string().from('template_id'),
     name: string(),
     status: string(),
@@ -487,7 +507,7 @@ const whatsappCampaigns = table('whatsapp_campaigns')
 const whatsappMessages = table('whatsapp_messages')
   .columns({
     id: string(),
-    companyId: string().from('company_id'),
+    organizationId: string().from('company_id'),
     campaignId: string().optional().from('campaign_id'),
     contactId: string().optional().from('contact_id'),
     phone: string(),
@@ -509,7 +529,8 @@ export const schema = createSchema({
   tables: [
     decks,
     users,
-    companies,
+    organizations,
+    organizationMemberships,
     crmCompanies,
     crmContacts,
     crmDealContacts,
@@ -552,54 +573,78 @@ type AuthData = {
   sub: string
   email: string
   name: string | null
+  canAccessUnscoped: boolean
+  organizationIds: string[]
 }
 
-const allowIfAuthenticated = (
-  authData: AuthData,
-  { cmpLit }: ExpressionBuilder<Schema, keyof Schema['tables']>,
-) => cmpLit(authData.sub, 'IS NOT', null)
+type TableName = keyof Schema['tables'] & string
+type Rule<TTable extends TableName> = (authData: AuthData, eb: ExpressionBuilder<Schema, TTable>) => Condition
 
-const AUTHENTICATED_CAN_DO_ANYTHING = {
+const allowIfUnscopedAccess: Rule<TableName> = (authData, { cmpLit }) =>
+  cmpLit(authData.canAccessUnscoped, '=', true)
+
+const allowOwnUser: Rule<'users'> = (authData, { cmp }) => cmp('id', authData.sub)
+
+const allowOrganization: Rule<'organizations'> = (authData, { cmp }) =>
+  cmp('id', 'IN', authData.organizationIds)
+
+const allowOrganizationMembership: Rule<'organization_memberships'> = (authData, { cmp }) =>
+  cmp('organizationId', 'IN', authData.organizationIds)
+
+const allowScopedField = <TTable extends TableName>(field: string): Rule<TTable> =>
+  (authData, { and, cmp, cmpLit, or }) =>
+    or(
+      cmp(field as never, 'IN', authData.organizationIds as never),
+      and(cmp(field as never, 'IS', null as never), cmpLit(authData.canAccessUnscoped, '=', true)),
+    )
+
+const readOnly = <TTable extends TableName>(select: Rule<TTable>[]) => ({
   row: {
-    select: [allowIfAuthenticated],
-    insert: [allowIfAuthenticated],
-    update: { preMutation: [allowIfAuthenticated], postMutation: [allowIfAuthenticated] },
-    delete: [allowIfAuthenticated],
+    select,
+    insert: NOBODY_CAN,
+    update: { preMutation: NOBODY_CAN, postMutation: NOBODY_CAN },
+    delete: NOBODY_CAN,
   },
-} as const
+})
+
+const organizationScoped = <TTable extends TableName>(field = 'organizationId') =>
+  readOnly<TTable>([allowScopedField<TTable>(field)])
+
+const unscopedOnly = readOnly<TableName>([allowIfUnscopedAccess])
 
 export const permissions = definePermissions<AuthData, Schema>(schema, () => {
   return {
-    decks: AUTHENTICATED_CAN_DO_ANYTHING,
-    users: AUTHENTICATED_CAN_DO_ANYTHING,
-    companies: AUTHENTICATED_CAN_DO_ANYTHING,
-    crm_companies: AUTHENTICATED_CAN_DO_ANYTHING,
-    crm_contacts: AUTHENTICATED_CAN_DO_ANYTHING,
-    crm_deal_contacts: AUTHENTICATED_CAN_DO_ANYTHING,
-    crm_deals: AUTHENTICATED_CAN_DO_ANYTHING,
-    crm_notes: AUTHENTICATED_CAN_DO_ANYTHING,
-    crm_boards: AUTHENTICATED_CAN_DO_ANYTHING,
-    crm_board_columns: AUTHENTICATED_CAN_DO_ANYTHING,
-    pm_teams: AUTHENTICATED_CAN_DO_ANYTHING,
-    pm_projects: AUTHENTICATED_CAN_DO_ANYTHING,
-    pm_statuses: AUTHENTICATED_CAN_DO_ANYTHING,
-    pm_labels: AUTHENTICATED_CAN_DO_ANYTHING,
-    pm_issues: AUTHENTICATED_CAN_DO_ANYTHING,
-    pm_issue_labels: AUTHENTICATED_CAN_DO_ANYTHING,
-    pm_issue_activity: AUTHENTICATED_CAN_DO_ANYTHING,
-    pm_saved_views: AUTHENTICATED_CAN_DO_ANYTHING,
-    pm_task_triggers: AUTHENTICATED_CAN_DO_ANYTHING,
-    pm_task_trigger_runs: AUTHENTICATED_CAN_DO_ANYTHING,
-    agent_workers: AUTHENTICATED_CAN_DO_ANYTHING,
-    github_repositories: AUTHENTICATED_CAN_DO_ANYTHING,
-    agent_runs: AUTHENTICATED_CAN_DO_ANYTHING,
-    agent_terminals: AUTHENTICATED_CAN_DO_ANYTHING,
-    agent_run_artifacts: AUTHENTICATED_CAN_DO_ANYTHING,
-    github_branches: AUTHENTICATED_CAN_DO_ANYTHING,
-    github_pull_requests: AUTHENTICATED_CAN_DO_ANYTHING,
-    github_webhook_events: AUTHENTICATED_CAN_DO_ANYTHING,
-    whatsapp_templates: AUTHENTICATED_CAN_DO_ANYTHING,
-    whatsapp_campaigns: AUTHENTICATED_CAN_DO_ANYTHING,
-    whatsapp_messages: AUTHENTICATED_CAN_DO_ANYTHING,
+    decks: organizationScoped<'decks'>(),
+    users: readOnly<'users'>([allowOwnUser]),
+    organizations: readOnly<'organizations'>([allowOrganization]),
+    organization_memberships: readOnly<'organization_memberships'>([allowOrganizationMembership]),
+    crm_companies: organizationScoped<'crm_companies'>(),
+    crm_contacts: organizationScoped<'crm_contacts'>(),
+    crm_deal_contacts: organizationScoped<'crm_deal_contacts'>(),
+    crm_deals: organizationScoped<'crm_deals'>(),
+    crm_notes: organizationScoped<'crm_notes'>(),
+    crm_boards: organizationScoped<'crm_boards'>(),
+    crm_board_columns: organizationScoped<'crm_board_columns'>(),
+    pm_teams: organizationScoped<'pm_teams'>('companyId'),
+    pm_projects: organizationScoped<'pm_projects'>('companyId'),
+    pm_statuses: organizationScoped<'pm_statuses'>('companyId'),
+    pm_labels: organizationScoped<'pm_labels'>('companyId'),
+    pm_issues: organizationScoped<'pm_issues'>('contextCompanyId'),
+    pm_issue_labels: unscopedOnly,
+    pm_issue_activity: unscopedOnly,
+    pm_saved_views: organizationScoped<'pm_saved_views'>('companyId'),
+    pm_task_triggers: organizationScoped<'pm_task_triggers'>('companyId'),
+    pm_task_trigger_runs: unscopedOnly,
+    agent_workers: unscopedOnly,
+    github_repositories: unscopedOnly,
+    agent_runs: unscopedOnly,
+    agent_terminals: unscopedOnly,
+    agent_run_artifacts: unscopedOnly,
+    github_branches: unscopedOnly,
+    github_pull_requests: unscopedOnly,
+    github_webhook_events: unscopedOnly,
+    whatsapp_templates: organizationScoped<'whatsapp_templates'>(),
+    whatsapp_campaigns: organizationScoped<'whatsapp_campaigns'>(),
+    whatsapp_messages: organizationScoped<'whatsapp_messages'>(),
   } satisfies PermissionsConfig<AuthData, Schema>
 })

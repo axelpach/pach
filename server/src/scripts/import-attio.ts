@@ -1,7 +1,8 @@
 import 'dotenv/config'
 import { readFileSync } from 'fs'
+import { eq } from 'drizzle-orm'
 import { getDb } from '../db.js'
-import { crmDeals } from '../../../db/schema.js'
+import { crmDeals, organizations } from '../../../db/schema.js'
 
 const CSV_PATH = '/Users/axelpach/Downloads/Pilot hunt 💥 - Kanban View.csv'
 
@@ -34,6 +35,7 @@ function parseCsv(content: string) {
 
 async function importData() {
   const db = getDb()
+  const [ardia] = await db.select({ id: organizations.id }).from(organizations).where(eq(organizations.project, 'ardia')).limit(1)
   const content = readFileSync(CSV_PATH, 'utf-8')
   const records = parseCsv(content)
 
@@ -44,6 +46,7 @@ async function importData() {
     // All entries become deals with stage 'prospecto'
     // Project = ardia (this is Ardia's sales pipeline)
     await db.insert(crmDeals).values({
+      organizationId: ardia?.id,
       title: record.name,
       stage: 'prospecto',
       project: 'ardia',

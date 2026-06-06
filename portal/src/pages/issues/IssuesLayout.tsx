@@ -37,6 +37,14 @@ export default function IssuesLayout() {
   const [issues] = useQuery(z.query.pm_issues)
   const [statuses] = useQuery(z.query.pm_statuses)
   const [savedViews] = useQuery(z.query.pm_saved_views.orderBy('position', 'asc'))
+  const accessibleOrganizationIds = new Set(user?.organizationIds ?? [])
+  const canAccessOrganization = (organizationId: string | null | undefined) =>
+    organizationId ? accessibleOrganizationIds.has(organizationId) : user?.canAccessUnscoped ?? false
+  const scopedIssues = issues.filter((issue) => canAccessOrganization(issue.contextCompanyId))
+  const scopedSavedViews = savedViews.filter((view) => canAccessOrganization(view.companyId))
+  const visibleTeams = teams.filter((team) =>
+    user?.canAccessUnscoped || scopedIssues.some((issue) => issue.teamId === team.id),
+  )
 
   const sidebarStorageKey = user ? `pach:issues:sidebar:${user.id}` : null
   const initialSidebar = readStoredSidebar(sidebarStorageKey)
@@ -49,7 +57,7 @@ export default function IssuesLayout() {
   const [savingTeam, setSavingTeam] = useState(false)
   const [composerRequestId, setComposerRequestId] = useState(0)
   const [mobileTrackerOpen, setMobileTrackerOpen] = useState(false)
-  const personalSavedViews = savedViews
+  const personalSavedViews = scopedSavedViews
     .filter((view) => view.scope === 'personal' && view.ownerId === user?.id && view.slug !== 'all-issues')
     .sort((a, b) => {
       const positionDiff = a.position - b.position
@@ -218,9 +226,9 @@ export default function IssuesLayout() {
   // keep section valid if team disappears
   useEffect(() => {
     if (section.kind !== 'team') return
-    if (teams.some((team) => team.id === section.teamId)) return
+    if (visibleTeams.some((team) => team.id === section.teamId)) return
     setSectionState({ kind: 'all' })
-  }, [section, teams])
+  }, [section, visibleTeams])
 
   // keep section valid if saved view disappears
   useEffect(() => {
@@ -312,7 +320,7 @@ export default function IssuesLayout() {
             <TrackerNavButton
               active={location.pathname === '/issues' && section.kind === 'all'}
               label="all issues"
-              meta={`${issues.length}`}
+              meta={`${scopedIssues.length}`}
               onClick={() => setSection({ kind: 'all' })}
             />
             {personalSavedViews.map((view) => (
@@ -350,17 +358,19 @@ export default function IssuesLayout() {
                   : <ChevronDown className="h-3 w-3" />}
                 teams
               </button>
-              <button
-                onClick={openCreateTeamModal}
-                className="flex h-5 w-5 items-center justify-center text-fg-4 transition hover:text-accent"
-                title="create team"
-              >
-                <Plus className="h-3.5 w-3.5" />
-              </button>
+              {user?.canAccessUnscoped && (
+                <button
+                  onClick={openCreateTeamModal}
+                  className="flex h-5 w-5 items-center justify-center text-fg-4 transition hover:text-accent"
+                  title="create team"
+                >
+                  <Plus className="h-3.5 w-3.5" />
+                </button>
+              )}
             </div>
-            {!teamsSectionCollapsed && (teams.length ? (
-              teams.map((team) => {
-                const teamIssueCount = issues.filter((issue) => issue.teamId === team.id).length
+            {!teamsSectionCollapsed && (visibleTeams.length ? (
+              visibleTeams.map((team) => {
+                const teamIssueCount = scopedIssues.filter((issue) => issue.teamId === team.id).length
                 const isActive =
                   location.pathname === '/issues' &&
                   section.kind === 'team' &&
@@ -393,15 +403,17 @@ export default function IssuesLayout() {
                         <span className="truncate">{team.name.toLowerCase()}</span>
                         <span className="ml-3 text-[10px] text-fg-4">{teamIssueCount}</span>
                       </button>
-                      <button
-                        onClick={() => openEditTeamModal(team)}
-                        className={`flex w-7 shrink-0 items-center justify-center transition ${
-                          isActive ? 'text-accent' : 'text-fg-4 hover:text-accent'
-                        }`}
-                        title="edit team"
-                      >
-                        <Pencil className="h-3 w-3" />
-                      </button>
+                      {user?.canAccessUnscoped && (
+                        <button
+                          onClick={() => openEditTeamModal(team)}
+                          className={`flex w-7 shrink-0 items-center justify-center transition ${
+                            isActive ? 'text-accent' : 'text-fg-4 hover:text-accent'
+                          }`}
+                          title="edit team"
+                        >
+                          <Pencil className="h-3 w-3" />
+                        </button>
+                      )}
                     </div>
                     {isExpanded ? (
                       <div className="mt-1 space-y-1 pl-7">

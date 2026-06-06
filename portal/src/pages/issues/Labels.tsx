@@ -1,8 +1,9 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useQuery, useZero } from '@rocicorp/zero/react'
 import { Check, Plus, Tag } from 'lucide-react'
 import type { Schema } from '../../zero-schema'
 import type { Mutators } from '../../mutators'
+import { useAuth } from '../../lib/auth'
 
 type LabelRow = Schema['tables']['pm_labels']['row']
 
@@ -10,6 +11,8 @@ type LabelScope =
   | { kind: 'global' }
   | { kind: 'company'; companyId: string }
   | { kind: 'team'; teamId: string }
+
+type ScopeFilter = 'all' | 'global' | 'company' | 'team'
 
 const PALETTE = [
   '#00ff88', // phosphor
@@ -32,18 +35,26 @@ type ModalState =
 
 export default function Labels() {
   const z = useZero<Schema, Mutators>()
+  const { user } = useAuth()
   const [labels] = useQuery(z.query.pm_labels.orderBy('name', 'asc'))
-  const [companies] = useQuery(z.query.companies.orderBy('name', 'asc'))
+  const [companies] = useQuery(z.query.organizations.orderBy('name', 'asc'))
   const [teams] = useQuery(z.query.pm_teams.orderBy('position', 'asc'))
   const [issueLabelLinks] = useQuery(z.query.pm_issue_labels)
 
-  const [scopeFilter, setScopeFilter] = useState<'all' | 'global' | 'company' | 'team'>('all')
+  const [scopeFilter, setScopeFilter] = useState<ScopeFilter>('all')
   const [modal, setModal] = useState<ModalState>(null)
   const [draftName, setDraftName] = useState('')
   const [draftDescription, setDraftDescription] = useState('')
   const [draftColor, setDraftColor] = useState<string>(DEFAULT_COLOR)
   const [draftScope, setDraftScope] = useState<LabelScope>({ kind: 'global' })
   const [saving, setSaving] = useState(false)
+  const accessibleOrganizationIds = useMemo(() => new Set(user?.organizationIds ?? []), [user?.organizationIds])
+  const canAccessUnscoped = user?.canAccessUnscoped ?? false
+  const canAccessOrganization = (organizationId: string | null | undefined) =>
+    organizationId ? accessibleOrganizationIds.has(organizationId) : canAccessUnscoped
+  const scopedCompanies = companies.filter((company) => canAccessOrganization(company.id))
+  const scopedLabels = labels.filter((label) => canAccessOrganization(label.companyId))
+  const visibleScopeFilters: ScopeFilter[] = canAccessUnscoped ? ['all', 'global', 'company', 'team'] : ['all', 'company']
 
   const usageCount = new Map<string, number>()
   for (const link of issueLabelLinks) {
@@ -59,14 +70,14 @@ export default function Labels() {
   function scopeLabel(scope: LabelScope) {
     if (scope.kind === 'global') return { tag: 'global', value: '—', accent: 'text-accent' }
     if (scope.kind === 'company') {
-      const c = companies.find((entry) => entry.id === scope.companyId)
-      return { tag: 'company', value: c?.name ?? '—', accent: 'text-amber' }
+      const c = scopedCompanies.find((entry) => entry.id === scope.companyId)
+      return { tag: 'organization', value: c?.name ?? '—', accent: 'text-amber' }
     }
     const t = teams.find((entry) => entry.id === scope.teamId)
     return { tag: 'team', value: t?.name ?? '—', accent: 'text-pach-info' }
   }
 
-  const filtered = labels.filter((label) => {
+  const filtered = scopedLabels.filter((label) => {
     if (scopeFilter === 'all') return true
     return scopeOf(label).kind === scopeFilter
   })
@@ -75,7 +86,7 @@ export default function Labels() {
     setDraftName('')
     setDraftDescription('')
     setDraftColor(DEFAULT_COLOR)
-    setDraftScope({ kind: 'global' })
+    setDraftScope(canAccessUnscoped ? { kind: 'global' } : { kind: 'company', companyId: scopedCompanies[0]?.id ?? '' })
     setModal({ mode: 'create' })
   }
 
@@ -96,6 +107,9 @@ export default function Labels() {
     if (!modal) return
     const name = draftName.trim()
     if (!name) return
+    if (draftScope.kind === 'global' && !canAccessUnscoped) return
+    if (draftScope.kind === 'team' && !canAccessUnscoped) return
+    if (draftScope.kind === 'company' && !canAccessOrganization(draftScope.companyId)) return
 
     setSaving(true)
     try {
@@ -160,7 +174,7 @@ export default function Labels() {
             <div className="text-[10px] uppercase tracking-label text-fg-3 mb-1">◊ labels</div>
             <h1 className="font-mono text-xl lowercase text-fg-1">labels</h1>
             <p className="text-xs text-fg-3 mt-0.5">
-              <span className="text-fg-4">›</span> define labels global, by company or by team
+              <span className="text-fg-4">›</span> define labels global, by organization or by team
             </p>
           </div>
           <button
@@ -173,7 +187,7 @@ export default function Labels() {
         </div>
 
         <div className="mt-4 flex flex-wrap items-center gap-2">
-          {(['all', 'global', 'company', 'team'] as const).map((scope) => (
+          {visibleScopeFilters.map((scope) => (
             <button
               key={scope}
               onClick={() => setScopeFilter(scope)}
@@ -183,9 +197,9 @@ export default function Labels() {
                   : 'border-[rgba(0,255,140,0.15)] bg-pit-3 text-fg-3 hover:text-fg-1 hover:border-[rgba(0,255,140,0.25)]'
               }`}
             >
-              {scope}
+              {scope === 'company' ? 'organization' : scope}
               <span className="text-fg-4">
-                · {scope === 'all' ? labels.length : labels.filter((l) => scopeOf(l).kind === scope).length}
+                · {scope === 'all' ? scopedLabels.length : scopedLabels.filter((l) => scopeOf(l).kind === scope).length}
               </span>
             </button>
           ))}
@@ -197,11 +211,11 @@ export default function Labels() {
           <div className="flex h-full items-center justify-center px-6 text-center">
             <div className="max-w-md">
               <div className="font-mono text-base lowercase text-fg-2">
-                {labels.length === 0 ? 'no labels yet' : 'no labels match this filter'}
+                {scopedLabels.length === 0 ? 'no labels yet' : 'no labels match this filter'}
               </div>
               <div className="mt-2 text-sm text-fg-3">
-                {labels.length === 0
-                  ? 'create one to start tagging issues across teams or companies.'
+                {scopedLabels.length === 0
+                  ? 'create one to start tagging issues across teams or organizations.'
                   : 'try another scope or create a new label.'}
               </div>
               <button
@@ -267,8 +281,9 @@ export default function Labels() {
           onColorChange={setDraftColor}
           scope={draftScope}
           onScopeChange={setDraftScope}
-          companies={companies}
+          companies={scopedCompanies}
           teams={teams}
+          allowGlobal={canAccessUnscoped}
           saving={saving}
           onClose={closeModal}
           onSubmit={submit}
@@ -298,6 +313,7 @@ function LabelModal({
   onScopeChange,
   companies,
   teams,
+  allowGlobal,
   saving,
   onClose,
   onSubmit,
@@ -312,8 +328,9 @@ function LabelModal({
   onColorChange: (v: string) => void
   scope: LabelScope
   onScopeChange: (v: LabelScope) => void
-  companies: Schema['tables']['companies']['row'][]
+  companies: Schema['tables']['organizations']['row'][]
   teams: Schema['tables']['pm_teams']['row'][]
+  allowGlobal: boolean
   saving: boolean
   onClose: () => void
   onSubmit: () => void
@@ -392,12 +409,14 @@ function LabelModal({
           <div className="block">
             <div className="mb-2 font-mono text-[10px] uppercase tracking-label text-fg-3">scope</div>
             <div className="space-y-2">
-              <ScopeRadio
-                checked={scope.kind === 'global'}
-                onClick={() => onScopeChange({ kind: 'global' })}
-                label="global"
-                description="available to every team and company"
-              />
+              {allowGlobal && (
+                <ScopeRadio
+                  checked={scope.kind === 'global'}
+                  onClick={() => onScopeChange({ kind: 'global' })}
+                  label="global"
+                  description="available to every team and organization"
+                />
+              )}
               <ScopeRadio
                 checked={scope.kind === 'company'}
                 onClick={() =>
@@ -406,8 +425,8 @@ function LabelModal({
                     companyId: scope.kind === 'company' ? scope.companyId : companies[0]?.id ?? '',
                   })
                 }
-                label="by company"
-                description="only usable on issues with this company context"
+                label="by organization"
+                description="only usable on issues with this organization context"
               />
               {scope.kind === 'company' && (
                 <select
@@ -415,7 +434,7 @@ function LabelModal({
                   onChange={(event) => onScopeChange({ kind: 'company', companyId: event.target.value })}
                   className="ml-6 w-[calc(100%-1.5rem)] bg-rim border border-[rgba(0,255,140,0.15)] px-3 py-1.5 text-sm text-fg-1 outline-none focus:border-accent focus:shadow-glow-xs"
                 >
-                  {companies.length === 0 && <option value="">no companies</option>}
+                  {companies.length === 0 && <option value="">no organizations</option>}
                   {companies.map((c) => (
                     <option key={c.id} value={c.id}>
                       {c.name}
@@ -423,30 +442,34 @@ function LabelModal({
                   ))}
                 </select>
               )}
-              <ScopeRadio
-                checked={scope.kind === 'team'}
-                onClick={() =>
-                  onScopeChange({
-                    kind: 'team',
-                    teamId: scope.kind === 'team' ? scope.teamId : teams[0]?.id ?? '',
-                  })
-                }
-                label="by team"
-                description="only usable on issues in this team"
-              />
-              {scope.kind === 'team' && (
-                <select
-                  value={scope.teamId}
-                  onChange={(event) => onScopeChange({ kind: 'team', teamId: event.target.value })}
-                  className="ml-6 w-[calc(100%-1.5rem)] bg-rim border border-[rgba(0,255,140,0.15)] px-3 py-1.5 text-sm text-fg-1 outline-none focus:border-accent focus:shadow-glow-xs"
-                >
-                  {teams.length === 0 && <option value="">no teams</option>}
-                  {teams.map((t) => (
-                    <option key={t.id} value={t.id}>
-                      {t.name}
-                    </option>
-                  ))}
-                </select>
+              {allowGlobal && (
+                <>
+                  <ScopeRadio
+                    checked={scope.kind === 'team'}
+                    onClick={() =>
+                      onScopeChange({
+                        kind: 'team',
+                        teamId: scope.kind === 'team' ? scope.teamId : teams[0]?.id ?? '',
+                      })
+                    }
+                    label="by team"
+                    description="only usable on issues in this team"
+                  />
+                  {scope.kind === 'team' && (
+                    <select
+                      value={scope.teamId}
+                      onChange={(event) => onScopeChange({ kind: 'team', teamId: event.target.value })}
+                      className="ml-6 w-[calc(100%-1.5rem)] bg-rim border border-[rgba(0,255,140,0.15)] px-3 py-1.5 text-sm text-fg-1 outline-none focus:border-accent focus:shadow-glow-xs"
+                    >
+                      {teams.length === 0 && <option value="">no teams</option>}
+                      {teams.map((t) => (
+                        <option key={t.id} value={t.id}>
+                          {t.name}
+                        </option>
+                      ))}
+                    </select>
+                  )}
+                </>
               )}
             </div>
           </div>
@@ -471,7 +494,7 @@ function LabelModal({
           </div>
           <button
             onClick={onSubmit}
-            disabled={!name.trim() || saving}
+            disabled={!name.trim() || (!allowGlobal && (scope.kind === 'global' || scope.kind === 'team')) || (scope.kind === 'company' && !scope.companyId) || saving}
             className="inline-flex items-center gap-2 border border-[rgba(0,255,140,0.3)] bg-[rgba(0,255,136,0.08)] px-4 py-2 font-mono text-xs uppercase tracking-label text-accent transition hover:bg-[rgba(0,255,136,0.16)] hover:shadow-glow-xs disabled:opacity-40 disabled:hover:bg-[rgba(0,255,136,0.08)] disabled:hover:shadow-none"
           >
             <Tag className="h-3.5 w-3.5" />

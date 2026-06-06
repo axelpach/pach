@@ -2,7 +2,7 @@ import { Router } from 'express'
 import { PushProcessor, zeroPostgresJS } from '@rocicorp/zero/pg'
 import { schema } from '../../schema.js'
 import { getConnection } from '../db.js'
-import { createServerMutators } from './mutators.js'
+import { createServerMutators, isAuthorizationError } from './mutators.js'
 
 const router = Router()
 
@@ -11,7 +11,7 @@ router.post('/push', async (req, res) => {
     const connection = getConnection()
     const zql = zeroPostgresJS(schema, connection)
     const pushProcessor = new PushProcessor(zql)
-    const mutators = createServerMutators()
+    const mutators = createServerMutators(req.user)
 
     const result = await pushProcessor.process(
       mutators,
@@ -22,6 +22,10 @@ router.post('/push', async (req, res) => {
     res.json(result)
   } catch (error) {
     console.error('Zero push error:', error)
+    if (isAuthorizationError(error)) {
+      res.status(403).json({ error: error.message })
+      return
+    }
     res.status(500).json({ error: 'Internal server error' })
   }
 })

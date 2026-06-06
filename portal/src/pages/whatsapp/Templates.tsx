@@ -3,7 +3,7 @@ import { FileText, Image, RefreshCw, Send, Type, Video, X } from 'lucide-react'
 import { useMemo, useState } from 'react'
 import { Button, StatusPill } from '../../components/pach'
 import { config } from '../../config'
-import { authFetch } from '../../lib/auth'
+import { authFetch, useAuth } from '../../lib/auth'
 import type { Mutators } from '../../mutators'
 import type { Schema } from '../../zero-schema'
 
@@ -88,7 +88,7 @@ function formatWhatsAppPhone(raw: string | null): string {
 
 interface RemoteTemplate {
   id: string
-  companyId: string
+  organizationId: string
   name: string
   language: string
   status: string
@@ -242,8 +242,9 @@ function buildSendPlan(template: RemoteTemplate, contact: ContactOption): { comp
 
 export default function WhatsAppTemplates() {
   const z = useZero<Schema, Mutators>()
+  const { user } = useAuth()
   const [templates] = useQuery(z.query.whatsapp_templates.orderBy('name', 'asc'))
-  const [companies] = useQuery(z.query.companies.orderBy('name', 'asc'))
+  const [companies] = useQuery(z.query.organizations.orderBy('name', 'asc'))
   const [contacts] = useQuery(z.query.crm_contacts.orderBy('name', 'asc'))
   const [syncing, setSyncing] = useState(false)
   const [statusMessage, setStatusMessage] = useState<string | null>(null)
@@ -254,8 +255,17 @@ export default function WhatsAppTemplates() {
     () => new Map(companies.map(c => [c.id, (c.project ?? null) as ProjectId | null])),
     [companies],
   )
+  const accessibleOrganizationIds = useMemo(() => new Set(user?.organizationIds ?? []), [user?.organizationIds])
+  const availableProjects = useMemo(
+    () => PROJECTS.filter(projectId =>
+      companies.some(company => company.project === projectId && accessibleOrganizationIds.has(company.id)),
+    ),
+    [accessibleOrganizationIds, companies],
+  )
 
-  const remoteTemplates = templates as RemoteTemplate[]
+  const remoteTemplates = (templates as RemoteTemplate[]).filter(template =>
+    accessibleOrganizationIds.has(template.organizationId),
+  )
   const selected = remoteTemplates.find(t => t.id === selectedId) || null
 
   async function handleSync() {
@@ -266,7 +276,7 @@ export default function WhatsAppTemplates() {
     let totalUpdated = 0
     let totalUnchanged = 0
     let totalFailed = 0
-    for (const projectId of PROJECTS) {
+    for (const projectId of availableProjects) {
       try {
         const res = await authFetch(`${config.apiUrl}/whatsapp/templates/sync`, {
           method: 'POST',
@@ -293,8 +303,8 @@ export default function WhatsAppTemplates() {
   }
 
   const projectStats = useMemo(() => {
-    return PROJECTS.map(projectId => {
-      const items = remoteTemplates.filter(t => projectByCompanyId.get(t.companyId) === projectId)
+    return availableProjects.map(projectId => {
+      const items = remoteTemplates.filter(t => projectByCompanyId.get(t.organizationId) === projectId)
       return {
         projectId,
         total: items.length,
@@ -303,7 +313,7 @@ export default function WhatsAppTemplates() {
         rejected: items.filter(t => String(t.status).toUpperCase() === 'REJECTED').length,
       }
     })
-  }, [projectByCompanyId, remoteTemplates])
+  }, [availableProjects, projectByCompanyId, remoteTemplates])
 
   return (
     <div className="flex-1 flex flex-col overflow-hidden">
@@ -356,7 +366,7 @@ export default function WhatsAppTemplates() {
                 const HeaderIcon = template.headerFormat ? HEADER_ICON[template.headerFormat] || null : null
                 const reviewInfo = STATUS_STYLES[String(template.status).toUpperCase()] || STATUS_STYLES.PENDING
                 const isActive = template.id === selectedId
-                const projectId = projectByCompanyId.get(template.companyId) as ProjectId | null
+                const projectId = projectByCompanyId.get(template.organizationId) as ProjectId | null
                 const canSendFromPach = projectId === 'ardia-mkt' && String(template.status).toUpperCase() === 'APPROVED'
                 return (
                   <div
@@ -420,11 +430,11 @@ export default function WhatsAppTemplates() {
         </section>
       </div>
 
-      {selected && <TemplateDetail template={selected} projectId={projectByCompanyId.get(selected.companyId) as ProjectId | null} onClose={() => setSelectedId(null)} />}
+      {selected && <TemplateDetail template={selected} projectId={projectByCompanyId.get(selected.organizationId) as ProjectId | null} onClose={() => setSelectedId(null)} />}
       {sendTemplate && (
         <SendTemplateModal
           template={sendTemplate}
-          projectId={projectByCompanyId.get(sendTemplate.companyId) as ProjectId | null}
+          projectId={projectByCompanyId.get(sendTemplate.organizationId) as ProjectId | null}
           contacts={contacts}
           onClose={() => setSendTemplate(null)}
         />
