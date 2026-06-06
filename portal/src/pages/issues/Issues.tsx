@@ -87,6 +87,7 @@ export type RowField =
   | 'project'
   | 'team'
   | 'labels'
+  | 'assignee'
   | 'estimate'
   | 'updated'
 
@@ -98,6 +99,7 @@ const ROW_FIELDS: Array<{ value: RowField; label: string }> = [
   { value: 'project', label: 'project' },
   { value: 'team', label: 'team' },
   { value: 'labels', label: 'labels' },
+  { value: 'assignee', label: 'assignee' },
   { value: 'estimate', label: 'estimate' },
   { value: 'updated', label: 'updated' },
 ]
@@ -111,6 +113,7 @@ const DEFAULT_VISIBLE_FIELDS: RowField[] = [
   'project',
   'team',
   'labels',
+  'assignee',
   'estimate',
   'updated',
 ]
@@ -969,6 +972,20 @@ export default function Issues() {
     )
   }
 
+  async function changeIssueAssignee(issueId: string, nextAssigneeId: string) {
+    const issue = scopedIssues.find((entry) => entry.id === issueId)
+    if (!issue) return
+    const target = nextAssigneeId || undefined
+    if (target === issue.assigneeId) return
+    const assignee = nextAssigneeId ? assignableUsers.find((u) => u.id === nextAssigneeId) : null
+    await z.mutate.pm_issues.update({ id: issueId, assigneeId: target })
+    await logActivity(
+      issueId,
+      target ? `assigned to ${assignee?.name ?? assignee?.email ?? '—'}` : 'cleared assignee',
+      'updated',
+    )
+  }
+
   async function changeIssueProject(issueId: string, nextProjectId: string) {
     const issue = scopedIssues.find((entry) => entry.id === issueId)
     if (!issue) return
@@ -1275,6 +1292,7 @@ export default function Issues() {
                                         team={teamMap.get(issue.teamId) ?? null}
                                         project={issue.projectId ? projectMap.get(issue.projectId) : null}
                                         assignee={issue.assigneeId ? userMap.get(issue.assigneeId) : null}
+                                        users={assignableUsers}
                                         status={statusMap.get(issue.statusId) ?? null}
                                         statusOptions={workspaceStatuses}
                                         teamProjects={projects.filter((p) => p.teamId === issue.teamId)}
@@ -1298,6 +1316,7 @@ export default function Issues() {
                                         onProjectChange={changeIssueProject}
                                         onTeamChange={changeIssueTeam}
                                         onEstimateChange={changeIssueEstimate}
+                                        onAssigneeChange={changeIssueAssignee}
                                         onPriorityChange={changeIssuePriority}
                                         onToggleLabel={toggleIssueLabel}
                                       />
@@ -1324,6 +1343,7 @@ export default function Issues() {
                         team={teamMap.get(activeDragIssue.teamId) ?? null}
                         project={activeDragIssue.projectId ? projectMap.get(activeDragIssue.projectId) : null}
                         assignee={activeDragIssue.assigneeId ? userMap.get(activeDragIssue.assigneeId) : null}
+                        users={assignableUsers}
                         status={statusMap.get(activeDragIssue.statusId) ?? null}
                         statusOptions={workspaceStatuses}
                         teamProjects={projects.filter((p) => p.teamId === activeDragIssue.teamId)}
@@ -1339,6 +1359,7 @@ export default function Issues() {
                         onProjectChange={() => {}}
                         onTeamChange={() => {}}
                         onEstimateChange={() => {}}
+                        onAssigneeChange={() => {}}
                         onPriorityChange={() => {}}
                         onToggleLabel={() => {}}
                       />
@@ -2116,6 +2137,7 @@ function IssueRow({
   team,
   project,
   assignee,
+  users,
   status,
   statusOptions,
   teamProjects,
@@ -2129,6 +2151,7 @@ function IssueRow({
   onProjectChange,
   onTeamChange,
   onEstimateChange,
+  onAssigneeChange,
   onPriorityChange,
   onToggleLabel,
   onHoverChange,
@@ -2140,6 +2163,7 @@ function IssueRow({
   team: Schema['tables']['pm_teams']['row'] | null
   project: Schema['tables']['pm_projects']['row'] | null | undefined
   assignee: Schema['tables']['users']['row'] | null | undefined
+  users: Schema['tables']['users']['row'][]
   status: Schema['tables']['pm_statuses']['row'] | null
   statusOptions: Schema['tables']['pm_statuses']['row'][]
   teamProjects: Schema['tables']['pm_projects']['row'][]
@@ -2155,6 +2179,7 @@ function IssueRow({
   onProjectChange: (issueId: string, nextProjectId: string) => void | Promise<void>
   onTeamChange: (issueId: string, nextTeamId: string) => void | Promise<void>
   onEstimateChange: (issueId: string, nextEstimate: string) => void | Promise<void>
+  onAssigneeChange: (issueId: string, nextAssigneeId: string) => void | Promise<void>
   onPriorityChange: (issueId: string, nextPriority: string) => void | Promise<void>
   onToggleLabel: (issueId: string, labelId: string) => void | Promise<void>
   onHoverChange?: (hovered: boolean) => void
@@ -2259,7 +2284,7 @@ function IssueRow({
           {company.name}
         </span>
       )}
-      {shows('project') && (
+      {shows('project') && issue.projectId && (
         <div className="hidden md:block shrink-0" onClick={(event) => event.stopPropagation()}>
           <PachSelect
             variant="button"
@@ -2330,6 +2355,28 @@ function IssueRow({
             triggerClassName="inline-flex items-center gap-1 p-0 border-0 bg-transparent transition hover:opacity-80"
             popupWidth="240px"
             openSignal={labelsOpenSignal}
+          />
+        </div>
+      )}
+      {shows('assignee') && assignee && (
+        <div className="hidden sm:block shrink-0" onClick={(event) => event.stopPropagation()}>
+          <PachSelect
+            variant="button"
+            value={issue.assigneeId ?? ''}
+            onChange={(next) => onAssigneeChange(issue.id, next)}
+            options={[
+              { value: '', label: 'unassigned' },
+              ...users.map((u) => ({ value: u.id, label: (u.name ?? u.email).toLowerCase() })),
+            ]}
+            trigger={
+              <span className="inline-flex h-5 min-w-6 items-center justify-center border border-[rgba(0,255,140,0.18)] bg-[rgba(0,255,136,0.05)] px-1.5 font-mono text-[10px] uppercase tracking-label text-fg-2">
+                {getUserInitials(assignee)}
+              </span>
+            }
+            triggerTitle={`assignee · ${assignee.name ?? assignee.email}`}
+            triggerClassName="inline-flex p-0 border-0 bg-transparent transition hover:opacity-80"
+            popupWidth="220px"
+            align="right"
           />
         </div>
       )}
@@ -2847,6 +2894,17 @@ function issueSectionStatusRank(statusType: string) {
 
 function formatShortDate(value: number) {
   return new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric' }).format(new Date(value))
+}
+
+function getUserInitials(user: Schema['tables']['users']['row']) {
+  const source = (user.name?.trim() || user.email.split('@')[0] || '').trim()
+  if (!source) return '??'
+  const parts = source
+    .replace(/[._-]+/g, ' ')
+    .split(/\s+/)
+    .filter(Boolean)
+  if (parts.length >= 2) return `${parts[0][0]}${parts[1][0]}`.toUpperCase()
+  return source.slice(0, 2).toUpperCase()
 }
 
 function sumEstimates(items: Schema['tables']['pm_issues']['row'][]) {
