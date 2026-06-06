@@ -2328,7 +2328,7 @@ function IssueRow({
           />
         </div>
       )}
-      {shows('labels') && (
+      {shows('labels') && issueLabels.length > 0 && (
         <div className="hidden md:block shrink-0" onClick={(event) => event.stopPropagation()}>
           <LabelMenu
             available={availableLabels}
@@ -2336,19 +2336,11 @@ function IssueRow({
             onToggle={(labelId) => onToggleLabel(issue.id, labelId)}
             trigger={
               <span className="inline-flex items-center gap-1">
-                {issueLabels.length > 0 ? (
-                  <>
-                    {issueLabels.slice(0, 3).map((label) => (
-                      <LabelChip key={label.id} label={label} />
-                    ))}
-                    {issueLabels.length > 3 && (
-                      <span className="font-mono text-[10px] text-fg-4">+{issueLabels.length - 3}</span>
-                    )}
-                  </>
-                ) : (
-                  <span className="inline-flex h-5 items-center border border-[rgba(0,255,140,0.15)] bg-pit-3 px-2 font-mono text-[10px] tracking-label lowercase text-fg-4">
-                    labels
-                  </span>
+                {issueLabels.slice(0, 3).map((label) => (
+                  <LabelChip key={label.id} label={label} />
+                ))}
+                {issueLabels.length > 3 && (
+                  <span className="font-mono text-[10px] text-fg-4">+{issueLabels.length - 3}</span>
                 )}
               </span>
             }
@@ -2369,7 +2361,7 @@ function IssueRow({
               ...users.map((u) => ({ value: u.id, label: (u.name ?? u.email).toLowerCase() })),
             ]}
             trigger={
-              <span className="inline-flex h-5 min-w-6 items-center justify-center border border-[rgba(0,255,140,0.18)] bg-[rgba(0,255,136,0.05)] px-1.5 font-mono text-[10px] uppercase tracking-label text-fg-2">
+              <span className="inline-flex h-5 min-w-6 items-center justify-center border border-[rgba(0,255,140,0.15)] bg-pit-3 px-1.5 font-mono text-[10px] uppercase tracking-label text-fg-3">
                 {getUserInitials(assignee)}
               </span>
             }
