@@ -594,6 +594,9 @@ const allowOrganization: Rule<'organizations'> = (authData, { cmp }) =>
 const allowOrganizationMembership: Rule<'organization_memberships'> = (authData, { cmp }) =>
   cmp('organizationId', 'IN', authData.organizationIds)
 
+const allowOwnSavedView: Rule<'pm_saved_views'> = (authData, { cmp }) =>
+  cmp('ownerId', authData.sub)
+
 const allowScopedField = <TTable extends TableName>(field: string): Rule<TTable> =>
   (authData, { and, cmp, cmpLit, or }) =>
     or(
@@ -636,7 +639,7 @@ export const permissions = definePermissions<AuthData, Schema>(schema, () => {
     pm_issues: organizationScoped<'pm_issues'>('contextCompanyId'),
     pm_issue_labels: unscopedOnly,
     pm_issue_activity: unscopedOnly,
-    pm_saved_views: organizationScoped<'pm_saved_views'>('companyId'),
+    pm_saved_views: readOnly<'pm_saved_views'>([allowScopedField<'pm_saved_views'>('companyId'), allowOwnSavedView]),
     pm_task_triggers: organizationScoped<'pm_task_triggers'>('companyId'),
     pm_task_trigger_runs: unscopedOnly,
     agent_workers: unscopedOnly,

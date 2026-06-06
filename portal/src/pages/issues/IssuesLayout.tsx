@@ -41,7 +41,9 @@ export default function IssuesLayout() {
   const canAccessOrganization = (organizationId: string | null | undefined) =>
     organizationId ? accessibleOrganizationIds.has(organizationId) : user?.canAccessUnscoped ?? false
   const scopedIssues = issues.filter((issue) => canAccessOrganization(issue.contextCompanyId))
-  const scopedSavedViews = savedViews.filter((view) => canAccessOrganization(view.companyId))
+  const canAccessSavedView = (view: Schema['tables']['pm_saved_views']['row']) =>
+    view.ownerId === user?.id || canAccessOrganization(view.companyId)
+  const scopedSavedViews = savedViews.filter(canAccessSavedView)
   const visibleTeams = teams.filter((team) =>
     user?.canAccessUnscoped || scopedIssues.some((issue) => issue.teamId === team.id),
   )

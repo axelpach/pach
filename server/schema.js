@@ -532,6 +532,7 @@ const allowAuthenticated = (_authData, { cmpLit }) => cmpLit(true, '=', true);
 const allowOwnUser = (authData, { cmp }) => cmp('id', authData.sub);
 const allowOrganization = (authData, { cmp }) => cmp('id', 'IN', authData.organizationIds);
 const allowOrganizationMembership = (authData, { cmp }) => cmp('organizationId', 'IN', authData.organizationIds);
+const allowOwnSavedView = (authData, { cmp }) => cmp('ownerId', authData.sub);
 const allowScopedField = (field) => (authData, { and, cmp, cmpLit, or }) => or(cmp(field, 'IN', authData.organizationIds), and(cmp(field, 'IS', null), cmpLit(authData.canAccessUnscoped, '=', true)));
 const readOnly = (select) => ({
     row: {
@@ -564,7 +565,7 @@ export const permissions = definePermissions(schema, () => {
         pm_issues: organizationScoped('contextCompanyId'),
         pm_issue_labels: unscopedOnly,
         pm_issue_activity: unscopedOnly,
-        pm_saved_views: organizationScoped('companyId'),
+        pm_saved_views: readOnly([allowScopedField('companyId'), allowOwnSavedView]),
         pm_task_triggers: organizationScoped('companyId'),
         pm_task_trigger_runs: unscopedOnly,
         agent_workers: unscopedOnly,

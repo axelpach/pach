@@ -84,6 +84,37 @@ export function createServerMutators(authData?: JWTPayload) {
     requireOrganizationAccess(await readOrganizationId(tx, tableName, id))
   }
 
+  async function readSavedViewAccess(tx: Tx, id: string): Promise<{ companyId: string | null | undefined; ownerId: string | null | undefined }> {
+    const rows = await tx.dbTransaction.query(
+      'select "company_id" as company_id, "owner_id" as owner_id from "pm_saved_views" where "id" = $1 limit 1',
+      [id],
+    )
+    const row = Array.from(rows)[0]
+    return {
+      companyId: row?.company_id as string | null | undefined,
+      ownerId: row?.owner_id as string | null | undefined,
+    }
+  }
+
+  function canAccessSavedView(companyId: string | null | undefined, ownerId: string | null | undefined) {
+    return ownerId === authData?.sub || canAccessOrganization(companyId)
+  }
+
+  function requireSavedViewAccess(companyId: string | null | undefined, ownerId: string | null | undefined) {
+    if (!canAccessSavedView(companyId, ownerId)) throw new AuthorizationError()
+  }
+
+  function requireSavedViewMutationAccess(args: { companyId?: string | null; ownerId?: string | null }) {
+    if (args.ownerId && args.ownerId !== authData?.sub) requireUnscopedAccess()
+    if (args.companyId) requireOrganizationAccess(args.companyId)
+    requireSavedViewAccess(args.companyId, args.ownerId)
+  }
+
+  async function requireExistingSavedViewMutationAccess(tx: Tx, id: string) {
+    const current = await readSavedViewAccess(tx, id)
+    requireSavedViewAccess(current.companyId, current.ownerId)
+  }
+
   return {
     organizations: {
       async create(tx: Tx, args: { id: string; name: string; legalName?: string; taxId?: string; taxRegime?: string; project?: string; description?: string }) {
@@ -352,7 +383,7 @@ export function createServerMutators(authData?: JWTPayload) {
 
     pm_saved_views: {
       async create(tx: Tx, args: { id: string; companyId?: string; teamId?: string; ownerId?: string; name: string; slug: string; icon?: string; color?: string; scope?: string; filters?: Record<string, unknown>; display?: Record<string, unknown>; position?: number }) {
-        requireOrganizationAccess(args.companyId)
+        requireSavedViewMutationAccess(args)
         const now = Date.now()
         await tx.mutate.pm_saved_views.insert({
           scope: 'personal',
@@ -365,13 +396,14 @@ export function createServerMutators(authData?: JWTPayload) {
         })
       },
       async update(tx: Tx, args: { id: string; companyId?: string | null; teamId?: string | null; ownerId?: string | null; name?: string; slug?: string; icon?: string; color?: string; scope?: string; filters?: Record<string, unknown>; display?: Record<string, unknown>; position?: number }) {
-        await requireExistingOrganizationAccess(tx, 'pm_saved_views', args.id)
-        if ('companyId' in args) requireOrganizationAccess(args.companyId)
+        await requireExistingSavedViewMutationAccess(tx, args.id)
+        if ('ownerId' in args && args.ownerId && args.ownerId !== authData?.sub) requireUnscopedAccess()
+        if ('companyId' in args && args.companyId) requireOrganizationAccess(args.companyId)
         const { id, ...updates } = args
         await tx.mutate.pm_saved_views.update({ id, ...updates, updatedAt: Date.now() })
       },
       async delete(tx: Tx, args: { id: string }) {
-        await requireExistingOrganizationAccess(tx, 'pm_saved_views', args.id)
+        await requireExistingSavedViewMutationAccess(tx, args.id)
         await tx.mutate.pm_saved_views.delete({ id: args.id })
       },
     },
