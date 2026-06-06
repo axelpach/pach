@@ -1239,7 +1239,7 @@ export default function Issues() {
                           <div>
                             {getStatusBuckets(group.issues, statusMap).map((status) => {
                               const statusIssues = group.issues
-                                .filter((issue) => getStatusBucket(statusMap.get(issue.statusId))?.key === status.key)
+                                .filter((issue) => getIssueStatusBucket(issue, statusMap).key === status.key)
                                 .sort(makeIssueComparator(sortConfig, statusMap))
                               if (!statusIssues.length) return null
 
@@ -2561,10 +2561,7 @@ function getStatusBuckets(
 ) {
   const uniqueStatuses = new Map<string, { key: string; name: string; type: string; position: number }>()
   for (const issue of issues) {
-    const status = statusMap.get(issue.statusId)
-    if (!status) continue
-    const bucket = getStatusBucket(status)
-    if (!bucket) continue
+    const bucket = getIssueStatusBucket(issue, statusMap)
     if (!uniqueStatuses.has(bucket.key)) uniqueStatuses.set(bucket.key, bucket)
   }
 
@@ -2573,6 +2570,19 @@ function getStatusBuckets(
     if (rankDiff !== 0) return rankDiff
     return a.position - b.position
   })
+}
+
+function getIssueStatusBucket(
+  issue: Schema['tables']['pm_issues']['row'],
+  statusMap: Map<string, Schema['tables']['pm_statuses']['row']>,
+) {
+  const status = statusMap.get(issue.statusId)
+  return getStatusBucket(status) ?? {
+    key: `missing:${issue.statusId}`,
+    name: 'unknown status',
+    type: 'todo',
+    position: 999,
+  }
 }
 
 function getWorkspaceStatuses(statuses: Schema['tables']['pm_statuses']['row'][]) {

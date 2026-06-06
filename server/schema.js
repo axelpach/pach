@@ -528,6 +528,7 @@ export const schema = createSchema({
     ],
 });
 const allowIfUnscopedAccess = (authData, { cmpLit }) => cmpLit(authData.canAccessUnscoped, '=', true);
+const allowAuthenticated = (_authData, { cmpLit }) => cmpLit(true, '=', true);
 const allowOwnUser = (authData, { cmp }) => cmp('id', authData.sub);
 const allowOrganization = (authData, { cmp }) => cmp('id', 'IN', authData.organizationIds);
 const allowOrganizationMembership = (authData, { cmp }) => cmp('organizationId', 'IN', authData.organizationIds);
@@ -542,6 +543,7 @@ const readOnly = (select) => ({
 });
 const organizationScoped = (field = 'organizationId') => readOnly([allowScopedField(field)]);
 const unscopedOnly = readOnly([allowIfUnscopedAccess]);
+const authenticatedReadOnly = readOnly([allowAuthenticated]);
 export const permissions = definePermissions(schema, () => {
     return {
         decks: organizationScoped(),
@@ -555,9 +557,9 @@ export const permissions = definePermissions(schema, () => {
         crm_notes: organizationScoped(),
         crm_boards: organizationScoped(),
         crm_board_columns: organizationScoped(),
-        pm_teams: organizationScoped('companyId'),
+        pm_teams: authenticatedReadOnly,
         pm_projects: organizationScoped('companyId'),
-        pm_statuses: organizationScoped('companyId'),
+        pm_statuses: authenticatedReadOnly,
         pm_labels: organizationScoped('companyId'),
         pm_issues: organizationScoped('contextCompanyId'),
         pm_issue_labels: unscopedOnly,

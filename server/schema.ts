@@ -583,6 +583,9 @@ type Rule<TTable extends TableName> = (authData: AuthData, eb: ExpressionBuilder
 const allowIfUnscopedAccess: Rule<TableName> = (authData, { cmpLit }) =>
   cmpLit(authData.canAccessUnscoped, '=', true)
 
+const allowAuthenticated: Rule<TableName> = (_authData, { cmpLit }) =>
+  cmpLit(true, '=', true)
+
 const allowOwnUser: Rule<'users'> = (authData, { cmp }) => cmp('id', authData.sub)
 
 const allowOrganization: Rule<'organizations'> = (authData, { cmp }) =>
@@ -611,6 +614,7 @@ const organizationScoped = <TTable extends TableName>(field = 'organizationId') 
   readOnly<TTable>([allowScopedField<TTable>(field)])
 
 const unscopedOnly = readOnly<TableName>([allowIfUnscopedAccess])
+const authenticatedReadOnly = readOnly<TableName>([allowAuthenticated])
 
 export const permissions = definePermissions<AuthData, Schema>(schema, () => {
   return {
@@ -625,9 +629,9 @@ export const permissions = definePermissions<AuthData, Schema>(schema, () => {
     crm_notes: organizationScoped<'crm_notes'>(),
     crm_boards: organizationScoped<'crm_boards'>(),
     crm_board_columns: organizationScoped<'crm_board_columns'>(),
-    pm_teams: organizationScoped<'pm_teams'>('companyId'),
+    pm_teams: authenticatedReadOnly,
     pm_projects: organizationScoped<'pm_projects'>('companyId'),
-    pm_statuses: organizationScoped<'pm_statuses'>('companyId'),
+    pm_statuses: authenticatedReadOnly,
     pm_labels: organizationScoped<'pm_labels'>('companyId'),
     pm_issues: organizationScoped<'pm_issues'>('contextCompanyId'),
     pm_issue_labels: unscopedOnly,
