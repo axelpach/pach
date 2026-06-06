@@ -547,7 +547,7 @@ const authenticatedReadOnly = readOnly([allowAuthenticated]);
 export const permissions = definePermissions(schema, () => {
     return {
         decks: organizationScoped(),
-        users: readOnly([allowOwnUser]),
+        users: authenticatedReadOnly,
         organizations: readOnly([allowOrganization]),
         organization_memberships: readOnly([allowOrganizationMembership]),
         crm_companies: organizationScoped(),

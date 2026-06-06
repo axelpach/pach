@@ -619,7 +619,7 @@ const authenticatedReadOnly = readOnly<TableName>([allowAuthenticated])
 export const permissions = definePermissions<AuthData, Schema>(schema, () => {
   return {
     decks: organizationScoped<'decks'>(),
-    users: readOnly<'users'>([allowOwnUser]),
+    users: authenticatedReadOnly,
     organizations: readOnly<'organizations'>([allowOrganization]),
     organization_memberships: readOnly<'organization_memberships'>([allowOrganizationMembership]),
     crm_companies: organizationScoped<'crm_companies'>(),
