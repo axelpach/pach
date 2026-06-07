@@ -4,6 +4,7 @@ import { useQuery, useZero } from '@rocicorp/zero/react'
 import { Search } from 'lucide-react'
 import type { Schema } from '../zero-schema'
 import type { Mutators } from '../mutators'
+import { useAuth } from '../lib/auth'
 import { StatusIcon } from '../pages/issues/StatusIcon'
 import { PriorityIcon, PRIORITY_META } from '../pages/issues/PriorityIcon'
 
@@ -11,18 +12,26 @@ const MAX_RESULTS = 30
 
 type IssueRow = Schema['tables']['pm_issues']['row']
 type StatusRow = Schema['tables']['pm_statuses']['row']
+type SavedViewRow = Schema['tables']['pm_saved_views']['row']
+type PaletteTab = { label: string; path: string }
+type PaletteResult =
+  | { kind: 'tab'; id: string; label: string; path: string }
+  | { kind: 'view'; id: string; view: SavedViewRow }
+  | { kind: 'issue'; id: string; issue: IssueRow }
 
-export function SearchPalette() {
+export function SearchPalette({ tabs }: { tabs: PaletteTab[] }) {
   const [open, setOpen] = useState(false)
   const [query, setQuery] = useState('')
   const [highlight, setHighlight] = useState(0)
   const navigate = useNavigate()
   const z = useZero<Schema, Mutators>()
+  const { user } = useAuth()
   const inputRef = useRef<HTMLInputElement | null>(null)
   const listRef = useRef<HTMLDivElement | null>(null)
 
   const [issues] = useQuery(z.query.pm_issues.orderBy('updatedAt', 'desc'))
   const [statuses] = useQuery(z.query.pm_statuses)
+  const [savedViews] = useQuery(z.query.pm_saved_views.orderBy('position', 'asc'))
 
   const statusMap = useMemo(() => {
     const m = new Map<string, StatusRow>()
@@ -65,12 +74,40 @@ export function SearchPalette() {
     }
   }, [open])
 
-  const results = useMemo(() => {
+  const personalSavedViews = useMemo(
+    () =>
+      savedViews
+        .filter((view) => view.scope === 'personal' && view.ownerId === user?.id && view.slug !== 'all-issues')
+        .sort((a, b) => {
+          const positionDiff = a.position - b.position
+          if (positionDiff !== 0) return positionDiff
+          return a.name.localeCompare(b.name)
+        }),
+    [savedViews, user?.id],
+  )
+
+  const results = useMemo<PaletteResult[]>(() => {
     const q = query.trim().toLowerCase()
+    const matches = (value: string | null | undefined) => !q || (value ?? '').toLowerCase().includes(q)
+    const tabResults = tabs
+      .filter((tab) => matches(tab.label) || matches(tab.path))
+      .map((tab) => ({ kind: 'tab' as const, id: `tab:${tab.path}`, label: tab.label, path: tab.path }))
+    const viewResults = personalSavedViews
+      .filter((view) => matches(view.name) || matches(view.slug))
+      .map((view) => ({ kind: 'view' as const, id: `view:${view.id}`, view }))
+
     if (!q) {
-      // no query: show most recently updated issues as quick access
-      return issues.slice(0, MAX_RESULTS)
+      return [
+        ...tabResults,
+        ...viewResults,
+        ...issues.slice(0, Math.max(0, MAX_RESULTS - tabResults.length - viewResults.length)).map((issue) => ({
+          kind: 'issue' as const,
+          id: `issue:${issue.id}`,
+          issue,
+        })),
+      ].slice(0, MAX_RESULTS)
     }
+
     const scored: Array<{ issue: IssueRow; score: number }> = []
     for (const issue of issues) {
       const title = issue.title.toLowerCase()
@@ -89,8 +126,17 @@ export function SearchPalette() {
       scored.push({ issue, score })
     }
     scored.sort((a, b) => b.score - a.score)
-    return scored.slice(0, MAX_RESULTS).map((entry) => entry.issue)
-  }, [issues, query])
+    const remaining = Math.max(0, MAX_RESULTS - tabResults.length - viewResults.length)
+    return [
+      ...tabResults,
+      ...viewResults,
+      ...scored.slice(0, remaining).map((entry) => ({
+        kind: 'issue' as const,
+        id: `issue:${entry.issue.id}`,
+        issue: entry.issue,
+      })),
+    ].slice(0, MAX_RESULTS)
+  }, [issues, personalSavedViews, query, tabs])
 
   useEffect(() => {
     setHighlight(0)
@@ -107,9 +153,11 @@ export function SearchPalette() {
     }
   }, [highlight, open])
 
-  function commit(issue: IssueRow) {
+  function commit(result: PaletteResult) {
     setOpen(false)
-    navigate(`/issues/${issue.id}`)
+    if (result.kind === 'tab') navigate(result.path)
+    else if (result.kind === 'view') navigate(`/issues?view=${result.view.id}`)
+    else navigate(`/issues/${result.issue.id}`)
   }
 
   function handleInputKey(event: React.KeyboardEvent<HTMLInputElement>) {
@@ -145,7 +193,7 @@ export function SearchPalette() {
             value={query}
             onChange={(event) => setQuery(event.target.value)}
             onKeyDown={handleInputKey}
-            placeholder="$ search issues by title, identifier, description…"
+            placeholder="$ search tabs, views, issues…"
             className="flex-1 bg-transparent font-mono text-sm text-fg-1 outline-none placeholder:text-fg-4"
           />
           <span className="hidden sm:inline-flex items-center gap-1 font-mono text-[10px] uppercase tracking-label text-fg-4">
@@ -163,35 +211,28 @@ export function SearchPalette() {
           ) : (
             <>
               <div className="px-4 pt-2 pb-1 font-mono text-[10px] uppercase tracking-label text-fg-4">
-                {query.trim() ? `${results.length} match${results.length === 1 ? '' : 'es'}` : 'recent'}
+              {query.trim() ? `${results.length} match${results.length === 1 ? '' : 'es'}` : 'quick access'}
               </div>
-              {results.map((issue, index) => {
-                const status = statusMap.get(issue.statusId)
+              {results.map((result, index) => {
                 const isHighlighted = index === highlight
+                const previous = results[index - 1]
+                const showSection = !previous || previous.kind !== result.kind
                 return (
-                  <button
-                    key={issue.id}
-                    data-result-index={index}
-                    onMouseEnter={() => setHighlight(index)}
-                    onClick={() => commit(issue)}
-                    className={`flex w-full items-center gap-3 px-4 py-2 text-left transition ${
-                      isHighlighted
-                        ? 'bg-[rgba(0,255,136,0.08)]'
-                        : 'hover:bg-[rgba(0,255,136,0.04)]'
-                    }`}
-                  >
-                    <span className="flex h-4 w-4 shrink-0 items-center justify-center">
-                      <StatusIcon statusType={status?.type ?? 'backlog'} />
-                    </span>
-                    <span className="flex h-4 w-4 shrink-0 items-center justify-center">
-                      <PriorityIcon priority={issue.priority} />
-                    </span>
-                    <span className="font-mono text-xs text-accent/80 tabular-nums shrink-0">{issue.identifier}</span>
-                    <span className="min-w-0 flex-1 truncate text-sm text-fg-1">{issue.title}</span>
-                    <span className="hidden sm:inline-flex shrink-0 font-mono text-[10px] uppercase tracking-label text-fg-4">
-                      {PRIORITY_META[issue.priority]?.label ?? '—'}
-                    </span>
-                  </button>
+                  <div key={result.id}>
+                    {showSection && (
+                      <div className="px-4 pt-3 pb-1 font-mono text-[10px] uppercase tracking-label text-fg-4">
+                        {result.kind === 'tab' ? 'tabs' : result.kind === 'view' ? 'views' : 'issues'}
+                      </div>
+                    )}
+                    <PaletteResultButton
+                      result={result}
+                      statusMap={statusMap}
+                      isHighlighted={isHighlighted}
+                      index={index}
+                      onHover={() => setHighlight(index)}
+                      onCommit={() => commit(result)}
+                    />
+                  </div>
                 )
               })}
             </>
@@ -215,5 +256,73 @@ export function SearchPalette() {
         </div>
       </div>
     </div>
+  )
+}
+
+function PaletteResultButton({
+  result,
+  statusMap,
+  isHighlighted,
+  index,
+  onHover,
+  onCommit,
+}: {
+  result: PaletteResult
+  statusMap: Map<string, StatusRow>
+  isHighlighted: boolean
+  index: number
+  onHover: () => void
+  onCommit: () => void
+}) {
+  const className = `flex w-full items-center gap-3 px-4 py-2 text-left transition ${
+    isHighlighted
+      ? 'bg-[rgba(0,255,136,0.08)]'
+      : 'hover:bg-[rgba(0,255,136,0.04)]'
+  }`
+
+  if (result.kind === 'tab') {
+    return (
+      <button data-result-index={index} onMouseEnter={onHover} onClick={onCommit} className={className}>
+        <span className="flex h-4 w-4 shrink-0 items-center justify-center font-mono text-[10px] uppercase tracking-label text-accent">
+          ▸
+        </span>
+        <span className="min-w-0 flex-1 truncate text-sm text-fg-1">{result.label}</span>
+        <span className="hidden sm:inline-flex shrink-0 font-mono text-[10px] uppercase tracking-label text-fg-4">
+          {result.path}
+        </span>
+      </button>
+    )
+  }
+
+  if (result.kind === 'view') {
+    return (
+      <button data-result-index={index} onMouseEnter={onHover} onClick={onCommit} className={className}>
+        <span className="flex h-4 w-4 shrink-0 items-center justify-center font-mono text-[10px] uppercase tracking-label text-accent">
+          ◇
+        </span>
+        <span className="min-w-0 flex-1 truncate text-sm text-fg-1">{result.view.name}</span>
+        <span className="hidden sm:inline-flex shrink-0 font-mono text-[10px] uppercase tracking-label text-fg-4">
+          saved view
+        </span>
+      </button>
+    )
+  }
+
+  const issue = result.issue
+  const status = statusMap.get(issue.statusId)
+  return (
+    <button data-result-index={index} onMouseEnter={onHover} onClick={onCommit} className={className}>
+      <span className="flex h-4 w-4 shrink-0 items-center justify-center">
+        <StatusIcon statusType={status?.type ?? 'backlog'} />
+      </span>
+      <span className="flex h-4 w-4 shrink-0 items-center justify-center">
+        <PriorityIcon priority={issue.priority} />
+      </span>
+      <span className="font-mono text-xs text-accent/80 tabular-nums shrink-0">{issue.identifier}</span>
+      <span className="min-w-0 flex-1 truncate text-sm text-fg-1">{issue.title}</span>
+      <span className="hidden sm:inline-flex shrink-0 font-mono text-[10px] uppercase tracking-label text-fg-4">
+        {PRIORITY_META[issue.priority]?.label ?? '—'}
+      </span>
+    </button>
   )
 }

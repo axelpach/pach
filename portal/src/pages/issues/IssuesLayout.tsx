@@ -75,7 +75,10 @@ export default function IssuesLayout() {
   // setSection from any child navigates back to the list view when triggered from /issues/:id
   function setSection(next: TrackerSection) {
     setSectionState(next)
-    if (location.pathname !== '/issues') navigate('/issues')
+    const target = next.kind === 'view' ? `/issues?view=${next.viewId}` : '/issues'
+    if (location.pathname !== '/issues' || location.search !== (next.kind === 'view' ? `?view=${next.viewId}` : '')) {
+      navigate(target)
+    }
   }
 
   function requestComposer() {
@@ -238,6 +241,18 @@ export default function IssuesLayout() {
     if (personalSavedViews.some((view) => view.id === section.viewId)) return
     setSectionState({ kind: 'all' })
   }, [section, personalSavedViews])
+
+  useEffect(() => {
+    if (location.pathname !== '/issues') return
+    const viewId = new URLSearchParams(location.search).get('view')
+    if (!viewId) return
+    if (!personalSavedViews.some((view) => view.id === viewId)) return
+    setSectionState((current) => (
+      current.kind === 'view' && current.viewId === viewId
+        ? current
+        : { kind: 'view', viewId }
+    ))
+  }, [location.pathname, location.search, personalSavedViews])
 
   useEffect(() => {
     if (!teamModal) return
