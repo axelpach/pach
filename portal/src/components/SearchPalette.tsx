@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState, type ComponentType } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useQuery, useZero } from '@rocicorp/zero/react'
 import { Search } from 'lucide-react'
@@ -13,9 +13,9 @@ const MAX_RESULTS = 30
 type IssueRow = Schema['tables']['pm_issues']['row']
 type StatusRow = Schema['tables']['pm_statuses']['row']
 type SavedViewRow = Schema['tables']['pm_saved_views']['row']
-type PaletteTab = { label: string; path: string }
+type PaletteTab = { label: string; path: string; icon: ComponentType<{ className?: string }> }
 type PaletteResult =
-  | { kind: 'tab'; id: string; label: string; path: string }
+  | { kind: 'tab'; id: string; label: string; path: string; icon: ComponentType<{ className?: string }> }
   | { kind: 'view'; id: string; view: SavedViewRow }
   | { kind: 'issue'; id: string; issue: IssueRow }
 
@@ -91,7 +91,7 @@ export function SearchPalette({ tabs }: { tabs: PaletteTab[] }) {
     const matches = (value: string | null | undefined) => !q || (value ?? '').toLowerCase().includes(q)
     const tabResults = tabs
       .filter((tab) => matches(tab.label) || matches(tab.path))
-      .map((tab) => ({ kind: 'tab' as const, id: `tab:${tab.path}`, label: tab.label, path: tab.path }))
+      .map((tab) => ({ kind: 'tab' as const, id: `tab:${tab.path}`, label: tab.label, path: tab.path, icon: tab.icon }))
     const viewResults = personalSavedViews
       .filter((view) => matches(view.name) || matches(view.slug))
       .map((view) => ({ kind: 'view' as const, id: `view:${view.id}`, view }))
@@ -281,10 +281,11 @@ function PaletteResultButton({
   }`
 
   if (result.kind === 'tab') {
+    const Icon = result.icon
     return (
       <button data-result-index={index} onMouseEnter={onHover} onClick={onCommit} className={className}>
-        <span className="flex h-4 w-4 shrink-0 items-center justify-center font-mono text-[10px] uppercase tracking-label text-accent">
-          ▸
+        <span className="flex h-4 w-4 shrink-0 items-center justify-center text-fg-3">
+          <Icon className="h-4 w-4" />
         </span>
         <span className="min-w-0 flex-1 truncate text-sm text-fg-1">{result.label}</span>
         <span className="hidden sm:inline-flex shrink-0 font-mono text-[10px] uppercase tracking-label text-fg-4">

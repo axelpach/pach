@@ -288,7 +288,7 @@ function AppShell() {
         <Topbar />
         <MobileHeader onMenuClick={() => setMobileMenuOpen(true)} />
         <MobileMenu open={mobileMenuOpen} onClose={() => setMobileMenuOpen(false)} />
-        <SearchPalette tabs={visibleOuterNavItems.map((item) => ({ label: item.label, path: item.path }))} />
+        <SearchPalette tabs={visibleOuterNavItems.map((item) => ({ label: item.label, path: item.path, icon: item.icon }))} />
         <div className="flex flex-1 min-h-0 overflow-hidden">
           <Sidebar />
           <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
