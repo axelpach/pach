@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { Outlet, useLocation, useNavigate, useOutletContext } from 'react-router-dom'
 import { useQuery, useZero } from '@rocicorp/zero/react'
 import { ChevronDown, ChevronRight, Menu, Pencil, Plus, X } from 'lucide-react'
@@ -37,15 +37,24 @@ export default function IssuesLayout() {
   const [issues] = useQuery(z.query.pm_issues)
   const [statuses] = useQuery(z.query.pm_statuses)
   const [savedViews] = useQuery(z.query.pm_saved_views.orderBy('position', 'asc'))
-  const accessibleOrganizationIds = new Set(user?.organizationIds ?? [])
+  const accessibleOrganizationIds = useMemo(() => new Set(user?.organizationIds ?? []), [user?.organizationIds])
   const canAccessOrganization = (organizationId: string | null | undefined) =>
     organizationId ? accessibleOrganizationIds.has(organizationId) : user?.canAccessUnscoped ?? false
-  const scopedIssues = issues.filter((issue) => canAccessOrganization(issue.contextCompanyId))
+  const scopedIssues = useMemo(
+    () => issues.filter((issue) => canAccessOrganization(issue.contextCompanyId)),
+    [issues, accessibleOrganizationIds, user?.canAccessUnscoped],
+  )
   const canAccessSavedView = (view: Schema['tables']['pm_saved_views']['row']) =>
     view.ownerId === user?.id || canAccessOrganization(view.companyId)
-  const scopedSavedViews = savedViews.filter(canAccessSavedView)
-  const visibleTeams = teams.filter((team) =>
-    user?.canAccessUnscoped || scopedIssues.some((issue) => issue.teamId === team.id),
+  const scopedSavedViews = useMemo(
+    () => savedViews.filter(canAccessSavedView),
+    [savedViews, accessibleOrganizationIds, user?.canAccessUnscoped, user?.id],
+  )
+  const visibleTeams = useMemo(
+    () => teams.filter((team) =>
+      user?.canAccessUnscoped || scopedIssues.some((issue) => issue.teamId === team.id),
+    ),
+    [teams, scopedIssues, user?.canAccessUnscoped],
   )
 
   const sidebarStorageKey = user ? `pach:issues:sidebar:${user.id}` : null
@@ -59,13 +68,17 @@ export default function IssuesLayout() {
   const [savingTeam, setSavingTeam] = useState(false)
   const [composerRequestId, setComposerRequestId] = useState(0)
   const [mobileTrackerOpen, setMobileTrackerOpen] = useState(false)
-  const personalSavedViews = scopedSavedViews
-    .filter((view) => view.scope === 'personal' && view.ownerId === user?.id && view.slug !== 'all-issues')
-    .sort((a, b) => {
-      const positionDiff = a.position - b.position
-      if (positionDiff !== 0) return positionDiff
-      return a.name.localeCompare(b.name)
-    })
+  const suppressNextViewUrlSyncRef = useRef(false)
+  const personalSavedViews = useMemo(
+    () => scopedSavedViews
+      .filter((view) => view.scope === 'personal' && view.ownerId === user?.id && view.slug !== 'all-issues')
+      .sort((a, b) => {
+        const positionDiff = a.position - b.position
+        if (positionDiff !== 0) return positionDiff
+        return a.name.localeCompare(b.name)
+      }),
+    [scopedSavedViews, user?.id],
+  )
 
   // close mobile tracker on route change
   useEffect(() => {
@@ -74,6 +87,7 @@ export default function IssuesLayout() {
 
   // setSection from any child navigates back to the list view when triggered from /issues/:id
   function setSection(next: TrackerSection) {
+    suppressNextViewUrlSyncRef.current = next.kind !== 'view'
     setSectionState(next)
     const target = next.kind === 'view' ? `/issues?view=${next.viewId}` : '/issues'
     if (location.pathname !== '/issues' || location.search !== (next.kind === 'view' ? `?view=${next.viewId}` : '')) {
@@ -245,7 +259,11 @@ export default function IssuesLayout() {
   useEffect(() => {
     if (location.pathname !== '/issues') return
     const viewId = new URLSearchParams(location.search).get('view')
-    if (!viewId) return
+    if (!viewId) {
+      suppressNextViewUrlSyncRef.current = false
+      return
+    }
+    if (suppressNextViewUrlSyncRef.current) return
     if (!personalSavedViews.some((view) => view.id === viewId)) return
     setSectionState((current) => (
       current.kind === 'view' && current.viewId === viewId
