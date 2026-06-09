@@ -183,6 +183,9 @@ export const mutators = {
       const { id, ...updates } = args
       await tx.mutate.fin_movements.update({ id, ...updates, updatedAt: Date.now() })
     },
+    async delete(tx: Tx, args: { id: string }) {
+      await tx.mutate.fin_movements.delete({ id: args.id })
+    },
   },
 
   fin_transfers: {

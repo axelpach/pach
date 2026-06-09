@@ -1,5 +1,5 @@
 import { useQuery, useZero } from '@rocicorp/zero/react'
-import { AlertTriangle, ArrowRightLeft, Building2, CalendarDays, ChartPie, CheckCircle, CircleDollarSign, CreditCard, FileText, FileUp, Landmark, Layers2, Loader2, Plus, Search, Tag, UploadCloud, UserRound, WalletCards, X } from 'lucide-react'
+import { AlertTriangle, ArrowRightLeft, Building2, CalendarDays, ChartPie, CheckCircle, CircleDollarSign, CreditCard, FileText, FileUp, Landmark, Layers2, Loader2, Plus, Search, Tag, Trash2, UploadCloud, UserRound, WalletCards, X } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState, type MouseEvent, type ReactNode } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { config } from '../../config'
@@ -80,7 +80,7 @@ const ACCOUNT_TYPES = [
 ]
 
 const CURRENCIES = ['MXN', 'USD', 'EUR']
-const MAX_IMPORT_FILE_BYTES = 45 * 1024 * 1024
+const MAX_IMPORT_TOTAL_BYTES = 10 * 1024 * 1024
 const UNCATEGORIZED_VALUE = '__uncategorized__'
 const EMPTY_ACCOUNT_DRAFT: AccountDraft = { name: '', institutionName: '', holderUserId: '', type: 'bank_account', currencyCode: 'MXN' }
 
@@ -154,11 +154,12 @@ export default function Finance() {
   })
   const [balanceModalOpen, setBalanceModalOpen] = useState(false)
   const [transferModalMovementId, setTransferModalMovementId] = useState<string | null>(null)
+  const [deleteMovementId, setDeleteMovementId] = useState<string | null>(null)
   const [institutionSuggestionsOpen, setInstitutionSuggestionsOpen] = useState(false)
   const [importModalOpen, setImportModalOpen] = useState(false)
   const [importDragActive, setImportDragActive] = useState(false)
   const [importPhase, setImportPhase] = useState<ImportPhase>('select')
-  const [importFile, setImportFile] = useState<File | null>(null)
+  const [importFiles, setImportFiles] = useState<File[]>([])
   const [importAccountId, setImportAccountId] = useState('')
   const [importMessage, setImportMessage] = useState<string | null>(null)
   const [apiCategories, setApiCategories] = useState<FinanceCategory[]>([])
@@ -290,6 +291,9 @@ export default function Finance() {
   const transferCandidates = selectedTransferMovement
     ? findTransferCandidates(selectedTransferMovement, scopedMovements, scopedAccounts)
     : []
+  const selectedDeleteMovement = deleteMovementId
+    ? scopedMovements.find((movement) => movement.id === deleteMovementId) ?? null
+    : null
 
   const selectedOrganizationLabel =
     organizationOptions.find((option) => option.value === selectedOrganizationId)?.label ?? 'select organization'
@@ -478,7 +482,7 @@ export default function Finance() {
   }, [importAccountId, scopedAccounts, selectedAccountFilterIds])
 
   useEffect(() => {
-    if (!accountModalOpen && !importModalOpen && !categoryModalOpen && !movementModalOpen && !balanceModalOpen && !transferModalMovementId) return
+    if (!accountModalOpen && !importModalOpen && !categoryModalOpen && !movementModalOpen && !balanceModalOpen && !transferModalMovementId && !deleteMovementId) return
     function handleKeyDown(event: KeyboardEvent) {
       if (event.key === 'Escape') {
         closeAccountModal()
@@ -487,11 +491,12 @@ export default function Finance() {
         setMovementModalOpen(false)
         setBalanceModalOpen(false)
         setTransferModalMovementId(null)
+        setDeleteMovementId(null)
       }
     }
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [accountModalOpen, balanceModalOpen, categoryModalOpen, importModalOpen, movementModalOpen, transferModalMovementId])
+  }, [accountModalOpen, balanceModalOpen, categoryModalOpen, deleteMovementId, importModalOpen, movementModalOpen, transferModalMovementId])
 
   function openAccountModal(account?: FinanceAccount) {
     if (account) {
@@ -713,24 +718,33 @@ export default function Finance() {
     setDashboardFilters({})
   }
 
-  function stageImportFile(file: File) {
+  function stageImportFiles(files: File[]) {
     setImportModalOpen(true)
-    if (file.size > MAX_IMPORT_FILE_BYTES) {
+    const nextFiles = files.filter((file) => file.size > 0)
+    const totalBytes = nextFiles.reduce((sum, file) => sum + file.size, 0)
+    if (nextFiles.length === 0) {
       setImportPhase('failed')
-      setImportFile(file)
-      setImportMessage(`File is too large (${formatBytes(file.size)}). Current import limit is ${formatBytes(MAX_IMPORT_FILE_BYTES)}.`)
+      setImportFiles([])
+      setImportMessage('Choose at least one file to import.')
+      if (fileInputRef.current) fileInputRef.current.value = ''
+      return
+    }
+    if (totalBytes > MAX_IMPORT_TOTAL_BYTES) {
+      setImportPhase('failed')
+      setImportFiles(nextFiles)
+      setImportMessage(`Files are too large (${formatBytes(totalBytes)}). Current import limit is ${formatBytes(MAX_IMPORT_TOTAL_BYTES)} total.`)
       if (fileInputRef.current) fileInputRef.current.value = ''
       return
     }
 
-    setImportFile(file)
+    setImportFiles(nextFiles)
     setImportPhase('ready')
     setImportMessage(null)
     if (fileInputRef.current) fileInputRef.current.value = ''
   }
 
   function resetImportSelection() {
-    setImportFile(null)
+    setImportFiles([])
     setImportPhase('select')
     setImportMessage(null)
     setImportDragActive(false)
@@ -738,7 +752,7 @@ export default function Finance() {
   }
 
   async function confirmImport() {
-    if (!importFile) return
+    if (importFiles.length === 0) return
     const targetAccountId = importAccountId || selectedAccountFilterIds[0] || scopedAccounts[0]?.id
     if (!targetAccountId || !selectedOrganizationId || !token) {
       setImportPhase('failed')
@@ -747,35 +761,47 @@ export default function Finance() {
     }
 
     setImportPhase('processing')
-    setImportMessage(`Reading ${importFile.name}...`)
+    setImportMessage(`Reading ${importFiles.length} file${importFiles.length === 1 ? '' : 's'}...`)
     try {
-      const contentBase64 = await fileToBase64(importFile)
-      setImportMessage(`Analyzing ${importFile.name}...`)
-      const response = await fetch(`${config.apiUrl}/finance/imports`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify({
-          organizationId: selectedOrganizationId,
-          accountId: targetAccountId,
-          fileName: importFile.name,
-          fileType: importFile.type || guessFileType(importFile.name),
-          sourceType: sourceTypeFor(importFile),
-          contentBase64,
-        }),
-      })
-      const result = await readJsonResponse(response)
-      if (!response.ok) throw new Error(result.message || result.error || 'Import failed')
-      const summary = result.summary
+      let parsed = 0
+      let created = 0
+      let needsReview = 0
+      let duplicates = 0
+      let duplicateFiles = 0
+      for (const [index, file] of importFiles.entries()) {
+        const contentBase64 = await fileToBase64(file)
+        setImportMessage(`Analyzing ${index + 1}/${importFiles.length}: ${file.name}...`)
+        const response = await fetch(`${config.apiUrl}/finance/imports`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify({
+            organizationId: selectedOrganizationId,
+            accountId: targetAccountId,
+            fileName: file.name,
+            fileType: file.type || guessFileType(file.name),
+            sourceType: sourceTypeFor(file),
+            contentBase64,
+          }),
+        })
+        const result = await readJsonResponse(response)
+        if (!response.ok) throw new Error(result.message || result.error || 'Import failed')
+        const summary = result.summary
+        parsed += summary?.parsed ?? 0
+        created += summary?.created ?? 0
+        needsReview += summary?.needsReview ?? 0
+        duplicates += summary?.duplicates ?? 0
+        if (result.duplicateFile) duplicateFiles += 1
+      }
       setImportPhase('success')
       setImportMessage(
-        result.duplicateFile
-          ? `Already imported. ${summary.parsed} movements matched. Review transactions in the list.`
-          : `Imported ${summary.created} movements. Review transactions and categories in the list.`,
+        duplicateFiles === importFiles.length
+          ? `Already imported. ${parsed} movements matched across ${importFiles.length} file${importFiles.length === 1 ? '' : 's'}.`
+          : `Imported ${created} movements. ${duplicates} duplicates skipped across ${importFiles.length} file${importFiles.length === 1 ? '' : 's'}.`,
       )
-      if (summary.needsReview > 0) setFilterField('statuses', ['pending_review'])
+      if (needsReview > 0) setFilterField('statuses', ['pending_review'])
     } catch (error) {
       setImportPhase('failed')
       setImportMessage(error instanceof Error ? error.message : 'Import failed')
@@ -810,6 +836,14 @@ export default function Finance() {
     await z.mutate.fin_movements.update({ id: movementId, status, reviewReason: reviewReasonForStatus(status) })
     const movement = scopedMovements.find((entry) => entry.id === movementId)
     if (status === 'reviewed' && movement?.categoryId) await learnCategorizationRule(movement, movement.categoryId)
+  }
+
+  async function confirmDeleteMovement() {
+    const movementId = selectedDeleteMovement?.id
+    if (!movementId) return
+    await z.mutate.fin_movements.delete({ id: movementId })
+    if (transferModalMovementId === movementId) setTransferModalMovementId(null)
+    setDeleteMovementId(null)
   }
 
   async function linkTransferMovement(sourceId: string, targetId: string) {
@@ -966,10 +1000,11 @@ export default function Finance() {
           ref={fileInputRef}
           type="file"
           accept=".csv,.txt,.pdf,image/*"
+          multiple
           className="hidden"
           onChange={(event) => {
-            const file = event.currentTarget.files?.[0]
-            if (file) stageImportFile(file)
+            const files = Array.from(event.currentTarget.files ?? [])
+            if (files.length > 0) stageImportFiles(files)
           }}
         />
 
@@ -1340,21 +1375,33 @@ export default function Finance() {
                         />
                       </div>
                     </div>
-                    <PachSelect
-                      variant="button"
-                      value={movement.status}
-                      onChange={(next) => void updateMovementStatus(movement.id, next)}
-                      options={movementStatusOptions}
-                      trigger={
-                        <span className={`inline-flex h-8 w-8 items-center justify-center border transition ${movement.status === 'pending_review' ? 'border-[rgba(255,184,77,0.28)] bg-[rgba(255,184,77,0.06)] text-amber' : movement.status === 'ignored' ? 'border-[rgba(133,167,145,0.16)] bg-transparent text-fg-4' : 'border-[rgba(0,255,140,0.22)] bg-[rgba(0,255,136,0.06)] text-accent'}`}>
-                          <StatusIcon status={movement.status} />
-                        </span>
-                      }
-                      triggerTitle={statusLabel(movement.status)}
-                      align="right"
-                      popupWidth="170px"
-                      triggerClassName="flex h-8 w-8 items-center justify-center"
-                    />
+                    <div className="flex items-start gap-1">
+                      <PachSelect
+                        variant="button"
+                        value={movement.status}
+                        onChange={(next) => void updateMovementStatus(movement.id, next)}
+                        options={movementStatusOptions}
+                        trigger={
+                          <span className={`inline-flex h-8 w-8 items-center justify-center border transition ${movement.status === 'pending_review' ? 'border-[rgba(255,184,77,0.28)] bg-[rgba(255,184,77,0.06)] text-amber' : movement.status === 'ignored' ? 'border-[rgba(133,167,145,0.16)] bg-transparent text-fg-4' : 'border-[rgba(0,255,140,0.22)] bg-[rgba(0,255,136,0.06)] text-accent'}`}>
+                            <StatusIcon status={movement.status} />
+                          </span>
+                        }
+                        triggerTitle={statusLabel(movement.status)}
+                        align="right"
+                        popupWidth="170px"
+                        triggerClassName="flex h-8 w-8 items-center justify-center"
+                      />
+                      <IconTooltip label="Delete movement" align="right">
+                        <button
+                          type="button"
+                          onClick={() => setDeleteMovementId(movement.id)}
+                          className="flex h-8 w-8 items-center justify-center border border-[rgba(0,255,140,0.1)] bg-transparent text-fg-4 transition hover:border-[rgba(255,83,124,0.28)] hover:bg-[rgba(255,83,124,0.06)] hover:text-fail"
+                          aria-label="Delete movement"
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </button>
+                      </IconTooltip>
+                    </div>
                   </div>
 
                   <div className="mt-2">
@@ -1451,21 +1498,33 @@ export default function Finance() {
                         {formatMoney(movement.amountMinor, movement.currencyCode)}
                       </td>
                       <td className="px-3 py-2 text-right">
-                        <PachSelect
-                          variant="button"
-                          value={movement.status}
-                          onChange={(next) => void updateMovementStatus(movement.id, next)}
-                          options={movementStatusOptions}
-                          trigger={
-                            <span className={`inline-flex h-7 w-7 items-center justify-center border transition ${movement.status === 'pending_review' ? 'border-[rgba(255,184,77,0.28)] bg-[rgba(255,184,77,0.06)] text-amber' : movement.status === 'ignored' ? 'border-[rgba(133,167,145,0.16)] bg-transparent text-fg-4' : 'border-[rgba(0,255,140,0.22)] bg-[rgba(0,255,136,0.06)] text-accent'}`}>
-                              <StatusIcon status={movement.status} />
-                            </span>
-                          }
-                          triggerTitle={statusLabel(movement.status)}
-                          align="right"
-                          popupWidth="170px"
-                          triggerClassName="ml-auto flex h-7 w-7 items-center justify-center"
-                        />
+                        <div className="flex items-center justify-end gap-1">
+                          <PachSelect
+                            variant="button"
+                            value={movement.status}
+                            onChange={(next) => void updateMovementStatus(movement.id, next)}
+                            options={movementStatusOptions}
+                            trigger={
+                              <span className={`inline-flex h-7 w-7 items-center justify-center border transition ${movement.status === 'pending_review' ? 'border-[rgba(255,184,77,0.28)] bg-[rgba(255,184,77,0.06)] text-amber' : movement.status === 'ignored' ? 'border-[rgba(133,167,145,0.16)] bg-transparent text-fg-4' : 'border-[rgba(0,255,140,0.22)] bg-[rgba(0,255,136,0.06)] text-accent'}`}>
+                                <StatusIcon status={movement.status} />
+                              </span>
+                            }
+                            triggerTitle={statusLabel(movement.status)}
+                            align="right"
+                            popupWidth="170px"
+                            triggerClassName="flex h-7 w-7 items-center justify-center"
+                          />
+                          <IconTooltip label="Delete movement" align="right">
+                            <button
+                              type="button"
+                              onClick={() => setDeleteMovementId(movement.id)}
+                              className="flex h-7 w-7 items-center justify-center border border-transparent bg-transparent text-fg-4 transition hover:border-[rgba(255,83,124,0.28)] hover:bg-[rgba(255,83,124,0.06)] hover:text-fail"
+                              aria-label="Delete movement"
+                            >
+                              <Trash2 className="h-3.5 w-3.5" />
+                            </button>
+                          </IconTooltip>
+                        </div>
                       </td>
                     </tr>
                   )
@@ -1680,8 +1739,8 @@ export default function Finance() {
                 onDrop={(event) => {
                   event.preventDefault()
                   setImportDragActive(false)
-                  const file = event.dataTransfer.files?.[0]
-                  if (file) stageImportFile(file)
+                  const files = Array.from(event.dataTransfer.files ?? [])
+                  if (files.length > 0) stageImportFiles(files)
                 }}
                 className={`flex min-h-56 flex-col items-center justify-center border border-dashed px-6 py-10 text-center transition ${
                   importDragActive
@@ -1694,15 +1753,15 @@ export default function Finance() {
                   {importDragActive ? 'drop to stage import' : 'drop statement, screenshot, or csv'}
                 </div>
                 <div className="mt-1 font-mono text-[10px] uppercase tracking-label text-fg-4">
-                  pdf · csv · txt · image · max {formatBytes(MAX_IMPORT_FILE_BYTES)}
+                  pdf · csv · txt · image · max {formatBytes(MAX_IMPORT_TOTAL_BYTES)} total
                 </div>
               </button>
 
-              {(importFile || importMessage) && (
+              {(importFiles.length > 0 || importMessage) && (
                 <div>
                   <div className="mb-2 flex items-center justify-between font-mono text-[10px] uppercase tracking-label text-fg-4">
-                    <span>{importPhase === 'processing' ? 'processing import' : importFile ? 'staged file' : 'latest import'}</span>
-                    {importFile && importPhase !== 'processing' ? (
+                    <span>{importPhase === 'processing' ? 'processing import' : importFiles.length > 0 ? 'staged files' : 'latest import'}</span>
+                    {importFiles.length > 0 && importPhase !== 'processing' ? (
                       <button
                         type="button"
                         onClick={resetImportSelection}
@@ -1714,18 +1773,29 @@ export default function Finance() {
                     ) : null}
                   </div>
 
-                  <div className="grid grid-cols-[20px_1fr_150px_32px] items-center gap-3 border-y border-[rgba(0,255,140,0.12)] py-2.5 font-mono text-xs">
-                    <FileText className="h-3.5 w-3.5 text-fg-4" />
-                    <div className="min-w-0">
-                      <div className="truncate text-fg-1" title={importFile?.name ?? undefined}>
-                        {importFile?.name ?? 'no file selected'}
+                  <div className="border-y border-[rgba(0,255,140,0.12)] font-mono text-xs">
+                    {importFiles.length > 0 ? importFiles.map((file) => (
+                      <div key={`${file.name}:${file.size}:${file.lastModified}`} className="grid grid-cols-[20px_1fr_150px_32px] items-center gap-3 border-b border-[rgba(0,255,140,0.08)] py-2.5 last:border-b-0">
+                        <FileText className="h-3.5 w-3.5 text-fg-4" />
+                        <div className="min-w-0">
+                          <div className="truncate text-fg-1" title={file.name}>
+                            {file.name}
+                          </div>
+                          <div className="mt-0.5 text-[10px] uppercase tracking-label text-fg-4">
+                            {formatBytes(file.size)}
+                          </div>
+                        </div>
+                        <ImportStatus phase={importPhase} />
+                        <span aria-hidden />
                       </div>
-                      <div className="mt-0.5 text-[10px] uppercase tracking-label text-fg-4">
-                        {importFile ? formatBytes(importFile.size) : 'idle'}
+                    )) : (
+                      <div className="grid grid-cols-[20px_1fr_150px_32px] items-center gap-3 py-2.5">
+                        <FileText className="h-3.5 w-3.5 text-fg-4" />
+                        <div className="min-w-0 text-fg-4">no file selected</div>
+                        <ImportStatus phase={importPhase} />
+                        <span aria-hidden />
                       </div>
-                    </div>
-                    <ImportStatus phase={importPhase} />
-                    <span aria-hidden />
+                    )}
                   </div>
 
                   {importMessage ? (
@@ -1749,12 +1819,91 @@ export default function Finance() {
               </button>
               <button
                 type="button"
-                disabled={!importFile || !importAccountId || importPhase === 'processing' || importPhase === 'success' || scopedAccounts.length === 0}
+                disabled={importFiles.length === 0 || !importAccountId || importPhase === 'processing' || importPhase === 'success' || scopedAccounts.length === 0}
                 onClick={() => void confirmImport()}
                 className="inline-flex items-center gap-2 border border-[rgba(0,255,140,0.3)] bg-[rgba(0,255,136,0.08)] px-3 py-1.5 font-mono text-xs uppercase tracking-label text-accent transition hover:bg-[rgba(0,255,136,0.16)] hover:shadow-glow-xs disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-[rgba(0,255,136,0.08)] disabled:hover:shadow-none"
               >
                 {importPhase === 'processing' ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <FileUp className="h-3.5 w-3.5" />}
                 {importPhase === 'processing' ? 'processing' : importPhase === 'success' ? 'processed' : 'process import'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {selectedDeleteMovement && (
+        <div
+          className="fixed inset-0 z-50 flex items-start justify-center bg-[rgba(0,0,0,0.72)] px-4 pt-[12vh] backdrop-blur-sm"
+          onClick={() => setDeleteMovementId(null)}
+        >
+          <div
+            className="w-full max-w-lg border border-[rgba(255,83,124,0.28)] bg-pit-2 shadow-[0_30px_80px_rgba(0,0,0,0.55)]"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="flex items-center justify-between border-b border-[rgba(255,83,124,0.16)] px-5 py-3">
+              <div className="flex items-center gap-2 font-mono text-xs">
+                <span className="inline-flex items-center gap-1.5 border border-[rgba(255,83,124,0.3)] bg-[rgba(255,83,124,0.07)] px-2 py-0.5 font-mono text-[10px] uppercase tracking-label text-fail">
+                  <Trash2 className="h-3 w-3" />
+                  delete
+                </span>
+                <span className="text-fg-4">›</span>
+                <span className="text-fg-2 lowercase">movement</span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setDeleteMovementId(null)}
+                className="font-mono text-xs uppercase tracking-label text-fg-4 transition hover:text-fg-1"
+                title="close"
+              >
+                [esc]
+              </button>
+            </div>
+
+            <div className="grid gap-4 px-5 py-4 font-mono">
+              <div>
+                <div className="text-lg text-fg-1">delete this movement?</div>
+                <div className="mt-2 text-xs leading-relaxed text-fg-4">
+                  this removes it from account balances, dashboard totals, imports review, and category spend. categorization rules learned from it stay active, but no longer point to this movement.
+                </div>
+              </div>
+
+              <section className="border border-[rgba(0,255,140,0.12)] bg-pit px-3 py-3">
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <div className="truncate text-sm text-fg-1" title={selectedDeleteMovement.merchantName || selectedDeleteMovement.description}>
+                      {selectedDeleteMovement.merchantName || selectedDeleteMovement.description}
+                    </div>
+                    {selectedDeleteMovement.merchantName ? (
+                      <div className="mt-1 truncate text-[10px] text-fg-4" title={selectedDeleteMovement.description}>
+                        {selectedDeleteMovement.description}
+                      </div>
+                    ) : null}
+                    <div className="mt-2 text-[10px] uppercase tracking-label text-fg-4">
+                      {formatZeroDate(selectedDeleteMovement.transactionDate)} · {accountLabel(selectedDeleteMovement.accountId, scopedAccounts)}
+                    </div>
+                  </div>
+                  <div className={`shrink-0 text-sm ${selectedDeleteMovement.amountMinor < 0 ? 'text-fail' : 'text-ok'}`}>
+                    {formatMoney(selectedDeleteMovement.amountMinor, selectedDeleteMovement.currencyCode)}
+                  </div>
+                </div>
+              </section>
+            </div>
+
+            <div className="flex items-center justify-between border-t border-[rgba(255,83,124,0.16)] px-5 py-3">
+              <button
+                type="button"
+                onClick={() => setDeleteMovementId(null)}
+                className="px-2 py-1.5 font-mono text-xs uppercase tracking-label text-fg-3 transition hover:text-fg-1"
+              >
+                [cancel]
+              </button>
+              <button
+                type="button"
+                onClick={() => void confirmDeleteMovement()}
+                className="inline-flex items-center gap-2 border border-[rgba(255,83,124,0.34)] bg-[rgba(255,83,124,0.08)] px-3 py-1.5 font-mono text-xs uppercase tracking-label text-fail transition hover:bg-[rgba(255,83,124,0.14)]"
+              >
+                <Trash2 className="h-3.5 w-3.5" />
+                delete movement
               </button>
             </div>
           </div>
@@ -2538,11 +2687,11 @@ function FinanceSidebarButton({
   )
 }
 
-function IconTooltip({ label, children }: { label: string; children: ReactNode }) {
+function IconTooltip({ label, children, align = 'left' }: { label: string; children: ReactNode; align?: 'left' | 'right' }) {
   return (
     <div className="group relative">
       {children}
-      <div className="pointer-events-none absolute left-0 top-[calc(100%+6px)] z-30 whitespace-nowrap border border-[rgba(0,255,140,0.2)] bg-pit px-2 py-1 font-mono text-[10px] uppercase tracking-label text-fg-2 opacity-0 shadow-[0_8px_24px_rgba(0,0,0,0.45)] transition group-hover:opacity-100">
+      <div className={`pointer-events-none absolute top-[calc(100%+6px)] z-30 whitespace-nowrap border border-[rgba(0,255,140,0.2)] bg-pit px-2 py-1 font-mono text-[10px] uppercase tracking-label text-fg-2 opacity-0 shadow-[0_8px_24px_rgba(0,0,0,0.45)] transition group-hover:opacity-100 ${align === 'right' ? 'right-0' : 'left-0'}`}>
         {label}
       </div>
     </div>

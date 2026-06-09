@@ -13,6 +13,7 @@ import {
 const ANTHROPIC_API_URL = 'https://api.anthropic.com/v1/messages'
 const HAIKU_MODEL = 'claude-haiku-4-5-20251001'
 const FINANCE_STATEMENT_TOOL_NAME = 'record_finance_statement'
+const MAX_IMPORT_BYTES = 10 * 1024 * 1024
 
 type SourceType = 'statement_csv' | 'statement_pdf' | 'screenshot' | 'manual_csv'
 
@@ -27,6 +28,7 @@ export type FinanceImportInput = {
 }
 
 type ParsedMovement = {
+  /** YYYY-MM-DD if only the date is visible; ISO-like datetime if the statement includes time. */
   transactionDate: string
   postedDate?: string | null
   description: string
@@ -70,8 +72,8 @@ const FINANCE_STATEMENT_TOOL = {
         items: {
           type: 'object',
           properties: {
-            transactionDate: { type: 'string', description: 'Transaction date in YYYY-MM-DD.' },
-            postedDate: { type: 'string', description: 'Posted date in YYYY-MM-DD. Omit if unknown.' },
+            transactionDate: { type: 'string', description: 'Transaction date/time. Use YYYY-MM-DD if only the date is visible; use an ISO 8601 datetime if hour/minute is visible.' },
+            postedDate: { type: 'string', description: 'Posted date/time. Use YYYY-MM-DD if only the date is visible; use an ISO 8601 datetime if hour/minute is visible. Omit if unknown.' },
             description: { type: 'string', description: 'Useful raw movement description.' },
             merchantName: { type: 'string', description: 'Normalized merchant or counterparty. Omit if unknown.' },
             amount: { type: 'number', description: 'Signed amount from this account perspective.' },
@@ -103,6 +105,9 @@ export async function importFinanceMovements(input: FinanceImportInput) {
   const bytes = Buffer.from(input.contentBase64, 'base64')
   if (bytes.length === 0) {
     return { error: 'VALIDATION' as const, message: 'The uploaded file is empty.' }
+  }
+  if (bytes.length > MAX_IMPORT_BYTES) {
+    return { error: 'VALIDATION' as const, message: 'The uploaded file is too large. Finance imports are limited to 10 MB.' }
   }
 
   const fileSha256 = sha256(bytes)
@@ -170,7 +175,7 @@ export async function importFinanceMovements(input: FinanceImportInput) {
 
       const fingerprint = buildMovementFingerprint({
         accountId: input.accountId,
-        transactionDate: normalized.transactionDate,
+        transactionDate: normalized.transactionDateExact,
         amountMinor: normalized.amountMinor,
         description: normalized.description,
       })
@@ -403,11 +408,14 @@ function parseToolResponse(input: unknown): ParsedStatement {
 }
 
 function normalizeParsedMovement(tx: ParsedMovement, fallbackCurrency: string) {
-  if (!isIsoDate(tx.transactionDate) || !tx.description || typeof tx.amount !== 'number') return null
+  const transactionDate = normalizeSourceDate(tx.transactionDate)
+  const postedDate = tx.postedDate ? normalizeSourceDate(tx.postedDate) : null
+  if (!transactionDate || !tx.description || typeof tx.amount !== 'number') return null
   const currencyCode = (tx.currencyCode || fallbackCurrency).trim().toUpperCase()
   return {
-    transactionDate: tx.transactionDate,
-    postedDate: tx.postedDate && isIsoDate(tx.postedDate) ? tx.postedDate : null,
+    transactionDate: transactionDate.date,
+    transactionDateExact: transactionDate.exact,
+    postedDate: postedDate?.date ?? null,
     description: tx.description.trim(),
     merchantName: tx.merchantName?.trim() || null,
     amountMinor: Math.round(tx.amount * 100),
@@ -415,7 +423,11 @@ function normalizeParsedMovement(tx: ParsedMovement, fallbackCurrency: string) {
     type: tx.type || null,
     categoryName: tx.categoryName?.trim() || null,
     confidence: typeof tx.confidence === 'number' ? Math.max(0, Math.min(100, Math.round(tx.confidence))) : null,
-    rawData: tx as unknown as Record<string, unknown>,
+    rawData: {
+      ...(tx as unknown as Record<string, unknown>),
+      transactionDateExact: transactionDate.exact,
+      postedDateExact: postedDate?.exact ?? null,
+    },
   }
 }
 
@@ -509,6 +521,12 @@ function sha256(value: string | Buffer) {
   return createHash('sha256').update(value).digest('hex')
 }
 
-function isIsoDate(value: unknown): value is string {
-  return typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value)
+function normalizeSourceDate(value: unknown) {
+  if (typeof value !== 'string') return null
+  const trimmed = value.trim()
+  const match = trimmed.match(/^(\d{4}-\d{2}-\d{2})(?:[T\s](\d{2}:\d{2})(?::(\d{2}))?(?:\.\d+)?(?:Z|[+-]\d{2}:?\d{2})?)?$/)
+  if (!match) return null
+  const [, date, minutes, seconds] = match
+  if (!minutes) return { date, exact: date }
+  return { date, exact: `${date}T${minutes}${seconds ? `:${seconds}` : ''}` }
 }

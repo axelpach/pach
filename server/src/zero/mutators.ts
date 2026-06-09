@@ -347,6 +347,16 @@ export function createServerMutators(authData?: JWTPayload) {
         const { id, ...updates } = args
         await tx.mutate.fin_movements.update({ id, ...updates, updatedAt: Date.now() })
       },
+      async delete(tx: Tx, args: { id: string }) {
+        await requireExistingOrganizationAccess(tx, 'fin_movements', args.id)
+        const rows = await tx.dbTransaction.query('select "transfer_id" as transfer_id from "fin_movements" where "id" = $1 limit 1', [args.id])
+        const transferId = Array.from(rows)[0]?.transfer_id as string | null | undefined
+        await tx.dbTransaction.query('update "fin_categorization_rules" set "created_from_movement_id" = null, "updated_at" = now() where "created_from_movement_id" = $1', [args.id])
+        if (transferId) {
+          await tx.dbTransaction.query('update "fin_movements" set "transfer_id" = null, "updated_at" = now() where "transfer_id" = $1 and "id" <> $2', [transferId, args.id])
+        }
+        await tx.mutate.fin_movements.delete({ id: args.id })
+      },
     },
 
     fin_transfers: {
