@@ -342,7 +342,7 @@ export function createServerMutators(authData?: JWTPayload) {
           updatedAt: now,
         })
       },
-      async update(tx: Tx, args: { id: string; categoryId?: string | null; transferId?: string | null; transactionDate?: number; postedDate?: number | null; description?: string; merchantName?: string | null; counterparty?: string | null; amountMinor?: number; currencyCode?: string; reportingAmountMinor?: number | null; reportingCurrencyCode?: string | null; fxRate?: string | null; fxRateSource?: string | null; type?: string; status?: string; reviewReason?: string | null }) {
+      async update(tx: Tx, args: { id: string; accountId?: string; categoryId?: string | null; transferId?: string | null; transactionDate?: number; postedDate?: number | null; description?: string; merchantName?: string | null; counterparty?: string | null; amountMinor?: number; currencyCode?: string; reportingAmountMinor?: number | null; reportingCurrencyCode?: string | null; fxRate?: string | null; fxRateSource?: string | null; type?: string; status?: string; reviewReason?: string | null }) {
         await requireExistingOrganizationAccess(tx, 'fin_movements', args.id)
         const { id, ...updates } = args
         await tx.mutate.fin_movements.update({ id, ...updates, updatedAt: Date.now() })

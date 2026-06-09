@@ -795,6 +795,17 @@ export default function Finance() {
     if (movement && categoryId) await learnCategorizationRule(movement, categoryId)
   }
 
+  async function updateMovementAccount(movementId: string, accountId: string) {
+    const account = scopedAccounts.find((entry) => entry.id === accountId)
+    if (!account) return
+    await z.mutate.fin_movements.update({
+      id: movementId,
+      accountId,
+      currencyCode: account.currencyCode,
+      reportingCurrencyCode: account.currencyCode,
+    })
+  }
+
   async function updateMovementStatus(movementId: string, status: string) {
     await z.mutate.fin_movements.update({ id: movementId, status, reviewReason: reviewReasonForStatus(status) })
     const movement = scopedMovements.find((entry) => entry.id === movementId)
@@ -1318,8 +1329,15 @@ export default function Finance() {
                   <div className="grid grid-cols-[1fr_auto] gap-2 border-t border-[rgba(0,255,140,0.08)] pt-2">
                     <div className="min-w-0">
                       <div className="text-[10px] uppercase tracking-label text-fg-4">{formatZeroDate(movement.transactionDate)}</div>
-                      <div className="mt-1 truncate text-fg-3" title={account?.name ?? 'unknown'}>
-                        {account?.name ?? 'unknown'}
+                      <div className="mt-1">
+                        <PachSelect
+                          value={movement.accountId}
+                          onChange={(next) => void updateMovementAccount(movement.id, next)}
+                          options={importAccountOptions}
+                          display={account?.name ?? 'unknown'}
+                          popupWidth="260px"
+                          triggerClassName="flex h-8 w-full min-w-0 items-center justify-between border border-[rgba(0,255,140,0.12)] bg-pit px-2 text-left font-mono text-xs text-fg-2 outline-none transition hover:border-[rgba(0,255,140,0.22)] hover:bg-[rgba(0,255,136,0.04)] hover:text-fg-1 focus-visible:border-accent"
+                        />
                       </div>
                     </div>
                     <PachSelect
@@ -1409,9 +1427,14 @@ export default function Finance() {
                         ) : null}
                       </td>
                       <td className="min-w-0 px-3 py-2 text-fg-3">
-                        <div className="truncate" title={account?.name ?? 'unknown'}>
-                          {account?.name ?? 'unknown'}
-                        </div>
+                        <PachSelect
+                          value={movement.accountId}
+                          onChange={(next) => void updateMovementAccount(movement.id, next)}
+                          options={importAccountOptions}
+                          display={account?.name ?? 'unknown'}
+                          popupWidth="260px"
+                          triggerClassName="flex h-7 w-full min-w-0 items-center justify-between border border-transparent bg-transparent px-2 text-left font-mono text-xs text-fg-2 outline-none transition hover:border-[rgba(0,255,140,0.18)] hover:bg-[rgba(0,255,136,0.04)] hover:text-fg-1 focus-visible:border-accent"
+                        />
                       </td>
                       <td className="min-w-0 px-3 py-2">
                         <PachSelect
