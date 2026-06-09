@@ -139,6 +139,164 @@ const crmBoardColumns = table('crm_board_columns')
     color: string().optional(),
 })
     .primaryKey('id');
+const finAccounts = table('fin_accounts')
+    .columns({
+    id: string(),
+    organizationId: string().from('organization_id'),
+    name: string(),
+    institutionName: string().optional().from('institution_name'),
+    holderUserId: string().optional().from('holder_user_id'),
+    type: string(),
+    currencyCode: string().from('currency_code'),
+    status: string(),
+    lastBalanceMinor: number().optional().from('last_balance_minor'),
+    lastBalanceAt: number().optional().from('last_balance_at'),
+    metadata: json(),
+    createdAt: number().from('created_at'),
+    updatedAt: number().from('updated_at'),
+})
+    .primaryKey('id');
+const finCategories = table('fin_categories')
+    .columns({
+    id: string(),
+    organizationId: string().from('organization_id'),
+    parentId: string().optional().from('parent_id'),
+    name: string(),
+    type: string(),
+    color: string().optional(),
+    icon: string().optional(),
+    position: number(),
+    archived: boolean(),
+    createdAt: number().from('created_at'),
+    updatedAt: number().from('updated_at'),
+})
+    .primaryKey('id');
+const finImports = table('fin_imports')
+    .columns({
+    id: string(),
+    organizationId: string().from('organization_id'),
+    accountId: string().from('account_id'),
+    createdByUserId: string().optional().from('created_by_user_id'),
+    status: string(),
+    sourceType: string().from('source_type'),
+    fileName: string().from('file_name'),
+    fileType: string().from('file_type'),
+    fileSha256: string().from('file_sha256'),
+    statementStartDate: number().optional().from('statement_start_date'),
+    statementEndDate: number().optional().from('statement_end_date'),
+    detectedCurrencyCode: string().optional().from('detected_currency_code'),
+    detectedInstitution: string().optional().from('detected_institution'),
+    detectedAccountHint: string().optional().from('detected_account_hint'),
+    itemsParsed: number().from('items_parsed'),
+    itemsReady: number().from('items_ready'),
+    itemsDuplicate: number().from('items_duplicate'),
+    itemsNeedingReview: number().from('items_needing_review'),
+    errorMessage: string().optional().from('error_message'),
+    rawSummary: json().from('raw_summary'),
+    createdAt: number().from('created_at'),
+    updatedAt: number().from('updated_at'),
+    appliedAt: number().optional().from('applied_at'),
+})
+    .primaryKey('id');
+const finImportItems = table('fin_import_items')
+    .columns({
+    id: string(),
+    organizationId: string().from('organization_id'),
+    importId: string().from('import_id'),
+    accountId: string().from('account_id'),
+    status: string(),
+    transactionDate: number().from('transaction_date'),
+    postedDate: number().optional().from('posted_date'),
+    description: string(),
+    merchantName: string().optional().from('merchant_name'),
+    amountMinor: number().from('amount_minor'),
+    currencyCode: string().from('currency_code'),
+    suggestedType: string().optional().from('suggested_type'),
+    suggestedCategoryId: string().optional().from('suggested_category_id'),
+    suggestedConfidence: number().optional().from('suggested_confidence'),
+    duplicateMovementId: string().optional().from('duplicate_movement_id'),
+    fingerprint: string(),
+    rawData: json().from('raw_data'),
+    errorMessage: string().optional().from('error_message'),
+    createdAt: number().from('created_at'),
+    updatedAt: number().from('updated_at'),
+})
+    .primaryKey('id');
+const finTransfers = table('fin_transfers')
+    .columns({
+    id: string(),
+    organizationId: string().from('organization_id'),
+    status: string(),
+    fromAccountId: string().optional().from('from_account_id'),
+    toAccountId: string().optional().from('to_account_id'),
+    amountMinor: number().optional().from('amount_minor'),
+    currencyCode: string().optional().from('currency_code'),
+    matchedConfidence: number().optional().from('matched_confidence'),
+    createdAt: number().from('created_at'),
+    updatedAt: number().from('updated_at'),
+})
+    .primaryKey('id');
+const finMovements = table('fin_movements')
+    .columns({
+    id: string(),
+    organizationId: string().from('organization_id'),
+    accountId: string().from('account_id'),
+    categoryId: string().optional().from('category_id'),
+    transferId: string().optional().from('transfer_id'),
+    importId: string().optional().from('import_id'),
+    sourceItemId: string().optional().from('source_item_id'),
+    transactionDate: number().from('transaction_date'),
+    postedDate: number().optional().from('posted_date'),
+    description: string(),
+    merchantName: string().optional().from('merchant_name'),
+    counterparty: string().optional(),
+    amountMinor: number().from('amount_minor'),
+    currencyCode: string().from('currency_code'),
+    reportingAmountMinor: number().optional().from('reporting_amount_minor'),
+    reportingCurrencyCode: string().optional().from('reporting_currency_code'),
+    fxRate: string().optional().from('fx_rate'),
+    fxRateSource: string().optional().from('fx_rate_source'),
+    type: string(),
+    status: string(),
+    reviewReason: string().optional().from('review_reason'),
+    externalId: string().optional().from('external_id'),
+    fingerprint: string(),
+    rawData: json().from('raw_data'),
+    createdAt: number().from('created_at'),
+    updatedAt: number().from('updated_at'),
+})
+    .primaryKey('id');
+const finCategorizationRules = table('fin_categorization_rules')
+    .columns({
+    id: string(),
+    organizationId: string().from('organization_id'),
+    accountId: string().optional().from('account_id'),
+    categoryId: string().optional().from('category_id'),
+    type: string(),
+    matchKind: string().from('match_kind'),
+    matchValue: string().from('match_value'),
+    amountMinor: number().optional().from('amount_minor'),
+    currencyCode: string().optional().from('currency_code'),
+    confidence: number(),
+    autoApply: boolean().from('auto_apply'),
+    createdFromMovementId: string().optional().from('created_from_movement_id'),
+    createdAt: number().from('created_at'),
+    updatedAt: number().from('updated_at'),
+})
+    .primaryKey('id');
+const finBalanceSnapshots = table('fin_balance_snapshots')
+    .columns({
+    id: string(),
+    organizationId: string().from('organization_id'),
+    accountId: string().from('account_id'),
+    asOfDate: number().from('as_of_date'),
+    balanceMinor: number().from('balance_minor'),
+    currencyCode: string().from('currency_code'),
+    source: string(),
+    importId: string().optional().from('import_id'),
+    createdAt: number().from('created_at'),
+})
+    .primaryKey('id');
 const pmTeams = table('pm_teams')
     .columns({
     id: string(),
@@ -504,6 +662,14 @@ export const schema = createSchema({
         crmNotes,
         crmBoards,
         crmBoardColumns,
+        finAccounts,
+        finCategories,
+        finImports,
+        finImportItems,
+        finTransfers,
+        finMovements,
+        finCategorizationRules,
+        finBalanceSnapshots,
         pmTeams,
         pmProjects,
         pmStatuses,
@@ -558,6 +724,14 @@ export const permissions = definePermissions(schema, () => {
         crm_notes: organizationScoped(),
         crm_boards: organizationScoped(),
         crm_board_columns: organizationScoped(),
+        fin_accounts: organizationScoped(),
+        fin_categories: organizationScoped(),
+        fin_imports: organizationScoped(),
+        fin_import_items: organizationScoped(),
+        fin_transfers: organizationScoped(),
+        fin_movements: organizationScoped(),
+        fin_categorization_rules: organizationScoped(),
+        fin_balance_snapshots: organizationScoped(),
         pm_teams: authenticatedReadOnly,
         pm_projects: organizationScoped('companyId'),
         pm_statuses: authenticatedReadOnly,

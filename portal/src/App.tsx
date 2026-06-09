@@ -1,6 +1,6 @@
 import { Routes, Route, NavLink, Navigate, useLocation, useNavigate } from 'react-router-dom'
 import { useQuery, useZero, ZeroProvider } from '@rocicorp/zero/react'
-import { FolderKanban, LayoutTemplate, LogOut, MessageCircleMore, Menu, Rows3, X } from 'lucide-react'
+import { CircleDollarSign, FolderKanban, LayoutTemplate, LogOut, MessageCircleMore, Menu, Rows3, X } from 'lucide-react'
 import { useEffect, useMemo, useState, type ComponentType } from 'react'
 import { schema } from './zero-schema'
 import { mutators, type Mutators } from './mutators'
@@ -9,6 +9,7 @@ import { AuthProvider, useAuth } from './lib/auth'
 import Decks from './pages/Decks'
 import DeckViewer from './pages/DeckViewer'
 import CRM from './pages/crm/CRM'
+import Finance from './pages/finance/Finance'
 import Issues from './pages/issues/Issues'
 import IssueDetail from './pages/issues/IssueDetail'
 import IssuesLayout from './pages/issues/IssuesLayout'
@@ -28,6 +29,7 @@ const WHATSAPP_PROJECTS = new Set(['ardia', 'ardia-mkt'])
 const OUTER_NAV_ITEMS = [
   { label: 'Issues', path: '/issues' },
   { label: 'CRM', path: '/crm' },
+  { label: 'Finance', path: '/finance' },
   { label: 'WhatsApp', path: '/whatsapp/templates', requiresWhatsApp: true },
   { label: 'Decks', path: '/decks' },
 ] as const
@@ -123,6 +125,7 @@ const MOBILE_NAV_ITEMS: Array<{
 }> = [
   { to: '/issues', label: 'issues', icon: Rows3 },
   { to: '/crm', label: 'crm', icon: FolderKanban },
+  { to: '/finance', label: 'finance', icon: CircleDollarSign },
   { to: '/whatsapp/templates', label: 'whatsapp', icon: MessageCircleMore, requiresWhatsApp: true },
   { to: '/decks', label: 'decks', icon: LayoutTemplate },
 ]
@@ -259,6 +262,7 @@ function AppShell() {
 
       const currentIndex = visibleOuterNavItems.findIndex((item) => {
         if (item.path === '/crm') return location.pathname.startsWith('/crm')
+        if (item.path === '/finance') return location.pathname.startsWith('/finance')
         if (item.path === '/decks') return location.pathname.startsWith('/decks')
         if (item.path === '/issues') return location.pathname.startsWith('/issues')
         if (item.path === '/whatsapp/templates') return location.pathname.startsWith('/whatsapp')
@@ -295,6 +299,7 @@ function AppShell() {
             <Routes>
               <Route path="/" element={<Navigate to={HOME_PATH} replace />} />
               <Route path="/crm/*" element={<CRM />} />
+              <Route path="/finance/*" element={<Finance />} />
               <Route path="/issues" element={<IssuesLayout />}>
                 <Route index element={<Issues />} />
                 <Route path="labels" element={<Labels />} />
@@ -342,6 +347,7 @@ function useVisibleOuterNavItems() {
           icon:
             item.path === '/issues' ? Rows3 :
             item.path === '/crm' ? FolderKanban :
+            item.path === '/finance' ? CircleDollarSign :
             item.path === '/whatsapp/templates' ? MessageCircleMore :
             LayoutTemplate,
         })),

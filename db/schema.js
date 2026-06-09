@@ -1,4 +1,4 @@
-import { boolean, index, pgTable, uniqueIndex, uuid, text, timestamp, integer, jsonb } from 'drizzle-orm/pg-core';
+import { bigint, boolean, date, index, pgTable, uniqueIndex, uuid, text, timestamp, integer, jsonb } from 'drizzle-orm/pg-core';
 /* ─────────────────────────── USERS ─────────────────────────── */
 export const users = pgTable('users', {
     id: uuid('id').primaryKey().defaultRandom(),
@@ -135,6 +135,189 @@ export const crmBoardColumns = pgTable('crm_board_columns', {
     /** Optional color for the column header */
     color: text('color'),
 });
+/* ─────────────────────────── FINANCE ─────────────────────────── */
+export const finAccounts = pgTable('fin_accounts', {
+    id: uuid('id').primaryKey().defaultRandom(),
+    organizationId: uuid('organization_id').notNull().references(() => organizations.id),
+    name: text('name').notNull(),
+    institutionName: text('institution_name'),
+    holderUserId: uuid('holder_user_id').references(() => users.id),
+    /** bank_account | credit_card | cash | investment | loan | manual_asset */
+    type: text('type').notNull().default('bank_account'),
+    currencyCode: text('currency_code').notNull().default('MXN'),
+    /** active | archived */
+    status: text('status').notNull().default('active'),
+    lastBalanceMinor: bigint('last_balance_minor', { mode: 'number' }),
+    lastBalanceAt: timestamp('last_balance_at', { withTimezone: true }),
+    metadata: jsonb('metadata').$type().notNull().default({}),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+}, (table) => ({
+    organizationIdIdx: index('fin_accounts_organization_idx').on(table.organizationId),
+    organizationStatusIdx: index('fin_accounts_organization_status_idx').on(table.organizationId, table.status),
+    holderUserIdIdx: index('fin_accounts_holder_user_idx').on(table.holderUserId),
+}));
+export const finCategories = pgTable('fin_categories', {
+    id: uuid('id').primaryKey().defaultRandom(),
+    organizationId: uuid('organization_id').notNull().references(() => organizations.id),
+    parentId: uuid('parent_id'),
+    name: text('name').notNull(),
+    /** income | expense | transfer | adjustment | mixed */
+    type: text('type').notNull().default('expense'),
+    color: text('color'),
+    icon: text('icon'),
+    position: integer('position').notNull().default(0),
+    archived: boolean('archived').notNull().default(false),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+}, (table) => ({
+    organizationIdIdx: index('fin_categories_organization_idx').on(table.organizationId),
+    organizationNameIdx: uniqueIndex('fin_categories_organization_name_idx').on(table.organizationId, table.name),
+}));
+export const finImports = pgTable('fin_imports', {
+    id: uuid('id').primaryKey().defaultRandom(),
+    organizationId: uuid('organization_id').notNull().references(() => organizations.id),
+    accountId: uuid('account_id').notNull().references(() => finAccounts.id),
+    createdByUserId: uuid('created_by_user_id').references(() => users.id),
+    /** uploading | parsing | ready | applied | partially_applied | failed | ignored */
+    status: text('status').notNull().default('parsing'),
+    /** statement_csv | statement_pdf | screenshot | manual_csv */
+    sourceType: text('source_type').notNull().default('statement_csv'),
+    fileName: text('file_name').notNull(),
+    fileType: text('file_type').notNull(),
+    fileSha256: text('file_sha256').notNull(),
+    statementStartDate: date('statement_start_date'),
+    statementEndDate: date('statement_end_date'),
+    detectedCurrencyCode: text('detected_currency_code'),
+    detectedInstitution: text('detected_institution'),
+    detectedAccountHint: text('detected_account_hint'),
+    itemsParsed: integer('items_parsed').notNull().default(0),
+    itemsReady: integer('items_ready').notNull().default(0),
+    itemsDuplicate: integer('items_duplicate').notNull().default(0),
+    itemsNeedingReview: integer('items_needing_review').notNull().default(0),
+    errorMessage: text('error_message'),
+    rawSummary: jsonb('raw_summary').$type().notNull().default({}),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+    appliedAt: timestamp('applied_at', { withTimezone: true }),
+}, (table) => ({
+    organizationIdIdx: index('fin_imports_organization_idx').on(table.organizationId),
+    accountIdIdx: index('fin_imports_account_idx').on(table.accountId),
+    fileShaIdx: index('fin_imports_file_sha_idx').on(table.fileSha256),
+}));
+export const finImportItems = pgTable('fin_import_items', {
+    id: uuid('id').primaryKey().defaultRandom(),
+    organizationId: uuid('organization_id').notNull().references(() => organizations.id),
+    importId: uuid('import_id').notNull().references(() => finImports.id),
+    accountId: uuid('account_id').notNull().references(() => finAccounts.id),
+    /** parsed | duplicate | needs_review | applied | ignored | failed */
+    status: text('status').notNull().default('parsed'),
+    transactionDate: date('transaction_date').notNull(),
+    postedDate: date('posted_date'),
+    description: text('description').notNull(),
+    merchantName: text('merchant_name'),
+    amountMinor: bigint('amount_minor', { mode: 'number' }).notNull(),
+    currencyCode: text('currency_code').notNull(),
+    suggestedType: text('suggested_type'),
+    suggestedCategoryId: uuid('suggested_category_id').references(() => finCategories.id),
+    suggestedConfidence: integer('suggested_confidence'),
+    duplicateMovementId: uuid('duplicate_movement_id'),
+    fingerprint: text('fingerprint').notNull(),
+    rawData: jsonb('raw_data').$type().notNull().default({}),
+    errorMessage: text('error_message'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+}, (table) => ({
+    importIdIdx: index('fin_import_items_import_idx').on(table.importId),
+    accountFingerprintIdx: index('fin_import_items_account_fingerprint_idx').on(table.accountId, table.fingerprint),
+}));
+export const finTransfers = pgTable('fin_transfers', {
+    id: uuid('id').primaryKey().defaultRandom(),
+    organizationId: uuid('organization_id').notNull().references(() => organizations.id),
+    /** suggested | confirmed | rejected */
+    status: text('status').notNull().default('suggested'),
+    fromAccountId: uuid('from_account_id').references(() => finAccounts.id),
+    toAccountId: uuid('to_account_id').references(() => finAccounts.id),
+    amountMinor: bigint('amount_minor', { mode: 'number' }),
+    currencyCode: text('currency_code'),
+    matchedConfidence: integer('matched_confidence'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+}, (table) => ({
+    organizationIdIdx: index('fin_transfers_organization_idx').on(table.organizationId),
+}));
+export const finMovements = pgTable('fin_movements', {
+    id: uuid('id').primaryKey().defaultRandom(),
+    organizationId: uuid('organization_id').notNull().references(() => organizations.id),
+    accountId: uuid('account_id').notNull().references(() => finAccounts.id),
+    categoryId: uuid('category_id').references(() => finCategories.id),
+    transferId: uuid('transfer_id').references(() => finTransfers.id),
+    importId: uuid('import_id').references(() => finImports.id),
+    sourceItemId: uuid('source_item_id').references(() => finImportItems.id),
+    transactionDate: date('transaction_date').notNull(),
+    postedDate: date('posted_date'),
+    description: text('description').notNull(),
+    merchantName: text('merchant_name'),
+    counterparty: text('counterparty'),
+    amountMinor: bigint('amount_minor', { mode: 'number' }).notNull(),
+    currencyCode: text('currency_code').notNull(),
+    reportingAmountMinor: bigint('reporting_amount_minor', { mode: 'number' }),
+    reportingCurrencyCode: text('reporting_currency_code'),
+    fxRate: text('fx_rate'),
+    fxRateSource: text('fx_rate_source'),
+    /** income | expense | transfer | adjustment */
+    type: text('type').notNull().default('expense'),
+    /** pending_review | reviewed | ignored */
+    status: text('status').notNull().default('pending_review'),
+    /** uncategorized | possible_transfer | duplicate | low_confidence | parse_issue */
+    reviewReason: text('review_reason'),
+    externalId: text('external_id'),
+    fingerprint: text('fingerprint').notNull(),
+    rawData: jsonb('raw_data').$type().notNull().default({}),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+}, (table) => ({
+    organizationDateIdx: index('fin_movements_organization_date_idx').on(table.organizationId, table.transactionDate),
+    accountDateIdx: index('fin_movements_account_date_idx').on(table.accountId, table.transactionDate),
+    accountFingerprintIdx: uniqueIndex('fin_movements_account_fingerprint_idx').on(table.accountId, table.fingerprint),
+    statusIdx: index('fin_movements_status_idx').on(table.status),
+}));
+export const finCategorizationRules = pgTable('fin_categorization_rules', {
+    id: uuid('id').primaryKey().defaultRandom(),
+    organizationId: uuid('organization_id').notNull().references(() => organizations.id),
+    accountId: uuid('account_id').references(() => finAccounts.id),
+    categoryId: uuid('category_id').references(() => finCategories.id),
+    /** income | expense | transfer | adjustment */
+    type: text('type').notNull().default('expense'),
+    /** contains | exact | regex | merchant | amount_recurring */
+    matchKind: text('match_kind').notNull().default('contains'),
+    matchValue: text('match_value').notNull(),
+    amountMinor: bigint('amount_minor', { mode: 'number' }),
+    currencyCode: text('currency_code'),
+    confidence: integer('confidence').notNull().default(90),
+    autoApply: boolean('auto_apply').notNull().default(true),
+    createdFromMovementId: uuid('created_from_movement_id').references(() => finMovements.id),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+}, (table) => ({
+    organizationIdIdx: index('fin_categorization_rules_organization_idx').on(table.organizationId),
+    organizationMatchIdx: index('fin_categorization_rules_match_idx').on(table.organizationId, table.matchKind, table.matchValue),
+}));
+export const finBalanceSnapshots = pgTable('fin_balance_snapshots', {
+    id: uuid('id').primaryKey().defaultRandom(),
+    organizationId: uuid('organization_id').notNull().references(() => organizations.id),
+    accountId: uuid('account_id').notNull().references(() => finAccounts.id),
+    asOfDate: date('as_of_date').notNull(),
+    balanceMinor: bigint('balance_minor', { mode: 'number' }).notNull(),
+    currencyCode: text('currency_code').notNull(),
+    /** manual | statement | calculated | import */
+    source: text('source').notNull().default('manual'),
+    importId: uuid('import_id').references(() => finImports.id),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+}, (table) => ({
+    accountDateIdx: uniqueIndex('fin_balance_snapshots_account_date_idx').on(table.accountId, table.asOfDate, table.source),
+    organizationIdIdx: index('fin_balance_snapshots_organization_idx').on(table.organizationId),
+}));
 /* ─────────────────────── PROJECT MANAGEMENT ─────────────────────── */
 export const pmTeams = pgTable('pm_teams', {
     id: uuid('id').primaryKey().defaultRandom(),

@@ -15,6 +15,12 @@ type ScopedTable =
   | 'crm_notes'
   | 'crm_boards'
   | 'crm_board_columns'
+  | 'fin_accounts'
+  | 'fin_categories'
+  | 'fin_transfers'
+  | 'fin_movements'
+  | 'fin_categorization_rules'
+  | 'fin_balance_snapshots'
   | 'pm_teams'
   | 'pm_projects'
   | 'pm_statuses'
@@ -35,6 +41,12 @@ const ORG_COLUMN_BY_TABLE: Record<ScopedTable, string> = {
   crm_notes: 'organization_id',
   crm_boards: 'organization_id',
   crm_board_columns: 'organization_id',
+  fin_accounts: 'organization_id',
+  fin_categories: 'organization_id',
+  fin_transfers: 'organization_id',
+  fin_movements: 'organization_id',
+  fin_categorization_rules: 'organization_id',
+  fin_balance_snapshots: 'organization_id',
   pm_teams: 'company_id',
   pm_projects: 'company_id',
   pm_statuses: 'company_id',
@@ -262,6 +274,129 @@ export function createServerMutators(authData?: JWTPayload) {
       async delete(tx: Tx, args: { id: string }) {
         await requireExistingOrganizationAccess(tx, 'crm_board_columns', args.id)
         await tx.mutate.crm_board_columns.delete({ id: args.id })
+      },
+    },
+
+    fin_accounts: {
+      async create(tx: Tx, args: { id: string; organizationId: string; name: string; institutionName?: string; holderUserId?: string; type?: string; currencyCode?: string; status?: string; lastBalanceMinor?: number; lastBalanceAt?: number; metadata?: Record<string, unknown> }) {
+        requireOrganizationAccess(args.organizationId)
+        const now = Date.now()
+        await tx.mutate.fin_accounts.insert({
+          type: 'bank_account',
+          currencyCode: 'MXN',
+          status: 'active',
+          metadata: {},
+          ...args,
+          createdAt: now,
+          updatedAt: now,
+        })
+      },
+      async update(tx: Tx, args: { id: string; name?: string; institutionName?: string | null; holderUserId?: string | null; type?: string; currencyCode?: string; status?: string; lastBalanceMinor?: number | null; lastBalanceAt?: number | null; metadata?: Record<string, unknown> }) {
+        await requireExistingOrganizationAccess(tx, 'fin_accounts', args.id)
+        const { id, ...updates } = args
+        await tx.mutate.fin_accounts.update({ id, ...updates, updatedAt: Date.now() })
+      },
+    },
+
+    fin_categories: {
+      async create(tx: Tx, args: { id: string; organizationId: string; parentId?: string; name: string; type?: string; color?: string; icon?: string; position?: number; archived?: boolean }) {
+        requireOrganizationAccess(args.organizationId)
+        const now = Date.now()
+        await tx.mutate.fin_categories.insert({
+          type: 'expense',
+          position: 0,
+          archived: false,
+          ...args,
+          createdAt: now,
+          updatedAt: now,
+        })
+      },
+      async update(tx: Tx, args: { id: string; parentId?: string | null; name?: string; type?: string; color?: string | null; icon?: string | null; position?: number; archived?: boolean }) {
+        await requireExistingOrganizationAccess(tx, 'fin_categories', args.id)
+        const { id, ...updates } = args
+        await tx.mutate.fin_categories.update({ id, ...updates, updatedAt: Date.now() })
+      },
+    },
+
+    fin_movements: {
+      async create(tx: Tx, args: { id: string; organizationId: string; accountId: string; categoryId?: string | null; transferId?: string | null; transactionDate: number; postedDate?: number | null; description: string; merchantName?: string | null; counterparty?: string | null; amountMinor: number; currencyCode: string; reportingAmountMinor?: number | null; reportingCurrencyCode?: string | null; fxRate?: string | null; fxRateSource?: string | null; type?: string; status?: string; reviewReason?: string | null; fingerprint?: string; rawData?: Record<string, unknown> }) {
+        requireOrganizationAccess(args.organizationId)
+        const now = Date.now()
+        await tx.mutate.fin_movements.insert({
+          transferId: null,
+          categoryId: null,
+          postedDate: null,
+          merchantName: null,
+          counterparty: null,
+          reportingAmountMinor: args.amountMinor,
+          reportingCurrencyCode: args.currencyCode,
+          fxRate: null,
+          fxRateSource: null,
+          type: 'expense',
+          status: 'reviewed',
+          reviewReason: null,
+          fingerprint: `manual:${args.id}`,
+          rawData: { source: 'manual' },
+          ...args,
+          createdAt: now,
+          updatedAt: now,
+        })
+      },
+      async update(tx: Tx, args: { id: string; categoryId?: string | null; transferId?: string | null; transactionDate?: number; postedDate?: number | null; description?: string; merchantName?: string | null; counterparty?: string | null; amountMinor?: number; currencyCode?: string; reportingAmountMinor?: number | null; reportingCurrencyCode?: string | null; fxRate?: string | null; fxRateSource?: string | null; type?: string; status?: string; reviewReason?: string | null }) {
+        await requireExistingOrganizationAccess(tx, 'fin_movements', args.id)
+        const { id, ...updates } = args
+        await tx.mutate.fin_movements.update({ id, ...updates, updatedAt: Date.now() })
+      },
+    },
+
+    fin_transfers: {
+      async create(tx: Tx, args: { id: string; organizationId: string; status?: string; fromAccountId?: string | null; toAccountId?: string | null; amountMinor?: number | null; currencyCode?: string | null; matchedConfidence?: number | null }) {
+        requireOrganizationAccess(args.organizationId)
+        const now = Date.now()
+        await tx.mutate.fin_transfers.insert({
+          status: 'confirmed',
+          fromAccountId: null,
+          toAccountId: null,
+          amountMinor: null,
+          currencyCode: null,
+          matchedConfidence: null,
+          ...args,
+          createdAt: now,
+          updatedAt: now,
+        })
+      },
+      async update(tx: Tx, args: { id: string; status?: string; fromAccountId?: string | null; toAccountId?: string | null; amountMinor?: number | null; currencyCode?: string | null; matchedConfidence?: number | null }) {
+        await requireExistingOrganizationAccess(tx, 'fin_transfers', args.id)
+        const { id, ...updates } = args
+        await tx.mutate.fin_transfers.update({ id, ...updates, updatedAt: Date.now() })
+      },
+    },
+
+    fin_categorization_rules: {
+      async create(tx: Tx, args: { id: string; organizationId: string; accountId?: string; categoryId?: string; type?: string; matchKind?: string; matchValue: string; amountMinor?: number; currencyCode?: string; confidence?: number; autoApply?: boolean; createdFromMovementId?: string }) {
+        requireOrganizationAccess(args.organizationId)
+        const now = Date.now()
+        await tx.mutate.fin_categorization_rules.insert({
+          type: 'expense',
+          matchKind: 'contains',
+          confidence: 90,
+          autoApply: true,
+          ...args,
+          createdAt: now,
+          updatedAt: now,
+        })
+      },
+      async update(tx: Tx, args: { id: string; accountId?: string | null; categoryId?: string | null; type?: string; matchKind?: string; matchValue?: string; amountMinor?: number | null; currencyCode?: string | null; confidence?: number; autoApply?: boolean }) {
+        await requireExistingOrganizationAccess(tx, 'fin_categorization_rules', args.id)
+        const { id, ...updates } = args
+        await tx.mutate.fin_categorization_rules.update({ id, ...updates, updatedAt: Date.now() })
+      },
+    },
+
+    fin_balance_snapshots: {
+      async create(tx: Tx, args: { id: string; organizationId: string; accountId: string; asOfDate: number; balanceMinor: number; currencyCode: string; source?: string; importId?: string }) {
+        requireOrganizationAccess(args.organizationId)
+        await tx.mutate.fin_balance_snapshots.insert({ source: 'manual', ...args, createdAt: Date.now() })
       },
     },
 

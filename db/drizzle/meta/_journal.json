@@ -127,6 +127,20 @@
       "when": 1780746000000,
       "tag": "0017_crm_board_column_organizations",
       "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1780800000000,
+      "tag": "0018_finance",
+      "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1780800100000,
+      "tag": "0019_fin_account_holder",
+      "breakpoints": true
     }
   ]
 }

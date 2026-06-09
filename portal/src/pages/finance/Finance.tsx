@@ -1,0 +1,2938 @@
+import { useQuery, useZero } from '@rocicorp/zero/react'
+import { AlertTriangle, ArrowRightLeft, Building2, CalendarDays, ChartPie, CheckCircle, CircleDollarSign, CreditCard, FileText, FileUp, Landmark, Layers2, Loader2, Plus, Search, Tag, UploadCloud, UserRound, WalletCards, X } from 'lucide-react'
+import { useEffect, useMemo, useRef, useState, type MouseEvent, type ReactNode } from 'react'
+import { useLocation, useNavigate } from 'react-router-dom'
+import { config } from '../../config'
+import { PachSelect, type PachSelectOption } from '../../components/PachSelect'
+import { useAuth } from '../../lib/auth'
+import type { Mutators } from '../../mutators'
+import type { Schema } from '../../zero-schema'
+import { FilterButton, type ActiveFilters, type FilterFieldConfig } from '../issues/IssueFilters'
+
+type Tab = 'dashboard' | 'movements' | 'accounts'
+type ImportPhase = 'select' | 'ready' | 'processing' | 'success' | 'failed'
+type FinanceMovement = Schema['tables']['fin_movements']['row']
+type FinanceAccount = Schema['tables']['fin_accounts']['row']
+type AccountDraft = {
+  name: string
+  institutionName: string
+  holderUserId: string
+  type: string
+  currencyCode: string
+}
+type TransferCandidate = {
+  movement: FinanceMovement
+  score: number
+  reasons: string[]
+}
+type CategoryBreakdownEntry = {
+  id: string
+  name: string
+  amountMinor: number
+  percent: number
+  currencyCode: string
+  color: string
+}
+type MonthlyBalanceEntry = {
+  id: string
+  label: string
+  positiveMinor: number
+  negativeMinor: number
+  netMinor: number
+  movementCount: number
+  currencyCode: string
+  mixedCurrency: boolean
+}
+
+function tabFromPath(pathname: string): Tab {
+  if (pathname === '/finance/dashboard') return 'dashboard'
+  return pathname === '/finance/accounts' || pathname === '/finance/accounts-cards' ? 'accounts' : 'movements'
+}
+
+function pathForTab(tab: Tab) {
+  if (tab === 'dashboard') return '/finance/dashboard'
+  return tab === 'accounts' ? '/finance/accounts' : '/finance/movements'
+}
+
+function financeOrganizationStorageKey(userId: string) {
+  return `pach:finance:organization:${userId}`
+}
+
+const ACCOUNT_TYPES = [
+  { value: 'bank_account', label: 'bank account' },
+  { value: 'credit_card', label: 'credit card' },
+  { value: 'cash', label: 'cash' },
+  { value: 'investment', label: 'investment' },
+  { value: 'loan', label: 'loan' },
+  { value: 'manual_asset', label: 'manual asset' },
+]
+
+const CURRENCIES = ['MXN', 'USD', 'EUR']
+const MAX_IMPORT_FILE_BYTES = 45 * 1024 * 1024
+const UNCATEGORIZED_VALUE = '__uncategorized__'
+const EMPTY_ACCOUNT_DRAFT: AccountDraft = { name: '', institutionName: '', holderUserId: '', type: 'bank_account', currencyCode: 'MXN' }
+
+const MOVEMENT_TYPES = [
+  { value: 'expense', label: 'expense' },
+  { value: 'income', label: 'income' },
+  { value: 'transfer', label: 'transfer' },
+  { value: 'adjustment', label: 'adjustment' },
+]
+
+const MOVEMENT_STATUSES = [
+  { value: 'pending_review', label: 'pending' },
+  { value: 'reviewed', label: 'reviewed' },
+  { value: 'ignored', label: 'ignored' },
+]
+
+const CATEGORY_CHART_COLORS = [
+  '#56f08b',
+  '#ff5f87',
+  '#ffb84d',
+  '#5fc6ff',
+  '#d48cff',
+  '#7ee7d1',
+  '#f7ef6a',
+  '#ff8f70',
+  '#9aa7ff',
+]
+
+export default function Finance() {
+  const z = useZero<Schema, Mutators>()
+  const location = useLocation()
+  const navigate = useNavigate()
+  const { user, token } = useAuth()
+  const [organizations] = useQuery(z.query.organizations.orderBy('name', 'asc'))
+  const [organizationMemberships] = useQuery(z.query.organization_memberships)
+  const [users] = useQuery(z.query.users.orderBy('email', 'asc'))
+  const [accounts] = useQuery(z.query.fin_accounts.orderBy('name', 'asc'))
+  const [movements] = useQuery(z.query.fin_movements.orderBy('transactionDate', 'desc'))
+  const [categories] = useQuery(z.query.fin_categories.orderBy('position', 'asc'))
+  const [transfers] = useQuery(z.query.fin_transfers)
+  const [categorizationRules] = useQuery(z.query.fin_categorization_rules)
+
+  const [organizationId, setOrganizationId] = useState(() => {
+    if (!user || typeof window === 'undefined') return ''
+    return localStorage.getItem(financeOrganizationStorageKey(user.id)) ?? ''
+  })
+  const [activeFilters, setActiveFilters] = useState<ActiveFilters>({})
+  const [dashboardFilters, setDashboardFilters] = useState<ActiveFilters>({})
+  const [search, setSearch] = useState('')
+  const [accountDraft, setAccountDraft] = useState<AccountDraft>(EMPTY_ACCOUNT_DRAFT)
+  const [accountModalOpen, setAccountModalOpen] = useState(false)
+  const [editingAccountId, setEditingAccountId] = useState<string | null>(null)
+  const [categoryDraft, setCategoryDraft] = useState({ name: '', type: 'expense' })
+  const [categoryModalOpen, setCategoryModalOpen] = useState(false)
+  const [categoryMergeDraft, setCategoryMergeDraft] = useState({ categoryId: '', targetCategoryId: '' })
+  const [movementDraft, setMovementDraft] = useState({
+    accountId: '',
+    categoryId: UNCATEGORIZED_VALUE,
+    transactionDate: todayInputDate(),
+    description: '',
+    amount: '',
+    type: 'expense',
+    status: 'reviewed',
+  })
+  const [movementModalOpen, setMovementModalOpen] = useState(false)
+  const [balanceDraft, setBalanceDraft] = useState({
+    accountId: '',
+    asOfDate: todayInputDate(),
+    balance: '',
+    createAdjustment: false,
+  })
+  const [balanceModalOpen, setBalanceModalOpen] = useState(false)
+  const [transferModalMovementId, setTransferModalMovementId] = useState<string | null>(null)
+  const [institutionSuggestionsOpen, setInstitutionSuggestionsOpen] = useState(false)
+  const [importModalOpen, setImportModalOpen] = useState(false)
+  const [importDragActive, setImportDragActive] = useState(false)
+  const [importPhase, setImportPhase] = useState<ImportPhase>('select')
+  const [importFile, setImportFile] = useState<File | null>(null)
+  const [importAccountId, setImportAccountId] = useState('')
+  const [importMessage, setImportMessage] = useState<string | null>(null)
+  const fileInputRef = useRef<HTMLInputElement | null>(null)
+  const tab = tabFromPath(location.pathname)
+  const organizationStorageKey = user ? financeOrganizationStorageKey(user.id) : null
+
+  const accessibleOrganizations = useMemo(() => {
+    const ids = new Set(user?.organizationIds ?? [])
+    return organizations.filter((organization) => ids.has(organization.id))
+  }, [organizations, user?.organizationIds])
+
+  const selectedOrganizationId = accessibleOrganizations.some((organization) => organization.id === organizationId)
+    ? organizationId
+    : accessibleOrganizations[0]?.id || ''
+  const scopedAccounts = accounts.filter((account) => account.organizationId === selectedOrganizationId && account.status !== 'archived')
+  const scopedCategories = categories.filter((category) => category.organizationId === selectedOrganizationId && !category.archived)
+  const scopedMovements = movements.filter((movement) => movement.organizationId === selectedOrganizationId)
+  const scopedTransfers = transfers.filter((transfer) => transfer.organizationId === selectedOrganizationId)
+  const selectedAccountFilterIds = activeFilters.accounts ?? []
+  const selectedStatusFilterIds = activeFilters.statuses ?? []
+  const selectedCategoryFilterIds = activeFilters.categories ?? []
+  const selectedMonthFilterIds = activeFilters.months ?? []
+  const selectedQuarterFilterIds = activeFilters.quarters ?? []
+  const selectedDashboardMonthFilterIds = dashboardFilters.months ?? []
+  const selectedDashboardQuarterFilterIds = dashboardFilters.quarters ?? []
+  const institutionSuggestions = useMemo(
+    () => Array.from(new Set(scopedAccounts.map((account) => account.institutionName?.trim()).filter((value): value is string => Boolean(value)))).sort((a, b) => a.localeCompare(b)),
+    [scopedAccounts],
+  )
+  const filteredInstitutionSuggestions = useMemo(() => {
+    const query = accountDraft.institutionName.trim().toLowerCase()
+    if (!query) return institutionSuggestions
+    return institutionSuggestions
+      .filter((institution) => institution.toLowerCase().includes(query))
+      .sort((a, b) => {
+        const aStarts = a.toLowerCase().startsWith(query)
+        const bStarts = b.toLowerCase().startsWith(query)
+        if (aStarts !== bStarts) return aStarts ? -1 : 1
+        return a.localeCompare(b)
+      })
+  }, [accountDraft.institutionName, institutionSuggestions])
+  const holderUsers = useMemo(() => {
+    const memberIds = new Set(
+      organizationMemberships
+        .filter((membership) => membership.organizationId === selectedOrganizationId)
+        .map((membership) => membership.userId),
+    )
+    const authUserRow: Schema['tables']['users']['row'] | null =
+      user && user.organizationIds.includes(selectedOrganizationId)
+        ? {
+            id: user.id,
+            email: user.email,
+            name: user.name ?? undefined,
+            canAccessUnscoped: user.canAccessUnscoped,
+            createdAt: 0,
+            updatedAt: 0,
+          }
+        : null
+    const candidates = users.filter((entry) => memberIds.has(entry.id))
+    const withAuthUser = authUserRow && !candidates.some((entry) => entry.id === authUserRow.id)
+      ? [...candidates, authUserRow]
+      : candidates
+    return withAuthUser.sort((a, b) => displayUser(a).localeCompare(displayUser(b)))
+  }, [organizationMemberships, selectedOrganizationId, user, users])
+  const holderUserMap = useMemo(() => new Map(holderUsers.map((entry) => [entry.id, entry])), [holderUsers])
+
+  const organizationOptions = accessibleOrganizations.map((organization) => ({
+    value: organization.id,
+    label: organization.name,
+    icon: <Building2 className="h-3.5 w-3.5" />,
+  }))
+
+  const importAccountOptions: PachSelectOption[] = scopedAccounts.map((account) => ({
+    value: account.id,
+    label: account.name,
+    icon: account.type === 'credit_card' ? <CreditCard className="h-3.5 w-3.5" /> : <Landmark className="h-3.5 w-3.5" />,
+  }))
+  const holderOptions: PachSelectOption[] = [
+    { value: '__unassigned__', label: 'unassigned', icon: <UserRound className="h-3.5 w-3.5" /> },
+    ...holderUsers.map((entry) => ({
+      value: entry.id,
+      label: displayUser(entry),
+      icon: <UserRound className="h-3.5 w-3.5" />,
+    })),
+  ]
+
+  const visibleMovements = scopedMovements
+    .filter((movement) => selectedAccountFilterIds.length === 0 || selectedAccountFilterIds.includes(movement.accountId))
+    .filter((movement) => {
+      if (selectedStatusFilterIds.length > 0) return selectedStatusFilterIds.includes(movement.status)
+      return movement.status !== 'ignored'
+    })
+    .filter((movement) => selectedCategoryFilterIds.length === 0 || selectedCategoryFilterIds.includes(movement.categoryId ?? UNCATEGORIZED_VALUE))
+    .filter((movement) => selectedMonthFilterIds.length === 0 || selectedMonthFilterIds.includes(monthKey(movement.transactionDate)))
+    .filter((movement) => selectedQuarterFilterIds.length === 0 || selectedQuarterFilterIds.includes(quarterKey(movement.transactionDate)))
+    .filter((movement) => {
+      if (!search.trim()) return true
+      const needle = search.trim().toLowerCase()
+      return `${movement.description} ${movement.merchantName ?? ''}`.toLowerCase().includes(needle)
+    })
+  const visibleFinancialMovements = visibleMovements.filter((movement) => !isTransferLikeMovement(movement, scopedCategories))
+  const visibleTotals = summarizeMovements(visibleFinancialMovements)
+  const dashboardPeriodMovements = scopedMovements
+    .filter((movement) => selectedDashboardMonthFilterIds.length === 0 || selectedDashboardMonthFilterIds.includes(monthKey(movement.transactionDate)))
+    .filter((movement) => selectedDashboardQuarterFilterIds.length === 0 || selectedDashboardQuarterFilterIds.includes(quarterKey(movement.transactionDate)))
+  const dashboardAccountMovements = dashboardPeriodMovements.filter((movement) => movement.status !== 'ignored')
+  const dashboardMovements = dashboardAccountMovements.filter((movement) => !isTransferLikeMovement(movement, scopedCategories))
+  const dashboardTotals = summarizeMovements(dashboardMovements)
+  const dashboardPendingCount = dashboardPeriodMovements.filter((movement) => movement.status === 'pending_review').length
+  const monthlyBalance = buildMonthlyBalance(dashboardMovements)
+  const categoryBreakdown = buildCategoryBreakdown(dashboardMovements, scopedCategories)
+  const accountStats = useMemo(
+    () => new Map(scopedAccounts.map((account) => [account.id, buildAccountStats(account, scopedMovements)])),
+    [scopedAccounts, scopedMovements],
+  )
+  const accountBalanceTotal = summarizeAccountBalances(scopedAccounts, accountStats)
+  const selectedTransferMovement = transferModalMovementId
+    ? scopedMovements.find((movement) => movement.id === transferModalMovementId) ?? null
+    : null
+  const selectedTransfer = selectedTransferMovement?.transferId
+    ? scopedTransfers.find((transfer) => transfer.id === selectedTransferMovement.transferId) ?? null
+    : null
+  const transferCandidates = selectedTransferMovement
+    ? findTransferCandidates(selectedTransferMovement, scopedMovements, scopedAccounts)
+    : []
+
+  const selectedOrganizationLabel =
+    organizationOptions.find((option) => option.value === selectedOrganizationId)?.label ?? 'select organization'
+  const importAccountLabel = importAccountOptions.find((option) => option.value === importAccountId)?.label ?? 'select account'
+  const holderDisplay = holderOptions.find((option) => option.value === (accountDraft.holderUserId || '__unassigned__'))?.label ?? 'unassigned'
+  const typeDisplay = ACCOUNT_TYPES.find((entry) => entry.value === accountDraft.type)?.label ?? 'type'
+  const typeOptions: PachSelectOption[] = ACCOUNT_TYPES.map((entry) => ({
+    value: entry.value,
+    label: entry.label,
+    icon: entry.value === 'credit_card' ? <CreditCard className="h-3.5 w-3.5" /> : <Landmark className="h-3.5 w-3.5" />,
+  }))
+  const currencyOptions: PachSelectOption[] = CURRENCIES.map((entry) => ({
+    value: entry,
+    label: entry,
+  }))
+  const categoryTypeOptions: PachSelectOption[] = MOVEMENT_TYPES
+  const categoryOptions: PachSelectOption[] = [
+    { value: UNCATEGORIZED_VALUE, label: 'uncategorized', icon: <Tag className="h-3.5 w-3.5" /> },
+    ...scopedCategories.map((entry) => ({
+      value: entry.id,
+      label: entry.name,
+      icon: <Tag className="h-3.5 w-3.5" />,
+    })),
+  ]
+  const movementTypeOptions: PachSelectOption[] = MOVEMENT_TYPES.map((entry) => ({ value: entry.value, label: entry.label }))
+  const movementStatusOptions: PachSelectOption[] = MOVEMENT_STATUSES.map((entry) => ({ value: entry.value, label: entry.label }))
+  const monthFilterOptions = uniqueBy(
+    scopedMovements.map((movement) => ({
+      value: monthKey(movement.transactionDate),
+      label: formatMonthLabel(movement.transactionDate),
+    })),
+    (entry) => entry.value,
+  )
+  const quarterFilterOptions = uniqueBy(
+    scopedMovements.map((movement) => ({
+      value: quarterKey(movement.transactionDate),
+      label: quarterKey(movement.transactionDate),
+    })),
+    (entry) => entry.value,
+  )
+  const filterConfigs: FilterFieldConfig[] = [
+    {
+      field: 'accounts',
+      label: 'accounts',
+      icon: WalletCards,
+      options: scopedAccounts.map((account) => ({
+        value: account.id,
+        label: account.name,
+        icon: account.type === 'credit_card' ? <CreditCard className="h-3.5 w-3.5" /> : <Landmark className="h-3.5 w-3.5" />,
+      })),
+    },
+    {
+      field: 'statuses',
+      label: 'statuses',
+      icon: Layers2,
+      options: movementStatusOptions.map((entry) => ({
+        value: entry.value,
+        label: entry.value === 'pending_review' ? 'needs review' : entry.label,
+      })),
+    },
+    {
+      field: 'categories',
+      label: 'categories',
+      icon: Tag,
+      options: [
+        { value: UNCATEGORIZED_VALUE, label: 'uncategorized' },
+        ...scopedCategories.map((category) => ({
+          value: category.id,
+          label: category.name,
+          icon: <Tag className="h-3.5 w-3.5" />,
+        })),
+      ],
+    },
+    {
+      field: 'months',
+      label: 'months',
+      icon: CalendarDays,
+      options: monthFilterOptions,
+    },
+    {
+      field: 'quarters',
+      label: 'quarters',
+      icon: CalendarDays,
+      options: quarterFilterOptions,
+    },
+  ]
+  const dashboardFilterConfigs: FilterFieldConfig[] = [
+    {
+      field: 'months',
+      label: 'months',
+      icon: CalendarDays,
+      options: monthFilterOptions,
+    },
+    {
+      field: 'quarters',
+      label: 'quarters',
+      icon: CalendarDays,
+      options: quarterFilterOptions,
+    },
+  ]
+  const selectedMovementAccount = scopedAccounts.find((account) => account.id === movementDraft.accountId)
+  const selectedBalanceAccount = scopedAccounts.find((account) => account.id === balanceDraft.accountId)
+  const editingAccount = editingAccountId ? scopedAccounts.find((account) => account.id === editingAccountId) : undefined
+  const balanceExpectedMinor = selectedBalanceAccount ? expectedBalanceAt(selectedBalanceAccount, scopedMovements, dateInputToMs(balanceDraft.asOfDate)) : null
+  const balanceActualMinor = parseMoneyToMinor(balanceDraft.balance)
+  const balanceDifferenceMinor = balanceExpectedMinor == null || balanceActualMinor == null ? null : balanceActualMinor - balanceExpectedMinor
+  const pendingCount = scopedMovements.filter((movement) => movement.status === 'pending_review').length
+  const canCreateAccount = Boolean(selectedOrganizationId && accountDraft.name.trim())
+  const canCreateCategory = Boolean(selectedOrganizationId && categoryDraft.name.trim())
+  const canMergeCategory = Boolean(
+    categoryMergeDraft.categoryId &&
+    categoryMergeDraft.targetCategoryId &&
+    categoryMergeDraft.categoryId !== categoryMergeDraft.targetCategoryId,
+  )
+  const canCreateMovement = Boolean(selectedOrganizationId && selectedMovementAccount && movementDraft.description.trim() && parseMoneyToMinor(movementDraft.amount) != null)
+  const canSaveBalance = Boolean(selectedOrganizationId && selectedBalanceAccount && balanceActualMinor != null)
+
+  useEffect(() => {
+    const canonicalPath = pathForTab(tab)
+    if (location.pathname === '/finance' || location.pathname === '/finance/') {
+      navigate('/finance/dashboard', { replace: true })
+    } else if (location.pathname === '/finance/accounts-cards') {
+      navigate('/finance/accounts', { replace: true })
+    } else if (location.pathname !== canonicalPath) {
+      navigate('/finance/dashboard', { replace: true })
+    }
+  }, [location.pathname, navigate, tab])
+
+  useEffect(() => {
+    if (!organizationStorageKey) return
+    const storedOrganizationId = localStorage.getItem(organizationStorageKey)
+    if (storedOrganizationId && storedOrganizationId !== organizationId) {
+      setOrganizationId(storedOrganizationId)
+    }
+    if (!storedOrganizationId && organizationId) setOrganizationId('')
+    // Reload when the logged-in user changes; avoid fighting explicit org selection.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [organizationStorageKey])
+
+  useEffect(() => {
+    if (!organizationId || accessibleOrganizations.length === 0) return
+    if (!accessibleOrganizations.some((organization) => organization.id === organizationId)) {
+      setOrganizationId('')
+    }
+  }, [accessibleOrganizations, organizationId])
+
+  useEffect(() => {
+    if (!organizationStorageKey || !selectedOrganizationId) return
+    localStorage.setItem(organizationStorageKey, selectedOrganizationId)
+  }, [organizationStorageKey, selectedOrganizationId])
+
+  useEffect(() => {
+    const preferredAccountId = selectedAccountFilterIds.length === 1 ? selectedAccountFilterIds[0] : ''
+    if (preferredAccountId && scopedAccounts.some((account) => account.id === preferredAccountId)) {
+      setImportAccountId(preferredAccountId)
+      return
+    }
+    if (!importAccountId || !scopedAccounts.some((account) => account.id === importAccountId)) {
+      setImportAccountId(scopedAccounts[0]?.id ?? '')
+    }
+  }, [importAccountId, scopedAccounts, selectedAccountFilterIds])
+
+  useEffect(() => {
+    if (!accountModalOpen && !importModalOpen && !categoryModalOpen && !movementModalOpen && !balanceModalOpen && !transferModalMovementId) return
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === 'Escape') {
+        closeAccountModal()
+        setImportModalOpen(false)
+        setCategoryModalOpen(false)
+        setMovementModalOpen(false)
+        setBalanceModalOpen(false)
+        setTransferModalMovementId(null)
+      }
+    }
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [accountModalOpen, balanceModalOpen, categoryModalOpen, importModalOpen, movementModalOpen, transferModalMovementId])
+
+  function openAccountModal(account?: FinanceAccount) {
+    if (account) {
+      setEditingAccountId(account.id)
+      setAccountDraft({
+        name: account.name,
+        institutionName: account.institutionName ?? '',
+        holderUserId: account.holderUserId ?? '',
+        type: account.type,
+        currencyCode: account.currencyCode,
+      })
+    } else {
+      setEditingAccountId(null)
+      setAccountDraft(EMPTY_ACCOUNT_DRAFT)
+    }
+    setInstitutionSuggestionsOpen(false)
+    setAccountModalOpen(true)
+  }
+
+  function closeAccountModal() {
+    setAccountModalOpen(false)
+    setEditingAccountId(null)
+    setAccountDraft(EMPTY_ACCOUNT_DRAFT)
+    setInstitutionSuggestionsOpen(false)
+  }
+
+  function saveAccount() {
+    if (!selectedOrganizationId || !accountDraft.name.trim()) return
+    const payload = {
+      name: accountDraft.name.trim(),
+      institutionName: accountDraft.institutionName.trim() || null,
+      holderUserId: accountDraft.holderUserId || null,
+      type: accountDraft.type,
+      currencyCode: accountDraft.currencyCode,
+    }
+    if (editingAccountId) {
+      z.mutate.fin_accounts.update({ id: editingAccountId, ...payload })
+    } else {
+      z.mutate.fin_accounts.create({
+        id: crypto.randomUUID(),
+        organizationId: selectedOrganizationId,
+        ...payload,
+        institutionName: payload.institutionName || undefined,
+        holderUserId: payload.holderUserId || undefined,
+      })
+    }
+    closeAccountModal()
+  }
+
+  function createCategory() {
+    if (!canCreateCategory) return
+    z.mutate.fin_categories.create({
+      id: crypto.randomUUID(),
+      organizationId: selectedOrganizationId,
+      name: categoryDraft.name.trim(),
+      type: categoryDraft.type,
+      position: scopedCategories.length,
+    })
+    setCategoryDraft({ name: '', type: 'expense' })
+    setCategoryModalOpen(false)
+  }
+
+  async function mergeAndArchiveCategory() {
+    if (!selectedOrganizationId || !canMergeCategory) return
+    const sourceCategory = scopedCategories.find((entry) => entry.id === categoryMergeDraft.categoryId)
+    const targetCategory = scopedCategories.find((entry) => entry.id === categoryMergeDraft.targetCategoryId)
+    if (!sourceCategory || !targetCategory) return
+
+    const sourceMovements = scopedMovements.filter((movement) => movement.categoryId === sourceCategory.id)
+    for (const movement of sourceMovements) {
+      await z.mutate.fin_movements.update({
+        id: movement.id,
+        categoryId: targetCategory.id,
+        type: targetCategory.type,
+        status: 'reviewed',
+        reviewReason: null,
+      })
+      await learnCategorizationRule(movement, targetCategory.id)
+    }
+
+    const sourceRules = categorizationRules.filter((rule) => rule.organizationId === selectedOrganizationId && rule.categoryId === sourceCategory.id)
+    for (const rule of sourceRules) {
+      await z.mutate.fin_categorization_rules.update({
+        id: rule.id,
+        categoryId: targetCategory.id,
+        type: targetCategory.type,
+        autoApply: true,
+      })
+    }
+
+    await z.mutate.fin_categories.update({ id: sourceCategory.id, archived: true })
+    setCategoryMergeDraft({ categoryId: '', targetCategoryId: '' })
+  }
+
+  function openMovementModal(accountId = selectedAccountFilterIds[0] || scopedAccounts[0]?.id || '') {
+    setMovementDraft({
+      accountId,
+      categoryId: UNCATEGORIZED_VALUE,
+      transactionDate: todayInputDate(),
+      description: '',
+      amount: '',
+      type: 'expense',
+      status: 'reviewed',
+    })
+    setMovementModalOpen(true)
+  }
+
+  async function createMovement() {
+    const account = scopedAccounts.find((entry) => entry.id === movementDraft.accountId)
+    const parsedAmountMinor = parseMoneyToMinor(movementDraft.amount)
+    if (!selectedOrganizationId || !account || !movementDraft.description.trim() || parsedAmountMinor == null) return
+
+    const id = crypto.randomUUID()
+    const amountMinor = signedAmountForType(parsedAmountMinor, movementDraft.type)
+    await z.mutate.fin_movements.create({
+      id,
+      organizationId: selectedOrganizationId,
+      accountId: account.id,
+      categoryId: movementDraft.categoryId === UNCATEGORIZED_VALUE ? undefined : movementDraft.categoryId,
+      transactionDate: dateInputToMs(movementDraft.transactionDate),
+      postedDate: undefined,
+      description: movementDraft.description.trim(),
+      merchantName: undefined,
+      counterparty: undefined,
+      amountMinor,
+      currencyCode: account.currencyCode,
+      reportingAmountMinor: amountMinor,
+      reportingCurrencyCode: account.currencyCode,
+      type: movementDraft.type,
+      status: movementDraft.status,
+      reviewReason: reviewReasonForStatus(movementDraft.status),
+      rawData: { source: 'manual' },
+      fingerprint: `manual:${id}`,
+    })
+    setMovementModalOpen(false)
+  }
+
+  function openBalanceModal(accountId: string) {
+    const account = scopedAccounts.find((entry) => entry.id === accountId)
+    setBalanceDraft({
+      accountId,
+      asOfDate: todayInputDate(),
+      balance: account?.lastBalanceMinor == null ? '' : String(account.lastBalanceMinor / 100),
+      createAdjustment: false,
+    })
+    setBalanceModalOpen(true)
+  }
+
+  async function saveBalance() {
+    const account = scopedAccounts.find((entry) => entry.id === balanceDraft.accountId)
+    if (!selectedOrganizationId || !account || balanceActualMinor == null) return
+
+    const asOfDate = dateInputToMs(balanceDraft.asOfDate)
+    const expectedMinor = expectedBalanceAt(account, scopedMovements, asOfDate)
+    const differenceMinor = expectedMinor == null ? 0 : balanceActualMinor - expectedMinor
+    await z.mutate.fin_balance_snapshots.create({
+      id: crypto.randomUUID(),
+      organizationId: selectedOrganizationId,
+      accountId: account.id,
+      asOfDate,
+      balanceMinor: balanceActualMinor,
+      currencyCode: account.currencyCode,
+      source: 'manual',
+    })
+    if (balanceDraft.createAdjustment && differenceMinor !== 0) {
+      const movementId = crypto.randomUUID()
+      await z.mutate.fin_movements.create({
+        id: movementId,
+        organizationId: selectedOrganizationId,
+        accountId: account.id,
+        categoryId: undefined,
+        transactionDate: asOfDate,
+        postedDate: undefined,
+        description: 'Reconciliation adjustment',
+        merchantName: undefined,
+        counterparty: undefined,
+        amountMinor: differenceMinor,
+        currencyCode: account.currencyCode,
+        reportingAmountMinor: differenceMinor,
+        reportingCurrencyCode: account.currencyCode,
+        type: 'adjustment',
+        status: 'reviewed',
+        reviewReason: null,
+        rawData: {
+          source: 'manual_reconciliation',
+          expectedBalanceMinor: expectedMinor,
+          actualBalanceMinor: balanceActualMinor,
+        },
+        fingerprint: `reconciliation:${movementId}`,
+      })
+    }
+    await z.mutate.fin_accounts.update({ id: account.id, lastBalanceMinor: balanceActualMinor, lastBalanceAt: asOfDate })
+    setBalanceModalOpen(false)
+  }
+
+  function setFilterField(field: string, values: string[]) {
+    setActiveFilters((current) => {
+      const next = { ...current }
+      if (values.length === 0) delete next[field]
+      else next[field] = values
+      return next
+    })
+  }
+
+  function clearAllFilters() {
+    setActiveFilters({})
+  }
+
+  function setDashboardFilterField(field: string, values: string[]) {
+    setDashboardFilters((current) => {
+      const next = { ...current }
+      if (values.length === 0) delete next[field]
+      else next[field] = values
+      return next
+    })
+  }
+
+  function clearDashboardFilters() {
+    setDashboardFilters({})
+  }
+
+  function stageImportFile(file: File) {
+    setImportModalOpen(true)
+    if (file.size > MAX_IMPORT_FILE_BYTES) {
+      setImportPhase('failed')
+      setImportFile(file)
+      setImportMessage(`File is too large (${formatBytes(file.size)}). Current import limit is ${formatBytes(MAX_IMPORT_FILE_BYTES)}.`)
+      if (fileInputRef.current) fileInputRef.current.value = ''
+      return
+    }
+
+    setImportFile(file)
+    setImportPhase('ready')
+    setImportMessage(null)
+    if (fileInputRef.current) fileInputRef.current.value = ''
+  }
+
+  function resetImportSelection() {
+    setImportFile(null)
+    setImportPhase('select')
+    setImportMessage(null)
+    setImportDragActive(false)
+    if (fileInputRef.current) fileInputRef.current.value = ''
+  }
+
+  async function confirmImport() {
+    if (!importFile) return
+    const targetAccountId = importAccountId || selectedAccountFilterIds[0] || scopedAccounts[0]?.id
+    if (!targetAccountId || !selectedOrganizationId || !token) {
+      setImportPhase('failed')
+      setImportMessage('Create or select an account before importing.')
+      return
+    }
+
+    setImportPhase('processing')
+    setImportMessage(`Reading ${importFile.name}...`)
+    try {
+      const contentBase64 = await fileToBase64(importFile)
+      setImportMessage(`Analyzing ${importFile.name}...`)
+      const response = await fetch(`${config.apiUrl}/finance/imports`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          organizationId: selectedOrganizationId,
+          accountId: targetAccountId,
+          fileName: importFile.name,
+          fileType: importFile.type || guessFileType(importFile.name),
+          sourceType: sourceTypeFor(importFile),
+          contentBase64,
+        }),
+      })
+      const result = await readJsonResponse(response)
+      if (!response.ok) throw new Error(result.message || result.error || 'Import failed')
+      const summary = result.summary
+      setImportPhase('success')
+      setImportMessage(
+        result.duplicateFile
+          ? `Already imported. ${summary.parsed} movements matched. Review transactions in the list.`
+          : `Imported ${summary.created} movements. Review transactions and categories in the list.`,
+      )
+      if (summary.needsReview > 0) setFilterField('statuses', ['pending_review'])
+    } catch (error) {
+      setImportPhase('failed')
+      setImportMessage(error instanceof Error ? error.message : 'Import failed')
+    }
+  }
+
+  async function updateCategory(movementId: string, categoryId: string) {
+    const movement = scopedMovements.find((entry) => entry.id === movementId)
+    const category = scopedCategories.find((entry) => entry.id === categoryId)
+    await z.mutate.fin_movements.update({
+      id: movementId,
+      categoryId: categoryId || null,
+      type: category?.type && ['income', 'expense', 'transfer', 'adjustment'].includes(category.type) ? category.type : movement?.type,
+      status: categoryId ? 'reviewed' : 'pending_review',
+      reviewReason: categoryId ? null : 'uncategorized',
+    })
+    if (movement && categoryId) await learnCategorizationRule(movement, categoryId)
+  }
+
+  async function updateMovementStatus(movementId: string, status: string) {
+    await z.mutate.fin_movements.update({ id: movementId, status, reviewReason: reviewReasonForStatus(status) })
+    const movement = scopedMovements.find((entry) => entry.id === movementId)
+    if (status === 'reviewed' && movement?.categoryId) await learnCategorizationRule(movement, movement.categoryId)
+  }
+
+  async function linkTransferMovement(sourceId: string, targetId: string) {
+    const source = scopedMovements.find((entry) => entry.id === sourceId)
+    const target = scopedMovements.find((entry) => entry.id === targetId)
+    if (!source || !target || !selectedOrganizationId) return
+
+    const outgoing = source.amountMinor <= 0 ? source : target
+    const incoming = outgoing.id === source.id ? target : source
+    const transferId = source.transferId || target.transferId || crypto.randomUUID()
+    const existingTransfer = scopedTransfers.find((entry) => entry.id === transferId)
+    const amountMinor = Math.max(Math.abs(source.amountMinor), Math.abs(target.amountMinor))
+    const score = scoreTransferCandidate(source, target)
+    const transferPayload = {
+      id: transferId,
+      status: 'confirmed',
+      fromAccountId: outgoing.amountMinor < 0 ? outgoing.accountId : null,
+      toAccountId: incoming.amountMinor > 0 ? incoming.accountId : null,
+      amountMinor,
+      currencyCode: source.currencyCode === target.currencyCode ? source.currencyCode : source.currencyCode,
+      matchedConfidence: score,
+    }
+
+    if (existingTransfer) {
+      await z.mutate.fin_transfers.update(transferPayload)
+    } else {
+      await z.mutate.fin_transfers.create({ ...transferPayload, organizationId: selectedOrganizationId })
+    }
+    await z.mutate.fin_movements.update({ id: source.id, transferId, type: 'transfer', status: 'reviewed', reviewReason: null })
+    await z.mutate.fin_movements.update({ id: target.id, transferId, type: 'transfer', status: 'reviewed', reviewReason: null })
+    setTransferModalMovementId(null)
+  }
+
+  async function markMovementAsTransfer(movementId: string) {
+    const movement = scopedMovements.find((entry) => entry.id === movementId)
+    if (!movement || !selectedOrganizationId) return
+    const transferId = movement.transferId || crypto.randomUUID()
+    const existingTransfer = scopedTransfers.find((entry) => entry.id === transferId)
+    const transferPayload = {
+      id: transferId,
+      status: 'confirmed',
+      fromAccountId: movement.amountMinor < 0 ? movement.accountId : null,
+      toAccountId: movement.amountMinor > 0 ? movement.accountId : null,
+      amountMinor: Math.abs(movement.amountMinor),
+      currencyCode: movement.currencyCode,
+      matchedConfidence: null,
+    }
+
+    if (existingTransfer) {
+      await z.mutate.fin_transfers.update(transferPayload)
+    } else {
+      await z.mutate.fin_transfers.create({ ...transferPayload, organizationId: selectedOrganizationId })
+    }
+    await z.mutate.fin_movements.update({ id: movement.id, transferId, type: 'transfer', status: 'reviewed', reviewReason: null })
+    setTransferModalMovementId(null)
+  }
+
+  async function unmarkTransferMovement(movementId: string) {
+    const movement = scopedMovements.find((entry) => entry.id === movementId)
+    if (!movement) return
+    const linkedMovements = movement.transferId
+      ? scopedMovements.filter((entry) => entry.transferId === movement.transferId)
+      : [movement]
+
+    for (const entry of linkedMovements) {
+      const category = entry.categoryId ? scopedCategories.find((candidate) => candidate.id === entry.categoryId) : null
+      await z.mutate.fin_movements.update({
+        id: entry.id,
+        transferId: null,
+        type: inferType(entry.amountMinor),
+        categoryId: category?.type === 'transfer' ? null : entry.categoryId,
+        status: category?.type === 'transfer' || !entry.categoryId ? 'pending_review' : 'reviewed',
+        reviewReason: category?.type === 'transfer' || !entry.categoryId ? 'uncategorized' : null,
+      })
+    }
+    if (movement.transferId) {
+      const transfer = scopedTransfers.find((entry) => entry.id === movement.transferId)
+      if (transfer) await z.mutate.fin_transfers.update({ id: transfer.id, status: 'rejected' })
+    }
+    setTransferModalMovementId(null)
+  }
+
+  async function learnCategorizationRule(movement: Schema['tables']['fin_movements']['row'], categoryId: string) {
+    const match = buildRuleMatch(movement)
+    if (!selectedOrganizationId || !match) return
+    const category = scopedCategories.find((entry) => entry.id === categoryId)
+    const existingRule = categorizationRules.find((rule) =>
+      rule.organizationId === selectedOrganizationId &&
+      (rule.accountId ?? '') === movement.accountId &&
+      rule.matchKind === match.kind &&
+      rule.matchValue.toLowerCase() === match.value.toLowerCase()
+    )
+
+    if (existingRule) {
+      await z.mutate.fin_categorization_rules.update({
+        id: existingRule.id,
+        categoryId,
+        type: category?.type ?? movement.type,
+        confidence: 95,
+        autoApply: true,
+      })
+      return
+    }
+
+    await z.mutate.fin_categorization_rules.create({
+      id: crypto.randomUUID(),
+      organizationId: selectedOrganizationId,
+      accountId: movement.accountId,
+      categoryId,
+      type: category?.type ?? movement.type,
+      matchKind: match.kind,
+      matchValue: match.value,
+      confidence: 95,
+      autoApply: true,
+      createdFromMovementId: movement.id,
+    })
+  }
+
+  return (
+    <div className="flex h-full min-h-0 flex-1 overflow-hidden">
+      <aside className="hidden shrink-0 flex-col border-r border-[rgba(0,255,140,0.12)] bg-[rgba(5,6,5,0.6)] px-2 py-4 backdrop-blur-sm md:relative md:z-auto md:flex md:w-[200px]">
+        <div className="mb-2 flex items-start justify-between gap-2 px-4 pb-3">
+          <div>
+            <div className="font-bold text-base tracking-wide text-accent [text-shadow:0_0_6px_rgba(0,255,136,0.5)]">
+              p@ch_
+            </div>
+            <div className="mt-1 text-[9px] uppercase tracking-label text-fg-4">
+              // finance · ledger
+            </div>
+          </div>
+        </div>
+
+        <div className="mb-4 px-2">
+          <div className="mb-2 font-mono text-[10px] uppercase tracking-label text-fg-4">organization</div>
+          <div className="relative">
+            <Building2 className="pointer-events-none absolute left-3 top-1/2 z-10 h-3.5 w-3.5 -translate-y-1/2 text-fg-4" />
+            <PachSelect
+              value={selectedOrganizationId}
+              onChange={(next) => {
+                setOrganizationId(next)
+                setActiveFilters({})
+                setDashboardFilters({})
+                if (organizationStorageKey) localStorage.setItem(organizationStorageKey, next)
+              }}
+              options={organizationOptions}
+              display={selectedOrganizationLabel}
+              popupWidth="200"
+              triggerClassName="flex h-8 w-full items-center justify-between border border-[rgba(0,255,140,0.18)] bg-rim pl-9 pr-2 text-left font-mono text-xs text-fg-1 outline-none transition hover:border-[rgba(0,255,140,0.32)] hover:bg-[rgba(0,255,136,0.04)] focus-visible:border-accent focus-visible:shadow-glow-xs"
+            />
+          </div>
+        </div>
+
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept=".csv,.txt,.pdf,image/*"
+          className="hidden"
+          onChange={(event) => {
+            const file = event.currentTarget.files?.[0]
+            if (file) stageImportFile(file)
+          }}
+        />
+
+        <div className="mt-4 space-y-1">
+          <div className="px-3 pb-1 font-mono text-[10px] uppercase tracking-label text-fg-4">sections</div>
+          <FinanceSidebarButton
+            active={tab === 'dashboard'}
+            label="dashboard"
+            onClick={() => navigate(pathForTab('dashboard'))}
+          />
+          <FinanceSidebarButton
+            active={tab === 'movements'}
+            label="movements"
+            meta={pendingCount ? String(pendingCount) : undefined}
+            onClick={() => navigate(pathForTab('movements'))}
+          />
+          <FinanceSidebarButton
+            active={tab === 'accounts'}
+            label="accounts/cards"
+            meta={String(scopedAccounts.length)}
+            onClick={() => navigate(pathForTab('accounts'))}
+          />
+        </div>
+
+        <div className="mt-6 space-y-1">
+          <div className="px-3 pb-1 font-mono text-[10px] uppercase tracking-label text-fg-4">quick read</div>
+          <div className="space-y-2 border border-[rgba(0,255,140,0.12)] bg-pit-2 px-3 py-2 font-mono text-xs">
+            <FinanceMetric label="pending" value={`${pendingCount}`} tone={pendingCount ? 'fail' : 'default'} />
+            <FinanceMetric label="accounts" value={`${scopedAccounts.length}`} />
+          </div>
+        </div>
+      </aside>
+
+      <main className="flex min-w-0 flex-1 flex-col overflow-hidden">
+        <div className="border-b border-[rgba(0,255,140,0.12)] bg-[rgba(5,6,5,0.72)] px-3 py-3 md:hidden">
+          <div className="mb-3 flex items-start justify-between gap-3">
+            <div>
+              <div className="font-mono text-xl font-bold lowercase text-fg-1">finance</div>
+              <div className="mt-0.5 font-mono text-[10px] uppercase tracking-label text-fg-4">ledger</div>
+            </div>
+            <div className="relative min-w-0 flex-1">
+              <Building2 className="pointer-events-none absolute left-3 top-1/2 z-10 h-3.5 w-3.5 -translate-y-1/2 text-fg-4" />
+              <PachSelect
+                value={selectedOrganizationId}
+                onChange={(next) => {
+                  setOrganizationId(next)
+                  setActiveFilters({})
+                  setDashboardFilters({})
+                  if (organizationStorageKey) localStorage.setItem(organizationStorageKey, next)
+                }}
+                options={organizationOptions}
+                display={selectedOrganizationLabel}
+                popupWidth="240"
+                triggerClassName="flex h-9 w-full items-center justify-between border border-[rgba(0,255,140,0.18)] bg-rim pl-9 pr-2 text-left font-mono text-xs text-fg-1 outline-none transition hover:border-[rgba(0,255,140,0.32)] hover:bg-[rgba(0,255,136,0.04)] focus-visible:border-accent focus-visible:shadow-glow-xs"
+              />
+            </div>
+          </div>
+          <div className="grid grid-cols-3 gap-1 font-mono text-[10px] uppercase tracking-label">
+            <button
+              type="button"
+              onClick={() => navigate(pathForTab('dashboard'))}
+              className={`border px-2 py-2 text-center transition ${tab === 'dashboard' ? 'border-[rgba(0,255,140,0.45)] bg-[rgba(0,255,136,0.08)] text-accent' : 'border-[rgba(0,255,140,0.12)] text-fg-3'}`}
+            >
+              dashboard
+            </button>
+            <button
+              type="button"
+              onClick={() => navigate(pathForTab('movements'))}
+              className={`border px-2 py-2 text-center transition ${tab === 'movements' ? 'border-[rgba(0,255,140,0.45)] bg-[rgba(0,255,136,0.08)] text-accent' : 'border-[rgba(0,255,140,0.12)] text-fg-3'}`}
+            >
+              movements
+            </button>
+            <button
+              type="button"
+              onClick={() => navigate(pathForTab('accounts'))}
+              className={`border px-2 py-2 text-center transition ${tab === 'accounts' ? 'border-[rgba(0,255,140,0.45)] bg-[rgba(0,255,136,0.08)] text-accent' : 'border-[rgba(0,255,140,0.12)] text-fg-3'}`}
+            >
+              accounts
+            </button>
+          </div>
+        </div>
+
+        <div className="sr-only">
+          <div>
+            <div className="mb-1 text-[10px] uppercase tracking-label text-fg-3">◊ finance · ledger</div>
+            <h1 className="font-mono text-2xl font-bold lowercase text-fg-1">finance</h1>
+            <p className="mt-0.5 text-sm text-fg-3">
+              <span className="text-fg-4">›</span> accounts · cards · movements
+            </p>
+          </div>
+        </div>
+
+      {tab === 'dashboard' ? (
+        <div className="min-h-0 flex-1 overflow-auto px-3 py-3 md:px-8 md:py-4">
+          <div className="mb-3 flex items-center justify-between gap-3">
+            <div className="[&>div>div>button]:h-8 [&>div>div>button]:px-3">
+              <FilterButton
+                activeFilters={dashboardFilters}
+                filterConfigs={dashboardFilterConfigs}
+                onFilterChange={setDashboardFilterField}
+                onClearAll={clearDashboardFilters}
+              />
+            </div>
+            <div className="font-mono text-[10px] uppercase tracking-label text-fg-4">
+              {dashboardPeriodMovements.length} period movements
+            </div>
+          </div>
+
+          <section className="border border-[rgba(0,255,140,0.14)] bg-pit-2 px-5 py-4 font-mono">
+            <div className="flex flex-wrap items-end justify-between gap-4">
+              <div>
+                <div className="text-[10px] uppercase tracking-label text-fg-4">total balance</div>
+                <div className="mt-2 text-3xl leading-none text-fg-1">
+                  {formatSummaryMoney(accountBalanceTotal.totalMinor, accountBalanceTotal.currencyCode, accountBalanceTotal.mixedCurrency)}
+                </div>
+              </div>
+              <div className="grid gap-1 text-right text-xs">
+                <span className="text-fg-3">{accountBalanceTotal.accountCount} accounts</span>
+                <span className="text-fg-4">
+                  {accountBalanceTotal.reconciledCount} reconciled · {accountBalanceTotal.movementOnlyCount} from movements
+                </span>
+              </div>
+            </div>
+          </section>
+
+          <div className="mt-3 grid gap-3 border border-[rgba(0,255,140,0.12)] bg-pit-2 px-3 py-2 font-mono text-xs md:grid-cols-4">
+            <FinanceMetric label="income" value={formatSummaryMoney(dashboardTotals.positiveMinor, dashboardTotals.currencyCode, dashboardTotals.mixedCurrency)} tone="ok" />
+            <FinanceMetric label="outflow" value={formatSummaryMoney(dashboardTotals.negativeMinor, dashboardTotals.currencyCode, dashboardTotals.mixedCurrency)} tone="fail" />
+            <FinanceMetric label="net" value={formatSummaryMoney(dashboardTotals.netMinor, dashboardTotals.currencyCode, dashboardTotals.mixedCurrency)} tone={dashboardTotals.netMinor < 0 ? 'fail' : 'ok'} />
+            <FinanceMetric label="pending" value={`${dashboardPendingCount} movements`} tone={dashboardPendingCount ? 'fail' : 'default'} />
+          </div>
+
+          <div className="mt-4 grid gap-4">
+            <section className="border border-[rgba(0,255,140,0.12)] bg-pit-2">
+              <div className="flex items-center justify-between border-b border-[rgba(0,255,140,0.12)] px-4 py-3 font-mono">
+                <div>
+                  <div className="text-[10px] uppercase tracking-label text-fg-4">balance per month</div>
+                  <div className="mt-1 text-sm lowercase text-fg-1">income, outflow, and net</div>
+                </div>
+                <CalendarDays className="h-4 w-4 text-accent" />
+              </div>
+              <div className="grid gap-2 p-3 md:hidden">
+                {monthlyBalance.map((entry) => {
+                  return (
+                    <div key={entry.id} className="border border-[rgba(0,255,140,0.1)] bg-pit px-3 py-3 font-mono text-xs">
+                      <div className="mb-2 flex items-start justify-between gap-3">
+                        <div className="min-w-0">
+                          <div className="truncate text-fg-1">{entry.label}</div>
+                          <div className="mt-0.5 text-[10px] uppercase tracking-label text-fg-4">{entry.movementCount} movements</div>
+                        </div>
+                        <div className={`shrink-0 ${entry.netMinor < 0 ? 'text-fail' : 'text-ok'}`}>
+                          {formatSummaryMoney(entry.netMinor, entry.currencyCode, entry.mixedCurrency)}
+                        </div>
+                      </div>
+                      <div className="grid grid-cols-3 gap-2">
+                        <FinanceMetric
+                          label="income"
+                          value={formatSummaryMoney(entry.positiveMinor, entry.currencyCode, entry.mixedCurrency)}
+                          tone="ok"
+                        />
+                        <FinanceMetric
+                          label="outflow"
+                          value={formatSummaryMoney(entry.negativeMinor, entry.currencyCode, entry.mixedCurrency)}
+                          tone="fail"
+                        />
+                        <FinanceMetric
+                          label="net"
+                          value={formatSummaryMoney(entry.netMinor, entry.currencyCode, entry.mixedCurrency)}
+                          tone={entry.netMinor < 0 ? 'fail' : 'ok'}
+                        />
+                      </div>
+                    </div>
+                  )
+                })}
+                {monthlyBalance.length === 0 ? (
+                  <div className="px-3 py-10 text-center font-mono text-sm text-fg-4">
+                    // no movements in this period
+                  </div>
+                ) : null}
+              </div>
+              <div className="hidden max-h-[520px] overflow-auto md:block">
+                <table className="w-full border-collapse font-mono text-xs">
+                  <thead className="sticky top-0 bg-pit text-[10px] uppercase tracking-label text-fg-4">
+                    <tr>
+                      <th className="border-b border-[rgba(0,255,140,0.12)] px-3 py-2 text-left">month</th>
+                      <th className="border-b border-[rgba(0,255,140,0.12)] px-3 py-2 text-right">income</th>
+                      <th className="border-b border-[rgba(0,255,140,0.12)] px-3 py-2 text-right">outflow</th>
+                      <th className="border-b border-[rgba(0,255,140,0.12)] px-3 py-2 text-right">net</th>
+                      <th className="border-b border-[rgba(0,255,140,0.12)] px-3 py-2 text-right">movements</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {monthlyBalance.map((entry) => {
+                      return (
+                        <tr key={entry.id} className="border-b border-[rgba(0,255,140,0.08)] text-fg-2 hover:bg-[rgba(0,255,136,0.04)]">
+                          <td className="px-3 py-2">
+                            <div className="text-fg-1">{entry.label}</div>
+                            <div className="mt-0.5 text-[10px] uppercase tracking-label text-fg-4">{entry.mixedCurrency ? 'mixed currencies' : entry.currencyCode}</div>
+                          </td>
+                          <td className="whitespace-nowrap px-3 py-2 text-right text-ok">
+                            {formatSummaryMoney(entry.positiveMinor, entry.currencyCode, entry.mixedCurrency)}
+                          </td>
+                          <td className="whitespace-nowrap px-3 py-2 text-right text-fail">
+                            {formatSummaryMoney(entry.negativeMinor, entry.currencyCode, entry.mixedCurrency)}
+                          </td>
+                          <td className={`whitespace-nowrap px-3 py-2 text-right ${entry.netMinor < 0 ? 'text-fail' : 'text-ok'}`}>
+                            {formatSummaryMoney(entry.netMinor, entry.currencyCode, entry.mixedCurrency)}
+                          </td>
+                          <td className="whitespace-nowrap px-3 py-2 text-right text-fg-3">{entry.movementCount}</td>
+                        </tr>
+                      )
+                    })}
+                    {monthlyBalance.length === 0 && (
+                      <tr>
+                        <td colSpan={5} className="px-3 py-12 text-center font-mono text-sm text-fg-4">
+                          // no movements in this period
+                        </td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </section>
+
+            <section className="border border-[rgba(0,255,140,0.12)] bg-pit-2">
+              <div className="flex items-center justify-between border-b border-[rgba(0,255,140,0.12)] px-4 py-3 font-mono">
+                <div>
+                  <div className="text-[10px] uppercase tracking-label text-fg-4">where money goes</div>
+                  <div className="mt-1 text-sm lowercase text-fg-1">spend by category</div>
+                </div>
+                <ChartPie className="h-4 w-4 text-accent" />
+              </div>
+              <div className="grid gap-6 p-4 lg:grid-cols-[320px_1fr]">
+                {categoryBreakdown.length === 0 ? (
+                  <div className="flex min-h-52 items-center justify-center border border-dashed border-[rgba(0,255,140,0.12)] font-mono text-sm text-fg-4 lg:col-span-2">
+                    // no spend to chart
+                  </div>
+                ) : (
+                  <>
+                    <div className="flex justify-center">
+                      <CategoryPieChart slices={categoryBreakdown} />
+                    </div>
+                    <div className="grid content-center gap-2">
+                      {categoryBreakdown.map((entry) => (
+                        <div key={entry.id} className="grid grid-cols-[12px_1fr_auto_auto] items-center gap-2 font-mono text-xs">
+                          <span className="h-3 w-3" style={{ backgroundColor: entry.color }} />
+                          <span className="truncate text-fg-2">{entry.name}</span>
+                          <span className="text-fg-4">{entry.percent.toFixed(1)}%</span>
+                          <span className="text-fail">{formatMoney(-entry.amountMinor, entry.currencyCode)}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </>
+                )}
+              </div>
+            </section>
+          </div>
+        </div>
+      ) : tab === 'movements' ? (
+        <div className="flex min-h-0 flex-1 flex-col overflow-hidden px-3 py-3 md:px-8 md:py-4">
+          <div className="mb-3 flex flex-wrap items-center gap-3">
+            <div className="[&>div>div>button]:h-8 [&>div>div>button]:px-3">
+              <FilterButton
+                activeFilters={activeFilters}
+                filterConfigs={filterConfigs}
+                onFilterChange={setFilterField}
+                onClearAll={clearAllFilters}
+              />
+            </div>
+            <div className="ml-auto flex w-full min-w-[260px] flex-wrap items-center gap-2 sm:w-auto sm:flex-nowrap sm:gap-3">
+              <IconTooltip label="+ Add movement">
+                <button
+                  type="button"
+                  disabled={scopedAccounts.length === 0}
+                  onClick={() => openMovementModal()}
+                  className="flex h-8 w-8 items-center justify-center border border-[rgba(0,255,140,0.15)] bg-pit-3 text-fg-3 transition hover:border-[rgba(0,255,140,0.3)] hover:text-accent disabled:cursor-not-allowed disabled:opacity-45"
+                  aria-label="Add movement"
+                >
+                  <Plus className="h-3.5 w-3.5" />
+                </button>
+              </IconTooltip>
+              <div className="group relative">
+                <button
+                  type="button"
+                  onClick={() => setCategoryModalOpen(true)}
+                  className="flex h-8 w-8 items-center justify-center border border-[rgba(0,255,140,0.15)] bg-pit-3 text-fg-3 transition hover:border-[rgba(0,255,140,0.3)] hover:text-accent"
+                  aria-label="Create category"
+                >
+                  <Tag className="h-3.5 w-3.5" />
+                </button>
+                <div className="pointer-events-none absolute left-0 top-[calc(100%+6px)] z-30 whitespace-nowrap border border-[rgba(0,255,140,0.2)] bg-pit px-2 py-1 font-mono text-[10px] uppercase tracking-label text-fg-2 opacity-0 shadow-[0_8px_24px_rgba(0,0,0,0.45)] transition group-hover:opacity-100">
+                  + Create category
+                </div>
+              </div>
+              <div className="relative min-w-[180px] flex-1 sm:w-[360px] sm:flex-none lg:w-[520px]">
+                <Search className="absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-fg-4" />
+                <input
+                  value={search}
+                  onChange={(event) => setSearch(event.target.value)}
+                  placeholder="$ search movements..."
+                  className="h-8 w-full border border-[rgba(0,255,140,0.15)] bg-bg-2 pl-9 pr-3 font-mono text-xs text-fg-1 outline-none placeholder:text-fg-4 focus:border-accent focus:shadow-glow-xs"
+                />
+              </div>
+              <button
+                type="button"
+                disabled={importPhase === 'processing' || scopedAccounts.length === 0}
+                onClick={() => setImportModalOpen(true)}
+                className="flex h-8 items-center gap-2 border border-[rgba(0,255,140,0.24)] bg-[rgba(0,255,136,0.06)] px-3 font-mono text-[10px] uppercase tracking-label text-accent transition hover:border-[rgba(0,255,140,0.45)] disabled:cursor-not-allowed disabled:opacity-45"
+              >
+                <FileUp className="h-3.5 w-3.5" />
+                import
+              </button>
+            </div>
+          </div>
+
+          <div className="mb-3 grid gap-2 border border-[rgba(0,255,140,0.12)] bg-pit-2 px-3 py-2 font-mono text-xs sm:grid-cols-4">
+            <FinanceMetric label="income" value={formatSummaryMoney(visibleTotals.positiveMinor, visibleTotals.currencyCode, visibleTotals.mixedCurrency)} tone="ok" />
+            <FinanceMetric label="outflow" value={formatSummaryMoney(visibleTotals.negativeMinor, visibleTotals.currencyCode, visibleTotals.mixedCurrency)} tone="fail" />
+            <FinanceMetric label="net" value={formatSummaryMoney(visibleTotals.netMinor, visibleTotals.currencyCode, visibleTotals.mixedCurrency)} tone={visibleTotals.netMinor < 0 ? 'fail' : 'ok'} />
+            <FinanceMetric label="visible" value={`${visibleMovements.length} movements`} />
+          </div>
+
+          <div className="grid min-h-0 flex-1 gap-2 overflow-auto md:hidden">
+            {visibleMovements.map((movement) => {
+              const account = accounts.find((entry) => entry.id === movement.accountId)
+              const category = categories.find((entry) => entry.id === movement.categoryId)
+              return (
+                <article key={movement.id} className="border border-[rgba(0,255,140,0.12)] bg-pit-2 px-3 py-3 font-mono text-xs">
+                  <div className="mb-2 flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <div className="flex min-w-0 items-center gap-2">
+                        <IconTooltip label={movement.transferId || movement.type === 'transfer' ? 'transfer linked' : 'link transfer'}>
+                          <button
+                            type="button"
+                            onClick={() => setTransferModalMovementId(movement.id)}
+                            className={`flex h-7 w-7 shrink-0 items-center justify-center border transition ${movement.transferId || movement.type === 'transfer' ? 'border-[rgba(0,255,140,0.28)] bg-[rgba(0,255,136,0.08)] text-accent' : 'border-[rgba(0,255,140,0.1)] bg-transparent text-fg-4 hover:border-[rgba(0,255,140,0.18)] hover:bg-[rgba(0,255,136,0.04)] hover:text-fg-1'}`}
+                            aria-label="Link transfer"
+                          >
+                            <ArrowRightLeft className="h-3.5 w-3.5" />
+                          </button>
+                        </IconTooltip>
+                        <div className="min-w-0 flex-1 truncate text-sm text-fg-1" title={movement.merchantName || movement.description}>
+                          {movement.merchantName || movement.description}
+                        </div>
+                      </div>
+                      {movement.merchantName ? (
+                        <div className="mt-1 truncate pl-9 text-[10px] text-fg-4" title={movement.description}>
+                          {movement.description}
+                        </div>
+                      ) : null}
+                    </div>
+                    <div className={`shrink-0 whitespace-nowrap text-right text-sm ${movement.amountMinor < 0 ? 'text-fail' : 'text-ok'}`}>
+                      {formatMoney(movement.amountMinor, movement.currencyCode)}
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-[1fr_auto] gap-2 border-t border-[rgba(0,255,140,0.08)] pt-2">
+                    <div className="min-w-0">
+                      <div className="text-[10px] uppercase tracking-label text-fg-4">{formatZeroDate(movement.transactionDate)}</div>
+                      <div className="mt-1 truncate text-fg-3" title={account?.name ?? 'unknown'}>
+                        {account?.name ?? 'unknown'}
+                      </div>
+                    </div>
+                    <PachSelect
+                      variant="button"
+                      value={movement.status}
+                      onChange={(next) => void updateMovementStatus(movement.id, next)}
+                      options={movementStatusOptions}
+                      trigger={
+                        <span className={`inline-flex h-8 w-8 items-center justify-center border transition ${movement.status === 'pending_review' ? 'border-[rgba(255,184,77,0.28)] bg-[rgba(255,184,77,0.06)] text-amber' : movement.status === 'ignored' ? 'border-[rgba(133,167,145,0.16)] bg-transparent text-fg-4' : 'border-[rgba(0,255,140,0.22)] bg-[rgba(0,255,136,0.06)] text-accent'}`}>
+                          <StatusIcon status={movement.status} />
+                        </span>
+                      }
+                      triggerTitle={statusLabel(movement.status)}
+                      align="right"
+                      popupWidth="170px"
+                      triggerClassName="flex h-8 w-8 items-center justify-center"
+                    />
+                  </div>
+
+                  <div className="mt-2">
+                    <PachSelect
+                      value={movement.categoryId ?? UNCATEGORIZED_VALUE}
+                      onChange={(next) => void updateCategory(movement.id, next === UNCATEGORIZED_VALUE ? '' : next)}
+                      options={categoryOptions}
+                      display={category?.name ?? 'uncategorized'}
+                      popupWidth="260px"
+                      triggerClassName="flex h-8 w-full min-w-0 items-center justify-between border border-[rgba(0,255,140,0.12)] bg-pit px-2 text-left font-mono text-xs text-fg-2 outline-none transition hover:border-[rgba(0,255,140,0.22)] hover:bg-[rgba(0,255,136,0.04)] hover:text-fg-1 focus-visible:border-accent"
+                    />
+                  </div>
+                </article>
+              )
+            })}
+            {visibleMovements.length === 0 ? (
+              <div className="border border-[rgba(0,255,140,0.12)] bg-pit-2 px-3 py-12 text-center font-mono text-sm text-fg-4">
+                // no movements yet
+              </div>
+            ) : null}
+          </div>
+
+          <div className="hidden min-h-0 flex-1 overflow-auto border border-[rgba(0,255,140,0.12)] md:block">
+            <table className="w-full table-fixed border-collapse font-mono text-xs">
+              <colgroup>
+                <col className="w-[11%]" />
+                <col className="w-[31%]" />
+                <col className="w-[18%]" />
+                <col className="w-[18%]" />
+                <col className="w-[15%]" />
+                <col className="w-[7%]" />
+              </colgroup>
+              <thead className="sticky top-0 bg-pit text-[10px] uppercase tracking-label text-fg-4">
+                <tr>
+                  <th className="border-b border-[rgba(0,255,140,0.12)] px-3 py-2 text-left">date</th>
+                  <th className="border-b border-[rgba(0,255,140,0.12)] px-3 py-2 text-left">movement</th>
+                  <th className="border-b border-[rgba(0,255,140,0.12)] px-3 py-2 text-left">account</th>
+                  <th className="border-b border-[rgba(0,255,140,0.12)] px-3 py-2 text-left">category</th>
+                  <th className="border-b border-[rgba(0,255,140,0.12)] px-3 py-2 text-right">amount</th>
+                  <th className="border-b border-[rgba(0,255,140,0.12)] px-3 py-2 text-right">state</th>
+                </tr>
+              </thead>
+              <tbody>
+                {visibleMovements.map((movement) => {
+                  const account = accounts.find((entry) => entry.id === movement.accountId)
+                  const category = categories.find((entry) => entry.id === movement.categoryId)
+                  return (
+                    <tr key={movement.id} className="border-b border-[rgba(0,255,140,0.08)] text-fg-2 hover:bg-[rgba(0,255,136,0.04)]">
+                      <td className="whitespace-nowrap px-3 py-2 text-fg-3">{formatZeroDate(movement.transactionDate)}</td>
+                      <td className="min-w-0 px-3 py-2">
+                        <div className="flex min-w-0 items-center gap-2">
+                          <IconTooltip label={movement.transferId || movement.type === 'transfer' ? 'transfer linked' : 'link transfer'}>
+                            <button
+                              type="button"
+                              onClick={() => setTransferModalMovementId(movement.id)}
+                              className={`flex h-6 w-6 shrink-0 items-center justify-center border transition ${movement.transferId || movement.type === 'transfer' ? 'border-[rgba(0,255,140,0.28)] bg-[rgba(0,255,136,0.08)] text-accent' : 'border-transparent bg-transparent text-fg-4 hover:border-[rgba(0,255,140,0.18)] hover:bg-[rgba(0,255,136,0.04)] hover:text-fg-1'}`}
+                              aria-label="Link transfer"
+                            >
+                              <ArrowRightLeft className="h-3.5 w-3.5" />
+                            </button>
+                          </IconTooltip>
+                          <div className="min-w-0 flex-1 truncate text-fg-1" title={movement.merchantName || movement.description}>
+                            {movement.merchantName || movement.description}
+                          </div>
+                        </div>
+                        {movement.merchantName ? (
+                          <div className="mt-0.5 truncate pl-8 text-[10px] text-fg-4" title={movement.description}>
+                            {movement.description}
+                          </div>
+                        ) : null}
+                      </td>
+                      <td className="min-w-0 px-3 py-2 text-fg-3">
+                        <div className="truncate" title={account?.name ?? 'unknown'}>
+                          {account?.name ?? 'unknown'}
+                        </div>
+                      </td>
+                      <td className="min-w-0 px-3 py-2">
+                        <PachSelect
+                          value={movement.categoryId ?? UNCATEGORIZED_VALUE}
+                          onChange={(next) => void updateCategory(movement.id, next === UNCATEGORIZED_VALUE ? '' : next)}
+                          options={categoryOptions}
+                          display={category?.name ?? 'uncategorized'}
+                          popupWidth="260px"
+                          triggerClassName="flex h-7 w-full min-w-0 items-center justify-between border border-transparent bg-transparent px-2 text-left font-mono text-xs text-fg-2 outline-none transition hover:border-[rgba(0,255,140,0.18)] hover:bg-[rgba(0,255,136,0.04)] hover:text-fg-1 focus-visible:border-accent"
+                        />
+                        {category ? null : <span className="text-[10px] text-amber">needs category</span>}
+                      </td>
+                      <td className={`whitespace-nowrap px-3 py-2 text-right ${movement.amountMinor < 0 ? 'text-fail' : 'text-ok'}`}>
+                        {formatMoney(movement.amountMinor, movement.currencyCode)}
+                      </td>
+                      <td className="px-3 py-2 text-right">
+                        <PachSelect
+                          variant="button"
+                          value={movement.status}
+                          onChange={(next) => void updateMovementStatus(movement.id, next)}
+                          options={movementStatusOptions}
+                          trigger={
+                            <span className={`inline-flex h-7 w-7 items-center justify-center border transition ${movement.status === 'pending_review' ? 'border-[rgba(255,184,77,0.28)] bg-[rgba(255,184,77,0.06)] text-amber' : movement.status === 'ignored' ? 'border-[rgba(133,167,145,0.16)] bg-transparent text-fg-4' : 'border-[rgba(0,255,140,0.22)] bg-[rgba(0,255,136,0.06)] text-accent'}`}>
+                              <StatusIcon status={movement.status} />
+                            </span>
+                          }
+                          triggerTitle={statusLabel(movement.status)}
+                          align="right"
+                          popupWidth="170px"
+                          triggerClassName="ml-auto flex h-7 w-7 items-center justify-center"
+                        />
+                      </td>
+                    </tr>
+                  )
+                })}
+                {visibleMovements.length === 0 && (
+                  <tr>
+                    <td colSpan={6} className="px-3 py-12 text-center font-mono text-sm text-fg-4">
+                      // no movements yet
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      ) : (
+        <div className="min-h-0 flex-1 overflow-auto px-3 py-3 md:px-8 md:py-4">
+          <div className="mb-3 flex items-center justify-end">
+            <button
+              type="button"
+              onClick={() => openAccountModal()}
+              className="flex h-8 items-center gap-2 border border-[rgba(0,255,140,0.24)] bg-[rgba(0,255,136,0.06)] px-3 font-mono text-[10px] uppercase tracking-label text-accent transition hover:border-[rgba(0,255,140,0.45)]"
+            >
+              <Plus className="h-3.5 w-3.5" />
+              add account
+            </button>
+          </div>
+          {scopedAccounts.length === 0 ? (
+            <FinanceEmptyState
+              title="start with an account or card"
+              body="add the bank account, credit card, cash box, or loan where movements will land. imports become much easier once each source has a home."
+              actionLabel="add account"
+              onAction={() => openAccountModal()}
+            />
+          ) : (
+            <>
+            <div className="grid gap-2 md:hidden">
+              {scopedAccounts.map((account) => {
+                const holder = account.holderUserId ? holderUserMap.get(account.holderUserId) : undefined
+                const stats = accountStats.get(account.id)
+                return (
+                  <article key={account.id} className="border border-[rgba(0,255,140,0.12)] bg-pit-2 px-3 py-3 font-mono text-xs">
+                    <div className="mb-3 flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <div className="truncate text-sm text-fg-1" title={account.name}>{account.name}</div>
+                        <div className="mt-1 truncate text-[10px] uppercase tracking-label text-fg-4">
+                          {account.institutionName || 'no institution'} · {typeLabel(account.type)}
+                        </div>
+                      </div>
+                      <div className="shrink-0 text-accent">{account.currencyCode}</div>
+                    </div>
+                    <div className="grid grid-cols-2 gap-2">
+                      <FinanceMetric
+                        label="current"
+                        value={formatMoney(stats?.calculatedBalanceMinor ?? 0, account.currencyCode)}
+                      />
+                      <FinanceMetric
+                        label="last set"
+                        value={account.lastBalanceMinor == null ? 'not set' : formatMoney(account.lastBalanceMinor, account.currencyCode)}
+                      />
+                      <FinanceMetric label="movements" value={`${stats?.movementCount ?? 0}`} />
+                      <FinanceMetric
+                        label="delta"
+                        value={formatMoney(stats?.deltaMinor ?? 0, account.currencyCode)}
+                        tone={(stats?.deltaMinor ?? 0) < 0 ? 'fail' : 'ok'}
+                      />
+                    </div>
+                    <div className="mt-3 flex items-center justify-between border-t border-[rgba(0,255,140,0.08)] pt-2">
+                      <span className="truncate text-fg-4">{holder ? displayUser(holder) : 'unassigned'}</span>
+                      <div className="flex shrink-0 items-center gap-3">
+                        <button
+                          type="button"
+                          onClick={() => openAccountModal(account)}
+                          className="text-fg-3 transition hover:text-fg-1"
+                        >
+                          edit
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => openBalanceModal(account.id)}
+                          className="text-accent transition hover:text-fg-1"
+                        >
+                          set balance
+                        </button>
+                      </div>
+                    </div>
+                  </article>
+                )
+              })}
+            </div>
+
+            <div className="hidden min-h-0 overflow-auto border border-[rgba(0,255,140,0.12)] md:block">
+              <table className="w-full border-collapse font-mono text-xs">
+                <thead className="sticky top-0 bg-pit text-[10px] uppercase tracking-label text-fg-4">
+                  <tr>
+                    <th className="border-b border-[rgba(0,255,140,0.12)] px-3 py-2 text-left">account/card</th>
+                    <th className="border-b border-[rgba(0,255,140,0.12)] px-3 py-2 text-left">institution</th>
+                    <th className="border-b border-[rgba(0,255,140,0.12)] px-3 py-2 text-left">type</th>
+                    <th className="border-b border-[rgba(0,255,140,0.12)] px-3 py-2 text-left">holder</th>
+                    <th className="border-b border-[rgba(0,255,140,0.12)] px-3 py-2 text-right">currency</th>
+                    <th className="border-b border-[rgba(0,255,140,0.12)] px-3 py-2 text-right">movements</th>
+                    <th className="border-b border-[rgba(0,255,140,0.12)] px-3 py-2 text-right">current balance</th>
+                    <th className="border-b border-[rgba(0,255,140,0.12)] px-3 py-2 text-right">last set</th>
+                    <th className="border-b border-[rgba(0,255,140,0.12)] px-3 py-2 text-right">delta</th>
+                    <th className="border-b border-[rgba(0,255,140,0.12)] px-3 py-2 text-right">actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {scopedAccounts.map((account) => {
+                    const holder = account.holderUserId ? holderUserMap.get(account.holderUserId) : undefined
+                    const stats = accountStats.get(account.id)
+                    return (
+                      <tr key={account.id} className="border-b border-[rgba(0,255,140,0.08)] text-fg-2 hover:bg-[rgba(0,255,136,0.04)]">
+                        <td className="px-3 py-2">
+                          <div className="text-fg-1">{account.name}</div>
+                          <div className="mt-0.5 text-[10px] uppercase tracking-label text-fg-4">{account.status}</div>
+                        </td>
+                        <td className="px-3 py-2 text-fg-3">{account.institutionName || 'no institution'}</td>
+                        <td className="px-3 py-2 text-fg-3">{typeLabel(account.type)}</td>
+                        <td className="px-3 py-2 text-fg-3">{holder ? displayUser(holder) : 'unassigned'}</td>
+                        <td className="whitespace-nowrap px-3 py-2 text-right text-accent">{account.currencyCode}</td>
+                        <td className="whitespace-nowrap px-3 py-2 text-right text-fg-2">{stats?.movementCount ?? 0}</td>
+                        <td className="whitespace-nowrap px-3 py-2 text-right text-fg-1">
+                          {formatMoney(stats?.calculatedBalanceMinor ?? 0, account.currencyCode)}
+                        </td>
+                        <td className="whitespace-nowrap px-3 py-2 text-right text-fg-3">
+                          {account.lastBalanceMinor == null ? 'not set' : formatMoney(account.lastBalanceMinor, account.currencyCode)}
+                        </td>
+                        <td className={`whitespace-nowrap px-3 py-2 text-right ${(stats?.deltaMinor ?? 0) < 0 ? 'text-fail' : 'text-ok'}`}>
+                          {formatMoney(stats?.deltaMinor ?? 0, account.currencyCode)}
+                        </td>
+                        <td className="whitespace-nowrap px-3 py-2 text-right">
+                          <div className="flex items-center justify-end gap-3">
+                            <button
+                              type="button"
+                              onClick={() => openAccountModal(account)}
+                              className="text-fg-3 transition hover:text-fg-1"
+                            >
+                              edit
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => openBalanceModal(account.id)}
+                              className="text-accent transition hover:text-fg-1"
+                            >
+                              set balance
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
+            </div>
+            </>
+          )}
+        </div>
+      )}
+      </main>
+
+      {importModalOpen && (
+        <div
+          className="fixed inset-0 z-50 flex items-start justify-center bg-[rgba(0,0,0,0.7)] px-4 pt-[8vh] backdrop-blur-sm"
+          onClick={() => setImportModalOpen(false)}
+        >
+          <div
+            className="w-full max-w-3xl border border-[rgba(0,255,140,0.2)] bg-pit-2 shadow-[0_30px_80px_rgba(0,0,0,0.5)]"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="flex items-center justify-between border-b border-[rgba(0,255,140,0.12)] px-5 py-3">
+              <div className="flex min-w-0 items-center gap-2 font-mono text-xs">
+                <span className="inline-flex items-center gap-1.5 border border-[rgba(0,255,140,0.25)] bg-[rgba(0,255,136,0.05)] px-2 py-0.5 font-mono text-[10px] uppercase tracking-label text-accent">
+                  import
+                </span>
+                <span className="text-fg-4">›</span>
+                <div className="w-48">
+                  <PachSelect
+                    value={importAccountId}
+                    onChange={setImportAccountId}
+                    options={importPhase === 'processing' ? [] : importAccountOptions}
+                    display={importAccountLabel}
+                    triggerClassName={`flex h-7 w-full items-center justify-between border border-transparent bg-transparent px-1 text-left font-mono text-xs lowercase text-fg-2 outline-none transition hover:border-[rgba(0,255,140,0.18)] hover:text-fg-1 ${importPhase === 'processing' ? 'cursor-not-allowed opacity-50' : ''}`}
+                    popupWidth="240px"
+                  />
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setImportModalOpen(false)}
+                className="font-mono text-xs uppercase tracking-label text-fg-4 transition hover:text-fg-1"
+                title="close"
+              >
+                [esc]
+              </button>
+            </div>
+
+            <div className="grid gap-4 p-5">
+              <button
+                type="button"
+                disabled={importPhase === 'processing' || scopedAccounts.length === 0}
+                onClick={() => fileInputRef.current?.click()}
+                onDragEnter={(event) => {
+                  event.preventDefault()
+                  setImportDragActive(true)
+                }}
+                onDragOver={(event) => {
+                  event.preventDefault()
+                  setImportDragActive(true)
+                }}
+                onDragLeave={() => setImportDragActive(false)}
+                onDrop={(event) => {
+                  event.preventDefault()
+                  setImportDragActive(false)
+                  const file = event.dataTransfer.files?.[0]
+                  if (file) stageImportFile(file)
+                }}
+                className={`flex min-h-56 flex-col items-center justify-center border border-dashed px-6 py-10 text-center transition ${
+                  importDragActive
+                    ? 'border-accent bg-[rgba(0,255,136,0.08)] shadow-glow-xs'
+                    : 'border-[rgba(0,255,140,0.22)] bg-pit hover:border-[rgba(0,255,140,0.4)] hover:bg-[rgba(0,255,136,0.04)]'
+                } disabled:cursor-not-allowed disabled:opacity-45`}
+              >
+                <UploadCloud className={`h-7 w-7 ${importDragActive ? 'text-accent' : 'text-fg-3'}`} />
+                <div className="mt-3 font-mono text-sm lowercase text-fg-1">
+                  {importDragActive ? 'drop to stage import' : 'drop statement, screenshot, or csv'}
+                </div>
+                <div className="mt-1 font-mono text-[10px] uppercase tracking-label text-fg-4">
+                  pdf · csv · txt · image · max {formatBytes(MAX_IMPORT_FILE_BYTES)}
+                </div>
+              </button>
+
+              {(importFile || importMessage) && (
+                <div>
+                  <div className="mb-2 flex items-center justify-between font-mono text-[10px] uppercase tracking-label text-fg-4">
+                    <span>{importPhase === 'processing' ? 'processing import' : importFile ? 'staged file' : 'latest import'}</span>
+                    {importFile && importPhase !== 'processing' ? (
+                      <button
+                        type="button"
+                        onClick={resetImportSelection}
+                        className="inline-flex items-center gap-1 text-fg-3 transition hover:text-fg-1"
+                      >
+                        <X className="h-3 w-3" />
+                        clear
+                      </button>
+                    ) : null}
+                  </div>
+
+                  <div className="grid grid-cols-[20px_1fr_150px_32px] items-center gap-3 border-y border-[rgba(0,255,140,0.12)] py-2.5 font-mono text-xs">
+                    <FileText className="h-3.5 w-3.5 text-fg-4" />
+                    <div className="min-w-0">
+                      <div className="truncate text-fg-1" title={importFile?.name ?? undefined}>
+                        {importFile?.name ?? 'no file selected'}
+                      </div>
+                      <div className="mt-0.5 text-[10px] uppercase tracking-label text-fg-4">
+                        {importFile ? formatBytes(importFile.size) : 'idle'}
+                      </div>
+                    </div>
+                    <ImportStatus phase={importPhase} />
+                    <span aria-hidden />
+                  </div>
+
+                  {importMessage ? (
+                    <div className={`mt-2 flex items-start gap-2 font-mono text-xs ${importPhase === 'failed' ? 'text-amber' : 'text-fg-3'}`}>
+                      {importPhase === 'failed' ? <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" /> : null}
+                      <span>{importMessage}</span>
+                    </div>
+                  ) : null}
+                </div>
+              )}
+            </div>
+
+            <div className="flex items-center justify-between border-t border-[rgba(0,255,140,0.12)] px-5 py-3">
+              <button
+                type="button"
+                onClick={() => setImportModalOpen(false)}
+                disabled={importPhase === 'processing'}
+                className="px-2 py-1.5 font-mono text-xs uppercase tracking-label text-fg-3 transition hover:text-fg-1 disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                [cancel]
+              </button>
+              <button
+                type="button"
+                disabled={!importFile || !importAccountId || importPhase === 'processing' || importPhase === 'success' || scopedAccounts.length === 0}
+                onClick={() => void confirmImport()}
+                className="inline-flex items-center gap-2 border border-[rgba(0,255,140,0.3)] bg-[rgba(0,255,136,0.08)] px-3 py-1.5 font-mono text-xs uppercase tracking-label text-accent transition hover:bg-[rgba(0,255,136,0.16)] hover:shadow-glow-xs disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-[rgba(0,255,136,0.08)] disabled:hover:shadow-none"
+              >
+                {importPhase === 'processing' ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <FileUp className="h-3.5 w-3.5" />}
+                {importPhase === 'processing' ? 'processing' : importPhase === 'success' ? 'processed' : 'process import'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {transferModalMovementId && selectedTransferMovement && (
+        <div
+          className="fixed inset-0 z-50 flex items-start justify-center bg-[rgba(0,0,0,0.7)] px-4 pt-[8vh] backdrop-blur-sm"
+          onClick={() => setTransferModalMovementId(null)}
+        >
+          <div
+            className="w-full max-w-3xl border border-[rgba(0,255,140,0.2)] bg-pit-2 shadow-[0_30px_80px_rgba(0,0,0,0.5)]"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="flex items-center justify-between border-b border-[rgba(0,255,140,0.12)] px-5 py-3">
+              <div className="flex items-center gap-2 font-mono text-xs">
+                <span className="inline-flex items-center gap-1.5 border border-[rgba(0,255,140,0.25)] bg-[rgba(0,255,136,0.05)] px-2 py-0.5 font-mono text-[10px] uppercase tracking-label text-accent">
+                  transfer
+                </span>
+                <span className="text-fg-4">›</span>
+                <span className="text-fg-2 lowercase">link movement</span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setTransferModalMovementId(null)}
+                className="font-mono text-xs uppercase tracking-label text-fg-4 transition hover:text-fg-1"
+                title="close"
+              >
+                [esc]
+              </button>
+            </div>
+
+            <div className="grid gap-4 px-5 py-4">
+              <section className="border border-[rgba(0,255,140,0.12)] bg-pit px-3 py-3 font-mono">
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div>
+                    <div className="text-sm text-fg-1">{selectedTransferMovement.merchantName || selectedTransferMovement.description}</div>
+                    <div className="mt-1 text-[10px] uppercase tracking-label text-fg-4">
+                      {formatZeroDate(selectedTransferMovement.transactionDate)} · {accountLabel(selectedTransferMovement.accountId, scopedAccounts)}
+                    </div>
+                  </div>
+                  <div className={`text-sm ${selectedTransferMovement.amountMinor < 0 ? 'text-fail' : 'text-ok'}`}>
+                    {formatMoney(selectedTransferMovement.amountMinor, selectedTransferMovement.currencyCode)}
+                  </div>
+                </div>
+                {selectedTransfer ? (
+                  <div className="mt-3 border-t border-[rgba(0,255,140,0.08)] pt-3 text-xs text-fg-3">
+                    linked transfer · {selectedTransfer.status}
+                  </div>
+                ) : (
+                  <div className="mt-3 border-t border-[rgba(0,255,140,0.08)] pt-3 text-xs text-fg-4">
+                    transfers are excluded from income, outflow, and category spend, but still affect account balances.
+                  </div>
+                )}
+              </section>
+
+              <section className="border border-[rgba(0,255,140,0.12)] bg-pit">
+                <div className="flex items-center justify-between border-b border-[rgba(0,255,140,0.12)] px-3 py-2 font-mono text-[10px] uppercase tracking-label text-fg-4">
+                  <span>suggested matches</span>
+                  <span>{transferCandidates.length}</span>
+                </div>
+                <div className="max-h-[320px] overflow-auto">
+                  {transferCandidates.length === 0 ? (
+                    <div className="px-3 py-10 text-center font-mono text-sm text-fg-4">
+                      // no likely opposite-side movements found
+                    </div>
+                  ) : (
+                    transferCandidates.slice(0, 10).map((candidate) => (
+                      <button
+                        key={candidate.movement.id}
+                        type="button"
+                        onClick={() => void linkTransferMovement(selectedTransferMovement.id, candidate.movement.id)}
+                        className="grid w-full grid-cols-[1fr_auto_auto] items-center gap-3 border-b border-[rgba(0,255,140,0.08)] px-3 py-3 text-left font-mono text-xs transition hover:bg-[rgba(0,255,136,0.05)]"
+                      >
+                        <span className="min-w-0">
+                          <span className="block truncate text-fg-1">{candidate.movement.merchantName || candidate.movement.description}</span>
+                          <span className="mt-1 block truncate text-[10px] uppercase tracking-label text-fg-4">
+                            {formatZeroDate(candidate.movement.transactionDate)} · {accountLabel(candidate.movement.accountId, scopedAccounts)} · {candidate.reasons.join(' · ')}
+                          </span>
+                        </span>
+                        <span className={`whitespace-nowrap ${candidate.movement.amountMinor < 0 ? 'text-fail' : 'text-ok'}`}>
+                          {formatMoney(candidate.movement.amountMinor, candidate.movement.currencyCode)}
+                        </span>
+                        <span className="whitespace-nowrap text-accent">{candidate.score}%</span>
+                      </button>
+                    ))
+                  )}
+                </div>
+              </section>
+            </div>
+
+            <div className="flex items-center justify-between border-t border-[rgba(0,255,140,0.12)] px-5 py-3">
+              <button
+                type="button"
+                onClick={() => setTransferModalMovementId(null)}
+                className="px-2 py-1.5 font-mono text-xs uppercase tracking-label text-fg-3 transition hover:text-fg-1"
+              >
+                [cancel]
+              </button>
+              <div className="flex flex-wrap items-center justify-end gap-2">
+                {isTransferLikeMovement(selectedTransferMovement, scopedCategories) ? (
+                  <button
+                    type="button"
+                    onClick={() => void unmarkTransferMovement(selectedTransferMovement.id)}
+                    className="inline-flex items-center gap-2 border border-[rgba(255,95,135,0.28)] bg-[rgba(255,95,135,0.06)] px-3 py-1.5 font-mono text-xs uppercase tracking-label text-fail transition hover:bg-[rgba(255,95,135,0.12)]"
+                  >
+                    <X className="h-3.5 w-3.5" />
+                    unmark transfer
+                  </button>
+                ) : null}
+                <button
+                  type="button"
+                  onClick={() => void markMovementAsTransfer(selectedTransferMovement.id)}
+                  className="inline-flex items-center gap-2 border border-[rgba(0,255,140,0.3)] bg-[rgba(0,255,136,0.08)] px-3 py-1.5 font-mono text-xs uppercase tracking-label text-accent transition hover:bg-[rgba(0,255,136,0.16)] hover:shadow-glow-xs"
+                >
+                  <ArrowRightLeft className="h-3.5 w-3.5" />
+                  mark transfer only
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {movementModalOpen && (
+        <div
+          className="fixed inset-0 z-50 flex items-start justify-center bg-[rgba(0,0,0,0.7)] px-4 pt-[10vh] backdrop-blur-sm"
+          onClick={() => setMovementModalOpen(false)}
+        >
+          <div
+            className="w-full max-w-2xl border border-[rgba(0,255,140,0.2)] bg-pit-2 shadow-[0_30px_80px_rgba(0,0,0,0.5)]"
+            onClick={(event) => event.stopPropagation()}
+            onKeyDown={(event) => {
+              if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') {
+                event.preventDefault()
+                if (canCreateMovement) void createMovement()
+              }
+            }}
+          >
+            <div className="flex items-center justify-between border-b border-[rgba(0,255,140,0.12)] px-5 py-3">
+              <div className="flex items-center gap-2 font-mono text-xs">
+                <span className="inline-flex items-center gap-1.5 border border-[rgba(0,255,140,0.25)] bg-[rgba(0,255,136,0.05)] px-2 py-0.5 font-mono text-[10px] uppercase tracking-label text-accent">
+                  finance
+                </span>
+                <span className="text-fg-4">›</span>
+                <span className="text-fg-2 lowercase">new movement</span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setMovementModalOpen(false)}
+                className="font-mono text-xs uppercase tracking-label text-fg-4 transition hover:text-fg-1"
+                title="close"
+              >
+                [esc]
+              </button>
+            </div>
+
+            <div className="px-5 pt-4">
+              <input
+                value={movementDraft.description}
+                onChange={(event) => setMovementDraft((draft) => ({ ...draft, description: event.target.value }))}
+                placeholder="movement description"
+                className="w-full bg-transparent px-0 py-1 font-mono text-lg text-fg-1 outline-none placeholder:text-fg-4"
+                autoFocus
+              />
+              <input
+                value={movementDraft.amount}
+                onChange={(event) => setMovementDraft((draft) => ({ ...draft, amount: event.target.value }))}
+                placeholder={selectedMovementAccount ? `${selectedMovementAccount.currencyCode} amount` : 'amount'}
+                inputMode="decimal"
+                className="w-full bg-transparent px-0 py-2 font-mono text-sm leading-relaxed text-fg-2 outline-none placeholder:text-fg-4"
+              />
+            </div>
+
+            <div className="flex flex-wrap items-center gap-2 px-5 py-3">
+              <PachSelect
+                variant="button"
+                value={movementDraft.accountId}
+                onChange={(next) => setMovementDraft((draft) => ({ ...draft, accountId: next }))}
+                options={importAccountOptions}
+                trigger={
+                  <FinanceComposerPill
+                    icon={selectedMovementAccount?.type === 'credit_card' ? <CreditCard className="h-3 w-3" /> : <Landmark className="h-3 w-3" />}
+                    label={selectedMovementAccount?.name?.toLowerCase() ?? 'account'}
+                  />
+                }
+                triggerTitle="account"
+                triggerClassName="transition"
+                popupWidth="260px"
+              />
+              <PachSelect
+                variant="button"
+                value={movementDraft.categoryId}
+                onChange={(next) => setMovementDraft((draft) => ({ ...draft, categoryId: next }))}
+                options={categoryOptions}
+                trigger={
+                  <FinanceComposerPill
+                    icon={<Tag className="h-3 w-3" />}
+                    label={categoryOptions.find((entry) => entry.value === movementDraft.categoryId)?.label?.toLowerCase() ?? 'uncategorized'}
+                  />
+                }
+                triggerTitle="category"
+                triggerClassName="transition"
+                popupWidth="260px"
+              />
+              <PachSelect
+                variant="button"
+                value={movementDraft.type}
+                onChange={(next) => setMovementDraft((draft) => ({ ...draft, type: next }))}
+                options={movementTypeOptions}
+                trigger={<FinanceComposerPill icon={<CircleDollarSign className="h-3 w-3" />} label={movementTypeLabel(movementDraft.type)} />}
+                triggerTitle="type"
+                triggerClassName="transition"
+                popupWidth="170px"
+              />
+              <PachSelect
+                variant="button"
+                value={movementDraft.status}
+                onChange={(next) => setMovementDraft((draft) => ({ ...draft, status: next }))}
+                options={movementStatusOptions}
+                trigger={<FinanceComposerPill icon={<Layers2 className="h-3 w-3" />} label={statusLabel(movementDraft.status)} />}
+                triggerTitle="status"
+                triggerClassName="transition"
+                popupWidth="170px"
+              />
+              {selectedMovementAccount ? (
+                <FinanceComposerPill
+                  icon={<span className="font-mono text-[10px] text-fg-3">$</span>}
+                  label={selectedMovementAccount.currencyCode}
+                />
+              ) : null}
+              <label className="inline-flex items-center gap-1.5 border border-[rgba(0,255,140,0.2)] bg-pit-3 px-2.5 py-1 font-mono text-[11px] lowercase text-fg-2 transition hover:border-[rgba(0,255,140,0.4)] hover:bg-[rgba(0,255,136,0.04)] hover:text-fg-1">
+                <CalendarDays className="h-3 w-3" />
+                <input
+                  type="date"
+                  value={movementDraft.transactionDate}
+                  onChange={(event) => setMovementDraft((draft) => ({ ...draft, transactionDate: event.target.value }))}
+                  className="w-[110px] bg-transparent font-mono text-[11px] text-fg-2 outline-none"
+                />
+              </label>
+            </div>
+
+            <div className="flex items-center justify-between border-t border-[rgba(0,255,140,0.12)] px-5 py-3">
+              <button
+                type="button"
+                onClick={() => setMovementModalOpen(false)}
+                className="px-2 py-1.5 font-mono text-xs uppercase tracking-label text-fg-3 transition hover:text-fg-1"
+              >
+                [cancel]
+              </button>
+              <button
+                type="button"
+                disabled={!canCreateMovement}
+                onClick={() => void createMovement()}
+                className="inline-flex items-center gap-2 border border-[rgba(0,255,140,0.3)] bg-[rgba(0,255,136,0.08)] px-3 py-1.5 font-mono text-xs uppercase tracking-label text-accent transition hover:bg-[rgba(0,255,136,0.16)] hover:shadow-glow-xs disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-[rgba(0,255,136,0.08)] disabled:hover:shadow-none"
+              >
+                <Plus className="h-3.5 w-3.5" />
+                add movement
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {balanceModalOpen && selectedBalanceAccount && (
+        <div
+          className="fixed inset-0 z-50 flex items-start justify-center bg-[rgba(0,0,0,0.7)] px-4 pt-[10vh] backdrop-blur-sm"
+          onClick={() => setBalanceModalOpen(false)}
+        >
+          <div
+            className="w-full max-w-xl border border-[rgba(0,255,140,0.2)] bg-pit-2 shadow-[0_30px_80px_rgba(0,0,0,0.5)]"
+            onClick={(event) => event.stopPropagation()}
+            onKeyDown={(event) => {
+              if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') {
+                event.preventDefault()
+                if (canSaveBalance) void saveBalance()
+              }
+            }}
+          >
+            <div className="flex items-center justify-between border-b border-[rgba(0,255,140,0.12)] px-5 py-3">
+              <div className="flex items-center gap-2 font-mono text-xs">
+                <span className="inline-flex items-center gap-1.5 border border-[rgba(0,255,140,0.25)] bg-[rgba(0,255,136,0.05)] px-2 py-0.5 font-mono text-[10px] uppercase tracking-label text-accent">
+                  balance
+                </span>
+                <span className="text-fg-4">›</span>
+                <span className="text-fg-2 lowercase">{selectedBalanceAccount.name}</span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setBalanceModalOpen(false)}
+                className="font-mono text-xs uppercase tracking-label text-fg-4 transition hover:text-fg-1"
+                title="close"
+              >
+                [esc]
+              </button>
+            </div>
+
+            <div className="grid gap-4 px-5 py-4">
+              <div className="grid gap-3 sm:grid-cols-[1fr_160px]">
+                <label className="grid gap-1">
+                  <span className="font-mono text-[10px] uppercase tracking-label text-fg-4">actual balance</span>
+                  <input
+                    value={balanceDraft.balance}
+                    onChange={(event) => setBalanceDraft((draft) => ({ ...draft, balance: event.target.value }))}
+                    placeholder={selectedBalanceAccount.currencyCode}
+                    inputMode="decimal"
+                    className="h-9 border border-[rgba(0,255,140,0.15)] bg-pit-3 px-3 font-mono text-xs text-fg-1 outline-none placeholder:text-fg-4 focus:border-accent"
+                    autoFocus
+                  />
+                </label>
+                <label className="grid gap-1">
+                  <span className="font-mono text-[10px] uppercase tracking-label text-fg-4">as of</span>
+                  <input
+                    type="date"
+                    value={balanceDraft.asOfDate}
+                    onChange={(event) => setBalanceDraft((draft) => ({ ...draft, asOfDate: event.target.value }))}
+                    className="h-9 border border-[rgba(0,255,140,0.15)] bg-pit-3 px-3 font-mono text-xs text-fg-1 outline-none focus:border-accent"
+                  />
+                </label>
+              </div>
+
+              <div className="grid gap-2 border border-[rgba(0,255,140,0.12)] bg-pit px-3 py-2 font-mono text-xs">
+                <FinanceMetric
+                  label="expected"
+                  value={balanceExpectedMinor == null ? 'not enough data' : formatMoney(balanceExpectedMinor, selectedBalanceAccount.currencyCode)}
+                />
+                <FinanceMetric
+                  label="difference"
+                  value={balanceDifferenceMinor == null ? 'enter balance' : formatMoney(balanceDifferenceMinor, selectedBalanceAccount.currencyCode)}
+                  tone={balanceDifferenceMinor == null || balanceDifferenceMinor >= 0 ? 'ok' : 'fail'}
+                />
+              </div>
+
+              <div className="border border-[rgba(0,255,140,0.1)] bg-pit px-3 py-2 font-mono text-xs text-fg-4">
+                use this as the opening balance for the day you start tracking, or as a later bank-reported reconciliation point.
+              </div>
+
+              {balanceDifferenceMinor != null && balanceDifferenceMinor !== 0 ? (
+                <label className="flex items-center gap-2 font-mono text-xs text-fg-2">
+                  <input
+                    type="checkbox"
+                    checked={balanceDraft.createAdjustment}
+                    onChange={(event) => setBalanceDraft((draft) => ({ ...draft, createAdjustment: event.target.checked }))}
+                    className="h-3.5 w-3.5 accent-[rgb(0,255,136)]"
+                  />
+                  add reconciliation adjustment for the difference
+                </label>
+              ) : null}
+            </div>
+
+            <div className="flex items-center justify-between border-t border-[rgba(0,255,140,0.12)] px-5 py-3">
+              <button
+                type="button"
+                onClick={() => setBalanceModalOpen(false)}
+                className="px-2 py-1.5 font-mono text-xs uppercase tracking-label text-fg-3 transition hover:text-fg-1"
+              >
+                [cancel]
+              </button>
+              <button
+                type="button"
+                disabled={!canSaveBalance}
+                onClick={() => void saveBalance()}
+                className="inline-flex items-center gap-2 border border-[rgba(0,255,140,0.3)] bg-[rgba(0,255,136,0.08)] px-3 py-1.5 font-mono text-xs uppercase tracking-label text-accent transition hover:bg-[rgba(0,255,136,0.16)] hover:shadow-glow-xs disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-[rgba(0,255,136,0.08)] disabled:hover:shadow-none"
+              >
+                <CheckCircle className="h-3.5 w-3.5" />
+                save balance
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {accountModalOpen && (
+        <div
+          className="fixed inset-0 z-50 flex items-start justify-center bg-[rgba(0,0,0,0.7)] px-4 pt-[10vh] backdrop-blur-sm"
+          onClick={closeAccountModal}
+        >
+          <div
+            className="w-full max-w-2xl border border-[rgba(0,255,140,0.2)] bg-pit-2 shadow-[0_30px_80px_rgba(0,0,0,0.5)]"
+            onClick={(event) => event.stopPropagation()}
+            onKeyDown={(event) => {
+              if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') {
+                event.preventDefault()
+                if (canCreateAccount) saveAccount()
+              }
+            }}
+          >
+            <div className="flex items-center justify-between border-b border-[rgba(0,255,140,0.12)] px-5 py-3">
+              <div className="flex items-center gap-2 font-mono text-xs">
+                <span className="inline-flex items-center gap-1.5 border border-[rgba(0,255,140,0.25)] bg-[rgba(0,255,136,0.05)] px-2 py-0.5 font-mono text-[10px] uppercase tracking-label text-accent">
+                  finance
+                </span>
+                <span className="text-fg-4">›</span>
+                <span className="text-fg-2 lowercase">{editingAccountId ? 'edit account/card' : 'new account/card'}</span>
+              </div>
+              <button
+                type="button"
+                onClick={closeAccountModal}
+                className="font-mono text-xs uppercase tracking-label text-fg-4 transition hover:text-fg-1"
+                title="close"
+              >
+                [esc]
+              </button>
+            </div>
+
+            <div className="px-5 pt-4">
+              <div>
+                <input
+                  value={accountDraft.name}
+                  onChange={(event) => setAccountDraft((draft) => ({ ...draft, name: event.target.value }))}
+                  placeholder="account/card name"
+                  className="w-full bg-transparent px-0 py-1 font-mono text-lg text-fg-1 outline-none placeholder:text-fg-4"
+                  autoFocus
+                />
+              </div>
+              {editingAccount && (
+                <div className="mt-2 font-mono text-[10px] uppercase tracking-label text-fg-4">
+                  {accountStats.get(editingAccount.id)?.movementCount ?? 0} linked movements stay unchanged
+                </div>
+              )}
+
+              <div className="relative">
+                <div className="relative">
+                  <input
+                    value={accountDraft.institutionName}
+                    onFocus={() => setInstitutionSuggestionsOpen(true)}
+                    onBlur={() => window.setTimeout(() => setInstitutionSuggestionsOpen(false), 120)}
+                    onChange={(event) => {
+                      setAccountDraft((draft) => ({ ...draft, institutionName: event.target.value }))
+                      setInstitutionSuggestionsOpen(true)
+                    }}
+                    placeholder="bank or issuer"
+                    className="w-full bg-transparent px-0 py-2 font-mono text-sm leading-relaxed text-fg-2 outline-none placeholder:text-fg-4"
+                  />
+                  {institutionSuggestionsOpen && institutionSuggestions.length > 0 && (
+                    <div className="absolute left-0 right-0 top-[calc(100%+4px)] z-[70] max-h-44 overflow-auto border border-[rgba(0,255,140,0.25)] bg-pit shadow-[0_0_18px_rgba(0,255,136,0.18),0_18px_44px_rgba(0,0,0,0.6)]">
+                      {filteredInstitutionSuggestions.length > 0 ? (
+                        filteredInstitutionSuggestions.map((institution) => (
+                          <button
+                            key={institution}
+                            type="button"
+                            onMouseDown={(event) => {
+                              event.preventDefault()
+                              setAccountDraft((draft) => ({ ...draft, institutionName: institution }))
+                              setInstitutionSuggestionsOpen(false)
+                            }}
+                            className="flex w-full items-center gap-2 px-3 py-1.5 text-left font-mono text-xs normal-case tracking-normal text-fg-2 transition hover:bg-[rgba(0,255,136,0.12)] hover:text-accent"
+                          >
+                            <Landmark className="h-3.5 w-3.5 text-fg-4" />
+                            <span className="flex-1 truncate">{institution}</span>
+                          </button>
+                        ))
+                      ) : (
+                        <div className="px-3 py-2 font-mono text-xs normal-case tracking-normal text-fg-4">
+                          no matching institutions
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-2 px-5 py-3">
+              <PachSelect
+                variant="button"
+                value={accountDraft.type}
+                onChange={(next) => setAccountDraft((draft) => ({ ...draft, type: next }))}
+                options={typeOptions}
+                trigger={
+                  <FinanceComposerPill
+                    icon={accountDraft.type === 'credit_card' ? <CreditCard className="h-3 w-3" /> : <Landmark className="h-3 w-3" />}
+                    label={typeDisplay}
+                  />
+                }
+                triggerTitle="type"
+                triggerClassName="transition"
+                popupWidth="190px"
+              />
+
+              <PachSelect
+                variant="button"
+                value={accountDraft.currencyCode}
+                onChange={(next) => setAccountDraft((draft) => ({ ...draft, currencyCode: next }))}
+                options={currencyOptions}
+                trigger={
+                  <FinanceComposerPill
+                    icon={<span className="font-mono text-[10px] text-fg-3">$</span>}
+                    label={accountDraft.currencyCode}
+                  />
+                }
+                triggerTitle="currency"
+                triggerClassName="transition"
+                popupWidth="140px"
+              />
+
+              <PachSelect
+                variant="button"
+                value={accountDraft.holderUserId || '__unassigned__'}
+                onChange={(next) => setAccountDraft((draft) => ({ ...draft, holderUserId: next === '__unassigned__' ? '' : next }))}
+                options={holderOptions}
+                trigger={
+                  <FinanceComposerPill
+                    icon={<UserRound className="h-3 w-3" />}
+                    label={holderDisplay}
+                  />
+                }
+                triggerTitle="holder"
+                triggerClassName="transition"
+                popupWidth="220px"
+              />
+            </div>
+
+            <div className="flex items-center justify-between border-t border-[rgba(0,255,140,0.12)] px-5 py-3">
+              <button
+                type="button"
+                onClick={closeAccountModal}
+                className="px-2 py-1.5 font-mono text-xs uppercase tracking-label text-fg-3 transition hover:text-fg-1"
+              >
+                [cancel]
+              </button>
+              <button
+                type="button"
+                disabled={!canCreateAccount}
+                onClick={saveAccount}
+                className="inline-flex items-center gap-2 border border-[rgba(0,255,140,0.3)] bg-[rgba(0,255,136,0.08)] px-3 py-1.5 font-mono text-xs uppercase tracking-label text-accent transition hover:bg-[rgba(0,255,136,0.16)] hover:shadow-glow-xs disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-[rgba(0,255,136,0.08)] disabled:hover:shadow-none"
+              >
+                {editingAccountId ? <CheckCircle className="h-3.5 w-3.5" /> : <Plus className="h-3.5 w-3.5" />}
+                {editingAccountId ? 'save account' : 'add account'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {categoryModalOpen && (
+        <div
+          className="fixed inset-0 z-50 flex items-start justify-center bg-[rgba(0,0,0,0.7)] px-4 pt-[8vh] backdrop-blur-sm"
+          onClick={() => setCategoryModalOpen(false)}
+        >
+          <div
+            className="w-full max-w-2xl border border-[rgba(0,255,140,0.2)] bg-pit-2 shadow-[0_30px_80px_rgba(0,0,0,0.5)]"
+            onClick={(event) => event.stopPropagation()}
+            onKeyDown={(event) => {
+              if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') {
+                event.preventDefault()
+                if (canCreateCategory) createCategory()
+              }
+            }}
+          >
+            <div className="flex items-center justify-between border-b border-[rgba(0,255,140,0.12)] px-5 py-3">
+              <div className="flex items-center gap-2 font-mono text-xs">
+                <span className="inline-flex items-center gap-1.5 border border-[rgba(0,255,140,0.25)] bg-[rgba(0,255,136,0.05)] px-2 py-0.5 font-mono text-[10px] uppercase tracking-label text-accent">
+                  finance
+                </span>
+                <span className="text-fg-4">›</span>
+                <span className="text-fg-2 lowercase">categories</span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setCategoryModalOpen(false)}
+                className="font-mono text-xs uppercase tracking-label text-fg-4 transition hover:text-fg-1"
+                title="close"
+              >
+                [esc]
+              </button>
+            </div>
+
+            <div className="grid max-h-[70vh] gap-4 overflow-auto px-5 py-4">
+              <section className="border border-[rgba(0,255,140,0.12)] bg-pit px-3 py-3">
+                <div className="mb-3 font-mono text-[10px] uppercase tracking-label text-fg-4">new category</div>
+                <input
+                  value={categoryDraft.name}
+                  onChange={(event) => setCategoryDraft((draft) => ({ ...draft, name: event.target.value }))}
+                  placeholder="category name"
+                  className="w-full bg-transparent px-0 py-1 font-mono text-lg text-fg-1 outline-none placeholder:text-fg-4"
+                  autoFocus
+                />
+                <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
+                  <PachSelect
+                    variant="button"
+                    value={categoryDraft.type}
+                    onChange={(next) => setCategoryDraft((draft) => ({ ...draft, type: next }))}
+                    options={categoryTypeOptions}
+                    trigger={
+                      <FinanceComposerPill
+                        icon={<Tag className="h-3 w-3" />}
+                        label={categoryTypeOptions.find((entry) => entry.value === categoryDraft.type)?.label ?? 'type'}
+                      />
+                    }
+                    triggerTitle="type"
+                    triggerClassName="transition"
+                    popupWidth="170px"
+                  />
+                  <button
+                    type="button"
+                    disabled={!canCreateCategory}
+                    onClick={createCategory}
+                    className="inline-flex items-center gap-2 border border-[rgba(0,255,140,0.3)] bg-[rgba(0,255,136,0.08)] px-3 py-1.5 font-mono text-xs uppercase tracking-label text-accent transition hover:bg-[rgba(0,255,136,0.16)] hover:shadow-glow-xs disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-[rgba(0,255,136,0.08)] disabled:hover:shadow-none"
+                  >
+                    <Plus className="h-3.5 w-3.5" />
+                    add category
+                  </button>
+                </div>
+              </section>
+
+              <section className="border border-[rgba(0,255,140,0.12)] bg-pit">
+                <div className="flex items-center justify-between border-b border-[rgba(0,255,140,0.12)] px-3 py-2 font-mono text-[10px] uppercase tracking-label text-fg-4">
+                  <span>manage categories</span>
+                  <span>{scopedCategories.length}</span>
+                </div>
+                <div className="max-h-[320px] overflow-auto">
+                  {scopedCategories.map((category) => {
+                    const movementCount = scopedMovements.filter((movement) => movement.categoryId === category.id).length
+                    const ruleCount = categorizationRules.filter((rule) => rule.organizationId === selectedOrganizationId && rule.categoryId === category.id).length
+                    const isMerging = categoryMergeDraft.categoryId === category.id
+                    const targetOptions = scopedCategories
+                      .filter((entry) => entry.id !== category.id)
+                      .map((entry) => ({ value: entry.id, label: entry.name, icon: <Tag className="h-3.5 w-3.5" /> }))
+
+                    return (
+                      <div key={category.id} className="border-b border-[rgba(0,255,140,0.08)] px-3 py-3 font-mono text-xs">
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="min-w-0">
+                            <div className="truncate text-fg-1">{category.name}</div>
+                            <div className="mt-1 text-[10px] uppercase tracking-label text-fg-4">
+                              {category.type} · {movementCount} movements · {ruleCount} rules
+                            </div>
+                          </div>
+                          <button
+                            type="button"
+                            disabled={targetOptions.length === 0}
+                            onClick={() => setCategoryMergeDraft({
+                              categoryId: category.id,
+                              targetCategoryId: targetOptions[0]?.value ?? '',
+                            })}
+                            className="shrink-0 px-2 py-1 text-fail transition hover:text-fg-1 disabled:cursor-not-allowed disabled:opacity-40"
+                          >
+                            delete
+                          </button>
+                        </div>
+                        {isMerging ? (
+                          <div className="mt-3 grid gap-2 border border-[rgba(255,95,135,0.16)] bg-[rgba(255,95,135,0.04)] p-2 sm:grid-cols-[1fr_auto_auto]">
+                            <PachSelect
+                              value={categoryMergeDraft.targetCategoryId}
+                              onChange={(next) => setCategoryMergeDraft((draft) => ({ ...draft, targetCategoryId: next }))}
+                              options={targetOptions}
+                              display={targetOptions.find((option) => option.value === categoryMergeDraft.targetCategoryId)?.label ?? 'select replacement'}
+                              popupWidth="260px"
+                              triggerClassName="flex h-8 w-full items-center justify-between border border-[rgba(0,255,140,0.12)] bg-pit px-2 text-left font-mono text-xs text-fg-2 outline-none transition hover:border-[rgba(0,255,140,0.22)] hover:bg-[rgba(0,255,136,0.04)] hover:text-fg-1 focus-visible:border-accent"
+                            />
+                            <button
+                              type="button"
+                              onClick={() => setCategoryMergeDraft({ categoryId: '', targetCategoryId: '' })}
+                              className="px-2 py-1.5 font-mono text-xs uppercase tracking-label text-fg-3 transition hover:text-fg-1"
+                            >
+                              cancel
+                            </button>
+                            <button
+                              type="button"
+                              disabled={!canMergeCategory}
+                              onClick={() => void mergeAndArchiveCategory()}
+                              className="px-2 py-1.5 font-mono text-xs uppercase tracking-label text-fail transition hover:text-fg-1 disabled:cursor-not-allowed disabled:opacity-40"
+                            >
+                              merge + archive
+                            </button>
+                          </div>
+                        ) : null}
+                      </div>
+                    )
+                  })}
+                  {scopedCategories.length === 0 ? (
+                    <div className="px-3 py-10 text-center font-mono text-sm text-fg-4">
+                      // no categories yet
+                    </div>
+                  ) : null}
+                </div>
+              </section>
+            </div>
+
+            <div className="flex items-center justify-between border-t border-[rgba(0,255,140,0.12)] px-5 py-3">
+              <button
+                type="button"
+                onClick={() => setCategoryModalOpen(false)}
+                className="px-2 py-1.5 font-mono text-xs uppercase tracking-label text-fg-3 transition hover:text-fg-1"
+              >
+                [cancel]
+              </button>
+              <div className="font-mono text-[10px] uppercase tracking-label text-fg-4">
+                delete = merge + archive
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+function FinanceMetric({ label, value, tone = 'default' }: { label: string; value: string; tone?: 'default' | 'ok' | 'fail' }) {
+  return (
+    <div className="flex min-w-0 items-baseline gap-2">
+      <span className="text-[10px] uppercase tracking-label text-fg-4">{label}</span>
+      <span className={`truncate ${tone === 'ok' ? 'text-ok' : tone === 'fail' ? 'text-fail' : 'text-fg-2'}`}>{value}</span>
+    </div>
+  )
+}
+
+function FinanceSidebarButton({
+  active,
+  label,
+  meta,
+  onClick,
+}: {
+  active: boolean
+  label: string
+  meta?: string
+  onClick: () => void
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`flex w-full items-center justify-between px-3 py-2 text-left font-mono text-xs lowercase transition ${
+        active
+          ? 'bg-[rgba(0,255,136,0.08)] text-accent ring-1 ring-[rgba(0,255,136,0.2)]'
+          : 'text-fg-2 hover:bg-[rgba(0,255,136,0.04)] hover:text-fg-1'
+      }`}
+    >
+      <span className="min-w-0 flex-1 truncate">{label}</span>
+      {meta ? <span className="ml-3 text-[10px] text-fg-4">{meta}</span> : null}
+    </button>
+  )
+}
+
+function IconTooltip({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <div className="group relative">
+      {children}
+      <div className="pointer-events-none absolute left-0 top-[calc(100%+6px)] z-30 whitespace-nowrap border border-[rgba(0,255,140,0.2)] bg-pit px-2 py-1 font-mono text-[10px] uppercase tracking-label text-fg-2 opacity-0 shadow-[0_8px_24px_rgba(0,0,0,0.45)] transition group-hover:opacity-100">
+        {label}
+      </div>
+    </div>
+  )
+}
+
+function CategoryPieChart({ slices }: { slices: CategoryBreakdownEntry[] }) {
+  const [tooltip, setTooltip] = useState<{ slice: CategoryBreakdownEntry; x: number; y: number } | null>(null)
+  const radius = 76
+  const circumference = 2 * Math.PI * radius
+  let offset = 0
+  function moveTooltip(event: MouseEvent<SVGCircleElement>, slice: CategoryBreakdownEntry) {
+    const rect = event.currentTarget.ownerSVGElement?.getBoundingClientRect()
+    setTooltip({
+      slice,
+      x: rect ? event.clientX - rect.left : 100,
+      y: rect ? event.clientY - rect.top : 100,
+    })
+  }
+
+  return (
+    <div className="relative">
+      <svg viewBox="0 0 200 200" className="h-56 w-56" role="img" aria-label="Spend by category">
+        <circle cx="100" cy="100" r={radius} fill="transparent" stroke="rgba(0,255,140,0.08)" strokeWidth="28" />
+        {slices.map((slice) => {
+          const length = (slice.percent / 100) * circumference
+          const currentOffset = offset
+          offset += length
+          return (
+            <circle
+              key={slice.id}
+              cx="100"
+              cy="100"
+              r={radius}
+              fill="transparent"
+              stroke={slice.color}
+              strokeWidth="28"
+              strokeDasharray={`${length} ${circumference - length}`}
+              strokeDashoffset={-currentOffset + circumference * 0.25}
+              strokeLinecap="butt"
+              className="transition hover:brightness-125"
+              style={{ pointerEvents: 'stroke' }}
+              onMouseEnter={(event) => moveTooltip(event, slice)}
+              onMouseMove={(event) => moveTooltip(event, slice)}
+              onMouseLeave={() => setTooltip(null)}
+            />
+          )
+        })}
+        <circle cx="100" cy="100" r="48" fill="rgb(0,7,4)" stroke="rgba(0,255,140,0.12)" pointerEvents="none" />
+        <text x="100" y="96" textAnchor="middle" className="fill-[rgb(119,150,132)] font-mono text-[10px] uppercase tracking-label" pointerEvents="none">
+          spend
+        </text>
+        <text x="100" y="114" textAnchor="middle" className="fill-[rgb(220,255,231)] font-mono text-sm" pointerEvents="none">
+          {slices.length}
+        </text>
+      </svg>
+      {tooltip ? (
+        <div
+          className="pointer-events-none absolute z-20 min-w-44 border border-[rgba(0,255,140,0.22)] bg-pit px-3 py-2 font-mono text-xs shadow-[0_12px_36px_rgba(0,0,0,0.55)]"
+          style={{ left: tooltip.x + 12, top: tooltip.y + 12 }}
+        >
+          <div className="flex items-center gap-2 text-fg-1">
+            <span className="h-2.5 w-2.5" style={{ backgroundColor: tooltip.slice.color }} />
+            <span className="truncate">{tooltip.slice.name}</span>
+          </div>
+          <div className="mt-1 text-[10px] uppercase tracking-label text-fg-4">{tooltip.slice.percent.toFixed(1)}%</div>
+          <div className="mt-1 text-fail">{formatMoney(-tooltip.slice.amountMinor, tooltip.slice.currencyCode)}</div>
+        </div>
+      ) : null}
+    </div>
+  )
+}
+
+function FinanceEmptyState({
+  title,
+  body,
+  actionLabel,
+  onAction,
+}: {
+  title: string
+  body: string
+  actionLabel: string
+  onAction: () => void
+}) {
+  return (
+    <div className="flex min-h-[320px] items-center justify-center border border-dashed border-[rgba(0,255,140,0.15)] bg-pit-2 px-6">
+      <div className="max-w-lg text-center">
+        <div className="font-mono text-xl lowercase text-fg-1">{title}</div>
+        <div className="mt-3 text-sm leading-6 text-fg-3">{body}</div>
+        <button
+          type="button"
+          onClick={onAction}
+          className="mt-5 inline-flex items-center gap-2 border border-[rgba(0,255,140,0.3)] bg-[rgba(0,255,136,0.08)] px-4 py-2 font-mono text-xs uppercase tracking-label text-accent transition hover:bg-[rgba(0,255,136,0.16)] hover:shadow-glow-xs"
+        >
+          <Plus className="h-3.5 w-3.5" />
+          {actionLabel}
+        </button>
+      </div>
+    </div>
+  )
+}
+
+function FinanceComposerPill({ icon, label }: { icon: ReactNode; label: string }) {
+  return (
+    <span className="inline-flex items-center gap-1.5 border border-[rgba(0,255,140,0.2)] bg-pit-3 px-2.5 py-1 font-mono text-[11px] lowercase text-fg-2 transition hover:border-[rgba(0,255,140,0.4)] hover:bg-[rgba(0,255,136,0.04)] hover:text-fg-1">
+      <span className="flex h-3.5 w-3.5 items-center justify-center">{icon}</span>
+      <span className="max-w-[160px] truncate">{label}</span>
+    </span>
+  )
+}
+
+function ImportStatus({ phase }: { phase: ImportPhase }) {
+  if (phase === 'ready') return <span className="text-right text-fg-3">pending confirm</span>
+  const status = phase
+  if (status === 'processing' || status === 'parsing') {
+    return (
+      <span className="inline-flex items-center justify-end gap-1.5 text-fg-3">
+        <Loader2 className="h-3 w-3 animate-spin" />
+        processing
+      </span>
+    )
+  }
+  if (status === 'success' || status === 'applied' || status === 'ready') {
+    return (
+      <span className="inline-flex items-center justify-end gap-1.5 text-accent">
+        <CheckCircle className="h-3 w-3" />
+        ready
+      </span>
+    )
+  }
+  if (status === 'failed') {
+    return (
+      <span className="inline-flex items-center justify-end gap-1.5 text-amber">
+        <AlertTriangle className="h-3 w-3" />
+        failed
+      </span>
+    )
+  }
+  return <span className="text-right text-fg-4">{status === 'select' ? 'pending' : status}</span>
+}
+
+function displayUser(user: Schema['tables']['users']['row'] | undefined) {
+  return user?.name || user?.email || 'unknown user'
+}
+
+function typeLabel(type: string) {
+  return ACCOUNT_TYPES.find((entry) => entry.value === type)?.label ?? type
+}
+
+function movementTypeLabel(type: string) {
+  return MOVEMENT_TYPES.find((entry) => entry.value === type)?.label ?? type
+}
+
+function statusLabel(status: string) {
+  return MOVEMENT_STATUSES.find((entry) => entry.value === status)?.label ?? status
+}
+
+function StatusIcon({ status }: { status: string }) {
+  if (status === 'pending_review') return <AlertTriangle className="h-3.5 w-3.5" />
+  if (status === 'ignored') return <X className="h-3.5 w-3.5" />
+  return <CheckCircle className="h-3.5 w-3.5" />
+}
+
+function reviewReasonForStatus(status: string) {
+  if (status === 'pending_review') return 'manual_review'
+  if (status === 'ignored') return 'ignored'
+  return null
+}
+
+function formatMoney(amountMinor: number, currencyCode: string) {
+  return new Intl.NumberFormat('en-US', {
+    style: 'currency',
+    currency: currencyCode,
+  }).format(amountMinor / 100)
+}
+
+function formatSummaryMoney(amountMinor: number, currencyCode: string, mixedCurrency: boolean) {
+  return mixedCurrency ? 'mixed currencies' : formatMoney(amountMinor, currencyCode)
+}
+
+function formatZeroDate(value: number) {
+  return new Date(value).toISOString().slice(0, 10)
+}
+
+function todayInputDate() {
+  const date = new Date()
+  date.setMinutes(date.getMinutes() - date.getTimezoneOffset())
+  return date.toISOString().slice(0, 10)
+}
+
+function dateInputToMs(value: string) {
+  const [year, month, day] = value.split('-').map(Number)
+  if (!year || !month || !day) return Date.now()
+  return Date.UTC(year, month - 1, day)
+}
+
+function monthKey(value: number) {
+  return formatZeroDate(value).slice(0, 7)
+}
+
+function quarterKey(value: number) {
+  const date = new Date(value)
+  const year = date.getUTCFullYear()
+  const quarter = Math.floor(date.getUTCMonth() / 3) + 1
+  return `${year}-Q${quarter}`
+}
+
+function formatMonthLabel(value: number) {
+  return new Intl.DateTimeFormat('en-US', { month: 'short', year: 'numeric', timeZone: 'UTC' }).format(new Date(value))
+}
+
+function parseMoneyToMinor(value: string) {
+  const normalized = value.replace(/,/g, '').trim()
+  if (!normalized) return null
+  const amount = Number(normalized)
+  if (!Number.isFinite(amount)) return null
+  return Math.round(amount * 100)
+}
+
+function signedAmountForType(amountMinor: number, type: string) {
+  if (type === 'expense') return -Math.abs(amountMinor)
+  if (type === 'income') return Math.abs(amountMinor)
+  return amountMinor
+}
+
+function inferType(amountMinor: number) {
+  return amountMinor >= 0 ? 'income' : 'expense'
+}
+
+function summarizeMovements(movements: Schema['tables']['fin_movements']['row'][]) {
+  const currencies = new Set(movements.map((movement) => movement.currencyCode))
+  const currencyCode = currencies.values().next().value ?? 'MXN'
+  const positiveMinor = movements.reduce((sum, movement) => sum + (movement.amountMinor > 0 ? movement.amountMinor : 0), 0)
+  const negativeMinor = movements.reduce((sum, movement) => sum + (movement.amountMinor < 0 ? movement.amountMinor : 0), 0)
+  return {
+    positiveMinor,
+    negativeMinor,
+    netMinor: positiveMinor + negativeMinor,
+    currencyCode,
+    mixedCurrency: currencies.size > 1,
+  }
+}
+
+function buildMonthlyBalance(movements: Schema['tables']['fin_movements']['row'][]): MonthlyBalanceEntry[] {
+  const months = new Map<string, {
+    positiveMinor: number
+    negativeMinor: number
+    movementCount: number
+    currencies: Set<string>
+  }>()
+
+  for (const movement of movements) {
+    const id = monthKey(movement.transactionDate)
+    const current = months.get(id) ?? {
+      positiveMinor: 0,
+      negativeMinor: 0,
+      movementCount: 0,
+      currencies: new Set<string>(),
+    }
+    current.positiveMinor += movement.amountMinor > 0 ? movement.amountMinor : 0
+    current.negativeMinor += movement.amountMinor < 0 ? movement.amountMinor : 0
+    current.movementCount += 1
+    current.currencies.add(movement.currencyCode)
+    months.set(id, current)
+  }
+
+  return Array.from(months.entries())
+    .sort(([a], [b]) => b.localeCompare(a))
+    .map(([id, value]) => {
+      const currencyCode = value.currencies.values().next().value ?? 'MXN'
+      return {
+        id,
+        label: formatMonthLabel(Date.UTC(Number(id.slice(0, 4)), Number(id.slice(5, 7)) - 1, 1)),
+        positiveMinor: value.positiveMinor,
+        negativeMinor: value.negativeMinor,
+        netMinor: value.positiveMinor + value.negativeMinor,
+        movementCount: value.movementCount,
+        currencyCode,
+        mixedCurrency: value.currencies.size > 1,
+      }
+    })
+}
+
+function buildCategoryBreakdown(
+  movements: Schema['tables']['fin_movements']['row'][],
+  categories: Schema['tables']['fin_categories']['row'][],
+): CategoryBreakdownEntry[] {
+  const categoryMap = new Map(categories.map((category) => [category.id, category]))
+  const totals = new Map<string, { name: string; amountMinor: number; currencyCode: string }>()
+
+  for (const movement of movements) {
+    if (movement.amountMinor >= 0) continue
+    const category = movement.categoryId ? categoryMap.get(movement.categoryId) : null
+    const id = category?.id ?? UNCATEGORIZED_VALUE
+    const current = totals.get(id) ?? {
+      name: category?.name ?? 'uncategorized',
+      amountMinor: 0,
+      currencyCode: movement.currencyCode,
+    }
+    current.amountMinor += Math.abs(movement.amountMinor)
+    totals.set(id, current)
+  }
+
+  const entries = Array.from(totals.entries())
+    .map(([id, value], index) => ({
+      id,
+      name: value.name,
+      amountMinor: value.amountMinor,
+      currencyCode: value.currencyCode,
+      percent: 0,
+      color: CATEGORY_CHART_COLORS[index % CATEGORY_CHART_COLORS.length],
+    }))
+    .sort((a, b) => b.amountMinor - a.amountMinor)
+    .slice(0, 9)
+  const total = entries.reduce((sum, entry) => sum + entry.amountMinor, 0)
+  return entries.map((entry) => ({
+    ...entry,
+    percent: total === 0 ? 0 : (entry.amountMinor / total) * 100,
+  }))
+}
+
+function summarizeAccountBalances(
+  accounts: Schema['tables']['fin_accounts']['row'][],
+  statsByAccountId: Map<string, ReturnType<typeof buildAccountStats>>,
+) {
+  const currencies = new Set(accounts.map((account) => account.currencyCode))
+  return {
+    totalMinor: accounts.reduce((sum, account) => sum + (statsByAccountId.get(account.id)?.calculatedBalanceMinor ?? 0), 0),
+    currencyCode: currencies.values().next().value ?? 'MXN',
+    mixedCurrency: currencies.size > 1,
+    accountCount: accounts.length,
+    reconciledCount: accounts.filter((account) => statsByAccountId.get(account.id)?.source === 'reconciled').length,
+    movementOnlyCount: accounts.filter((account) => statsByAccountId.get(account.id)?.source === 'movements').length,
+  }
+}
+
+function isTransferLikeMovement(
+  movement: Schema['tables']['fin_movements']['row'],
+  categories: Schema['tables']['fin_categories']['row'][],
+) {
+  if (movement.type === 'transfer' || movement.transferId) return true
+  const category = movement.categoryId ? categories.find((entry) => entry.id === movement.categoryId) : null
+  return category?.type === 'transfer'
+}
+
+function buildAccountStats(
+  account: Schema['tables']['fin_accounts']['row'],
+  movements: Schema['tables']['fin_movements']['row'][],
+) {
+  const accountMovements = movements.filter((movement) => movement.accountId === account.id && movement.status !== 'ignored')
+  const hasReconciledBalance = account.lastBalanceMinor != null && account.lastBalanceAt != null
+  const sinceLastBalance = hasReconciledBalance
+    ? accountMovements.filter((movement) => movement.transactionDate > account.lastBalanceAt!)
+    : accountMovements
+  const deltaMinor = sinceLastBalance.reduce((sum, movement) => sum + movement.amountMinor, 0)
+  return {
+    movementCount: accountMovements.length,
+    deltaMinor,
+    calculatedBalanceMinor: (hasReconciledBalance ? account.lastBalanceMinor! : 0) + deltaMinor,
+    source: hasReconciledBalance ? 'reconciled' : 'movements',
+  }
+}
+
+function accountLabel(accountId: string, accounts: FinanceAccount[]) {
+  return accounts.find((account) => account.id === accountId)?.name ?? 'unknown account'
+}
+
+function findTransferCandidates(
+  source: FinanceMovement,
+  movements: FinanceMovement[],
+  accounts: FinanceAccount[],
+): TransferCandidate[] {
+  return movements
+    .filter((candidate) => candidate.id !== source.id)
+    .filter((candidate) => candidate.accountId !== source.accountId)
+    .filter((candidate) => candidate.status !== 'ignored')
+    .filter((candidate) => !candidate.transferId || candidate.transferId === source.transferId)
+    .filter((candidate) => Math.sign(candidate.amountMinor) !== Math.sign(source.amountMinor))
+    .map((candidate) => ({
+      movement: candidate,
+      score: scoreTransferCandidate(source, candidate),
+      reasons: transferCandidateReasons(source, candidate, accounts),
+    }))
+    .filter((candidate) => candidate.score >= 45)
+    .sort((a, b) => b.score - a.score || Math.abs(source.transactionDate - a.movement.transactionDate) - Math.abs(source.transactionDate - b.movement.transactionDate))
+}
+
+function scoreTransferCandidate(source: FinanceMovement, candidate: FinanceMovement) {
+  const amountDelta = Math.abs(Math.abs(source.amountMinor) - Math.abs(candidate.amountMinor))
+  const largestAmount = Math.max(Math.abs(source.amountMinor), Math.abs(candidate.amountMinor), 1)
+  const amountRatio = amountDelta / largestAmount
+  const dayDelta = Math.abs(source.transactionDate - candidate.transactionDate) / (24 * 60 * 60 * 1000)
+  let score = 0
+
+  if (source.currencyCode === candidate.currencyCode && amountRatio <= 0.005) score += 45
+  else if (source.currencyCode === candidate.currencyCode && amountRatio <= 0.02) score += 35
+  else if (amountRatio <= 0.05) score += 20
+  else if (amountRatio <= 0.12) score += 10
+
+  if (dayDelta <= 1) score += 25
+  else if (dayDelta <= 3) score += 18
+  else if (dayDelta <= 7) score += 10
+  else if (dayDelta <= 14) score += 4
+
+  if (source.accountId !== candidate.accountId) score += 20
+  if (source.currencyCode === candidate.currencyCode) score += 10
+  return Math.min(99, Math.round(score))
+}
+
+function transferCandidateReasons(source: FinanceMovement, candidate: FinanceMovement, accounts: FinanceAccount[]) {
+  const reasons: string[] = []
+  const amountDelta = Math.abs(Math.abs(source.amountMinor) - Math.abs(candidate.amountMinor))
+  const dayDelta = Math.round(Math.abs(source.transactionDate - candidate.transactionDate) / (24 * 60 * 60 * 1000))
+  if (amountDelta === 0 && source.currencyCode === candidate.currencyCode) reasons.push('same amount')
+  else reasons.push(`${formatMoney(amountDelta, source.currencyCode)} apart`)
+  reasons.push(dayDelta === 0 ? 'same day' : `${dayDelta}d apart`)
+  reasons.push(accountLabel(candidate.accountId, accounts))
+  if (source.currencyCode !== candidate.currencyCode) reasons.push('different currency')
+  return reasons
+}
+
+function buildRuleMatch(movement: Schema['tables']['fin_movements']['row']) {
+  const merchant = movement.merchantName?.trim()
+  if (merchant && merchant.length >= 3) return { kind: 'merchant', value: normalizeRuleValue(merchant) }
+  const description = movement.description.trim()
+  if (description.length < 3) return null
+  return { kind: 'contains', value: normalizeRuleValue(description) }
+}
+
+function normalizeRuleValue(value: string) {
+  return value.toLowerCase().replace(/\s+/g, ' ').trim().slice(0, 80)
+}
+
+function expectedBalanceAt(
+  account: Schema['tables']['fin_accounts']['row'],
+  movements: Schema['tables']['fin_movements']['row'][],
+  asOfDate: number,
+) {
+  const hasReconciledBalance = account.lastBalanceMinor != null && account.lastBalanceAt != null
+  if (hasReconciledBalance && asOfDate < account.lastBalanceAt!) return null
+  const deltaMinor = movements
+    .filter((movement) => movement.accountId === account.id && movement.status !== 'ignored')
+    .filter((movement) => movement.transactionDate > (hasReconciledBalance ? account.lastBalanceAt! : 0) && movement.transactionDate <= asOfDate)
+    .reduce((sum, movement) => sum + movement.amountMinor, 0)
+  return (hasReconciledBalance ? account.lastBalanceMinor! : 0) + deltaMinor
+}
+
+function uniqueBy<T>(values: T[], getKey: (value: T) => string) {
+  const seen = new Set<string>()
+  return values.filter((value) => {
+    const key = getKey(value)
+    if (seen.has(key)) return false
+    seen.add(key)
+    return true
+  })
+}
+
+function fileToBase64(file: File) {
+  return new Promise<string>((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onerror = () => reject(reader.error)
+    reader.onload = () => {
+      const value = String(reader.result ?? '')
+      resolve(value.includes(',') ? value.split(',')[1] : value)
+    }
+    reader.readAsDataURL(file)
+  })
+}
+
+async function readJsonResponse(response: Response) {
+  const text = await response.text()
+  if (!text) return {}
+  try {
+    return JSON.parse(text) as { error?: string; message?: string; summary?: { parsed: number; created: number; needsReview: number; duplicates: number }; duplicateFile?: boolean }
+  } catch {
+    return {
+      error: 'INVALID_RESPONSE',
+      message: response.status === 413 ? 'Upload is too large for the server.' : text.slice(0, 240),
+    }
+  }
+}
+
+function formatBytes(bytes: number) {
+  if (bytes < 1024 * 1024) return `${Math.ceil(bytes / 1024)} KB`
+  return `${(bytes / 1024 / 1024).toFixed(1)} MB`
+}
+
+function compactImportMessage(message: string) {
+  if (/processing/i.test(message)) return 'processing'
+  if (/too large/i.test(message)) return 'failed · file too large'
+  if (/already imported/i.test(message)) return 'duplicate file'
+  if (/imported/i.test(message)) return 'import complete'
+  return message.length > 44 ? `${message.slice(0, 44)}...` : message
+}
+
+function sourceTypeFor(file: File) {
+  if (file.type.startsWith('image/')) return 'screenshot'
+  if (file.type === 'application/pdf') return 'statement_pdf'
+  return 'statement_csv'
+}
+
+function guessFileType(fileName: string) {
+  if (fileName.toLowerCase().endsWith('.pdf')) return 'application/pdf'
+  if (fileName.toLowerCase().endsWith('.csv')) return 'text/csv'
+  return 'text/plain'
+}
