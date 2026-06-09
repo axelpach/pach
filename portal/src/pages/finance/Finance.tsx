@@ -25,6 +25,15 @@ type TransferCandidate = {
   score: number
   reasons: string[]
 }
+type MoneyAmount = {
+  currencyCode: string
+  amountMinor: number
+}
+type MovementSummary = {
+  positiveAmounts: MoneyAmount[]
+  negativeAmounts: MoneyAmount[]
+  netAmounts: MoneyAmount[]
+}
 type CategoryBreakdownEntry = {
   id: string
   name: string
@@ -33,15 +42,17 @@ type CategoryBreakdownEntry = {
   currencyCode: string
   color: string
 }
+type CategoryBreakdownGroup = {
+  currencyCode: string
+  entries: CategoryBreakdownEntry[]
+}
 type MonthlyBalanceEntry = {
   id: string
   label: string
-  positiveMinor: number
-  negativeMinor: number
-  netMinor: number
+  positiveAmounts: MoneyAmount[]
+  negativeAmounts: MoneyAmount[]
+  netAmounts: MoneyAmount[]
   movementCount: number
-  currencyCode: string
-  mixedCurrency: boolean
 }
 
 function tabFromPath(pathname: string): Tab {
@@ -1028,9 +1039,7 @@ export default function Finance() {
             <div className="flex flex-wrap items-end justify-between gap-4">
               <div>
                 <div className="text-[10px] uppercase tracking-label text-fg-4">total balance</div>
-                <div className="mt-2 text-3xl leading-none text-fg-1">
-                  {formatSummaryMoney(accountBalanceTotal.totalMinor, accountBalanceTotal.currencyCode, accountBalanceTotal.mixedCurrency)}
-                </div>
+                <MoneyStack amounts={accountBalanceTotal.balanceAmounts} size="hero" />
               </div>
               <div className="grid gap-1 text-right text-xs">
                 <span className="text-fg-3">{accountBalanceTotal.accountCount} accounts</span>
@@ -1042,9 +1051,9 @@ export default function Finance() {
           </section>
 
           <div className="mt-3 grid gap-3 border border-[rgba(0,255,140,0.12)] bg-pit-2 px-3 py-2 font-mono text-xs md:grid-cols-4">
-            <FinanceMetric label="income" value={formatSummaryMoney(dashboardTotals.positiveMinor, dashboardTotals.currencyCode, dashboardTotals.mixedCurrency)} tone="ok" />
-            <FinanceMetric label="outflow" value={formatSummaryMoney(dashboardTotals.negativeMinor, dashboardTotals.currencyCode, dashboardTotals.mixedCurrency)} tone="fail" />
-            <FinanceMetric label="net" value={formatSummaryMoney(dashboardTotals.netMinor, dashboardTotals.currencyCode, dashboardTotals.mixedCurrency)} tone={dashboardTotals.netMinor < 0 ? 'fail' : 'ok'} />
+            <FinanceMetric label="income" value={<MoneyStack amounts={dashboardTotals.positiveAmounts} tone="ok" />} tone="ok" />
+            <FinanceMetric label="outflow" value={<MoneyStack amounts={dashboardTotals.negativeAmounts} tone="fail" />} tone="fail" />
+            <FinanceMetric label="net" value={<MoneyStack amounts={dashboardTotals.netAmounts} tone="byAmount" />} />
             <FinanceMetric label="pending" value={`${dashboardPendingCount} movements`} tone={dashboardPendingCount ? 'fail' : 'default'} />
           </div>
 
@@ -1066,25 +1075,24 @@ export default function Finance() {
                           <div className="truncate text-fg-1">{entry.label}</div>
                           <div className="mt-0.5 text-[10px] uppercase tracking-label text-fg-4">{entry.movementCount} movements</div>
                         </div>
-                        <div className={`shrink-0 ${entry.netMinor < 0 ? 'text-fail' : 'text-ok'}`}>
-                          {formatSummaryMoney(entry.netMinor, entry.currencyCode, entry.mixedCurrency)}
+                        <div className="shrink-0 text-right">
+                          <MoneyStack amounts={entry.netAmounts} tone="byAmount" align="right" />
                         </div>
                       </div>
                       <div className="grid grid-cols-3 gap-2">
                         <FinanceMetric
                           label="income"
-                          value={formatSummaryMoney(entry.positiveMinor, entry.currencyCode, entry.mixedCurrency)}
+                          value={<MoneyStack amounts={entry.positiveAmounts} tone="ok" />}
                           tone="ok"
                         />
                         <FinanceMetric
                           label="outflow"
-                          value={formatSummaryMoney(entry.negativeMinor, entry.currencyCode, entry.mixedCurrency)}
+                          value={<MoneyStack amounts={entry.negativeAmounts} tone="fail" />}
                           tone="fail"
                         />
                         <FinanceMetric
                           label="net"
-                          value={formatSummaryMoney(entry.netMinor, entry.currencyCode, entry.mixedCurrency)}
-                          tone={entry.netMinor < 0 ? 'fail' : 'ok'}
+                          value={<MoneyStack amounts={entry.netAmounts} tone="byAmount" />}
                         />
                       </div>
                     </div>
@@ -1113,16 +1121,16 @@ export default function Finance() {
                         <tr key={entry.id} className="border-b border-[rgba(0,255,140,0.08)] text-fg-2 hover:bg-[rgba(0,255,136,0.04)]">
                           <td className="px-3 py-2">
                             <div className="text-fg-1">{entry.label}</div>
-                            <div className="mt-0.5 text-[10px] uppercase tracking-label text-fg-4">{entry.mixedCurrency ? 'mixed currencies' : entry.currencyCode}</div>
+                            <div className="mt-0.5 text-[10px] uppercase tracking-label text-fg-4">{entry.movementCount} movements</div>
                           </td>
                           <td className="whitespace-nowrap px-3 py-2 text-right text-ok">
-                            {formatSummaryMoney(entry.positiveMinor, entry.currencyCode, entry.mixedCurrency)}
+                            <MoneyStack amounts={entry.positiveAmounts} tone="ok" align="right" />
                           </td>
                           <td className="whitespace-nowrap px-3 py-2 text-right text-fail">
-                            {formatSummaryMoney(entry.negativeMinor, entry.currencyCode, entry.mixedCurrency)}
+                            <MoneyStack amounts={entry.negativeAmounts} tone="fail" align="right" />
                           </td>
-                          <td className={`whitespace-nowrap px-3 py-2 text-right ${entry.netMinor < 0 ? 'text-fail' : 'text-ok'}`}>
-                            {formatSummaryMoney(entry.netMinor, entry.currencyCode, entry.mixedCurrency)}
+                          <td className="whitespace-nowrap px-3 py-2 text-right">
+                            <MoneyStack amounts={entry.netAmounts} tone="byAmount" align="right" />
                           </td>
                           <td className="whitespace-nowrap px-3 py-2 text-right text-fg-3">{entry.movementCount}</td>
                         </tr>
@@ -1154,21 +1162,24 @@ export default function Finance() {
                     // no spend to chart
                   </div>
                 ) : (
-                  <>
-                    <div className="flex justify-center">
-                      <CategoryPieChart slices={categoryBreakdown} />
+                  categoryBreakdown.map((group) => (
+                    <div key={group.currencyCode} className="grid gap-6 border-b border-[rgba(0,255,140,0.08)] pb-4 last:border-b-0 last:pb-0 lg:col-span-2 lg:grid-cols-[320px_1fr]">
+                      <div className="flex flex-col items-center justify-center gap-2">
+                        <CategoryPieChart slices={group.entries} />
+                        <div className="font-mono text-[10px] uppercase tracking-label text-fg-4">{group.currencyCode}</div>
+                      </div>
+                      <div className="grid content-center gap-2">
+                        {group.entries.map((entry) => (
+                          <div key={entry.id} className="grid grid-cols-[12px_1fr_auto_auto] items-center gap-2 font-mono text-xs">
+                            <span className="h-3 w-3" style={{ backgroundColor: entry.color }} />
+                            <span className="truncate text-fg-2">{entry.name}</span>
+                            <span className="text-fg-4">{entry.percent.toFixed(1)}%</span>
+                            <span className="text-fail">{formatMoney(-entry.amountMinor, entry.currencyCode)}</span>
+                          </div>
+                        ))}
+                      </div>
                     </div>
-                    <div className="grid content-center gap-2">
-                      {categoryBreakdown.map((entry) => (
-                        <div key={entry.id} className="grid grid-cols-[12px_1fr_auto_auto] items-center gap-2 font-mono text-xs">
-                          <span className="h-3 w-3" style={{ backgroundColor: entry.color }} />
-                          <span className="truncate text-fg-2">{entry.name}</span>
-                          <span className="text-fg-4">{entry.percent.toFixed(1)}%</span>
-                          <span className="text-fail">{formatMoney(-entry.amountMinor, entry.currencyCode)}</span>
-                        </div>
-                      ))}
-                    </div>
-                  </>
+                  ))
                 )}
               </div>
             </section>
@@ -1232,9 +1243,9 @@ export default function Finance() {
           </div>
 
           <div className="mb-3 grid gap-2 border border-[rgba(0,255,140,0.12)] bg-pit-2 px-3 py-2 font-mono text-xs sm:grid-cols-4">
-            <FinanceMetric label="income" value={formatSummaryMoney(visibleTotals.positiveMinor, visibleTotals.currencyCode, visibleTotals.mixedCurrency)} tone="ok" />
-            <FinanceMetric label="outflow" value={formatSummaryMoney(visibleTotals.negativeMinor, visibleTotals.currencyCode, visibleTotals.mixedCurrency)} tone="fail" />
-            <FinanceMetric label="net" value={formatSummaryMoney(visibleTotals.netMinor, visibleTotals.currencyCode, visibleTotals.mixedCurrency)} tone={visibleTotals.netMinor < 0 ? 'fail' : 'ok'} />
+            <FinanceMetric label="income" value={<MoneyStack amounts={visibleTotals.positiveAmounts} tone="ok" />} tone="ok" />
+            <FinanceMetric label="outflow" value={<MoneyStack amounts={visibleTotals.negativeAmounts} tone="fail" />} tone="fail" />
+            <FinanceMetric label="net" value={<MoneyStack amounts={visibleTotals.netAmounts} tone="byAmount" />} />
             <FinanceMetric label="visible" value={`${visibleMovements.length} movements`} />
           </div>
 
@@ -2389,12 +2400,46 @@ export default function Finance() {
   )
 }
 
-function FinanceMetric({ label, value, tone = 'default' }: { label: string; value: string; tone?: 'default' | 'ok' | 'fail' }) {
+function FinanceMetric({ label, value, tone = 'default' }: { label: string; value: ReactNode; tone?: 'default' | 'ok' | 'fail' }) {
   return (
     <div className="flex min-w-0 items-baseline gap-2">
       <span className="text-[10px] uppercase tracking-label text-fg-4">{label}</span>
-      <span className={`truncate ${tone === 'ok' ? 'text-ok' : tone === 'fail' ? 'text-fail' : 'text-fg-2'}`}>{value}</span>
+      <span className={`min-w-0 truncate ${tone === 'ok' ? 'text-ok' : tone === 'fail' ? 'text-fail' : 'text-fg-2'}`}>{value}</span>
     </div>
+  )
+}
+
+function MoneyStack({
+  amounts,
+  tone = 'default',
+  size = 'default',
+  align = 'left',
+}: {
+  amounts: MoneyAmount[]
+  tone?: 'default' | 'ok' | 'fail' | 'byAmount'
+  size?: 'default' | 'hero'
+  align?: 'left' | 'right'
+}) {
+  const displayAmounts = amounts.length > 0 ? amounts : [{ currencyCode: 'MXN', amountMinor: 0 }]
+  const sizeClass = size === 'hero' ? 'text-3xl leading-none' : 'text-sm'
+  const alignClass = align === 'right' ? 'items-end text-right' : 'items-start text-left'
+  return (
+    <span className={`flex flex-col gap-1 ${alignClass}`}>
+      {displayAmounts.map((amount) => {
+        const toneClass = tone === 'ok'
+          ? 'text-ok'
+          : tone === 'fail'
+            ? 'text-fail'
+            : tone === 'byAmount'
+              ? amount.amountMinor < 0 ? 'text-fail' : 'text-ok'
+              : 'text-fg-1'
+        return (
+          <span key={amount.currencyCode} className={`block whitespace-nowrap ${sizeClass} ${toneClass}`}>
+            {formatMoney(amount.amountMinor, amount.currencyCode)}
+          </span>
+        )
+      })}
+    </span>
   )
 }
 
@@ -2606,10 +2651,6 @@ function formatMoney(amountMinor: number, currencyCode: string) {
   }).format(amountMinor / 100)
 }
 
-function formatSummaryMoney(amountMinor: number, currencyCode: string, mixedCurrency: boolean) {
-  return mixedCurrency ? 'mixed currencies' : formatMoney(amountMinor, currencyCode)
-}
-
 function formatZeroDate(value: number) {
   return new Date(value).toISOString().slice(0, 10)
 }
@@ -2659,56 +2700,81 @@ function inferType(amountMinor: number) {
   return amountMinor >= 0 ? 'income' : 'expense'
 }
 
-function summarizeMovements(movements: Schema['tables']['fin_movements']['row'][]) {
-  const currencies = new Set(movements.map((movement) => movement.currencyCode))
-  const currencyCode = currencies.values().next().value ?? 'MXN'
-  const positiveMinor = movements.reduce((sum, movement) => sum + (movement.amountMinor > 0 ? movement.amountMinor : 0), 0)
-  const negativeMinor = movements.reduce((sum, movement) => sum + (movement.amountMinor < 0 ? movement.amountMinor : 0), 0)
+function summarizeMovements(movements: Schema['tables']['fin_movements']['row'][]): MovementSummary {
+  const totals = movementCurrencyTotals(movements)
   return {
-    positiveMinor,
-    negativeMinor,
-    netMinor: positiveMinor + negativeMinor,
-    currencyCode,
-    mixedCurrency: currencies.size > 1,
+    positiveAmounts: moneyAmountsFromMap(totals, 'positiveMinor'),
+    negativeAmounts: moneyAmountsFromMap(totals, 'negativeMinor'),
+    netAmounts: moneyAmountsFromMap(totals, 'netMinor'),
   }
+}
+
+function movementCurrencyTotals(movements: Schema['tables']['fin_movements']['row'][]) {
+  const totals = new Map<string, { positiveMinor: number; negativeMinor: number; netMinor: number }>()
+  for (const movement of movements) {
+    addMovementToCurrencyTotals(totals, movement)
+  }
+  return totals
+}
+
+function addMovementToCurrencyTotals(
+  totals: Map<string, { positiveMinor: number; negativeMinor: number; netMinor: number }>,
+  movement: Schema['tables']['fin_movements']['row'],
+) {
+  const current = totals.get(movement.currencyCode) ?? { positiveMinor: 0, negativeMinor: 0, netMinor: 0 }
+  current.positiveMinor += movement.amountMinor > 0 ? movement.amountMinor : 0
+  current.negativeMinor += movement.amountMinor < 0 ? movement.amountMinor : 0
+  current.netMinor += movement.amountMinor
+  totals.set(movement.currencyCode, current)
+}
+
+function moneyAmountsFromMap(
+  totals: Map<string, { positiveMinor: number; negativeMinor: number; netMinor: number }>,
+  field: 'positiveMinor' | 'negativeMinor' | 'netMinor',
+): MoneyAmount[] {
+  return Array.from(totals.entries())
+    .map(([currencyCode, value]) => ({ currencyCode, amountMinor: value[field] }))
+    .sort((a, b) => currencySortValue(a.currencyCode).localeCompare(currencySortValue(b.currencyCode)))
+}
+
+function moneyAmountsFromSimpleMap(totals: Map<string, number>): MoneyAmount[] {
+  return Array.from(totals.entries())
+    .map(([currencyCode, amountMinor]) => ({ currencyCode, amountMinor }))
+    .sort((a, b) => currencySortValue(a.currencyCode).localeCompare(currencySortValue(b.currencyCode)))
+}
+
+function currencySortValue(currencyCode: string) {
+  const knownIndex = CURRENCIES.indexOf(currencyCode)
+  return `${knownIndex === -1 ? 999 : knownIndex}:${currencyCode}`
 }
 
 function buildMonthlyBalance(movements: Schema['tables']['fin_movements']['row'][]): MonthlyBalanceEntry[] {
   const months = new Map<string, {
-    positiveMinor: number
-    negativeMinor: number
     movementCount: number
-    currencies: Set<string>
+    totals: Map<string, { positiveMinor: number; negativeMinor: number; netMinor: number }>
   }>()
 
   for (const movement of movements) {
     const id = monthKey(movement.transactionDate)
     const current = months.get(id) ?? {
-      positiveMinor: 0,
-      negativeMinor: 0,
       movementCount: 0,
-      currencies: new Set<string>(),
+      totals: new Map<string, { positiveMinor: number; negativeMinor: number; netMinor: number }>(),
     }
-    current.positiveMinor += movement.amountMinor > 0 ? movement.amountMinor : 0
-    current.negativeMinor += movement.amountMinor < 0 ? movement.amountMinor : 0
     current.movementCount += 1
-    current.currencies.add(movement.currencyCode)
+    addMovementToCurrencyTotals(current.totals, movement)
     months.set(id, current)
   }
 
   return Array.from(months.entries())
     .sort(([a], [b]) => b.localeCompare(a))
     .map(([id, value]) => {
-      const currencyCode = value.currencies.values().next().value ?? 'MXN'
       return {
         id,
         label: formatMonthLabel(Date.UTC(Number(id.slice(0, 4)), Number(id.slice(5, 7)) - 1, 1)),
-        positiveMinor: value.positiveMinor,
-        negativeMinor: value.negativeMinor,
-        netMinor: value.positiveMinor + value.negativeMinor,
+        positiveAmounts: moneyAmountsFromMap(value.totals, 'positiveMinor'),
+        negativeAmounts: moneyAmountsFromMap(value.totals, 'negativeMinor'),
+        netAmounts: moneyAmountsFromMap(value.totals, 'netMinor'),
         movementCount: value.movementCount,
-        currencyCode,
-        mixedCurrency: value.currencies.size > 1,
       }
     })
 }
@@ -2716,50 +2782,60 @@ function buildMonthlyBalance(movements: Schema['tables']['fin_movements']['row']
 function buildCategoryBreakdown(
   movements: Schema['tables']['fin_movements']['row'][],
   categories: Schema['tables']['fin_categories']['row'][],
-): CategoryBreakdownEntry[] {
+): CategoryBreakdownGroup[] {
   const categoryMap = new Map(categories.map((category) => [category.id, category]))
-  const totals = new Map<string, { name: string; amountMinor: number; currencyCode: string }>()
+  const totals = new Map<string, Map<string, { name: string; amountMinor: number; currencyCode: string }>>()
 
   for (const movement of movements) {
     if (movement.amountMinor >= 0) continue
     const category = movement.categoryId ? categoryMap.get(movement.categoryId) : null
     const id = category?.id ?? UNCATEGORIZED_VALUE
-    const current = totals.get(id) ?? {
+    const currencyTotals = totals.get(movement.currencyCode) ?? new Map<string, { name: string; amountMinor: number; currencyCode: string }>()
+    const current = currencyTotals.get(id) ?? {
       name: category?.name ?? 'uncategorized',
       amountMinor: 0,
       currencyCode: movement.currencyCode,
     }
     current.amountMinor += Math.abs(movement.amountMinor)
-    totals.set(id, current)
+    currencyTotals.set(id, current)
+    totals.set(movement.currencyCode, currencyTotals)
   }
 
-  const entries = Array.from(totals.entries())
-    .map(([id, value], index) => ({
-      id,
-      name: value.name,
-      amountMinor: value.amountMinor,
-      currencyCode: value.currencyCode,
-      percent: 0,
-      color: CATEGORY_CHART_COLORS[index % CATEGORY_CHART_COLORS.length],
-    }))
-    .sort((a, b) => b.amountMinor - a.amountMinor)
-    .slice(0, 9)
-  const total = entries.reduce((sum, entry) => sum + entry.amountMinor, 0)
-  return entries.map((entry) => ({
-    ...entry,
-    percent: total === 0 ? 0 : (entry.amountMinor / total) * 100,
-  }))
+  return Array.from(totals.entries())
+    .sort(([a], [b]) => currencySortValue(a).localeCompare(currencySortValue(b)))
+    .map(([currencyCode, currencyTotals]) => {
+      const entries = Array.from(currencyTotals.entries())
+        .map(([id, value], index) => ({
+          id: `${currencyCode}:${id}`,
+          name: value.name,
+          amountMinor: value.amountMinor,
+          currencyCode: value.currencyCode,
+          percent: 0,
+          color: CATEGORY_CHART_COLORS[index % CATEGORY_CHART_COLORS.length],
+        }))
+        .sort((a, b) => b.amountMinor - a.amountMinor)
+        .slice(0, 9)
+      const total = entries.reduce((sum, entry) => sum + entry.amountMinor, 0)
+      return {
+        currencyCode,
+        entries: entries.map((entry) => ({
+          ...entry,
+          percent: total === 0 ? 0 : (entry.amountMinor / total) * 100,
+        })),
+      }
+    })
 }
 
 function summarizeAccountBalances(
   accounts: Schema['tables']['fin_accounts']['row'][],
   statsByAccountId: Map<string, ReturnType<typeof buildAccountStats>>,
 ) {
-  const currencies = new Set(accounts.map((account) => account.currencyCode))
+  const balances = new Map<string, number>()
+  for (const account of accounts) {
+    balances.set(account.currencyCode, (balances.get(account.currencyCode) ?? 0) + (statsByAccountId.get(account.id)?.calculatedBalanceMinor ?? 0))
+  }
   return {
-    totalMinor: accounts.reduce((sum, account) => sum + (statsByAccountId.get(account.id)?.calculatedBalanceMinor ?? 0), 0),
-    currencyCode: currencies.values().next().value ?? 'MXN',
-    mixedCurrency: currencies.size > 1,
+    balanceAmounts: moneyAmountsFromSimpleMap(balances),
     accountCount: accounts.length,
     reconciledCount: accounts.filter((account) => statsByAccountId.get(account.id)?.source === 'reconciled').length,
     movementOnlyCount: accounts.filter((account) => statsByAccountId.get(account.id)?.source === 'movements').length,
