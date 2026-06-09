@@ -1,6 +1,6 @@
 import { Router } from 'express'
-import { eq } from 'drizzle-orm'
-import { finImports } from '../../../db/schema.js'
+import { asc, eq } from 'drizzle-orm'
+import { finCategories, finImports } from '../../../db/schema.js'
 import { getDb } from '../db.js'
 import { importFinanceMovements } from '../services/finance-import.js'
 
@@ -8,6 +8,43 @@ const router = Router()
 
 const SOURCE_TYPES = new Set(['statement_csv', 'statement_pdf', 'screenshot', 'manual_csv'])
 type SourceType = 'statement_csv' | 'statement_pdf' | 'screenshot' | 'manual_csv'
+
+router.get('/categories', async (req, res) => {
+  const organizationId = typeof req.query.organizationId === 'string' ? req.query.organizationId : ''
+
+  if (!organizationId) {
+    res.status(400).json({ error: 'VALIDATION', message: 'Missing organizationId.' })
+    return
+  }
+
+  if (!req.user?.organizationIds.includes(organizationId)) {
+    res.status(403).json({ error: 'NOT_AUTHORIZED', message: 'Not authorized for this organization.' })
+    return
+  }
+
+  const db = getDb()
+  const categories = await db
+    .select()
+    .from(finCategories)
+    .where(eq(finCategories.organizationId, organizationId))
+    .orderBy(asc(finCategories.position), asc(finCategories.name))
+
+  res.json({
+    categories: categories.map((category) => ({
+      id: category.id,
+      organizationId: category.organizationId,
+      parentId: category.parentId,
+      name: category.name,
+      type: category.type,
+      color: category.color,
+      icon: category.icon,
+      position: category.position,
+      archived: category.archived,
+      createdAt: category.createdAt.getTime(),
+      updatedAt: category.updatedAt.getTime(),
+    })),
+  })
+})
 
 router.post('/imports', async (req, res) => {
   try {

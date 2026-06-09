@@ -13,6 +13,7 @@ type Tab = 'dashboard' | 'movements' | 'accounts'
 type ImportPhase = 'select' | 'ready' | 'processing' | 'success' | 'failed'
 type FinanceMovement = Schema['tables']['fin_movements']['row']
 type FinanceAccount = Schema['tables']['fin_accounts']['row']
+type FinanceCategory = Schema['tables']['fin_categories']['row']
 type AccountDraft = {
   name: string
   institutionName: string
@@ -160,6 +161,7 @@ export default function Finance() {
   const [importFile, setImportFile] = useState<File | null>(null)
   const [importAccountId, setImportAccountId] = useState('')
   const [importMessage, setImportMessage] = useState<string | null>(null)
+  const [apiCategories, setApiCategories] = useState<FinanceCategory[]>([])
   const fileInputRef = useRef<HTMLInputElement | null>(null)
   const tab = tabFromPath(location.pathname)
   const organizationStorageKey = user ? financeOrganizationStorageKey(user.id) : null
@@ -172,8 +174,13 @@ export default function Finance() {
   const selectedOrganizationId = accessibleOrganizations.some((organization) => organization.id === organizationId)
     ? organizationId
     : accessibleOrganizations[0]?.id || ''
+  const financeCategories = useMemo(
+    () => uniqueBy([...categories, ...apiCategories], (category) => category.id)
+      .sort((a, b) => a.position - b.position || a.name.localeCompare(b.name)),
+    [apiCategories, categories],
+  )
   const scopedAccounts = accounts.filter((account) => account.organizationId === selectedOrganizationId && account.status !== 'archived')
-  const scopedCategories = categories.filter((category) => category.organizationId === selectedOrganizationId && !category.archived)
+  const scopedCategories = financeCategories.filter((category) => category.organizationId === selectedOrganizationId && !category.archived)
   const scopedMovements = movements.filter((movement) => movement.organizationId === selectedOrganizationId)
   const scopedTransfers = transfers.filter((transfer) => transfer.organizationId === selectedOrganizationId)
   const selectedAccountFilterIds = activeFilters.accounts ?? []
@@ -433,6 +440,31 @@ export default function Finance() {
     if (!organizationStorageKey || !selectedOrganizationId) return
     localStorage.setItem(organizationStorageKey, selectedOrganizationId)
   }, [organizationStorageKey, selectedOrganizationId])
+
+  useEffect(() => {
+    if (!selectedOrganizationId || !token) {
+      setApiCategories([])
+      return
+    }
+
+    let cancelled = false
+    void (async () => {
+      try {
+        const response = await fetch(`${config.apiUrl}/finance/categories?organizationId=${encodeURIComponent(selectedOrganizationId)}`, {
+          headers: { Authorization: `Bearer ${token}` },
+        })
+        const result = await readJsonResponse(response)
+        if (!response.ok) throw new Error(result.message || result.error || 'Could not load finance categories.')
+        if (!cancelled) setApiCategories(Array.isArray(result.categories) ? result.categories : [])
+      } catch {
+        if (!cancelled) setApiCategories([])
+      }
+    })()
+
+    return () => {
+      cancelled = true
+    }
+  }, [selectedOrganizationId, token])
 
   useEffect(() => {
     const preferredAccountId = selectedAccountFilterIds.length === 1 ? selectedAccountFilterIds[0] : ''
@@ -1039,7 +1071,7 @@ export default function Finance() {
             <div className="flex flex-wrap items-end justify-between gap-4">
               <div>
                 <div className="text-[10px] uppercase tracking-label text-fg-4">total balance</div>
-                <MoneyStack amounts={accountBalanceTotal.balanceAmounts} size="hero" />
+                <MoneyStack amounts={accountBalanceTotal.balanceAmounts} size="hero" aligned />
               </div>
               <div className="grid gap-1 text-right text-xs">
                 <span className="text-fg-3">{accountBalanceTotal.accountCount} accounts</span>
@@ -1252,7 +1284,7 @@ export default function Finance() {
           <div className="grid min-h-0 flex-1 gap-2 overflow-auto md:hidden">
             {visibleMovements.map((movement) => {
               const account = accounts.find((entry) => entry.id === movement.accountId)
-              const category = categories.find((entry) => entry.id === movement.categoryId)
+              const category = financeCategories.find((entry) => entry.id === movement.categoryId)
               return (
                 <article key={movement.id} className="border border-[rgba(0,255,140,0.12)] bg-pit-2 px-3 py-3 font-mono text-xs">
                   <div className="mb-2 flex items-start justify-between gap-3">
@@ -1350,7 +1382,7 @@ export default function Finance() {
               <tbody>
                 {visibleMovements.map((movement) => {
                   const account = accounts.find((entry) => entry.id === movement.accountId)
-                  const category = categories.find((entry) => entry.id === movement.categoryId)
+                  const category = financeCategories.find((entry) => entry.id === movement.categoryId)
                   return (
                     <tr key={movement.id} className="border-b border-[rgba(0,255,140,0.08)] text-fg-2 hover:bg-[rgba(0,255,136,0.04)]">
                       <td className="whitespace-nowrap px-3 py-2 text-fg-3">{formatZeroDate(movement.transactionDate)}</td>
@@ -2414,11 +2446,13 @@ function MoneyStack({
   tone = 'default',
   size = 'default',
   align = 'left',
+  aligned = false,
 }: {
   amounts: MoneyAmount[]
   tone?: 'default' | 'ok' | 'fail' | 'byAmount'
   size?: 'default' | 'hero'
   align?: 'left' | 'right'
+  aligned?: boolean
 }) {
   const displayAmounts = amounts.length > 0 ? amounts : [{ currencyCode: 'MXN', amountMinor: 0 }]
   const sizeClass = size === 'hero' ? 'text-3xl leading-none' : 'text-sm'
@@ -2433,6 +2467,17 @@ function MoneyStack({
             : tone === 'byAmount'
               ? amount.amountMinor < 0 ? 'text-fail' : 'text-ok'
               : 'text-fg-1'
+        if (aligned) {
+          const parts = formatMoneyParts(amount.amountMinor, amount.currencyCode)
+          return (
+            <span key={amount.currencyCode} className={`grid grid-cols-[1ch_minmax(2.5ch,max-content)_auto_minmax(2.5ch,max-content)] items-baseline gap-1 whitespace-nowrap tabular-nums ${sizeClass} ${toneClass}`}>
+              <span className="text-right">{parts.sign}</span>
+              <span>{parts.prefix}</span>
+              <span className="text-right">{parts.number}</span>
+              <span>{parts.suffix}</span>
+            </span>
+          )
+        }
         return (
           <span key={amount.currencyCode} className={`block whitespace-nowrap ${sizeClass} ${toneClass}`}>
             {formatMoney(amount.amountMinor, amount.currencyCode)}
@@ -2649,6 +2694,32 @@ function formatMoney(amountMinor: number, currencyCode: string) {
     style: 'currency',
     currency: currencyCode,
   }).format(amountMinor / 100)
+}
+
+function formatMoneyParts(amountMinor: number, currencyCode: string) {
+  const parts = new Intl.NumberFormat('en-US', {
+    style: 'currency',
+    currency: currencyCode,
+  }).formatToParts(Math.abs(amountMinor) / 100)
+  const number = parts
+    .filter((part) => ['integer', 'group', 'decimal', 'fraction'].includes(part.type))
+    .map((part) => part.value)
+    .join('')
+  const firstNumberIndex = parts.findIndex((part) => part.type === 'integer')
+  const prefix = parts
+    .filter((part, index) => part.type === 'currency' && (firstNumberIndex === -1 || index < firstNumberIndex))
+    .map((part) => part.value)
+    .join('')
+  const suffix = parts
+    .filter((part, index) => part.type === 'currency' && firstNumberIndex !== -1 && index > firstNumberIndex)
+    .map((part) => part.value)
+    .join('')
+  return {
+    sign: amountMinor < 0 ? '-' : amountMinor > 0 ? '+' : '',
+    prefix,
+    number,
+    suffix,
+  }
 }
 
 function formatZeroDate(value: number) {
@@ -2979,7 +3050,13 @@ async function readJsonResponse(response: Response) {
   const text = await response.text()
   if (!text) return {}
   try {
-    return JSON.parse(text) as { error?: string; message?: string; summary?: { parsed: number; created: number; needsReview: number; duplicates: number }; duplicateFile?: boolean }
+    return JSON.parse(text) as {
+      error?: string
+      message?: string
+      summary?: { parsed: number; created: number; needsReview: number; duplicates: number }
+      duplicateFile?: boolean
+      categories?: FinanceCategory[]
+    }
   } catch {
     return {
       error: 'INVALID_RESPONSE',
