@@ -277,8 +277,8 @@ export default function Finance() {
   const monthlyBalance = buildMonthlyBalance(dashboardMovements)
   const categoryBreakdown = buildCategoryBreakdown(dashboardMovements, scopedCategories)
   const accountStats = useMemo(
-    () => new Map(scopedAccounts.map((account) => [account.id, buildAccountStats(account, scopedMovements)])),
-    [scopedAccounts, scopedMovements],
+    () => new Map(scopedAccounts.map((account) => [account.id, buildAccountStats(account, scopedMovements, scopedCategories)])),
+    [scopedAccounts, scopedCategories, scopedMovements],
   )
   const accountBalanceTotal = summarizeAccountBalances(scopedAccounts, accountStats)
   const selectedTransferMovement = transferModalMovementId
@@ -2925,8 +2925,13 @@ function isTransferLikeMovement(
 function buildAccountStats(
   account: Schema['tables']['fin_accounts']['row'],
   movements: Schema['tables']['fin_movements']['row'][],
+  categories: Schema['tables']['fin_categories']['row'][],
 ) {
-  const accountMovements = movements.filter((movement) => movement.accountId === account.id && movement.status !== 'ignored')
+  const accountMovements = movements.filter((movement) =>
+    movement.accountId === account.id &&
+    movement.status !== 'ignored' &&
+    !isTransferLikeMovement(movement, categories)
+  )
   const hasReconciledBalance = account.lastBalanceMinor != null && account.lastBalanceAt != null
   const sinceLastBalance = hasReconciledBalance
     ? accountMovements.filter((movement) => movement.transactionDate > account.lastBalanceAt!)
