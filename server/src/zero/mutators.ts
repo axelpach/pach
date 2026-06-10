@@ -17,6 +17,8 @@ type ScopedTable =
   | 'crm_board_columns'
   | 'fin_accounts'
   | 'fin_categories'
+  | 'fin_imports'
+  | 'fin_import_items'
   | 'fin_transfers'
   | 'fin_movements'
   | 'fin_categorization_rules'
@@ -43,6 +45,8 @@ const ORG_COLUMN_BY_TABLE: Record<ScopedTable, string> = {
   crm_board_columns: 'organization_id',
   fin_accounts: 'organization_id',
   fin_categories: 'organization_id',
+  fin_imports: 'organization_id',
+  fin_import_items: 'organization_id',
   fin_transfers: 'organization_id',
   fin_movements: 'organization_id',
   fin_categorization_rules: 'organization_id',
@@ -356,6 +360,14 @@ export function createServerMutators(authData?: JWTPayload) {
           await tx.dbTransaction.query('update "fin_movements" set "transfer_id" = null, "updated_at" = now() where "transfer_id" = $1 and "id" <> $2', [transferId, args.id])
         }
         await tx.mutate.fin_movements.delete({ id: args.id })
+      },
+    },
+
+    fin_import_items: {
+      async update(tx: Tx, args: { id: string; accountId?: string; status?: string; description?: string; merchantName?: string | null; amountMinor?: number; currencyCode?: string; suggestedType?: string | null; suggestedCategoryId?: string | null; suggestedConfidence?: number | null; errorMessage?: string | null }) {
+        await requireExistingOrganizationAccess(tx, 'fin_import_items', args.id)
+        const { id, ...updates } = args
+        await tx.mutate.fin_import_items.update({ id, ...updates, updatedAt: Date.now() })
       },
     },
 

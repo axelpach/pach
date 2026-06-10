@@ -188,6 +188,13 @@ export const mutators = {
     },
   },
 
+  fin_import_items: {
+    async update(tx: Tx, args: { id: string; accountId?: string; status?: string; description?: string; merchantName?: string | null; amountMinor?: number; currencyCode?: string; suggestedType?: string | null; suggestedCategoryId?: string | null; suggestedConfidence?: number | null; errorMessage?: string | null }) {
+      const { id, ...updates } = args
+      await tx.mutate.fin_import_items.update({ id, ...updates, updatedAt: Date.now() })
+    },
+  },
+
   fin_transfers: {
     async create(tx: Tx, args: { id: string; organizationId: string; status?: string; fromAccountId?: string | null; toAccountId?: string | null; amountMinor?: number | null; currencyCode?: string | null; matchedConfidence?: number | null }) {
       const now = Date.now()

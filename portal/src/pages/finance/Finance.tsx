@@ -14,6 +14,8 @@ type ImportPhase = 'select' | 'ready' | 'processing' | 'success' | 'failed'
 type FinanceMovement = Schema['tables']['fin_movements']['row']
 type FinanceAccount = Schema['tables']['fin_accounts']['row']
 type FinanceCategory = Schema['tables']['fin_categories']['row']
+type FinanceImport = Schema['tables']['fin_imports']['row']
+type FinanceImportItem = Schema['tables']['fin_import_items']['row']
 type AccountDraft = {
   name: string
   institutionName: string
@@ -120,6 +122,8 @@ export default function Finance() {
   const [accounts] = useQuery(z.query.fin_accounts.orderBy('name', 'asc'))
   const [movements] = useQuery(z.query.fin_movements.orderBy('transactionDate', 'desc'))
   const [categories] = useQuery(z.query.fin_categories.orderBy('position', 'asc'))
+  const [imports] = useQuery(z.query.fin_imports.orderBy('updatedAt', 'desc'))
+  const [importItems] = useQuery(z.query.fin_import_items.orderBy('transactionDate', 'desc'))
   const [transfers] = useQuery(z.query.fin_transfers)
   const [categorizationRules] = useQuery(z.query.fin_categorization_rules)
 
@@ -130,6 +134,7 @@ export default function Finance() {
   const [activeFilters, setActiveFilters] = useState<ActiveFilters>({})
   const [dashboardFilters, setDashboardFilters] = useState<ActiveFilters>({})
   const [search, setSearch] = useState('')
+  const [editingMovementLabel, setEditingMovementLabel] = useState<{ id: string; value: string } | null>(null)
   const [accountDraft, setAccountDraft] = useState<AccountDraft>(EMPTY_ACCOUNT_DRAFT)
   const [accountModalOpen, setAccountModalOpen] = useState(false)
   const [editingAccountId, setEditingAccountId] = useState<string | null>(null)
@@ -146,13 +151,6 @@ export default function Finance() {
     status: 'reviewed',
   })
   const [movementModalOpen, setMovementModalOpen] = useState(false)
-  const [balanceDraft, setBalanceDraft] = useState({
-    accountId: '',
-    asOfDate: todayInputDate(),
-    balance: '',
-    createAdjustment: false,
-  })
-  const [balanceModalOpen, setBalanceModalOpen] = useState(false)
   const [transferModalMovementId, setTransferModalMovementId] = useState<string | null>(null)
   const [deleteMovementId, setDeleteMovementId] = useState<string | null>(null)
   const [institutionSuggestionsOpen, setInstitutionSuggestionsOpen] = useState(false)
@@ -162,6 +160,7 @@ export default function Finance() {
   const [importFiles, setImportFiles] = useState<File[]>([])
   const [importAccountId, setImportAccountId] = useState('')
   const [importMessage, setImportMessage] = useState<string | null>(null)
+  const [reviewImportId, setReviewImportId] = useState<string | null>(null)
   const [apiCategories, setApiCategories] = useState<FinanceCategory[]>([])
   const fileInputRef = useRef<HTMLInputElement | null>(null)
   const tab = tabFromPath(location.pathname)
@@ -266,22 +265,39 @@ export default function Finance() {
       const needle = search.trim().toLowerCase()
       return `${movement.description} ${movement.merchantName ?? ''}`.toLowerCase().includes(needle)
     })
-  const visibleFinancialMovements = visibleMovements.filter((movement) => !isTransferLikeMovement(movement, scopedCategories))
-  const visibleTotals = summarizeMovements(visibleFinancialMovements)
+  const visibleTotals = summarizeMovements(visibleMovements)
   const dashboardPeriodMovements = scopedMovements
     .filter((movement) => selectedDashboardMonthFilterIds.length === 0 || selectedDashboardMonthFilterIds.includes(monthKey(movement.transactionDate)))
     .filter((movement) => selectedDashboardQuarterFilterIds.length === 0 || selectedDashboardQuarterFilterIds.includes(quarterKey(movement.transactionDate)))
   const dashboardAccountMovements = dashboardPeriodMovements.filter((movement) => movement.status !== 'ignored')
-  const dashboardMovements = dashboardAccountMovements.filter((movement) => !isTransferLikeMovement(movement, scopedCategories))
-  const dashboardTotals = summarizeMovements(dashboardMovements)
+  const dashboardNonTransferMovements = dashboardAccountMovements.filter((movement) => !isTransferLikeMovement(movement, scopedCategories))
+  const dashboardBalanceTotals = summarizeMovements(dashboardNonTransferMovements)
+  const dashboardTotals = summarizeMovements(dashboardAccountMovements)
   const dashboardPendingCount = dashboardPeriodMovements.filter((movement) => movement.status === 'pending_review').length
-  const monthlyBalance = buildMonthlyBalance(dashboardMovements)
-  const categoryBreakdown = buildCategoryBreakdown(dashboardMovements, scopedCategories)
+  const monthlyBalance = buildMonthlyBalance(dashboardAccountMovements)
+  const categoryBreakdown = buildCategoryBreakdown(dashboardNonTransferMovements, scopedCategories)
   const accountStats = useMemo(
-    () => new Map(scopedAccounts.map((account) => [account.id, buildAccountStats(account, scopedMovements, scopedCategories)])),
-    [scopedAccounts, scopedCategories, scopedMovements],
+    () => new Map(scopedAccounts.map((account) => [account.id, buildAccountStats(account, scopedMovements)])),
+    [scopedAccounts, scopedMovements],
   )
-  const accountBalanceTotal = summarizeAccountBalances(scopedAccounts, accountStats)
+  const scopedImports = imports.filter((entry) => entry.organizationId === selectedOrganizationId)
+  const pendingImports = scopedImports.filter((entry) => ['ready', 'partially_applied'].includes(entry.status))
+  const selectedReviewImport = reviewImportId
+    ? scopedImports.find((entry) => entry.id === reviewImportId) ?? null
+    : null
+  const reviewItems = selectedReviewImport
+    ? importItems.filter((item) => item.importId === selectedReviewImport.id)
+    : []
+  const reviewCounts = summarizeImportReview(reviewItems)
+  const visibleReviewItems = reviewItems.filter((item) => item.status !== 'ignored')
+  const pendingReviewActionCount = reviewCounts.ready + reviewCounts.needsReview
+  const canApplyReview = reviewItems.length > 0 && (pendingReviewActionCount > 0 || reviewCounts.ignored + reviewCounts.duplicate + reviewCounts.applied === reviewItems.length)
+  const importModalStep = selectedReviewImport ? 'review' : 'upload'
+  const pendingImport = pendingImports[0] ?? null
+  const pendingImportItems = pendingImport
+    ? importItems.filter((item) => item.importId === pendingImport.id)
+    : []
+  const pendingImportCounts = summarizeImportReview(pendingImportItems)
   const selectedTransferMovement = transferModalMovementId
     ? scopedMovements.find((movement) => movement.id === transferModalMovementId) ?? null
     : null
@@ -320,6 +336,11 @@ export default function Finance() {
   ]
   const movementTypeOptions: PachSelectOption[] = MOVEMENT_TYPES.map((entry) => ({ value: entry.value, label: entry.label }))
   const movementStatusOptions: PachSelectOption[] = MOVEMENT_STATUSES.map((entry) => ({ value: entry.value, label: entry.label }))
+  const importItemStatusOptions: PachSelectOption[] = [
+    { value: 'parsed', label: 'ready' },
+    { value: 'needs_review', label: 'needs review' },
+    { value: 'ignored', label: 'ignored' },
+  ]
   const monthFilterOptions = uniqueBy(
     scopedMovements.map((movement) => ({
       value: monthKey(movement.transactionDate),
@@ -395,11 +416,7 @@ export default function Finance() {
     },
   ]
   const selectedMovementAccount = scopedAccounts.find((account) => account.id === movementDraft.accountId)
-  const selectedBalanceAccount = scopedAccounts.find((account) => account.id === balanceDraft.accountId)
   const editingAccount = editingAccountId ? scopedAccounts.find((account) => account.id === editingAccountId) : undefined
-  const balanceExpectedMinor = selectedBalanceAccount ? expectedBalanceAt(selectedBalanceAccount, scopedMovements, dateInputToMs(balanceDraft.asOfDate)) : null
-  const balanceActualMinor = parseMoneyToMinor(balanceDraft.balance)
-  const balanceDifferenceMinor = balanceExpectedMinor == null || balanceActualMinor == null ? null : balanceActualMinor - balanceExpectedMinor
   const pendingCount = scopedMovements.filter((movement) => movement.status === 'pending_review').length
   const canCreateAccount = Boolean(selectedOrganizationId && accountDraft.name.trim())
   const canCreateCategory = Boolean(selectedOrganizationId && categoryDraft.name.trim())
@@ -409,7 +426,6 @@ export default function Finance() {
     categoryMergeDraft.categoryId !== categoryMergeDraft.targetCategoryId,
   )
   const canCreateMovement = Boolean(selectedOrganizationId && selectedMovementAccount && movementDraft.description.trim() && parseMoneyToMinor(movementDraft.amount) != null)
-  const canSaveBalance = Boolean(selectedOrganizationId && selectedBalanceAccount && balanceActualMinor != null)
 
   useEffect(() => {
     const canonicalPath = pathForTab(tab)
@@ -482,21 +498,20 @@ export default function Finance() {
   }, [importAccountId, scopedAccounts, selectedAccountFilterIds])
 
   useEffect(() => {
-    if (!accountModalOpen && !importModalOpen && !categoryModalOpen && !movementModalOpen && !balanceModalOpen && !transferModalMovementId && !deleteMovementId) return
+    if (!accountModalOpen && !importModalOpen && !categoryModalOpen && !movementModalOpen && !transferModalMovementId && !deleteMovementId) return
     function handleKeyDown(event: KeyboardEvent) {
       if (event.key === 'Escape') {
         closeAccountModal()
         setImportModalOpen(false)
         setCategoryModalOpen(false)
         setMovementModalOpen(false)
-        setBalanceModalOpen(false)
         setTransferModalMovementId(null)
         setDeleteMovementId(null)
       }
     }
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [accountModalOpen, balanceModalOpen, categoryModalOpen, deleteMovementId, importModalOpen, movementModalOpen, transferModalMovementId])
+  }, [accountModalOpen, categoryModalOpen, deleteMovementId, importModalOpen, movementModalOpen, transferModalMovementId])
 
   function openAccountModal(account?: FinanceAccount) {
     if (account) {
@@ -634,64 +649,6 @@ export default function Finance() {
     setMovementModalOpen(false)
   }
 
-  function openBalanceModal(accountId: string) {
-    const account = scopedAccounts.find((entry) => entry.id === accountId)
-    setBalanceDraft({
-      accountId,
-      asOfDate: todayInputDate(),
-      balance: account?.lastBalanceMinor == null ? '' : String(account.lastBalanceMinor / 100),
-      createAdjustment: false,
-    })
-    setBalanceModalOpen(true)
-  }
-
-  async function saveBalance() {
-    const account = scopedAccounts.find((entry) => entry.id === balanceDraft.accountId)
-    if (!selectedOrganizationId || !account || balanceActualMinor == null) return
-
-    const asOfDate = dateInputToMs(balanceDraft.asOfDate)
-    const expectedMinor = expectedBalanceAt(account, scopedMovements, asOfDate)
-    const differenceMinor = expectedMinor == null ? 0 : balanceActualMinor - expectedMinor
-    await z.mutate.fin_balance_snapshots.create({
-      id: crypto.randomUUID(),
-      organizationId: selectedOrganizationId,
-      accountId: account.id,
-      asOfDate,
-      balanceMinor: balanceActualMinor,
-      currencyCode: account.currencyCode,
-      source: 'manual',
-    })
-    if (balanceDraft.createAdjustment && differenceMinor !== 0) {
-      const movementId = crypto.randomUUID()
-      await z.mutate.fin_movements.create({
-        id: movementId,
-        organizationId: selectedOrganizationId,
-        accountId: account.id,
-        categoryId: undefined,
-        transactionDate: asOfDate,
-        postedDate: undefined,
-        description: 'Reconciliation adjustment',
-        merchantName: undefined,
-        counterparty: undefined,
-        amountMinor: differenceMinor,
-        currencyCode: account.currencyCode,
-        reportingAmountMinor: differenceMinor,
-        reportingCurrencyCode: account.currencyCode,
-        type: 'adjustment',
-        status: 'reviewed',
-        reviewReason: null,
-        rawData: {
-          source: 'manual_reconciliation',
-          expectedBalanceMinor: expectedMinor,
-          actualBalanceMinor: balanceActualMinor,
-        },
-        fingerprint: `reconciliation:${movementId}`,
-      })
-    }
-    await z.mutate.fin_accounts.update({ id: account.id, lastBalanceMinor: balanceActualMinor, lastBalanceAt: asOfDate })
-    setBalanceModalOpen(false)
-  }
-
   function setFilterField(field: string, values: string[]) {
     setActiveFilters((current) => {
       const next = { ...current }
@@ -751,6 +708,11 @@ export default function Finance() {
     if (fileInputRef.current) fileInputRef.current.value = ''
   }
 
+  function openImportUpload() {
+    setReviewImportId(null)
+    setImportModalOpen(true)
+  }
+
   async function confirmImport() {
     if (importFiles.length === 0) return
     const targetAccountId = importAccountId || selectedAccountFilterIds[0] || scopedAccounts[0]?.id
@@ -764,10 +726,11 @@ export default function Finance() {
     setImportMessage(`Reading ${importFiles.length} file${importFiles.length === 1 ? '' : 's'}...`)
     try {
       let parsed = 0
-      let created = 0
       let needsReview = 0
       let duplicates = 0
+      let ready = 0
       let duplicateFiles = 0
+      let latestImportId: string | null = null
       for (const [index, file] of importFiles.entries()) {
         const contentBase64 = await fileToBase64(file)
         setImportMessage(`Analyzing ${index + 1}/${importFiles.length}: ${file.name}...`)
@@ -788,20 +751,21 @@ export default function Finance() {
         })
         const result = await readJsonResponse(response)
         if (!response.ok) throw new Error(result.message || result.error || 'Import failed')
+        if (result.importId) latestImportId = result.importId
         const summary = result.summary
         parsed += summary?.parsed ?? 0
-        created += summary?.created ?? 0
+        ready += summary?.ready ?? 0
         needsReview += summary?.needsReview ?? 0
         duplicates += summary?.duplicates ?? 0
         if (result.duplicateFile) duplicateFiles += 1
       }
       setImportPhase('success')
+      if (latestImportId) setReviewImportId(latestImportId)
       setImportMessage(
         duplicateFiles === importFiles.length
-          ? `Already imported. ${parsed} movements matched across ${importFiles.length} file${importFiles.length === 1 ? '' : 's'}.`
-          : `Imported ${created} movements. ${duplicates} duplicates skipped across ${importFiles.length} file${importFiles.length === 1 ? '' : 's'}.`,
+          ? `Draft already exists. ${parsed} movements matched across ${importFiles.length} file${importFiles.length === 1 ? '' : 's'}.`
+          : `Draft ready. ${ready} ready, ${needsReview} need review, ${duplicates} duplicates skipped across ${importFiles.length} file${importFiles.length === 1 ? '' : 's'}.`,
       )
-      if (needsReview > 0) setFilterField('statuses', ['pending_review'])
     } catch (error) {
       setImportPhase('failed')
       setImportMessage(error instanceof Error ? error.message : 'Import failed')
@@ -821,6 +785,86 @@ export default function Finance() {
     if (movement && categoryId) await learnCategorizationRule(movement, categoryId)
   }
 
+  function openImportReview(importId: string) {
+    setReviewImportId(importId)
+    setImportModalOpen(true)
+    setImportPhase('success')
+    setImportFiles([])
+    setImportMessage(null)
+  }
+
+  async function updateImportItemAccount(item: FinanceImportItem, accountId: string) {
+    const account = scopedAccounts.find((entry) => entry.id === accountId)
+    if (!account) return
+    await z.mutate.fin_import_items.update({
+      id: item.id,
+      accountId,
+      currencyCode: account.currencyCode,
+    })
+  }
+
+  async function updateImportItemCategory(item: FinanceImportItem, categoryId: string) {
+    if (categoryId === UNCATEGORIZED_VALUE) {
+      await z.mutate.fin_import_items.update({
+        id: item.id,
+        suggestedCategoryId: null,
+        suggestedType: null,
+        status: 'needs_review',
+      })
+      return
+    }
+    const category = scopedCategories.find((entry) => entry.id === categoryId)
+    await z.mutate.fin_import_items.update({
+      id: item.id,
+      suggestedCategoryId: categoryId,
+      suggestedType: category?.type ?? item.suggestedType ?? inferType(item.amountMinor),
+      status: 'parsed',
+    })
+  }
+
+  async function updateImportItemStatus(item: FinanceImportItem, status: string) {
+    if (item.status === 'duplicate' || item.status === 'applied') return
+    await z.mutate.fin_import_items.update({
+      id: item.id,
+      status: status === 'parsed' && !item.suggestedCategoryId ? 'needs_review' : status,
+    })
+  }
+
+  async function removeImportItem(item: FinanceImportItem) {
+    if (item.status === 'duplicate' || item.status === 'applied') return
+    await z.mutate.fin_import_items.update({
+      id: item.id,
+      status: 'ignored',
+      errorMessage: null,
+    })
+  }
+
+  async function applyReviewedImport() {
+    if (!selectedReviewImport || !token) return
+    setImportPhase('processing')
+    setImportMessage('Applying reviewed movements...')
+    try {
+      const response = await fetch(`${config.apiUrl}/finance/imports/${selectedReviewImport.id}/apply`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+      })
+      const result = await readJsonResponse(response)
+      if (!response.ok) throw new Error(result.message || result.error || 'Could not apply import')
+      setImportPhase('success')
+      setImportMessage(`Applied ${result.summary?.created ?? 0} movements. ${result.summary?.remainingReview ?? 0} still need review.`)
+      if ((result.summary?.remainingReview ?? 0) === 0) {
+        setReviewImportId(null)
+        setImportModalOpen(false)
+      }
+    } catch (error) {
+      setImportPhase('failed')
+      setImportMessage(error instanceof Error ? error.message : 'Could not apply import')
+    }
+  }
+
   async function updateMovementAccount(movementId: string, accountId: string) {
     const account = scopedAccounts.find((entry) => entry.id === accountId)
     if (!account) return
@@ -836,6 +880,32 @@ export default function Finance() {
     await z.mutate.fin_movements.update({ id: movementId, status, reviewReason: reviewReasonForStatus(status) })
     const movement = scopedMovements.find((entry) => entry.id === movementId)
     if (status === 'reviewed' && movement?.categoryId) await learnCategorizationRule(movement, movement.categoryId)
+  }
+
+  function startEditingMovementLabel(movement: FinanceMovement) {
+    setEditingMovementLabel({
+      id: movement.id,
+      value: movement.merchantName || movement.description,
+    })
+  }
+
+  function cancelEditingMovementLabel() {
+    setEditingMovementLabel(null)
+  }
+
+  async function saveEditingMovementLabel(movement: FinanceMovement) {
+    if (editingMovementLabel?.id !== movement.id) return
+    const value = editingMovementLabel.value.trim()
+    if (!value) {
+      setEditingMovementLabel(null)
+      return
+    }
+    if (movement.merchantName) {
+      if (value !== movement.merchantName) await z.mutate.fin_movements.update({ id: movement.id, merchantName: value })
+    } else if (value !== movement.description) {
+      await z.mutate.fin_movements.update({ id: movement.id, description: value })
+    }
+    setEditingMovementLabel(null)
   }
 
   async function confirmDeleteMovement() {
@@ -1117,13 +1187,11 @@ export default function Finance() {
             <div className="flex flex-wrap items-end justify-between gap-4">
               <div>
                 <div className="text-[10px] uppercase tracking-label text-fg-4">total balance</div>
-                <MoneyStack amounts={accountBalanceTotal.balanceAmounts} size="hero" aligned />
+                <MoneyStack amounts={dashboardBalanceTotals.netAmounts} size="hero" aligned />
               </div>
               <div className="grid gap-1 text-right text-xs">
-                <span className="text-fg-3">{accountBalanceTotal.accountCount} accounts</span>
-                <span className="text-fg-4">
-                  {accountBalanceTotal.reconciledCount} reconciled · {accountBalanceTotal.movementOnlyCount} from movements
-                </span>
+                <span className="text-fg-3">{dashboardNonTransferMovements.length} counted movements</span>
+                <span className="text-fg-4">transfers excluded</span>
               </div>
             </div>
           </section>
@@ -1139,7 +1207,7 @@ export default function Finance() {
             <section className="border border-[rgba(0,255,140,0.12)] bg-pit-2">
               <div className="flex items-center justify-between border-b border-[rgba(0,255,140,0.12)] px-4 py-3 font-mono">
                 <div>
-                  <div className="text-[10px] uppercase tracking-label text-fg-4">balance per month</div>
+                  <div className="text-[10px] uppercase tracking-label text-fg-4">movements per month</div>
                   <div className="mt-1 text-sm lowercase text-fg-1">income, outflow, and net</div>
                 </div>
                 <CalendarDays className="h-4 w-4 text-accent" />
@@ -1311,7 +1379,7 @@ export default function Finance() {
               <button
                 type="button"
                 disabled={importPhase === 'processing' || scopedAccounts.length === 0}
-                onClick={() => setImportModalOpen(true)}
+                onClick={openImportUpload}
                 className="flex h-8 items-center gap-2 border border-[rgba(0,255,140,0.24)] bg-[rgba(0,255,136,0.06)] px-3 font-mono text-[10px] uppercase tracking-label text-accent transition hover:border-[rgba(0,255,140,0.45)] disabled:cursor-not-allowed disabled:opacity-45"
               >
                 <FileUp className="h-3.5 w-3.5" />
@@ -1319,6 +1387,19 @@ export default function Finance() {
               </button>
             </div>
           </div>
+
+          {pendingImport ? (
+            <button
+              type="button"
+              onClick={() => openImportReview(pendingImport.id)}
+              className="mb-3 flex w-full items-center justify-between gap-3 border border-[rgba(0,255,140,0.16)] bg-pit-2 px-3 py-2 text-left font-mono text-xs transition hover:border-[rgba(0,255,140,0.28)] hover:bg-[rgba(0,255,136,0.04)]"
+            >
+              <span className="min-w-0 truncate text-fg-3">
+                // import draft · {pendingImports.length > 1 ? `${pendingImports.length} files · ` : ''}{pendingImport.fileName} · {pendingImportCounts.ready} ready · {pendingImportCounts.needsReview} need review
+              </span>
+              <span className="shrink-0 text-accent">review import</span>
+            </button>
+          ) : null}
 
           <div className="mb-3 grid gap-2 border border-[rgba(0,255,140,0.12)] bg-pit-2 px-3 py-2 font-mono text-xs sm:grid-cols-4">
             <FinanceMetric label="income" value={<MoneyStack amounts={visibleTotals.positiveAmounts} tone="ok" />} tone="ok" />
@@ -1346,9 +1427,15 @@ export default function Finance() {
                             <ArrowRightLeft className="h-3.5 w-3.5" />
                           </button>
                         </IconTooltip>
-                        <div className="min-w-0 flex-1 truncate text-sm text-fg-1" title={movement.merchantName || movement.description}>
-                          {movement.merchantName || movement.description}
-                        </div>
+                        <EditableMovementLabel
+                          movement={movement}
+                          editingValue={editingMovementLabel?.id === movement.id ? editingMovementLabel.value : null}
+                          className="text-sm text-fg-1"
+                          onStart={() => startEditingMovementLabel(movement)}
+                          onChange={(value) => setEditingMovementLabel({ id: movement.id, value })}
+                          onSave={() => void saveEditingMovementLabel(movement)}
+                          onCancel={cancelEditingMovementLabel}
+                        />
                       </div>
                       {movement.merchantName ? (
                         <div className="mt-1 truncate pl-9 text-[10px] text-fg-4" title={movement.description}>
@@ -1463,9 +1550,15 @@ export default function Finance() {
                               <ArrowRightLeft className="h-3.5 w-3.5" />
                             </button>
                           </IconTooltip>
-                          <div className="min-w-0 flex-1 truncate text-fg-1" title={movement.merchantName || movement.description}>
-                            {movement.merchantName || movement.description}
-                          </div>
+                          <EditableMovementLabel
+                            movement={movement}
+                            editingValue={editingMovementLabel?.id === movement.id ? editingMovementLabel.value : null}
+                            className="text-fg-1"
+                            onStart={() => startEditingMovementLabel(movement)}
+                            onChange={(value) => setEditingMovementLabel({ id: movement.id, value })}
+                            onSave={() => void saveEditingMovementLabel(movement)}
+                            onCancel={cancelEditingMovementLabel}
+                          />
                         </div>
                         {movement.merchantName ? (
                           <div className="mt-0.5 truncate pl-8 text-[10px] text-fg-4" title={movement.description}>
@@ -1578,38 +1671,20 @@ export default function Finance() {
                     </div>
                     <div className="grid grid-cols-2 gap-2">
                       <FinanceMetric
-                        label="current"
+                        label="balance"
                         value={formatMoney(stats?.calculatedBalanceMinor ?? 0, account.currencyCode)}
                       />
-                      <FinanceMetric
-                        label="last set"
-                        value={account.lastBalanceMinor == null ? 'not set' : formatMoney(account.lastBalanceMinor, account.currencyCode)}
-                      />
                       <FinanceMetric label="movements" value={`${stats?.movementCount ?? 0}`} />
-                      <FinanceMetric
-                        label="delta"
-                        value={formatMoney(stats?.deltaMinor ?? 0, account.currencyCode)}
-                        tone={(stats?.deltaMinor ?? 0) < 0 ? 'fail' : 'ok'}
-                      />
                     </div>
                     <div className="mt-3 flex items-center justify-between border-t border-[rgba(0,255,140,0.08)] pt-2">
                       <span className="truncate text-fg-4">{holder ? displayUser(holder) : 'unassigned'}</span>
-                      <div className="flex shrink-0 items-center gap-3">
-                        <button
-                          type="button"
-                          onClick={() => openAccountModal(account)}
-                          className="text-fg-3 transition hover:text-fg-1"
-                        >
-                          edit
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => openBalanceModal(account.id)}
-                          className="text-accent transition hover:text-fg-1"
-                        >
-                          set balance
-                        </button>
-                      </div>
+                      <button
+                        type="button"
+                        onClick={() => openAccountModal(account)}
+                        className="shrink-0 text-fg-3 transition hover:text-fg-1"
+                      >
+                        edit
+                      </button>
                     </div>
                   </article>
                 )
@@ -1626,9 +1701,7 @@ export default function Finance() {
                     <th className="border-b border-[rgba(0,255,140,0.12)] px-3 py-2 text-left">holder</th>
                     <th className="border-b border-[rgba(0,255,140,0.12)] px-3 py-2 text-right">currency</th>
                     <th className="border-b border-[rgba(0,255,140,0.12)] px-3 py-2 text-right">movements</th>
-                    <th className="border-b border-[rgba(0,255,140,0.12)] px-3 py-2 text-right">current balance</th>
-                    <th className="border-b border-[rgba(0,255,140,0.12)] px-3 py-2 text-right">last set</th>
-                    <th className="border-b border-[rgba(0,255,140,0.12)] px-3 py-2 text-right">delta</th>
+                    <th className="border-b border-[rgba(0,255,140,0.12)] px-3 py-2 text-right">balance</th>
                     <th className="border-b border-[rgba(0,255,140,0.12)] px-3 py-2 text-right">actions</th>
                   </tr>
                 </thead>
@@ -1650,12 +1723,6 @@ export default function Finance() {
                         <td className="whitespace-nowrap px-3 py-2 text-right text-fg-1">
                           {formatMoney(stats?.calculatedBalanceMinor ?? 0, account.currencyCode)}
                         </td>
-                        <td className="whitespace-nowrap px-3 py-2 text-right text-fg-3">
-                          {account.lastBalanceMinor == null ? 'not set' : formatMoney(account.lastBalanceMinor, account.currencyCode)}
-                        </td>
-                        <td className={`whitespace-nowrap px-3 py-2 text-right ${(stats?.deltaMinor ?? 0) < 0 ? 'text-fail' : 'text-ok'}`}>
-                          {formatMoney(stats?.deltaMinor ?? 0, account.currencyCode)}
-                        </td>
                         <td className="whitespace-nowrap px-3 py-2 text-right">
                           <div className="flex items-center justify-end gap-3">
                             <button
@@ -1664,13 +1731,6 @@ export default function Finance() {
                               className="text-fg-3 transition hover:text-fg-1"
                             >
                               edit
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => openBalanceModal(account.id)}
-                              className="text-accent transition hover:text-fg-1"
-                            >
-                              set balance
                             </button>
                           </div>
                         </td>
@@ -1692,7 +1752,7 @@ export default function Finance() {
           onClick={() => setImportModalOpen(false)}
         >
           <div
-            className="w-full max-w-3xl border border-[rgba(0,255,140,0.2)] bg-pit-2 shadow-[0_30px_80px_rgba(0,0,0,0.5)]"
+            className="w-full max-w-5xl border border-[rgba(0,255,140,0.2)] bg-pit-2 shadow-[0_30px_80px_rgba(0,0,0,0.5)]"
             onClick={(event) => event.stopPropagation()}
           >
             <div className="flex items-center justify-between border-b border-[rgba(0,255,140,0.12)] px-5 py-3">
@@ -1701,16 +1761,23 @@ export default function Finance() {
                   import
                 </span>
                 <span className="text-fg-4">›</span>
-                <div className="w-48">
-                  <PachSelect
-                    value={importAccountId}
-                    onChange={setImportAccountId}
-                    options={importPhase === 'processing' ? [] : importAccountOptions}
-                    display={importAccountLabel}
-                    triggerClassName={`flex h-7 w-full items-center justify-between border border-transparent bg-transparent px-1 text-left font-mono text-xs lowercase text-fg-2 outline-none transition hover:border-[rgba(0,255,140,0.18)] hover:text-fg-1 ${importPhase === 'processing' ? 'cursor-not-allowed opacity-50' : ''}`}
-                    popupWidth="240px"
-                  />
-                </div>
+                {importModalStep === 'review' ? (
+                  <>
+                    <span className="text-accent">review</span>
+                    <span className="min-w-0 truncate text-fg-3">{selectedReviewImport.fileName}</span>
+                  </>
+                ) : (
+                  <div className="w-48">
+                    <PachSelect
+                      value={importAccountId}
+                      onChange={setImportAccountId}
+                      options={importPhase === 'processing' ? [] : importAccountOptions}
+                      display={importAccountLabel}
+                      triggerClassName={`flex h-7 w-full items-center justify-between border border-transparent bg-transparent px-1 text-left font-mono text-xs lowercase text-fg-2 outline-none transition hover:border-[rgba(0,255,140,0.18)] hover:text-fg-1 ${importPhase === 'processing' ? 'cursor-not-allowed opacity-50' : ''}`}
+                      popupWidth="240px"
+                    />
+                  </div>
+                )}
               </div>
               <button
                 type="button"
@@ -1723,89 +1790,223 @@ export default function Finance() {
             </div>
 
             <div className="grid gap-4 p-5">
-              <button
-                type="button"
-                disabled={importPhase === 'processing' || scopedAccounts.length === 0}
-                onClick={() => fileInputRef.current?.click()}
-                onDragEnter={(event) => {
-                  event.preventDefault()
-                  setImportDragActive(true)
-                }}
-                onDragOver={(event) => {
-                  event.preventDefault()
-                  setImportDragActive(true)
-                }}
-                onDragLeave={() => setImportDragActive(false)}
-                onDrop={(event) => {
-                  event.preventDefault()
-                  setImportDragActive(false)
-                  const files = Array.from(event.dataTransfer.files ?? [])
-                  if (files.length > 0) stageImportFiles(files)
-                }}
-                className={`flex min-h-56 flex-col items-center justify-center border border-dashed px-6 py-10 text-center transition ${
-                  importDragActive
-                    ? 'border-accent bg-[rgba(0,255,136,0.08)] shadow-glow-xs'
-                    : 'border-[rgba(0,255,140,0.22)] bg-pit hover:border-[rgba(0,255,140,0.4)] hover:bg-[rgba(0,255,136,0.04)]'
-                } disabled:cursor-not-allowed disabled:opacity-45`}
-              >
-                <UploadCloud className={`h-7 w-7 ${importDragActive ? 'text-accent' : 'text-fg-3'}`} />
-                <div className="mt-3 font-mono text-sm lowercase text-fg-1">
-                  {importDragActive ? 'drop to stage import' : 'drop statement, screenshot, or csv'}
-                </div>
-                <div className="mt-1 font-mono text-[10px] uppercase tracking-label text-fg-4">
-                  pdf · csv · txt · image · max {formatBytes(MAX_IMPORT_TOTAL_BYTES)} total
-                </div>
-              </button>
-
-              {(importFiles.length > 0 || importMessage) && (
-                <div>
-                  <div className="mb-2 flex items-center justify-between font-mono text-[10px] uppercase tracking-label text-fg-4">
-                    <span>{importPhase === 'processing' ? 'processing import' : importFiles.length > 0 ? 'staged files' : 'latest import'}</span>
-                    {importFiles.length > 0 && importPhase !== 'processing' ? (
-                      <button
-                        type="button"
-                        onClick={resetImportSelection}
-                        className="inline-flex items-center gap-1 text-fg-3 transition hover:text-fg-1"
-                      >
-                        <X className="h-3 w-3" />
-                        clear
-                      </button>
-                    ) : null}
-                  </div>
-
-                  <div className="border-y border-[rgba(0,255,140,0.12)] font-mono text-xs">
-                    {importFiles.length > 0 ? importFiles.map((file) => (
-                      <div key={`${file.name}:${file.size}:${file.lastModified}`} className="grid grid-cols-[20px_1fr_150px_32px] items-center gap-3 border-b border-[rgba(0,255,140,0.08)] py-2.5 last:border-b-0">
-                        <FileText className="h-3.5 w-3.5 text-fg-4" />
-                        <div className="min-w-0">
-                          <div className="truncate text-fg-1" title={file.name}>
-                            {file.name}
-                          </div>
-                          <div className="mt-0.5 text-[10px] uppercase tracking-label text-fg-4">
-                            {formatBytes(file.size)}
-                          </div>
-                        </div>
-                        <ImportStatus phase={importPhase} />
-                        <span aria-hidden />
-                      </div>
-                    )) : (
-                      <div className="grid grid-cols-[20px_1fr_150px_32px] items-center gap-3 py-2.5">
-                        <FileText className="h-3.5 w-3.5 text-fg-4" />
-                        <div className="min-w-0 text-fg-4">no file selected</div>
-                        <ImportStatus phase={importPhase} />
-                        <span aria-hidden />
-                      </div>
-                    )}
-                  </div>
-
-                  {importMessage ? (
-                    <div className={`mt-2 flex items-start gap-2 font-mono text-xs ${importPhase === 'failed' ? 'text-amber' : 'text-fg-3'}`}>
-                      {importPhase === 'failed' ? <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" /> : null}
-                      <span>{importMessage}</span>
+              {importModalStep === 'upload' ? (
+                <>
+                  <button
+                    type="button"
+                    disabled={importPhase === 'processing' || scopedAccounts.length === 0}
+                    onClick={() => fileInputRef.current?.click()}
+                    onDragEnter={(event) => {
+                      event.preventDefault()
+                      setImportDragActive(true)
+                    }}
+                    onDragOver={(event) => {
+                      event.preventDefault()
+                      setImportDragActive(true)
+                    }}
+                    onDragLeave={() => setImportDragActive(false)}
+                    onDrop={(event) => {
+                      event.preventDefault()
+                      setImportDragActive(false)
+                      const files = Array.from(event.dataTransfer.files ?? [])
+                      if (files.length > 0) stageImportFiles(files)
+                    }}
+                    className={`flex min-h-56 flex-col items-center justify-center border border-dashed px-6 py-10 text-center transition ${
+                      importDragActive
+                        ? 'border-accent bg-[rgba(0,255,136,0.08)] shadow-glow-xs'
+                        : 'border-[rgba(0,255,140,0.22)] bg-pit hover:border-[rgba(0,255,140,0.4)] hover:bg-[rgba(0,255,136,0.04)]'
+                    } disabled:cursor-not-allowed disabled:opacity-45`}
+                  >
+                    <UploadCloud className={`h-7 w-7 ${importDragActive ? 'text-accent' : 'text-fg-3'}`} />
+                    <div className="mt-3 font-mono text-sm lowercase text-fg-1">
+                      {importDragActive ? 'drop to stage import' : 'drop statement, screenshot, or csv'}
                     </div>
-                  ) : null}
-                </div>
-              )}
+                    <div className="mt-1 font-mono text-[10px] uppercase tracking-label text-fg-4">
+                      pdf · csv · txt · image · max {formatBytes(MAX_IMPORT_TOTAL_BYTES)} total
+                    </div>
+                  </button>
+
+                  {(importFiles.length > 0 || importMessage) && (
+                    <div>
+                      <div className="mb-2 flex items-center justify-between font-mono text-[10px] uppercase tracking-label text-fg-4">
+                        <span>{importPhase === 'processing' ? 'processing import' : importFiles.length > 0 ? 'staged files' : 'latest import'}</span>
+                        {importFiles.length > 0 && importPhase !== 'processing' ? (
+                          <button
+                            type="button"
+                            onClick={resetImportSelection}
+                            className="inline-flex items-center gap-1 text-fg-3 transition hover:text-fg-1"
+                          >
+                            <X className="h-3 w-3" />
+                            clear
+                          </button>
+                        ) : null}
+                      </div>
+
+                      <div className="border-y border-[rgba(0,255,140,0.12)] font-mono text-xs">
+                        {importFiles.length > 0 ? importFiles.map((file) => (
+                          <div key={`${file.name}:${file.size}:${file.lastModified}`} className="grid grid-cols-[20px_1fr_150px_32px] items-center gap-3 border-b border-[rgba(0,255,140,0.08)] py-2.5 last:border-b-0">
+                            <FileText className="h-3.5 w-3.5 text-fg-4" />
+                            <div className="min-w-0">
+                              <div className="truncate text-fg-1" title={file.name}>
+                                {file.name}
+                              </div>
+                              <div className="mt-0.5 text-[10px] uppercase tracking-label text-fg-4">
+                                {formatBytes(file.size)}
+                              </div>
+                            </div>
+                            <ImportStatus phase={importPhase} />
+                            <span aria-hidden />
+                          </div>
+                        )) : (
+                          <div className="grid grid-cols-[20px_1fr_150px_32px] items-center gap-3 py-2.5">
+                            <FileText className="h-3.5 w-3.5 text-fg-4" />
+                            <div className="min-w-0 text-fg-4">no file selected</div>
+                            <ImportStatus phase={importPhase} />
+                            <span aria-hidden />
+                          </div>
+                        )}
+                      </div>
+
+                      {importMessage ? (
+                        <div className={`mt-2 flex items-start gap-2 font-mono text-xs ${importPhase === 'failed' ? 'text-amber' : 'text-fg-3'}`}>
+                          {importPhase === 'failed' ? <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" /> : null}
+                          <span>{importMessage}</span>
+                        </div>
+                      ) : null}
+                    </div>
+                  )}
+                </>
+              ) : null}
+
+              {selectedReviewImport ? (
+                <section className="border border-[rgba(0,255,140,0.12)] bg-pit font-mono">
+                  <div className="flex flex-wrap items-center justify-between gap-3 border-b border-[rgba(0,255,140,0.12)] px-3 py-2">
+                    <div>
+                      <div className="text-[10px] uppercase tracking-label text-fg-4">step 2 · review draft</div>
+                      <div className="mt-0.5 max-w-[520px] truncate text-xs text-fg-2" title={selectedReviewImport.fileName}>
+                        {selectedReviewImport.fileName}
+                      </div>
+                    </div>
+                    <div className="flex flex-wrap items-center gap-3 text-[10px] uppercase tracking-label">
+                      <span className="text-accent">{reviewCounts.ready} ready</span>
+                      <span className="text-amber">{reviewCounts.needsReview} review</span>
+                      <span className="text-fg-4">{reviewCounts.duplicate} duplicate</span>
+                      <span className="text-fg-4">{reviewCounts.ignored} ignored</span>
+                    </div>
+                  </div>
+
+                  <div className="max-h-[62vh] overflow-auto">
+                    <table className="w-full table-fixed border-collapse text-xs">
+                      <colgroup>
+                        <col className="w-[12%]" />
+                        <col className="w-[27%]" />
+                        <col className="w-[17%]" />
+                        <col className="w-[18%]" />
+                        <col className="w-[13%]" />
+                        <col className="w-[11%]" />
+                        <col className="w-[2%]" />
+                      </colgroup>
+                      <thead className="sticky top-0 bg-pit text-[10px] uppercase tracking-label text-fg-4">
+                        <tr>
+                          <th className="border-b border-[rgba(0,255,140,0.12)] px-3 py-2 text-left">date</th>
+                          <th className="border-b border-[rgba(0,255,140,0.12)] px-3 py-2 text-left">movement</th>
+                          <th className="border-b border-[rgba(0,255,140,0.12)] px-3 py-2 text-left">account</th>
+                          <th className="border-b border-[rgba(0,255,140,0.12)] px-3 py-2 text-left">category</th>
+                          <th className="border-b border-[rgba(0,255,140,0.12)] px-3 py-2 text-right">amount</th>
+                          <th className="border-b border-[rgba(0,255,140,0.12)] px-3 py-2 text-right">status</th>
+                          <th className="border-b border-[rgba(0,255,140,0.12)] px-2 py-2 text-right"> </th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {visibleReviewItems.map((item) => {
+                          const locked = item.status === 'duplicate' || item.status === 'applied'
+                          const account = scopedAccounts.find((entry) => entry.id === item.accountId)
+                          const category = scopedCategories.find((entry) => entry.id === item.suggestedCategoryId)
+                          return (
+                            <tr key={item.id} className="border-b border-[rgba(0,255,140,0.08)] text-fg-2">
+                              <td className="whitespace-nowrap px-3 py-2 text-fg-3">{formatZeroDate(item.transactionDate)}</td>
+                              <td className="min-w-0 px-3 py-2">
+                                <div className="truncate text-fg-1" title={item.merchantName || item.description}>
+                                  {item.merchantName || item.description}
+                                </div>
+                                {item.merchantName ? (
+                                  <div className="mt-0.5 truncate text-[10px] text-fg-4" title={item.description}>
+                                    {item.description}
+                                  </div>
+                                ) : null}
+                              </td>
+                              <td className="min-w-0 px-3 py-2">
+                                <PachSelect
+                                  value={item.accountId}
+                                  onChange={(next) => void updateImportItemAccount(item, next)}
+                                  options={locked ? [] : importAccountOptions}
+                                  display={account?.name ?? 'unknown'}
+                                  popupWidth="240px"
+                                  triggerClassName={`flex h-7 w-full min-w-0 items-center justify-between border border-transparent bg-transparent px-2 text-left font-mono text-xs text-fg-2 outline-none transition hover:border-[rgba(0,255,140,0.18)] hover:bg-[rgba(0,255,136,0.04)] hover:text-fg-1 focus-visible:border-accent ${locked ? 'pointer-events-none opacity-55' : ''}`}
+                                />
+                              </td>
+                              <td className="min-w-0 px-3 py-2">
+                                <PachSelect
+                                  value={item.suggestedCategoryId ?? UNCATEGORIZED_VALUE}
+                                  onChange={(next) => void updateImportItemCategory(item, next)}
+                                  options={locked ? [] : categoryOptions}
+                                  display={category?.name ?? 'uncategorized'}
+                                  popupWidth="240px"
+                                  triggerClassName={`flex h-7 w-full min-w-0 items-center justify-between border border-transparent bg-transparent px-2 text-left font-mono text-xs text-fg-2 outline-none transition hover:border-[rgba(0,255,140,0.18)] hover:bg-[rgba(0,255,136,0.04)] hover:text-fg-1 focus-visible:border-accent ${locked ? 'pointer-events-none opacity-55' : ''}`}
+                                />
+                              </td>
+                              <td className={`whitespace-nowrap px-3 py-2 text-right ${item.amountMinor < 0 ? 'text-fail' : 'text-ok'}`}>
+                                {formatMoney(item.amountMinor, item.currencyCode)}
+                              </td>
+                              <td className="px-3 py-2 text-right">
+                                {locked ? (
+                                  <span className={`text-[10px] uppercase tracking-label ${item.status === 'duplicate' ? 'text-amber' : 'text-fg-4'}`}>
+                                    {item.status}
+                                  </span>
+                                ) : (
+                                  <PachSelect
+                                    value={item.status === 'needs_review' ? 'needs_review' : item.status === 'ignored' ? 'ignored' : 'parsed'}
+                                    onChange={(next) => void updateImportItemStatus(item, next)}
+                                    options={importItemStatusOptions}
+                                    display={importItemStatusLabel(item.status)}
+                                    popupWidth="160px"
+                                    align="right"
+                                    triggerClassName="ml-auto flex h-7 w-full min-w-0 items-center justify-between border border-transparent bg-transparent px-2 text-left font-mono text-xs text-fg-2 outline-none transition hover:border-[rgba(0,255,140,0.18)] hover:bg-[rgba(0,255,136,0.04)] hover:text-fg-1 focus-visible:border-accent"
+                                  />
+                                )}
+                              </td>
+                              <td className="px-2 py-2 text-right">
+                                {locked ? (
+                                  <span aria-hidden className="block h-7 w-7" />
+                                ) : (
+                                  <button
+                                    type="button"
+                                    onClick={() => void removeImportItem(item)}
+                                    className="group relative inline-flex h-7 w-7 items-center justify-center border border-transparent text-fg-4 transition hover:border-[rgba(255,83,124,0.35)] hover:bg-[rgba(255,83,124,0.08)] hover:text-fail"
+                                    aria-label="Remove from import"
+                                  >
+                                    <Trash2 className="h-3.5 w-3.5" />
+                                    <span className="pointer-events-none absolute bottom-full right-0 mb-1 hidden whitespace-nowrap border border-[rgba(255,83,124,0.25)] bg-pit-2 px-2 py-1 font-mono text-[10px] uppercase tracking-label text-fail shadow-[0_12px_30px_rgba(0,0,0,0.45)] group-hover:block">
+                                      remove
+                                    </span>
+                                  </button>
+                                )}
+                              </td>
+                            </tr>
+                          )
+                        })}
+                        {visibleReviewItems.length === 0 ? (
+                          <tr>
+                            <td colSpan={7} className="px-3 py-10 text-center text-sm text-fg-4">
+                              // no draft movements
+                            </td>
+                          </tr>
+                        ) : null}
+                      </tbody>
+                    </table>
+                  </div>
+                </section>
+              ) : null}
             </div>
 
             <div className="flex items-center justify-between border-t border-[rgba(0,255,140,0.12)] px-5 py-3">
@@ -1817,15 +2018,28 @@ export default function Finance() {
               >
                 [cancel]
               </button>
-              <button
-                type="button"
-                disabled={importFiles.length === 0 || !importAccountId || importPhase === 'processing' || importPhase === 'success' || scopedAccounts.length === 0}
-                onClick={() => void confirmImport()}
-                className="inline-flex items-center gap-2 border border-[rgba(0,255,140,0.3)] bg-[rgba(0,255,136,0.08)] px-3 py-1.5 font-mono text-xs uppercase tracking-label text-accent transition hover:bg-[rgba(0,255,136,0.16)] hover:shadow-glow-xs disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-[rgba(0,255,136,0.08)] disabled:hover:shadow-none"
-              >
-                {importPhase === 'processing' ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <FileUp className="h-3.5 w-3.5" />}
-                {importPhase === 'processing' ? 'processing' : importPhase === 'success' ? 'processed' : 'process import'}
-              </button>
+              <div className="flex items-center gap-2">
+                {selectedReviewImport ? (
+                  <button
+                    type="button"
+                    disabled={!canApplyReview || importPhase === 'processing'}
+                    onClick={() => void applyReviewedImport()}
+                    className="inline-flex items-center gap-2 border border-[rgba(0,255,140,0.3)] bg-[rgba(0,255,136,0.08)] px-3 py-1.5 font-mono text-xs uppercase tracking-label text-accent transition hover:bg-[rgba(0,255,136,0.16)] hover:shadow-glow-xs disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-[rgba(0,255,136,0.08)] disabled:hover:shadow-none"
+                  >
+                    {importPhase === 'processing' ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <FileUp className="h-3.5 w-3.5" />}
+                    finish review
+                  </button>
+                ) : null}
+                <button
+                  type="button"
+                  disabled={importFiles.length === 0 || !importAccountId || importPhase === 'processing' || scopedAccounts.length === 0}
+                  onClick={() => void confirmImport()}
+                  className={`inline-flex items-center gap-2 border border-[rgba(0,255,140,0.3)] bg-[rgba(0,255,136,0.08)] px-3 py-1.5 font-mono text-xs uppercase tracking-label text-accent transition hover:bg-[rgba(0,255,136,0.16)] hover:shadow-glow-xs disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-[rgba(0,255,136,0.08)] disabled:hover:shadow-none ${importModalStep === 'review' ? 'hidden' : ''}`}
+                >
+                  {importPhase === 'processing' ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <FileUp className="h-3.5 w-3.5" />}
+                  {importPhase === 'processing' ? 'processing' : 'process import'}
+                </button>
+              </div>
             </div>
           </div>
         </div>
@@ -2163,114 +2377,6 @@ export default function Finance() {
               >
                 <Plus className="h-3.5 w-3.5" />
                 add movement
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {balanceModalOpen && selectedBalanceAccount && (
-        <div
-          className="fixed inset-0 z-50 flex items-start justify-center bg-[rgba(0,0,0,0.7)] px-4 pt-[10vh] backdrop-blur-sm"
-          onClick={() => setBalanceModalOpen(false)}
-        >
-          <div
-            className="w-full max-w-xl border border-[rgba(0,255,140,0.2)] bg-pit-2 shadow-[0_30px_80px_rgba(0,0,0,0.5)]"
-            onClick={(event) => event.stopPropagation()}
-            onKeyDown={(event) => {
-              if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') {
-                event.preventDefault()
-                if (canSaveBalance) void saveBalance()
-              }
-            }}
-          >
-            <div className="flex items-center justify-between border-b border-[rgba(0,255,140,0.12)] px-5 py-3">
-              <div className="flex items-center gap-2 font-mono text-xs">
-                <span className="inline-flex items-center gap-1.5 border border-[rgba(0,255,140,0.25)] bg-[rgba(0,255,136,0.05)] px-2 py-0.5 font-mono text-[10px] uppercase tracking-label text-accent">
-                  balance
-                </span>
-                <span className="text-fg-4">›</span>
-                <span className="text-fg-2 lowercase">{selectedBalanceAccount.name}</span>
-              </div>
-              <button
-                type="button"
-                onClick={() => setBalanceModalOpen(false)}
-                className="font-mono text-xs uppercase tracking-label text-fg-4 transition hover:text-fg-1"
-                title="close"
-              >
-                [esc]
-              </button>
-            </div>
-
-            <div className="grid gap-4 px-5 py-4">
-              <div className="grid gap-3 sm:grid-cols-[1fr_160px]">
-                <label className="grid gap-1">
-                  <span className="font-mono text-[10px] uppercase tracking-label text-fg-4">actual balance</span>
-                  <input
-                    value={balanceDraft.balance}
-                    onChange={(event) => setBalanceDraft((draft) => ({ ...draft, balance: event.target.value }))}
-                    placeholder={selectedBalanceAccount.currencyCode}
-                    inputMode="decimal"
-                    className="h-9 border border-[rgba(0,255,140,0.15)] bg-pit-3 px-3 font-mono text-xs text-fg-1 outline-none placeholder:text-fg-4 focus:border-accent"
-                    autoFocus
-                  />
-                </label>
-                <label className="grid gap-1">
-                  <span className="font-mono text-[10px] uppercase tracking-label text-fg-4">as of</span>
-                  <input
-                    type="date"
-                    value={balanceDraft.asOfDate}
-                    onChange={(event) => setBalanceDraft((draft) => ({ ...draft, asOfDate: event.target.value }))}
-                    className="h-9 border border-[rgba(0,255,140,0.15)] bg-pit-3 px-3 font-mono text-xs text-fg-1 outline-none focus:border-accent"
-                  />
-                </label>
-              </div>
-
-              <div className="grid gap-2 border border-[rgba(0,255,140,0.12)] bg-pit px-3 py-2 font-mono text-xs">
-                <FinanceMetric
-                  label="expected"
-                  value={balanceExpectedMinor == null ? 'not enough data' : formatMoney(balanceExpectedMinor, selectedBalanceAccount.currencyCode)}
-                />
-                <FinanceMetric
-                  label="difference"
-                  value={balanceDifferenceMinor == null ? 'enter balance' : formatMoney(balanceDifferenceMinor, selectedBalanceAccount.currencyCode)}
-                  tone={balanceDifferenceMinor == null || balanceDifferenceMinor >= 0 ? 'ok' : 'fail'}
-                />
-              </div>
-
-              <div className="border border-[rgba(0,255,140,0.1)] bg-pit px-3 py-2 font-mono text-xs text-fg-4">
-                use this as the opening balance for the day you start tracking, or as a later bank-reported reconciliation point.
-              </div>
-
-              {balanceDifferenceMinor != null && balanceDifferenceMinor !== 0 ? (
-                <label className="flex items-center gap-2 font-mono text-xs text-fg-2">
-                  <input
-                    type="checkbox"
-                    checked={balanceDraft.createAdjustment}
-                    onChange={(event) => setBalanceDraft((draft) => ({ ...draft, createAdjustment: event.target.checked }))}
-                    className="h-3.5 w-3.5 accent-[rgb(0,255,136)]"
-                  />
-                  add reconciliation adjustment for the difference
-                </label>
-              ) : null}
-            </div>
-
-            <div className="flex items-center justify-between border-t border-[rgba(0,255,140,0.12)] px-5 py-3">
-              <button
-                type="button"
-                onClick={() => setBalanceModalOpen(false)}
-                className="px-2 py-1.5 font-mono text-xs uppercase tracking-label text-fg-3 transition hover:text-fg-1"
-              >
-                [cancel]
-              </button>
-              <button
-                type="button"
-                disabled={!canSaveBalance}
-                onClick={() => void saveBalance()}
-                className="inline-flex items-center gap-2 border border-[rgba(0,255,140,0.3)] bg-[rgba(0,255,136,0.08)] px-3 py-1.5 font-mono text-xs uppercase tracking-label text-accent transition hover:bg-[rgba(0,255,136,0.16)] hover:shadow-glow-xs disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-[rgba(0,255,136,0.08)] disabled:hover:shadow-none"
-              >
-                <CheckCircle className="h-3.5 w-3.5" />
-                save balance
               </button>
             </div>
           </div>
@@ -2698,6 +2804,57 @@ function IconTooltip({ label, children, align = 'left' }: { label: string; child
   )
 }
 
+function EditableMovementLabel({
+  movement,
+  editingValue,
+  className,
+  onStart,
+  onChange,
+  onSave,
+  onCancel,
+}: {
+  movement: FinanceMovement
+  editingValue: string | null
+  className?: string
+  onStart: () => void
+  onChange: (value: string) => void
+  onSave: () => void
+  onCancel: () => void
+}) {
+  const label = movement.merchantName || movement.description
+  if (editingValue != null) {
+    return (
+      <input
+        value={editingValue}
+        onChange={(event) => onChange(event.target.value)}
+        onBlur={onSave}
+        onKeyDown={(event) => {
+          if (event.key === 'Enter') {
+            event.preventDefault()
+            onSave()
+          }
+          if (event.key === 'Escape') {
+            event.preventDefault()
+            onCancel()
+          }
+        }}
+        className={`h-7 min-w-0 flex-1 border border-[rgba(0,255,140,0.24)] bg-pit-3 px-2 font-mono text-xs text-fg-1 outline-none focus:border-accent focus:shadow-glow-xs ${className ?? ''}`}
+        autoFocus
+      />
+    )
+  }
+  return (
+    <button
+      type="button"
+      onClick={onStart}
+      className={`min-w-0 flex-1 truncate text-left transition hover:text-accent ${className ?? ''}`}
+      title={`${label} · click to edit`}
+    >
+      {label}
+    </button>
+  )
+}
+
 function CategoryPieChart({ slices }: { slices: CategoryBreakdownEntry[] }) {
   const [tooltip, setTooltip] = useState<{ slice: CategoryBreakdownEntry; x: number; y: number } | null>(null)
   const radius = 76
@@ -2831,6 +2988,22 @@ function ImportStatus({ phase }: { phase: ImportPhase }) {
     )
   }
   return <span className="text-right text-fg-4">{status === 'select' ? 'pending' : status}</span>
+}
+
+function summarizeImportReview(items: FinanceImportItem[]) {
+  return {
+    ready: items.filter((item) => item.status === 'parsed').length,
+    needsReview: items.filter((item) => item.status === 'needs_review').length,
+    duplicate: items.filter((item) => item.status === 'duplicate').length,
+    ignored: items.filter((item) => item.status === 'ignored').length,
+    applied: items.filter((item) => item.status === 'applied').length,
+  }
+}
+
+function importItemStatusLabel(status: string) {
+  if (status === 'parsed') return 'ready'
+  if (status === 'needs_review') return 'needs review'
+  return status.replace(/_/g, ' ')
 }
 
 function displayUser(user: Schema['tables']['users']['row'] | undefined) {
@@ -2980,12 +3153,6 @@ function moneyAmountsFromMap(
     .sort((a, b) => currencySortValue(a.currencyCode).localeCompare(currencySortValue(b.currencyCode)))
 }
 
-function moneyAmountsFromSimpleMap(totals: Map<string, number>): MoneyAmount[] {
-  return Array.from(totals.entries())
-    .map(([currencyCode, amountMinor]) => ({ currencyCode, amountMinor }))
-    .sort((a, b) => currencySortValue(a.currencyCode).localeCompare(currencySortValue(b.currencyCode)))
-}
-
 function currencySortValue(currencyCode: string) {
   const knownIndex = CURRENCIES.indexOf(currencyCode)
   return `${knownIndex === -1 ? 999 : knownIndex}:${currencyCode}`
@@ -3069,22 +3236,6 @@ function buildCategoryBreakdown(
     })
 }
 
-function summarizeAccountBalances(
-  accounts: Schema['tables']['fin_accounts']['row'][],
-  statsByAccountId: Map<string, ReturnType<typeof buildAccountStats>>,
-) {
-  const balances = new Map<string, number>()
-  for (const account of accounts) {
-    balances.set(account.currencyCode, (balances.get(account.currencyCode) ?? 0) + (statsByAccountId.get(account.id)?.calculatedBalanceMinor ?? 0))
-  }
-  return {
-    balanceAmounts: moneyAmountsFromSimpleMap(balances),
-    accountCount: accounts.length,
-    reconciledCount: accounts.filter((account) => statsByAccountId.get(account.id)?.source === 'reconciled').length,
-    movementOnlyCount: accounts.filter((account) => statsByAccountId.get(account.id)?.source === 'movements').length,
-  }
-}
-
 function isTransferLikeMovement(
   movement: Schema['tables']['fin_movements']['row'],
   categories: Schema['tables']['fin_categories']['row'][],
@@ -3097,23 +3248,15 @@ function isTransferLikeMovement(
 function buildAccountStats(
   account: Schema['tables']['fin_accounts']['row'],
   movements: Schema['tables']['fin_movements']['row'][],
-  categories: Schema['tables']['fin_categories']['row'][],
 ) {
   const accountMovements = movements.filter((movement) =>
     movement.accountId === account.id &&
-    movement.status !== 'ignored' &&
-    !isTransferLikeMovement(movement, categories)
+    movement.status !== 'ignored'
   )
-  const hasReconciledBalance = account.lastBalanceMinor != null && account.lastBalanceAt != null
-  const sinceLastBalance = hasReconciledBalance
-    ? accountMovements.filter((movement) => movement.transactionDate > account.lastBalanceAt!)
-    : accountMovements
-  const deltaMinor = sinceLastBalance.reduce((sum, movement) => sum + movement.amountMinor, 0)
+  const calculatedBalanceMinor = accountMovements.reduce((sum, movement) => sum + movement.amountMinor, 0)
   return {
     movementCount: accountMovements.length,
-    deltaMinor,
-    calculatedBalanceMinor: (hasReconciledBalance ? account.lastBalanceMinor! : 0) + deltaMinor,
-    source: hasReconciledBalance ? 'reconciled' : 'movements',
+    calculatedBalanceMinor,
   }
 }
 
@@ -3187,20 +3330,6 @@ function normalizeRuleValue(value: string) {
   return value.toLowerCase().replace(/\s+/g, ' ').trim().slice(0, 80)
 }
 
-function expectedBalanceAt(
-  account: Schema['tables']['fin_accounts']['row'],
-  movements: Schema['tables']['fin_movements']['row'][],
-  asOfDate: number,
-) {
-  const hasReconciledBalance = account.lastBalanceMinor != null && account.lastBalanceAt != null
-  if (hasReconciledBalance && asOfDate < account.lastBalanceAt!) return null
-  const deltaMinor = movements
-    .filter((movement) => movement.accountId === account.id && movement.status !== 'ignored')
-    .filter((movement) => movement.transactionDate > (hasReconciledBalance ? account.lastBalanceAt! : 0) && movement.transactionDate <= asOfDate)
-    .reduce((sum, movement) => sum + movement.amountMinor, 0)
-  return (hasReconciledBalance ? account.lastBalanceMinor! : 0) + deltaMinor
-}
-
 function uniqueBy<T>(values: T[], getKey: (value: T) => string) {
   const seen = new Set<string>()
   return values.filter((value) => {
@@ -3230,7 +3359,16 @@ async function readJsonResponse(response: Response) {
     return JSON.parse(text) as {
       error?: string
       message?: string
-      summary?: { parsed: number; created: number; needsReview: number; duplicates: number }
+      importId?: string
+      summary?: {
+        parsed?: number
+        ready?: number
+        created?: number
+        skipped?: number
+        needsReview?: number
+        remainingReview?: number
+        duplicates?: number
+      }
       duplicateFile?: boolean
       categories?: FinanceCategory[]
     }
@@ -3250,8 +3388,9 @@ function formatBytes(bytes: number) {
 function compactImportMessage(message: string) {
   if (/processing/i.test(message)) return 'processing'
   if (/too large/i.test(message)) return 'failed · file too large'
-  if (/already imported/i.test(message)) return 'duplicate file'
-  if (/imported/i.test(message)) return 'import complete'
+  if (/already|duplicate/i.test(message)) return 'duplicate file'
+  if (/draft ready/i.test(message)) return 'draft ready'
+  if (/applied/i.test(message)) return 'applied'
   return message.length > 44 ? `${message.slice(0, 44)}...` : message
 }
 

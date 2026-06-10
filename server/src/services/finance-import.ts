@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto'
-import { and, eq, isNull, or } from 'drizzle-orm'
+import { and, eq, inArray, isNull, or } from 'drizzle-orm'
 import { getDb } from '../db.js'
 import {
   finAccounts,
@@ -79,7 +79,7 @@ const FINANCE_STATEMENT_TOOL = {
             amount: { type: 'number', description: 'Signed amount from this account perspective.' },
             currencyCode: { type: 'string', description: 'Currency code. Omit if unknown.' },
             type: { type: 'string', enum: ['income', 'expense', 'transfer', 'adjustment'] },
-            categoryName: { type: 'string', description: 'Short Spanish category suggestion. Omit if unknown.' },
+            categoryName: { type: 'string', description: 'Existing category name only when one clearly fits. Omit if unknown or if no existing category fits.' },
             confidence: { type: 'number', description: 'Extraction/category confidence from 0 to 100. Omit if unknown.' },
           },
           required: ['transactionDate', 'description', 'amount'],
@@ -117,13 +117,14 @@ export async function importFinanceMovements(input: FinanceImportInput) {
     .where(and(eq(finImports.accountId, input.accountId), eq(finImports.fileSha256, fileSha256)))
     .limit(1)
 
-  if (existingImport?.status === 'applied' || existingImport?.status === 'ready') {
+  if (existingImport && ['ready', 'partially_applied', 'applied'].includes(existingImport.status)) {
     return {
       importId: existingImport.id,
       duplicateFile: true,
       summary: {
         parsed: existingImport.itemsParsed,
         created: 0,
+        ready: existingImport.itemsReady,
         duplicates: existingImport.itemsDuplicate,
         needsReview: existingImport.itemsNeedingReview,
       },
@@ -145,15 +146,16 @@ export async function importFinanceMovements(input: FinanceImportInput) {
     .returning()
 
   try {
+    const categories = await loadCategoryMap(input.organizationId)
     const parsed = await parseWithHaiku({
       sourceType: input.sourceType,
       fileName: input.fileName,
       fileType: input.fileType,
       contentBase64: input.contentBase64,
       accountCurrencyCode: account.currencyCode,
+      existingCategoryNames: existingCategoryNames(categories),
     })
 
-    const categories = await loadCategoryMap(input.organizationId)
     const rules = await db
       .select()
       .from(finCategorizationRules)
@@ -165,9 +167,9 @@ export async function importFinanceMovements(input: FinanceImportInput) {
         ),
       )
 
-    let created = 0
     let duplicates = 0
     let needsReview = 0
+    let ready = 0
 
     for (const tx of parsed.transactions) {
       const normalized = normalizeParsedMovement(tx, account.currencyCode)
@@ -189,16 +191,15 @@ export async function importFinanceMovements(input: FinanceImportInput) {
       const rule = findMatchingRule(rules, normalized.description, normalized.merchantName, normalized.amountMinor)
       const suggestedType = rule?.type ?? normalized.type ?? inferType(normalized.amountMinor)
       let categoryId = rule?.categoryId ?? null
-      let categoryName = normalized.categoryName
 
-      if (!categoryId && categoryName) {
-        categoryId = await ensureCategory(input.organizationId, categoryName, suggestedType, categories)
+      if (!categoryId && normalized.categoryName) {
+        categoryId = findExistingCategoryId(categories, normalized.categoryName)
       }
 
       const confident = Boolean(categoryId) && (rule || (normalized.confidence ?? 0) >= 70)
       const itemStatus = existingMovement ? 'duplicate' : confident ? 'parsed' : 'needs_review'
 
-      const [item] = await db
+      await db
         .insert(finImportItems)
         .values({
           organizationId: input.organizationId,
@@ -218,60 +219,37 @@ export async function importFinanceMovements(input: FinanceImportInput) {
           fingerprint,
           rawData: normalized.rawData,
         })
-        .returning()
 
       if (existingMovement) {
         duplicates += 1
-        continue
+      } else if (confident) {
+        ready += 1
+      } else {
+        needsReview += 1
       }
-
-      const movementStatus = confident ? 'reviewed' : 'pending_review'
-      if (!confident) needsReview += 1
-
-      await db.insert(finMovements).values({
-        organizationId: input.organizationId,
-        accountId: input.accountId,
-        categoryId,
-        importId: importRow.id,
-        sourceItemId: item.id,
-        transactionDate: normalized.transactionDate,
-        postedDate: normalized.postedDate,
-        description: normalized.description,
-        merchantName: normalized.merchantName,
-        amountMinor: normalized.amountMinor,
-        currencyCode: normalized.currencyCode,
-        reportingAmountMinor: normalized.amountMinor,
-        reportingCurrencyCode: normalized.currencyCode,
-        type: suggestedType,
-        status: movementStatus,
-        reviewReason: movementStatus === 'pending_review' ? 'uncategorized' : null,
-        fingerprint,
-        rawData: normalized.rawData,
-      })
-      created += 1
     }
 
     await db
       .update(finImports)
       .set({
-        status: 'applied',
+        status: 'ready',
         statementStartDate: parsed.statementStartDate ?? null,
         statementEndDate: parsed.statementEndDate ?? null,
         detectedCurrencyCode: parsed.detectedCurrencyCode ?? account.currencyCode,
         detectedInstitution: parsed.detectedInstitution ?? account.institutionName,
         detectedAccountHint: parsed.detectedAccountHint ?? null,
         itemsParsed: parsed.transactions.length,
-        itemsReady: created - needsReview,
+        itemsReady: ready,
         itemsDuplicate: duplicates,
         itemsNeedingReview: needsReview,
         rawSummary: {
           model: HAIKU_MODEL,
-          created,
+          created: 0,
+          ready,
           duplicates,
           needsReview,
         },
         updatedAt: new Date(),
-        appliedAt: new Date(),
       })
       .where(eq(finImports.id, importRow.id))
 
@@ -280,7 +258,8 @@ export async function importFinanceMovements(input: FinanceImportInput) {
       duplicateFile: false,
       summary: {
         parsed: parsed.transactions.length,
-        created,
+        created: 0,
+        ready,
         duplicates,
         needsReview,
       },
@@ -295,12 +274,120 @@ export async function importFinanceMovements(input: FinanceImportInput) {
   }
 }
 
+export async function applyFinanceImport(importId: string) {
+  const db = getDb()
+  const [importRow] = await db.select().from(finImports).where(eq(finImports.id, importId)).limit(1)
+  if (!importRow) return { error: 'NOT_FOUND' as const, message: 'Import not found.' }
+  if (importRow.status === 'applied') {
+    return {
+      import: importRow,
+      summary: {
+        created: 0,
+        skipped: 0,
+        remainingReview: 0,
+        duplicates: importRow.itemsDuplicate,
+      },
+    }
+  }
+
+  const items = await db
+    .select()
+    .from(finImportItems)
+    .where(and(eq(finImportItems.importId, importId), inArray(finImportItems.status, ['parsed', 'needs_review'])))
+
+  let created = 0
+  let skipped = 0
+
+  for (const item of items) {
+    const exactDate = typeof item.rawData?.transactionDateExact === 'string'
+      ? item.rawData.transactionDateExact
+      : formatDateForFingerprint(item.transactionDate)
+    const fingerprint = buildMovementFingerprint({
+      accountId: item.accountId,
+      transactionDate: exactDate,
+      amountMinor: item.amountMinor,
+      description: item.description,
+    })
+    const [existingMovement] = await db
+      .select({ id: finMovements.id })
+      .from(finMovements)
+      .where(and(eq(finMovements.accountId, item.accountId), eq(finMovements.fingerprint, fingerprint)))
+      .limit(1)
+
+    if (existingMovement) {
+      await db
+        .update(finImportItems)
+        .set({ status: 'duplicate', duplicateMovementId: existingMovement.id, fingerprint, updatedAt: new Date() })
+        .where(eq(finImportItems.id, item.id))
+      skipped += 1
+      continue
+    }
+
+    const movementType = item.suggestedType || inferType(item.amountMinor)
+    const movementStatus = item.status === 'needs_review' ? 'pending_review' : item.suggestedCategoryId ? 'reviewed' : 'pending_review'
+    await db.insert(finMovements).values({
+      organizationId: item.organizationId,
+      accountId: item.accountId,
+      categoryId: item.suggestedCategoryId,
+      importId: item.importId,
+      sourceItemId: item.id,
+      transactionDate: item.transactionDate,
+      postedDate: item.postedDate,
+      description: item.description,
+      merchantName: item.merchantName,
+      amountMinor: item.amountMinor,
+      currencyCode: item.currencyCode,
+      reportingAmountMinor: item.amountMinor,
+      reportingCurrencyCode: item.currencyCode,
+      type: movementType,
+      status: movementStatus,
+      reviewReason: movementStatus === 'pending_review' ? 'uncategorized' : null,
+      fingerprint,
+      rawData: item.rawData,
+    })
+    await db
+      .update(finImportItems)
+      .set({ status: 'applied', fingerprint, updatedAt: new Date() })
+      .where(eq(finImportItems.id, item.id))
+    if (item.status === 'parsed' && item.suggestedCategoryId) {
+      await learnRuleFromImportItem(item, item.suggestedCategoryId, movementType)
+    }
+    created += 1
+  }
+
+  const counts = await countImportItems(importId)
+  const nextStatus = counts.pending === 0 ? 'applied' : created > 0 ? 'partially_applied' : 'ready'
+  const [updatedImport] = await db
+    .update(finImports)
+    .set({
+      status: nextStatus,
+      itemsReady: counts.ready,
+      itemsDuplicate: counts.duplicate,
+      itemsNeedingReview: counts.needsReview,
+      updatedAt: new Date(),
+      appliedAt: nextStatus === 'applied' ? new Date() : importRow.appliedAt,
+    })
+    .where(eq(finImports.id, importId))
+    .returning()
+
+  return {
+    import: updatedImport,
+    summary: {
+      created,
+      skipped,
+      remainingReview: counts.needsReview,
+      duplicates: counts.duplicate,
+    },
+  }
+}
+
 async function parseWithHaiku(input: {
   sourceType: SourceType
   fileName: string
   fileType: string
   contentBase64: string
   accountCurrencyCode: string
+  existingCategoryNames: string[]
 }): Promise<ParsedStatement> {
   const apiKey = process.env.ANTHROPIC_API_KEY
   if (!apiKey) {
@@ -350,12 +437,16 @@ function buildAnthropicContent(input: {
   fileType: string
   contentBase64: string
   accountCurrencyCode: string
+  existingCategoryNames: string[]
 }) {
+  const categoryInstructions = input.existingCategoryNames.length > 0
+    ? `\n\nExisting categories you may use exactly when they fit: ${input.existingCategoryNames.join(', ')}.\nIf none of these categories clearly fit a movement, omit categoryName. Do not invent or translate new category names.`
+    : '\n\nNo existing categories were provided. Omit categoryName for every movement.'
   const prompt = `Extract all financial movements from ${input.fileName}.
 
 Use the ${FINANCE_STATEMENT_TOOL_NAME} tool with every movement you can read.
 
-Do not invent movements. Preserve transaction dates. If the document has both charges and payments, sign each movement from this account's perspective.`
+Do not invent movements. Preserve transaction dates. If the document has both charges and payments, sign each movement from this account's perspective.${categoryInstructions}`
 
   const base = [{ type: 'text', text: prompt }]
   if (input.fileType.startsWith('image/')) {
@@ -436,41 +527,80 @@ async function loadCategoryMap(organizationId: string) {
     .select()
     .from(finCategories)
     .where(eq(finCategories.organizationId, organizationId))
-  return new Map(rows.map((category) => [category.name.trim().toLowerCase(), category]))
+  const categories = rows.filter((category) => !category.archived)
+  const map = new Map<string, typeof finCategories.$inferSelect>()
+  for (const category of categories) {
+    for (const key of categoryLookupKeys(category.name)) {
+      if (!map.has(key)) map.set(key, category)
+    }
+  }
+  return map
 }
 
-async function ensureCategory(
-  organizationId: string,
-  name: string,
-  type: string,
-  cache: Map<string, typeof finCategories.$inferSelect>,
-) {
-  const normalizedName = name.trim()
-  const key = normalizedName.toLowerCase()
-  const existing = cache.get(key)
-  if (existing) return existing.id
+function existingCategoryNames(categories: Map<string, typeof finCategories.$inferSelect>) {
+  return Array.from(new Map(Array.from(categories.values()).map((category) => [category.id, category.name])).values())
+}
 
-  const [created] = await getDb()
-    .insert(finCategories)
-    .values({ organizationId, name: normalizedName, type: categoryType(type) })
-    .onConflictDoNothing()
-    .returning()
-
-  if (created) {
-    cache.set(key, created)
-    return created.id
-  }
-
-  const [row] = await getDb()
-    .select()
-    .from(finCategories)
-    .where(and(eq(finCategories.organizationId, organizationId), eq(finCategories.name, normalizedName)))
-    .limit(1)
-  if (row) {
-    cache.set(key, row)
-    return row.id
+function findExistingCategoryId(categories: Map<string, typeof finCategories.$inferSelect>, suggestedName: string) {
+  for (const key of categoryLookupKeys(suggestedName)) {
+    const category = categories.get(key)
+    if (category) return category.id
   }
   return null
+}
+
+async function countImportItems(importId: string) {
+  const rows = await getDb().select().from(finImportItems).where(eq(finImportItems.importId, importId))
+  return {
+    ready: rows.filter((item) => item.status === 'parsed').length,
+    needsReview: rows.filter((item) => item.status === 'needs_review').length,
+    duplicate: rows.filter((item) => item.status === 'duplicate').length,
+    pending: rows.filter((item) => item.status === 'parsed' || item.status === 'needs_review').length,
+  }
+}
+
+async function learnRuleFromImportItem(
+  item: typeof finImportItems.$inferSelect,
+  categoryId: string,
+  type: string,
+) {
+  const match = buildRuleMatch({
+    description: item.description,
+    merchantName: item.merchantName,
+  })
+  if (!match) return
+  const db = getDb()
+  const [existingRule] = await db
+    .select()
+    .from(finCategorizationRules)
+    .where(
+      and(
+        eq(finCategorizationRules.organizationId, item.organizationId),
+        eq(finCategorizationRules.accountId, item.accountId),
+        eq(finCategorizationRules.matchKind, match.kind),
+        eq(finCategorizationRules.matchValue, match.value),
+      ),
+    )
+    .limit(1)
+
+  if (existingRule) {
+    await db
+      .update(finCategorizationRules)
+      .set({ categoryId, type: categoryType(type), confidence: 95, autoApply: true, updatedAt: new Date() })
+      .where(eq(finCategorizationRules.id, existingRule.id))
+    return
+  }
+
+  await db.insert(finCategorizationRules).values({
+    organizationId: item.organizationId,
+    accountId: item.accountId,
+    categoryId,
+    type: categoryType(type),
+    matchKind: match.kind,
+    matchValue: match.value,
+    confidence: 95,
+    autoApply: true,
+  })
 }
 
 function findMatchingRule(
@@ -496,6 +626,43 @@ function findMatchingRule(
   })
 }
 
+function buildRuleMatch(input: { description: string; merchantName?: string | null }) {
+  const merchant = input.merchantName?.trim()
+  if (merchant && merchant.length >= 3) return { kind: 'merchant', value: normalizeRuleValue(merchant) }
+  const description = input.description.trim()
+  if (description.length < 3) return null
+  return { kind: 'contains', value: normalizeRuleValue(description) }
+}
+
+function normalizeRuleValue(value: string) {
+  return value.toLowerCase().replace(/\s+/g, ' ').trim().slice(0, 80)
+}
+
+function categoryLookupKeys(value: string) {
+  const normalized = normalizeCategoryLookupName(value)
+  const keys = new Set<string>([normalized])
+  if (normalized.endsWith('iones') && normalized.length > 6) {
+    keys.add(`${normalized.slice(0, -5)}ion`)
+  }
+  if (normalized.endsWith('es') && normalized.length > 5) {
+    keys.add(normalized.slice(0, -2))
+  }
+  if (normalized.endsWith('s') && normalized.length > 4) {
+    keys.add(normalized.slice(0, -1))
+  }
+  return Array.from(keys).filter(Boolean)
+}
+
+function normalizeCategoryLookupName(value: string) {
+  return value
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
 function inferType(amountMinor: number) {
   return amountMinor >= 0 ? 'income' : 'expense'
 }
@@ -519,6 +686,12 @@ function normalizeText(value: string) {
 
 function sha256(value: string | Buffer) {
   return createHash('sha256').update(value).digest('hex')
+}
+
+function formatDateForFingerprint(value: string | Date | number) {
+  if (typeof value === 'string') return value.slice(0, 10)
+  if (value instanceof Date) return value.toISOString().slice(0, 10)
+  return new Date(value).toISOString().slice(0, 10)
 }
 
 function normalizeSourceDate(value: unknown) {

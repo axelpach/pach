@@ -2,7 +2,7 @@ import { Router } from 'express'
 import { asc, eq } from 'drizzle-orm'
 import { finCategories, finImports } from '../../../db/schema.js'
 import { getDb } from '../db.js'
-import { importFinanceMovements } from '../services/finance-import.js'
+import { applyFinanceImport, importFinanceMovements } from '../services/finance-import.js'
 
 const router = Router()
 
@@ -101,6 +101,38 @@ router.post('/imports', async (req, res) => {
     res.status(500).json({
       error: 'IMPORT_FAILED',
       message: error instanceof Error ? error.message : 'Import failed.',
+    })
+  }
+})
+
+router.post('/imports/:id/apply', async (req, res) => {
+  try {
+    const importId = req.params.id
+    const db = getDb()
+    const [entry] = await db.select().from(finImports).where(eq(finImports.id, importId)).limit(1)
+
+    if (!entry) {
+      res.status(404).json({ error: 'NOT_FOUND', message: 'Import not found.' })
+      return
+    }
+
+    if (!req.user?.organizationIds.includes(entry.organizationId)) {
+      res.status(403).json({ error: 'NOT_AUTHORIZED', message: 'Not authorized for this organization.' })
+      return
+    }
+
+    const result = await applyFinanceImport(importId)
+    if ('error' in result) {
+      const status = result.error === 'NOT_FOUND' ? 404 : 500
+      res.status(status).json(result)
+      return
+    }
+
+    res.json(result)
+  } catch (error) {
+    res.status(500).json({
+      error: 'APPLY_FAILED',
+      message: error instanceof Error ? error.message : 'Could not apply import.',
     })
   }
 })
