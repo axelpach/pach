@@ -948,6 +948,15 @@ export default function Finance() {
     })
   }
 
+  async function updateMovementCurrency(movementId: string, currencyCode: string) {
+    if (!CURRENCIES.includes(currencyCode)) return
+    await z.mutate.fin_movements.update({
+      id: movementId,
+      currencyCode,
+      reportingCurrencyCode: currencyCode,
+    })
+  }
+
   async function updateMovementStatus(movementId: string, status: string) {
     await z.mutate.fin_movements.update({ id: movementId, status, reviewReason: reviewReasonForStatus(status) })
     const movement = scopedMovements.find((entry) => entry.id === movementId)
@@ -1551,8 +1560,19 @@ export default function Finance() {
                         </div>
                       ) : null}
                     </div>
-                    <div className={`shrink-0 whitespace-nowrap text-right text-sm ${movement.amountMinor < 0 ? 'text-fail' : 'text-ok'}`}>
-                      {formatMoney(movement.amountMinor, movement.currencyCode)}
+                    <div className="shrink-0 text-right">
+                      <div className={`whitespace-nowrap text-sm ${movement.amountMinor < 0 ? 'text-fail' : 'text-ok'}`}>
+                        {formatMoney(movement.amountMinor, movement.currencyCode)}
+                      </div>
+                      <PachSelect
+                        value={movement.currencyCode}
+                        onChange={(next) => void updateMovementCurrency(movement.id, next)}
+                        options={currencyOptions}
+                        display={movement.currencyCode}
+                        align="right"
+                        popupWidth="120px"
+                        triggerClassName="ml-auto mt-1 flex h-6 w-16 items-center justify-end border border-transparent bg-transparent px-1 text-right font-mono text-[10px] uppercase tracking-label text-fg-4 outline-none transition hover:border-[rgba(0,255,140,0.18)] hover:bg-[rgba(0,255,136,0.04)] hover:text-fg-1 focus-visible:border-accent"
+                      />
                     </div>
                   </div>
 
@@ -1712,8 +1732,19 @@ export default function Finance() {
                         />
                         {category ? null : <span className="text-[10px] text-amber">needs category</span>}
                       </td>
-                      <td className={`whitespace-nowrap px-3 py-2 text-right ${movement.amountMinor < 0 ? 'text-fail' : 'text-ok'}`}>
-                        {formatMoney(movement.amountMinor, movement.currencyCode)}
+                      <td className="whitespace-nowrap px-3 py-2 text-right">
+                        <div className={movement.amountMinor < 0 ? 'text-fail' : 'text-ok'}>
+                          {formatMoney(movement.amountMinor, movement.currencyCode)}
+                        </div>
+                        <PachSelect
+                          value={movement.currencyCode}
+                          onChange={(next) => void updateMovementCurrency(movement.id, next)}
+                          options={currencyOptions}
+                          display={movement.currencyCode}
+                          align="right"
+                          popupWidth="120px"
+                          triggerClassName="ml-auto mt-0.5 flex h-5 w-14 items-center justify-end border border-transparent bg-transparent px-1 text-right font-mono text-[9px] uppercase tracking-label text-fg-4 outline-none transition hover:border-[rgba(0,255,140,0.18)] hover:bg-[rgba(0,255,136,0.04)] hover:text-fg-1 focus-visible:border-accent"
+                        />
                       </td>
                       <td className="px-3 py-2 text-right">
                         <div className="flex items-center justify-end gap-1">

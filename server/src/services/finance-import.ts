@@ -320,11 +320,20 @@ export async function applyFinanceImport(importId: string) {
     .select()
     .from(finImportItems)
     .where(and(eq(finImportItems.importId, importId), inArray(finImportItems.status, ['parsed', 'needs_review'])))
+  const accountIds = Array.from(new Set(items.map((item) => item.accountId)))
+  const itemAccounts = accountIds.length > 0
+    ? await db
+      .select({ id: finAccounts.id, currencyCode: finAccounts.currencyCode })
+      .from(finAccounts)
+      .where(inArray(finAccounts.id, accountIds))
+    : []
+  const accountCurrencyById = new Map(itemAccounts.map((account) => [account.id, account.currencyCode]))
 
   let created = 0
   let skipped = 0
 
   for (const item of items) {
+    const movementCurrencyCode = accountCurrencyById.get(item.accountId) ?? item.currencyCode
     const transactionTime = normalizeTransactionTime(item.transactionTime) ?? '00:00:00'
     const rawExactDate = typeof item.rawData?.transactionDateExact === 'string' ? item.rawData.transactionDateExact : null
     const exactDate = rawExactDate?.includes('T')
@@ -380,9 +389,9 @@ export async function applyFinanceImport(importId: string) {
       description: item.description,
       merchantName: item.merchantName,
       amountMinor: item.amountMinor,
-      currencyCode: item.currencyCode,
+      currencyCode: movementCurrencyCode,
       reportingAmountMinor: item.amountMinor,
-      reportingCurrencyCode: item.currencyCode,
+      reportingCurrencyCode: movementCurrencyCode,
       type: movementType,
       status: movementStatus,
       reviewReason: movementStatus === 'pending_review' ? 'uncategorized' : null,
@@ -487,7 +496,7 @@ async function parseWithHaiku(input: {
       max_tokens: 8192,
       temperature: 0,
       system:
-        `You extract bank and credit card movements for a finance ledger. Use the provided tool to return structured data. Amounts must be signed: income/deposits positive, expenses/card purchases negative, transfers may be positive or negative as shown by the source account. If a movement date does not show a year, use ${new Date().getFullYear()} as the year. If a movement has a visible transaction time, return it as transactionTime in HH:mm:ss; if not, omit transactionTime. Never use the phone status bar time as a transaction time.`,
+        `You extract bank and credit card movements for a finance ledger. Use the provided tool to return structured data. Amounts must be signed: income/deposits positive, expenses/card purchases negative, transfers may be positive or negative as shown by the source account. The account currency is ${input.accountCurrencyCode}; use that currency for movements unless the document explicitly shows a different transaction currency. If a movement date does not show a year, use ${new Date().getFullYear()} as the year. If a movement has a visible transaction time, return it as transactionTime in HH:mm:ss; if not, omit transactionTime. Never use the phone status bar time as a transaction time.`,
       tools: [FINANCE_STATEMENT_TOOL],
       tool_choice: { type: 'tool', name: FINANCE_STATEMENT_TOOL_NAME },
       messages: [
@@ -527,7 +536,7 @@ function buildAnthropicContent(input: {
 
 Use the ${FINANCE_STATEMENT_TOOL_NAME} tool with every movement you can read.
 
-Do not invent movements. Preserve transaction dates. If a visible movement date does not include a year, return it using ${currentYear} as the year. If a movement itself includes a visible time, return transactionTime as HH:mm:ss. If no movement time is visible, omit transactionTime. Do not use phone status bar times or screenshot capture times as transaction times. If the document has both charges and payments, sign each movement from this account's perspective.${categoryInstructions}`
+Do not invent movements. Preserve transaction dates. The account currency is ${input.accountCurrencyCode}; use that currency for movements unless the source explicitly shows a different transaction currency. If a visible movement date does not include a year, return it using ${currentYear} as the year. If a movement itself includes a visible time, return transactionTime as HH:mm:ss. If no movement time is visible, omit transactionTime. Do not use phone status bar times or screenshot capture times as transaction times. If the document has both charges and payments, sign each movement from this account's perspective.${categoryInstructions}`
 
   const base = [{ type: 'text', text: prompt }]
   if (input.fileType.startsWith('image/')) {
@@ -586,7 +595,8 @@ function normalizeParsedMovement(tx: ParsedMovement, fallbackCurrency: string) {
   if (!transactionDate || !tx.description || typeof tx.amount !== 'number') return null
   const transactionTime = normalizeTransactionTime(tx.transactionTime) ?? transactionDate.time
   const transactionDateExact = formatDateTimeForFingerprint(transactionDate.date, transactionTime)
-  const currencyCode = (tx.currencyCode || fallbackCurrency).trim().toUpperCase()
+  const parsedCurrencyCode = tx.currencyCode?.trim().toUpperCase() || null
+  const currencyCode = fallbackCurrency.trim().toUpperCase()
   return {
     transactionDate: transactionDate.date,
     transactionDateExact,
@@ -603,6 +613,7 @@ function normalizeParsedMovement(tx: ParsedMovement, fallbackCurrency: string) {
       ...(tx as unknown as Record<string, unknown>),
       transactionDateExact,
       transactionTime,
+      parsedCurrencyCode,
       postedDateExact: postedDate?.exact ?? null,
     },
   }
