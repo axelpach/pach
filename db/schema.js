@@ -215,6 +215,7 @@ export const finImportItems = pgTable('fin_import_items', {
     /** parsed | duplicate | needs_review | applied | ignored | failed */
     status: text('status').notNull().default('parsed'),
     transactionDate: date('transaction_date').notNull(),
+    transactionTime: text('transaction_time').notNull().default('00:00:00'),
     postedDate: date('posted_date'),
     description: text('description').notNull(),
     merchantName: text('merchant_name'),
@@ -257,6 +258,7 @@ export const finMovements = pgTable('fin_movements', {
     importId: uuid('import_id').references(() => finImports.id),
     sourceItemId: uuid('source_item_id').references(() => finImportItems.id),
     transactionDate: date('transaction_date').notNull(),
+    transactionTime: text('transaction_time').notNull().default('00:00:00'),
     postedDate: date('posted_date'),
     description: text('description').notNull(),
     merchantName: text('merchant_name'),

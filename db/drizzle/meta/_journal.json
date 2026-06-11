@@ -148,6 +148,13 @@
       "when": 1780800200000,
       "tag": "0020_fin_import_batches",
       "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "7",
+      "when": 1780800300000,
+      "tag": "0021_fin_transaction_time",
+      "breakpoints": true
     }
   ]
 }

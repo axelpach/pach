@@ -323,12 +323,13 @@ export function createServerMutators(authData?: JWTPayload) {
     },
 
     fin_movements: {
-      async create(tx: Tx, args: { id: string; organizationId: string; accountId: string; categoryId?: string | null; transferId?: string | null; transactionDate: number; postedDate?: number | null; description: string; merchantName?: string | null; counterparty?: string | null; amountMinor: number; currencyCode: string; reportingAmountMinor?: number | null; reportingCurrencyCode?: string | null; fxRate?: string | null; fxRateSource?: string | null; type?: string; status?: string; reviewReason?: string | null; fingerprint?: string; rawData?: Record<string, unknown> }) {
+      async create(tx: Tx, args: { id: string; organizationId: string; accountId: string; categoryId?: string | null; transferId?: string | null; transactionDate: number; transactionTime?: string; postedDate?: number | null; description: string; merchantName?: string | null; counterparty?: string | null; amountMinor: number; currencyCode: string; reportingAmountMinor?: number | null; reportingCurrencyCode?: string | null; fxRate?: string | null; fxRateSource?: string | null; type?: string; status?: string; reviewReason?: string | null; fingerprint?: string; rawData?: Record<string, unknown> }) {
         requireOrganizationAccess(args.organizationId)
         const now = Date.now()
         await tx.mutate.fin_movements.insert({
           transferId: null,
           categoryId: null,
+          transactionTime: '00:00:00',
           postedDate: null,
           merchantName: null,
           counterparty: null,
@@ -346,7 +347,7 @@ export function createServerMutators(authData?: JWTPayload) {
           updatedAt: now,
         })
       },
-      async update(tx: Tx, args: { id: string; accountId?: string; categoryId?: string | null; transferId?: string | null; transactionDate?: number; postedDate?: number | null; description?: string; merchantName?: string | null; counterparty?: string | null; amountMinor?: number; currencyCode?: string; reportingAmountMinor?: number | null; reportingCurrencyCode?: string | null; fxRate?: string | null; fxRateSource?: string | null; type?: string; status?: string; reviewReason?: string | null; fingerprint?: string }) {
+      async update(tx: Tx, args: { id: string; accountId?: string; categoryId?: string | null; transferId?: string | null; transactionDate?: number; transactionTime?: string; postedDate?: number | null; description?: string; merchantName?: string | null; counterparty?: string | null; amountMinor?: number; currencyCode?: string; reportingAmountMinor?: number | null; reportingCurrencyCode?: string | null; fxRate?: string | null; fxRateSource?: string | null; type?: string; status?: string; reviewReason?: string | null; fingerprint?: string }) {
         await requireExistingOrganizationAccess(tx, 'fin_movements', args.id)
         const { id, ...updates } = args
         await tx.mutate.fin_movements.update({ id, ...updates, updatedAt: Date.now() })
@@ -364,7 +365,7 @@ export function createServerMutators(authData?: JWTPayload) {
     },
 
     fin_import_items: {
-      async update(tx: Tx, args: { id: string; accountId?: string; status?: string; description?: string; merchantName?: string | null; amountMinor?: number; currencyCode?: string; suggestedType?: string | null; suggestedCategoryId?: string | null; suggestedConfidence?: number | null; errorMessage?: string | null }) {
+      async update(tx: Tx, args: { id: string; accountId?: string; status?: string; transactionTime?: string; description?: string; merchantName?: string | null; amountMinor?: number; currencyCode?: string; suggestedType?: string | null; suggestedCategoryId?: string | null; suggestedConfidence?: number | null; duplicateMovementId?: string | null; rawData?: Record<string, unknown>; errorMessage?: string | null }) {
         await requireExistingOrganizationAccess(tx, 'fin_import_items', args.id)
         const { id, ...updates } = args
         await tx.mutate.fin_import_items.update({ id, ...updates, updatedAt: Date.now() })

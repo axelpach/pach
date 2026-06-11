@@ -352,6 +352,7 @@ export default function Finance() {
     { value: 'parsed', label: 'ready' },
     { value: 'needs_review', label: 'needs review' },
     { value: 'ignored', label: 'ignored' },
+    { value: 'duplicate', label: 'duplicate' },
   ]
   const monthFilterOptions = uniqueBy(
     scopedMovements.map((movement) => ({
@@ -644,6 +645,7 @@ export default function Finance() {
       accountId: account.id,
       categoryId: movementDraft.categoryId === UNCATEGORIZED_VALUE ? undefined : movementDraft.categoryId,
       transactionDate: dateInputToMs(movementDraft.transactionDate),
+      transactionTime: '00:00:00',
       postedDate: undefined,
       description: movementDraft.description.trim(),
       merchantName: undefined,
@@ -818,20 +820,27 @@ export default function Finance() {
   async function updateImportItemAccount(item: FinanceImportItem, accountId: string) {
     const account = scopedAccounts.find((entry) => entry.id === accountId)
     if (!account) return
+    const duplicateOverride = item.status === 'duplicate'
     await z.mutate.fin_import_items.update({
       id: item.id,
       accountId,
       currencyCode: account.currencyCode,
+      status: duplicateOverride ? (item.suggestedCategoryId ? 'parsed' : 'needs_review') : item.status,
+      duplicateMovementId: duplicateOverride ? null : item.duplicateMovementId,
+      rawData: duplicateOverride ? { ...item.rawData, duplicateOverride: true } : item.rawData,
     })
   }
 
   async function updateImportItemCategory(item: FinanceImportItem, categoryId: string) {
+    const duplicateOverride = item.status === 'duplicate'
     if (categoryId === UNCATEGORIZED_VALUE) {
       await z.mutate.fin_import_items.update({
         id: item.id,
         suggestedCategoryId: null,
         suggestedType: null,
         status: 'needs_review',
+        duplicateMovementId: duplicateOverride ? null : item.duplicateMovementId,
+        rawData: duplicateOverride ? { ...item.rawData, duplicateOverride: true } : item.rawData,
       })
       return
     }
@@ -841,22 +850,31 @@ export default function Finance() {
       suggestedCategoryId: categoryId,
       suggestedType: category?.type ?? item.suggestedType ?? inferType(item.amountMinor),
       status: 'parsed',
+      duplicateMovementId: duplicateOverride ? null : item.duplicateMovementId,
+      rawData: duplicateOverride ? { ...item.rawData, duplicateOverride: true } : item.rawData,
     })
   }
 
   async function updateImportItemStatus(item: FinanceImportItem, status: string) {
-    if (item.status === 'duplicate' || item.status === 'applied') return
+    if (item.status === 'applied') return
+    const nextStatus = status === 'parsed' && !item.suggestedCategoryId ? 'needs_review' : status
+    const duplicateOverride = item.status === 'duplicate' && nextStatus !== 'duplicate'
     await z.mutate.fin_import_items.update({
       id: item.id,
-      status: status === 'parsed' && !item.suggestedCategoryId ? 'needs_review' : status,
+      status: nextStatus,
+      duplicateMovementId: duplicateOverride ? null : item.duplicateMovementId,
+      rawData: duplicateOverride ? { ...item.rawData, duplicateOverride: true } : item.rawData,
+      errorMessage: null,
     })
   }
 
   async function removeImportItem(item: FinanceImportItem) {
-    if (item.status === 'duplicate' || item.status === 'applied') return
+    if (item.status === 'applied') return
     await z.mutate.fin_import_items.update({
       id: item.id,
       status: 'ignored',
+      duplicateMovementId: item.status === 'duplicate' ? null : item.duplicateMovementId,
+      rawData: item.status === 'duplicate' ? { ...item.rawData, duplicateOverride: true } : item.rawData,
       errorMessage: null,
     })
   }
@@ -988,6 +1006,7 @@ export default function Finance() {
         fingerprint: await buildMovementFingerprintForUpdate({
           accountId: movement.accountId,
           transactionDate: value,
+          transactionTime: movement.transactionTime,
           amountMinor: movement.amountMinor,
           description: movement.description,
         }),
@@ -2025,13 +2044,18 @@ export default function Finance() {
                       </thead>
                       <tbody>
                         {visibleReviewItems.map((item) => {
-                          const locked = item.status === 'duplicate' || item.status === 'applied'
+                          const locked = item.status === 'applied'
                           const sourceImport = selectedReviewImportById.get(item.importId)
                           const account = scopedAccounts.find((entry) => entry.id === item.accountId)
                           const category = scopedCategories.find((entry) => entry.id === item.suggestedCategoryId)
                           return (
                             <tr key={item.id} className="border-b border-[rgba(0,255,140,0.08)] text-fg-2">
-                              <td className="whitespace-nowrap px-3 py-2 text-fg-3">{formatZeroDate(item.transactionDate)}</td>
+                              <td className="whitespace-nowrap px-3 py-2 text-fg-3">
+                                <div>{formatZeroDate(item.transactionDate)}</div>
+                                {isMeaningfulTransactionTime(item.transactionTime) ? (
+                                  <div className="mt-0.5 text-[10px] text-fg-4">{formatTransactionTime(item.transactionTime)}</div>
+                                ) : null}
+                              </td>
                               <td className="min-w-0 px-3 py-2">
                                 <div className="truncate text-fg-1" title={item.merchantName || item.description}>
                                   {item.merchantName || item.description}
@@ -2072,12 +2096,12 @@ export default function Finance() {
                               </td>
                               <td className="px-3 py-2 text-right">
                                 {locked ? (
-                                  <span className={`text-[10px] uppercase tracking-label ${item.status === 'duplicate' ? 'text-amber' : 'text-fg-4'}`}>
+                                  <span className="text-[10px] uppercase tracking-label text-fg-4">
                                     {item.status}
                                   </span>
                                 ) : (
                                   <PachSelect
-                                    value={item.status === 'needs_review' ? 'needs_review' : item.status === 'ignored' ? 'ignored' : 'parsed'}
+                                    value={item.status === 'needs_review' ? 'needs_review' : item.status === 'ignored' ? 'ignored' : item.status === 'duplicate' ? 'duplicate' : 'parsed'}
                                     onChange={(next) => void updateImportItemStatus(item, next)}
                                     options={importItemStatusOptions}
                                     display={importItemStatusLabel(item.status)}
@@ -3062,7 +3086,10 @@ function EditableMovementDate({
       className={`${compact ? 'text-[10px] uppercase tracking-label' : 'text-xs'} whitespace-nowrap text-left text-fg-3 transition hover:text-accent`}
       title="click to edit date"
     >
-      {formatZeroDate(movement.transactionDate)}
+      <span>{formatZeroDate(movement.transactionDate)}</span>
+      {isMeaningfulTransactionTime(movement.transactionTime) ? (
+        <span className={`${compact ? 'ml-1' : 'block mt-0.5'} text-[10px] text-fg-4`}>{formatTransactionTime(movement.transactionTime)}</span>
+      ) : null}
     </button>
   )
 }
@@ -3274,7 +3301,8 @@ function sortMovementsByDate(
   const directionValue = direction === 'asc' ? 1 : -1
   return [...movements].sort((a, b) => {
     const compared = (a.transactionDate - b.transactionDate) * directionValue
-    return compared || a.description.localeCompare(b.description)
+    const timeCompared = formatTransactionTime(a.transactionTime).localeCompare(formatTransactionTime(b.transactionTime)) * directionValue
+    return compared || timeCompared || a.description.localeCompare(b.description)
   })
 }
 
@@ -3285,7 +3313,8 @@ function sortImportItemsByDate(
   const directionValue = direction === 'asc' ? 1 : -1
   return [...items].sort((a, b) => {
     const compared = (a.transactionDate - b.transactionDate) * directionValue
-    return compared || a.description.localeCompare(b.description)
+    const timeCompared = formatTransactionTime(a.transactionTime).localeCompare(formatTransactionTime(b.transactionTime)) * directionValue
+    return compared || timeCompared || a.description.localeCompare(b.description)
   })
 }
 
@@ -3338,6 +3367,15 @@ function formatZeroDate(value: number) {
   return new Date(value).toISOString().slice(0, 10)
 }
 
+function isMeaningfulTransactionTime(value: string | null | undefined) {
+  return Boolean(value && value !== '00:00:00')
+}
+
+function formatTransactionTime(value: string | null | undefined) {
+  if (!value) return '00:00:00'
+  return value.slice(0, 8)
+}
+
 function todayInputDate() {
   const date = new Date()
   date.setMinutes(date.getMinutes() - date.getTimezoneOffset())
@@ -3358,10 +3396,11 @@ function isValidDateInput(value: string) {
 async function buildMovementFingerprintForUpdate(input: {
   accountId: string
   transactionDate: string
+  transactionTime?: string | null
   amountMinor: number
   description: string
 }) {
-  return sha256Text(`${input.accountId}|${input.transactionDate}|${input.amountMinor}|${normalizeFingerprintText(input.description)}`)
+  return sha256Text(`${input.accountId}|${input.transactionDate}T${formatTransactionTime(input.transactionTime)}|${input.amountMinor}|${normalizeFingerprintText(input.description)}`)
 }
 
 function normalizeFingerprintText(value: string) {

@@ -31,6 +31,8 @@ export type FinanceImportInput = {
 type ParsedMovement = {
   /** YYYY-MM-DD if only the date is visible; ISO-like datetime if the statement includes time. */
   transactionDate: string
+  /** HH:mm:ss when the movement itself shows a time. Omit when not visible. */
+  transactionTime?: string | null
   postedDate?: string | null
   description: string
   merchantName?: string | null
@@ -73,7 +75,8 @@ const FINANCE_STATEMENT_TOOL = {
         items: {
           type: 'object',
           properties: {
-            transactionDate: { type: 'string', description: 'Transaction date/time. Use YYYY-MM-DD if only the date is visible; use an ISO 8601 datetime if hour/minute is visible.' },
+            transactionDate: { type: 'string', description: 'Transaction date. Use YYYY-MM-DD. If only month/day is visible, use the current year.' },
+            transactionTime: { type: 'string', description: 'Transaction time in HH:mm:ss only if the time is visible for this movement. Omit when not visible. Do not use the phone status bar time.' },
             postedDate: { type: 'string', description: 'Posted date/time. Use YYYY-MM-DD if only the date is visible; use an ISO 8601 datetime if hour/minute is visible. Omit if unknown.' },
             description: { type: 'string', description: 'Useful raw movement description.' },
             merchantName: { type: 'string', description: 'Normalized merchant or counterparty. Omit if unknown.' },
@@ -193,11 +196,20 @@ export async function importFinanceMovements(input: FinanceImportInput) {
         amountMinor: normalized.amountMinor,
         description: normalized.description,
       })
+      const legacyFingerprint = normalized.transactionTime === '00:00:00'
+        ? buildMovementFingerprint({
+          accountId: input.accountId,
+          transactionDate: normalized.transactionDate,
+          amountMinor: normalized.amountMinor,
+          description: normalized.description,
+        })
+        : null
+      const duplicateFingerprints = legacyFingerprint && legacyFingerprint !== fingerprint ? [fingerprint, legacyFingerprint] : [fingerprint]
 
       const [existingMovement] = await db
         .select({ id: finMovements.id })
         .from(finMovements)
-        .where(and(eq(finMovements.accountId, input.accountId), eq(finMovements.fingerprint, fingerprint)))
+        .where(and(eq(finMovements.accountId, input.accountId), inArray(finMovements.fingerprint, duplicateFingerprints)))
         .limit(1)
 
       const rule = findMatchingRule(rules, normalized.description, normalized.merchantName, normalized.amountMinor)
@@ -219,6 +231,7 @@ export async function importFinanceMovements(input: FinanceImportInput) {
           accountId: input.accountId,
           status: itemStatus,
           transactionDate: normalized.transactionDate,
+          transactionTime: normalized.transactionTime,
           postedDate: normalized.postedDate,
           description: normalized.description,
           merchantName: normalized.merchantName,
@@ -312,20 +325,37 @@ export async function applyFinanceImport(importId: string) {
   let skipped = 0
 
   for (const item of items) {
-    const exactDate = typeof item.rawData?.transactionDateExact === 'string'
-      ? item.rawData.transactionDateExact
-      : formatDateForFingerprint(item.transactionDate)
-    const fingerprint = buildMovementFingerprint({
+    const transactionTime = normalizeTransactionTime(item.transactionTime) ?? '00:00:00'
+    const rawExactDate = typeof item.rawData?.transactionDateExact === 'string' ? item.rawData.transactionDateExact : null
+    const exactDate = rawExactDate?.includes('T')
+      ? rawExactDate
+      : formatDateTimeForFingerprint(formatDateForFingerprint(item.transactionDate), transactionTime)
+    const baseFingerprint = buildMovementFingerprint({
       accountId: item.accountId,
       transactionDate: exactDate,
       amountMinor: item.amountMinor,
       description: item.description,
     })
-    const [existingMovement] = await db
-      .select({ id: finMovements.id })
-      .from(finMovements)
-      .where(and(eq(finMovements.accountId, item.accountId), eq(finMovements.fingerprint, fingerprint)))
-      .limit(1)
+    const duplicateOverride = item.rawData?.duplicateOverride === true
+    const legacyFingerprint = transactionTime === '00:00:00'
+      ? buildMovementFingerprint({
+        accountId: item.accountId,
+        transactionDate: formatDateForFingerprint(item.transactionDate),
+        amountMinor: item.amountMinor,
+        description: item.description,
+      })
+      : null
+    const fingerprint = duplicateOverride ? `override:${item.id}:${baseFingerprint}` : baseFingerprint
+    const duplicateFingerprints = legacyFingerprint && legacyFingerprint !== baseFingerprint ? [baseFingerprint, legacyFingerprint] : [baseFingerprint]
+    let existingMovement: { id: string } | undefined
+    if (!duplicateOverride) {
+      const [match] = await db
+        .select({ id: finMovements.id })
+        .from(finMovements)
+        .where(and(eq(finMovements.accountId, item.accountId), inArray(finMovements.fingerprint, duplicateFingerprints)))
+        .limit(1)
+      existingMovement = match
+    }
 
     if (existingMovement) {
       await db
@@ -345,6 +375,7 @@ export async function applyFinanceImport(importId: string) {
       importId: item.importId,
       sourceItemId: item.id,
       transactionDate: item.transactionDate,
+      transactionTime,
       postedDate: item.postedDate,
       description: item.description,
       merchantName: item.merchantName,
@@ -456,7 +487,7 @@ async function parseWithHaiku(input: {
       max_tokens: 8192,
       temperature: 0,
       system:
-        `You extract bank and credit card movements for a finance ledger. Use the provided tool to return structured data. Amounts must be signed: income/deposits positive, expenses/card purchases negative, transfers may be positive or negative as shown by the source account. If a movement date does not show a year, use ${new Date().getFullYear()} as the year.`,
+        `You extract bank and credit card movements for a finance ledger. Use the provided tool to return structured data. Amounts must be signed: income/deposits positive, expenses/card purchases negative, transfers may be positive or negative as shown by the source account. If a movement date does not show a year, use ${new Date().getFullYear()} as the year. If a movement has a visible transaction time, return it as transactionTime in HH:mm:ss; if not, omit transactionTime. Never use the phone status bar time as a transaction time.`,
       tools: [FINANCE_STATEMENT_TOOL],
       tool_choice: { type: 'tool', name: FINANCE_STATEMENT_TOOL_NAME },
       messages: [
@@ -496,7 +527,7 @@ function buildAnthropicContent(input: {
 
 Use the ${FINANCE_STATEMENT_TOOL_NAME} tool with every movement you can read.
 
-Do not invent movements. Preserve transaction dates. If a visible movement date does not include a year, return it using ${currentYear} as the year. If the document has both charges and payments, sign each movement from this account's perspective.${categoryInstructions}`
+Do not invent movements. Preserve transaction dates. If a visible movement date does not include a year, return it using ${currentYear} as the year. If a movement itself includes a visible time, return transactionTime as HH:mm:ss. If no movement time is visible, omit transactionTime. Do not use phone status bar times or screenshot capture times as transaction times. If the document has both charges and payments, sign each movement from this account's perspective.${categoryInstructions}`
 
   const base = [{ type: 'text', text: prompt }]
   if (input.fileType.startsWith('image/')) {
@@ -553,10 +584,13 @@ function normalizeParsedMovement(tx: ParsedMovement, fallbackCurrency: string) {
   const transactionDate = normalizeSourceDate(tx.transactionDate, currentYear)
   const postedDate = tx.postedDate ? normalizeSourceDate(tx.postedDate, currentYear) : null
   if (!transactionDate || !tx.description || typeof tx.amount !== 'number') return null
+  const transactionTime = normalizeTransactionTime(tx.transactionTime) ?? transactionDate.time
+  const transactionDateExact = formatDateTimeForFingerprint(transactionDate.date, transactionTime)
   const currencyCode = (tx.currencyCode || fallbackCurrency).trim().toUpperCase()
   return {
     transactionDate: transactionDate.date,
-    transactionDateExact: transactionDate.exact,
+    transactionDateExact,
+    transactionTime,
     postedDate: postedDate?.date ?? null,
     description: tx.description.trim(),
     merchantName: tx.merchantName?.trim() || null,
@@ -567,7 +601,8 @@ function normalizeParsedMovement(tx: ParsedMovement, fallbackCurrency: string) {
     confidence: typeof tx.confidence === 'number' ? Math.max(0, Math.min(100, Math.round(tx.confidence))) : null,
     rawData: {
       ...(tx as unknown as Record<string, unknown>),
-      transactionDateExact: transactionDate.exact,
+      transactionDateExact,
+      transactionTime,
       postedDateExact: postedDate?.exact ?? null,
     },
   }
@@ -745,20 +780,49 @@ function formatDateForFingerprint(value: string | Date | number) {
   return new Date(value).toISOString().slice(0, 10)
 }
 
+function formatDateTimeForFingerprint(date: string, time: string) {
+  return `${date.slice(0, 10)}T${normalizeTransactionTime(time) ?? '00:00:00'}`
+}
+
+function normalizeTransactionTime(value: unknown) {
+  if (typeof value !== 'string') return null
+  const trimmed = value.trim()
+  const match = trimmed.match(/^(\d{1,2}):(\d{2})(?::(\d{2}))?\s*(a\.?m\.?|p\.?m\.?|am|pm)?$/i)
+  if (!match) return null
+  let hour = Number(match[1])
+  const minute = Number(match[2])
+  const second = match[3] ? Number(match[3]) : 0
+  const meridiem = match[4]?.toLowerCase().replace(/\./g, '')
+  if (meridiem === 'pm' && hour < 12) hour += 12
+  if (meridiem === 'am' && hour === 12) hour = 0
+  if (hour < 0 || hour > 23 || minute > 59 || second > 59) return null
+  return `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}:${String(second).padStart(2, '0')}`
+}
+
 function normalizeSourceDate(value: unknown, defaultYear = new Date().getFullYear()) {
   if (typeof value !== 'string') return null
   const trimmed = value.trim()
-  const match = trimmed.match(/^(\d{4}-\d{2}-\d{2})(?:[T\s](\d{2}:\d{2})(?::(\d{2}))?(?:\.\d+)?(?:Z|[+-]\d{2}:?\d{2})?)?$/)
+  const { dateText, time } = extractTrailingTime(trimmed)
+  const match = dateText.match(/^(\d{4}-\d{2}-\d{2})(?:[T\s](\d{2}:\d{2})(?::(\d{2}))?(?:\.\d+)?(?:Z|[+-]\d{2}:?\d{2})?)?$/)
   if (match) {
     const [, date, minutes, seconds] = match
-    if (!minutes) return { date, exact: date }
-    return { date, exact: `${date}T${minutes}${seconds ? `:${seconds}` : ''}` }
+    const parsedTime = minutes ? normalizeTransactionTime(`${minutes}:${seconds ?? '00'}`) ?? '00:00:00' : time
+    return { date, time: parsedTime, exact: formatDateTimeForFingerprint(date, parsedTime) }
   }
 
-  const yearlessDate = normalizeYearlessDate(trimmed, defaultYear)
-  if (yearlessDate) return { date: yearlessDate, exact: yearlessDate }
+  const yearlessDate = normalizeYearlessDate(dateText, defaultYear)
+  if (yearlessDate) return { date: yearlessDate, time, exact: formatDateTimeForFingerprint(yearlessDate, time) }
 
   return null
+}
+
+function extractTrailingTime(value: string) {
+  const match = value.match(/\s+(\d{1,2}:\d{2}(?::\d{2})?\s*(?:a\.?m\.?|p\.?m\.?|am|pm)?)$/i)
+  if (!match) return { dateText: value, time: '00:00:00' }
+  return {
+    dateText: value.slice(0, match.index).trim(),
+    time: normalizeTransactionTime(match[1]) ?? '00:00:00',
+  }
 }
 
 function normalizeYearlessDate(value: string, defaultYear: number) {
