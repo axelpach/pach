@@ -199,8 +199,10 @@ export default function Finance() {
   const selectedCategoryFilterIds = activeFilters.categories ?? []
   const selectedMonthFilterIds = activeFilters.months ?? []
   const selectedQuarterFilterIds = activeFilters.quarters ?? []
+  const selectedCurrencyFilterIds = activeFilters.currencies ?? []
   const selectedDashboardMonthFilterIds = dashboardFilters.months ?? []
   const selectedDashboardQuarterFilterIds = dashboardFilters.quarters ?? []
+  const selectedDashboardCurrencyFilterIds = dashboardFilters.currencies ?? []
   const institutionSuggestions = useMemo(
     () => Array.from(new Set(scopedAccounts.map((account) => account.institutionName?.trim()).filter((value): value is string => Boolean(value)))).sort((a, b) => a.localeCompare(b)),
     [scopedAccounts],
@@ -271,6 +273,7 @@ export default function Finance() {
     .filter((movement) => selectedCategoryFilterIds.length === 0 || selectedCategoryFilterIds.includes(movement.categoryId ?? UNCATEGORIZED_VALUE))
     .filter((movement) => selectedMonthFilterIds.length === 0 || selectedMonthFilterIds.includes(monthKey(movement.transactionDate)))
     .filter((movement) => selectedQuarterFilterIds.length === 0 || selectedQuarterFilterIds.includes(quarterKey(movement.transactionDate)))
+    .filter((movement) => selectedCurrencyFilterIds.length === 0 || selectedCurrencyFilterIds.includes(movement.currencyCode))
     .filter((movement) => {
       if (!search.trim()) return true
       const needle = search.trim().toLowerCase()
@@ -281,6 +284,7 @@ export default function Finance() {
   const dashboardPeriodMovements = scopedMovements
     .filter((movement) => selectedDashboardMonthFilterIds.length === 0 || selectedDashboardMonthFilterIds.includes(monthKey(movement.transactionDate)))
     .filter((movement) => selectedDashboardQuarterFilterIds.length === 0 || selectedDashboardQuarterFilterIds.includes(quarterKey(movement.transactionDate)))
+    .filter((movement) => selectedDashboardCurrencyFilterIds.length === 0 || selectedDashboardCurrencyFilterIds.includes(movement.currencyCode))
   const dashboardAccountMovements = dashboardPeriodMovements.filter((movement) => movement.status !== 'ignored')
   const dashboardNonTransferMovements = dashboardAccountMovements.filter((movement) => !isTransferLikeMovement(movement, scopedCategories))
   const dashboardBalanceTotals = summarizeMovements(dashboardNonTransferMovements)
@@ -368,6 +372,20 @@ export default function Finance() {
     })),
     (entry) => entry.value,
   )
+  const currencyFilterOptions = uniqueBy(
+    [
+      ...scopedMovements.map((movement) => movement.currencyCode),
+      ...scopedAccounts.map((account) => account.currencyCode),
+    ]
+      .filter(Boolean)
+      .sort((a, b) => currencySortValue(a).localeCompare(currencySortValue(b)))
+      .map((currencyCode) => ({
+        value: currencyCode,
+        label: currencyCode,
+        icon: <span className="font-mono text-[10px] text-fg-3">$</span>,
+      })),
+    (entry) => entry.value,
+  )
   const filterConfigs: FilterFieldConfig[] = [
     {
       field: 'accounts',
@@ -402,6 +420,12 @@ export default function Finance() {
       ],
     },
     {
+      field: 'currencies',
+      label: 'currencies',
+      icon: CircleDollarSign,
+      options: currencyFilterOptions,
+    },
+    {
       field: 'months',
       label: 'months',
       icon: CalendarDays,
@@ -415,6 +439,12 @@ export default function Finance() {
     },
   ]
   const dashboardFilterConfigs: FilterFieldConfig[] = [
+    {
+      field: 'currencies',
+      label: 'currencies',
+      icon: CircleDollarSign,
+      options: currencyFilterOptions,
+    },
     {
       field: 'months',
       label: 'months',
