@@ -52,10 +52,10 @@ type CategoryBreakdownGroup = {
 type MonthlyBalanceEntry = {
   id: string
   label: string
+  startingAmounts: MoneyAmount[]
   positiveAmounts: MoneyAmount[]
   negativeAmounts: MoneyAmount[]
-  netAmounts: MoneyAmount[]
-  movementCount: number
+  endingAmounts: MoneyAmount[]
 }
 
 function tabFromPath(pathname: string): Tab {
@@ -272,9 +272,7 @@ export default function Finance() {
   const dashboardAccountMovements = dashboardPeriodMovements.filter((movement) => movement.status !== 'ignored')
   const dashboardNonTransferMovements = dashboardAccountMovements.filter((movement) => !isTransferLikeMovement(movement, scopedCategories))
   const dashboardBalanceTotals = summarizeMovements(dashboardNonTransferMovements)
-  const dashboardTotals = summarizeMovements(dashboardAccountMovements)
-  const dashboardPendingCount = dashboardPeriodMovements.filter((movement) => movement.status === 'pending_review').length
-  const monthlyBalance = buildMonthlyBalance(dashboardAccountMovements)
+  const monthlyBalance = buildMonthlyBalance(dashboardNonTransferMovements)
   const categoryBreakdown = buildCategoryBreakdown(dashboardNonTransferMovements, scopedCategories)
   const accountStats = useMemo(
     () => new Map(scopedAccounts.map((account) => [account.id, buildAccountStats(account, scopedMovements)])),
@@ -1196,19 +1194,12 @@ export default function Finance() {
             </div>
           </section>
 
-          <div className="mt-3 grid gap-3 border border-[rgba(0,255,140,0.12)] bg-pit-2 px-3 py-2 font-mono text-xs md:grid-cols-4">
-            <FinanceMetric label="income" value={<MoneyStack amounts={dashboardTotals.positiveAmounts} tone="ok" />} tone="ok" />
-            <FinanceMetric label="outflow" value={<MoneyStack amounts={dashboardTotals.negativeAmounts} tone="fail" />} tone="fail" />
-            <FinanceMetric label="net" value={<MoneyStack amounts={dashboardTotals.netAmounts} tone="byAmount" />} />
-            <FinanceMetric label="pending" value={`${dashboardPendingCount} movements`} tone={dashboardPendingCount ? 'fail' : 'default'} />
-          </div>
-
           <div className="mt-4 grid gap-4">
             <section className="border border-[rgba(0,255,140,0.12)] bg-pit-2">
               <div className="flex items-center justify-between border-b border-[rgba(0,255,140,0.12)] px-4 py-3 font-mono">
                 <div>
-                  <div className="text-[10px] uppercase tracking-label text-fg-4">movements per month</div>
-                  <div className="mt-1 text-sm lowercase text-fg-1">income, outflow, and net</div>
+                  <div className="text-[10px] uppercase tracking-label text-fg-4">balance by month</div>
+                  <div className="mt-1 text-sm lowercase text-fg-1">starting and ending balance · transfers excluded</div>
                 </div>
                 <CalendarDays className="h-4 w-4 text-accent" />
               </div>
@@ -1219,13 +1210,23 @@ export default function Finance() {
                       <div className="mb-2 flex items-start justify-between gap-3">
                         <div className="min-w-0">
                           <div className="truncate text-fg-1">{entry.label}</div>
-                          <div className="mt-0.5 text-[10px] uppercase tracking-label text-fg-4">{entry.movementCount} movements</div>
+                          <div className="mt-0.5 text-[10px] uppercase tracking-label text-fg-4">month balance</div>
                         </div>
                         <div className="shrink-0 text-right">
-                          <MoneyStack amounts={entry.netAmounts} tone="byAmount" align="right" />
+                          <MoneyStack amounts={entry.endingAmounts} tone="byAmount" align="right" />
                         </div>
                       </div>
-                      <div className="grid grid-cols-3 gap-2">
+                      <div className="grid grid-cols-2 gap-2">
+                        <FinanceMetric
+                          label="start"
+                          value={<MoneyStack amounts={entry.startingAmounts} tone="byAmount" />}
+                        />
+                        <FinanceMetric
+                          label="end"
+                          value={<MoneyStack amounts={entry.endingAmounts} tone="byAmount" />}
+                        />
+                      </div>
+                      <div className="mt-2 grid grid-cols-2 gap-2">
                         <FinanceMetric
                           label="income"
                           value={<MoneyStack amounts={entry.positiveAmounts} tone="ok" />}
@@ -1235,10 +1236,6 @@ export default function Finance() {
                           label="outflow"
                           value={<MoneyStack amounts={entry.negativeAmounts} tone="fail" />}
                           tone="fail"
-                        />
-                        <FinanceMetric
-                          label="net"
-                          value={<MoneyStack amounts={entry.netAmounts} tone="byAmount" />}
                         />
                       </div>
                     </div>
@@ -1255,10 +1252,10 @@ export default function Finance() {
                   <thead className="sticky top-0 bg-pit text-[10px] uppercase tracking-label text-fg-4">
                     <tr>
                       <th className="border-b border-[rgba(0,255,140,0.12)] px-3 py-2 text-left">month</th>
+                      <th className="border-b border-[rgba(0,255,140,0.12)] px-3 py-2 text-right">start</th>
                       <th className="border-b border-[rgba(0,255,140,0.12)] px-3 py-2 text-right">income</th>
                       <th className="border-b border-[rgba(0,255,140,0.12)] px-3 py-2 text-right">outflow</th>
-                      <th className="border-b border-[rgba(0,255,140,0.12)] px-3 py-2 text-right">net</th>
-                      <th className="border-b border-[rgba(0,255,140,0.12)] px-3 py-2 text-right">movements</th>
+                      <th className="border-b border-[rgba(0,255,140,0.12)] px-3 py-2 text-right">end</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -1267,7 +1264,10 @@ export default function Finance() {
                         <tr key={entry.id} className="border-b border-[rgba(0,255,140,0.08)] text-fg-2 hover:bg-[rgba(0,255,136,0.04)]">
                           <td className="px-3 py-2">
                             <div className="text-fg-1">{entry.label}</div>
-                            <div className="mt-0.5 text-[10px] uppercase tracking-label text-fg-4">{entry.movementCount} movements</div>
+                            <div className="mt-0.5 text-[10px] uppercase tracking-label text-fg-4">running balance</div>
+                          </td>
+                          <td className="whitespace-nowrap px-3 py-2 text-right">
+                            <MoneyStack amounts={entry.startingAmounts} tone="byAmount" align="right" />
                           </td>
                           <td className="whitespace-nowrap px-3 py-2 text-right text-ok">
                             <MoneyStack amounts={entry.positiveAmounts} tone="ok" align="right" />
@@ -1276,9 +1276,8 @@ export default function Finance() {
                             <MoneyStack amounts={entry.negativeAmounts} tone="fail" align="right" />
                           </td>
                           <td className="whitespace-nowrap px-3 py-2 text-right">
-                            <MoneyStack amounts={entry.netAmounts} tone="byAmount" align="right" />
+                            <MoneyStack amounts={entry.endingAmounts} tone="byAmount" align="right" />
                           </td>
-                          <td className="whitespace-nowrap px-3 py-2 text-right text-fg-3">{entry.movementCount}</td>
                         </tr>
                       )
                     })}
@@ -3160,33 +3159,50 @@ function currencySortValue(currencyCode: string) {
 
 function buildMonthlyBalance(movements: Schema['tables']['fin_movements']['row'][]): MonthlyBalanceEntry[] {
   const months = new Map<string, {
-    movementCount: number
     totals: Map<string, { positiveMinor: number; negativeMinor: number; netMinor: number }>
   }>()
 
   for (const movement of movements) {
     const id = monthKey(movement.transactionDate)
     const current = months.get(id) ?? {
-      movementCount: 0,
       totals: new Map<string, { positiveMinor: number; negativeMinor: number; netMinor: number }>(),
     }
-    current.movementCount += 1
     addMovementToCurrencyTotals(current.totals, movement)
     months.set(id, current)
   }
 
-  return Array.from(months.entries())
-    .sort(([a], [b]) => b.localeCompare(a))
-    .map(([id, value]) => {
-      return {
-        id,
-        label: formatMonthLabel(Date.UTC(Number(id.slice(0, 4)), Number(id.slice(5, 7)) - 1, 1)),
-        positiveAmounts: moneyAmountsFromMap(value.totals, 'positiveMinor'),
-        negativeAmounts: moneyAmountsFromMap(value.totals, 'negativeMinor'),
-        netAmounts: moneyAmountsFromMap(value.totals, 'netMinor'),
-        movementCount: value.movementCount,
-      }
-    })
+  const runningTotals = new Map<string, number>()
+  const ascendingEntries = Array.from(months.entries()).sort(([a], [b]) => a.localeCompare(b))
+  const entries = ascendingEntries.map(([id, value]) => {
+    const monthCurrencies = Array.from(value.totals.keys())
+    const startingAmounts = moneyAmountsFromSimpleMap(withZeroCurrencies(runningTotals, monthCurrencies))
+    for (const [currencyCode, totals] of value.totals.entries()) {
+      runningTotals.set(currencyCode, (runningTotals.get(currencyCode) ?? 0) + totals.netMinor)
+    }
+    return {
+      id,
+      label: formatMonthLabel(Date.UTC(Number(id.slice(0, 4)), Number(id.slice(5, 7)) - 1, 1)),
+      startingAmounts,
+      positiveAmounts: moneyAmountsFromMap(value.totals, 'positiveMinor'),
+      negativeAmounts: moneyAmountsFromMap(value.totals, 'negativeMinor'),
+      endingAmounts: moneyAmountsFromSimpleMap(runningTotals),
+    }
+  })
+  return entries.reverse()
+}
+
+function moneyAmountsFromSimpleMap(totals: Map<string, number>): MoneyAmount[] {
+  return Array.from(totals.entries())
+    .map(([currencyCode, amountMinor]) => ({ currencyCode, amountMinor }))
+    .sort((a, b) => currencySortValue(a.currencyCode).localeCompare(currencySortValue(b.currencyCode)))
+}
+
+function withZeroCurrencies(totals: Map<string, number>, currencies: string[]) {
+  const next = new Map(totals)
+  for (const currencyCode of currencies) {
+    if (!next.has(currencyCode)) next.set(currencyCode, 0)
+  }
+  return next
 }
 
 function buildCategoryBreakdown(
