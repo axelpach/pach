@@ -1854,14 +1854,14 @@ export default function Finance() {
 
       {importModalOpen && (
         <div
-          className="fixed inset-0 z-50 flex items-start justify-center bg-[rgba(0,0,0,0.7)] px-4 pt-[8vh] backdrop-blur-sm"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-[rgba(0,0,0,0.7)] px-4 py-4 backdrop-blur-sm sm:py-6"
           onClick={() => setImportModalOpen(false)}
         >
           <div
-            className="w-full max-w-5xl border border-[rgba(0,255,140,0.2)] bg-pit-2 shadow-[0_30px_80px_rgba(0,0,0,0.5)]"
+            className="flex max-h-[calc(100vh-2rem)] w-full max-w-5xl flex-col overflow-hidden border border-[rgba(0,255,140,0.2)] bg-pit-2 shadow-[0_30px_80px_rgba(0,0,0,0.5)] sm:max-h-[calc(100vh-3rem)]"
             onClick={(event) => event.stopPropagation()}
           >
-            <div className="flex items-center justify-between border-b border-[rgba(0,255,140,0.12)] px-5 py-3">
+            <div className="flex shrink-0 items-center justify-between border-b border-[rgba(0,255,140,0.12)] px-5 py-3">
               <div className="flex min-w-0 items-center gap-2 font-mono text-xs">
                 <span className="inline-flex items-center gap-1.5 border border-[rgba(0,255,140,0.25)] bg-[rgba(0,255,136,0.05)] px-2 py-0.5 font-mono text-[10px] uppercase tracking-label text-accent">
                   import
@@ -1895,7 +1895,7 @@ export default function Finance() {
               </button>
             </div>
 
-            <div className="grid gap-4 p-5">
+            <div className="grid min-h-0 flex-1 gap-4 overflow-auto p-5">
               {importModalStep === 'upload' ? (
                 <>
                   <button
@@ -1948,7 +1948,7 @@ export default function Finance() {
                         ) : null}
                       </div>
 
-                      <div className="border-y border-[rgba(0,255,140,0.12)] font-mono text-xs">
+                      <div className="max-h-[34vh] overflow-auto border-y border-[rgba(0,255,140,0.12)] font-mono text-xs">
                         {importFiles.length > 0 ? importFiles.map((file) => (
                           <div key={`${file.name}:${file.size}:${file.lastModified}`} className="grid grid-cols-[20px_1fr_150px_32px] items-center gap-3 border-b border-[rgba(0,255,140,0.08)] py-2.5 last:border-b-0">
                             <FileText className="h-3.5 w-3.5 text-fg-4" />
@@ -2121,7 +2121,7 @@ export default function Finance() {
               ) : null}
             </div>
 
-            <div className="flex items-center justify-between border-t border-[rgba(0,255,140,0.12)] px-5 py-3">
+            <div className="flex shrink-0 items-center justify-between border-t border-[rgba(0,255,140,0.12)] px-5 py-3">
               <div className="flex items-center gap-3">
                 <button
                   type="button"
