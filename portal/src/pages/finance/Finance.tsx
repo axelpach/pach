@@ -1,5 +1,5 @@
 import { useQuery, useZero } from '@rocicorp/zero/react'
-import { AlertTriangle, ArrowRightLeft, Building2, CalendarDays, ChartPie, CheckCircle, CircleDollarSign, CreditCard, FileText, FileUp, Landmark, Layers2, Loader2, Plus, Search, Tag, Trash2, UploadCloud, UserRound, WalletCards, X } from 'lucide-react'
+import { AlertTriangle, ArrowDown, ArrowRightLeft, ArrowUp, Building2, CalendarDays, ChartPie, CheckCircle, CircleDollarSign, CreditCard, FileText, FileUp, Landmark, Layers2, Loader2, Plus, Search, Tag, Trash2, UploadCloud, UserRound, WalletCards, X } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState, type MouseEvent, type ReactNode } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { config } from '../../config'
@@ -16,6 +16,7 @@ type FinanceAccount = Schema['tables']['fin_accounts']['row']
 type FinanceCategory = Schema['tables']['fin_categories']['row']
 type FinanceImport = Schema['tables']['fin_imports']['row']
 type FinanceImportItem = Schema['tables']['fin_import_items']['row']
+type MovementSortDirection = 'asc' | 'desc'
 type AccountDraft = {
   name: string
   institutionName: string
@@ -56,6 +57,13 @@ type MonthlyBalanceEntry = {
   positiveAmounts: MoneyAmount[]
   negativeAmounts: MoneyAmount[]
   endingAmounts: MoneyAmount[]
+}
+type ImportReviewGroup = {
+  id: string
+  imports: FinanceImport[]
+  items: FinanceImportItem[]
+  counts: ReturnType<typeof summarizeImportReview>
+  fileLabel: string
 }
 
 function tabFromPath(pathname: string): Tab {
@@ -134,7 +142,10 @@ export default function Finance() {
   const [activeFilters, setActiveFilters] = useState<ActiveFilters>({})
   const [dashboardFilters, setDashboardFilters] = useState<ActiveFilters>({})
   const [search, setSearch] = useState('')
+  const [movementSortDirection, setMovementSortDirection] = useState<MovementSortDirection>('desc')
+  const [reviewSortDirection, setReviewSortDirection] = useState<MovementSortDirection>('desc')
   const [editingMovementLabel, setEditingMovementLabel] = useState<{ id: string; value: string } | null>(null)
+  const [editingMovementDate, setEditingMovementDate] = useState<{ id: string; value: string } | null>(null)
   const [accountDraft, setAccountDraft] = useState<AccountDraft>(EMPTY_ACCOUNT_DRAFT)
   const [accountModalOpen, setAccountModalOpen] = useState(false)
   const [editingAccountId, setEditingAccountId] = useState<string | null>(null)
@@ -160,7 +171,7 @@ export default function Finance() {
   const [importFiles, setImportFiles] = useState<File[]>([])
   const [importAccountId, setImportAccountId] = useState('')
   const [importMessage, setImportMessage] = useState<string | null>(null)
-  const [reviewImportId, setReviewImportId] = useState<string | null>(null)
+  const [reviewBatchId, setReviewBatchId] = useState<string | null>(null)
   const [apiCategories, setApiCategories] = useState<FinanceCategory[]>([])
   const fileInputRef = useRef<HTMLInputElement | null>(null)
   const tab = tabFromPath(location.pathname)
@@ -251,7 +262,7 @@ export default function Finance() {
     })),
   ]
 
-  const visibleMovements = scopedMovements
+  const filteredMovements = scopedMovements
     .filter((movement) => selectedAccountFilterIds.length === 0 || selectedAccountFilterIds.includes(movement.accountId))
     .filter((movement) => {
       if (selectedStatusFilterIds.length > 0) return selectedStatusFilterIds.includes(movement.status)
@@ -265,7 +276,8 @@ export default function Finance() {
       const needle = search.trim().toLowerCase()
       return `${movement.description} ${movement.merchantName ?? ''}`.toLowerCase().includes(needle)
     })
-  const visibleTotals = summarizeMovements(visibleMovements)
+  const visibleMovements = sortMovementsByDate(filteredMovements, movementSortDirection)
+  const visibleTotals = summarizeMovements(filteredMovements)
   const dashboardPeriodMovements = scopedMovements
     .filter((movement) => selectedDashboardMonthFilterIds.length === 0 || selectedDashboardMonthFilterIds.includes(monthKey(movement.transactionDate)))
     .filter((movement) => selectedDashboardQuarterFilterIds.length === 0 || selectedDashboardQuarterFilterIds.includes(quarterKey(movement.transactionDate)))
@@ -280,22 +292,24 @@ export default function Finance() {
   )
   const scopedImports = imports.filter((entry) => entry.organizationId === selectedOrganizationId)
   const pendingImports = scopedImports.filter((entry) => ['ready', 'partially_applied'].includes(entry.status))
-  const selectedReviewImport = reviewImportId
-    ? scopedImports.find((entry) => entry.id === reviewImportId) ?? null
-    : null
-  const reviewItems = selectedReviewImport
-    ? importItems.filter((item) => item.importId === selectedReviewImport.id)
+  const pendingImportGroups = buildImportReviewGroups(pendingImports, importItems)
+  const selectedReviewImports = reviewBatchId
+    ? scopedImports.filter((entry) => importBatchKey(entry) === reviewBatchId)
     : []
+  const selectedReviewGroup = reviewBatchId
+    ? buildImportReviewGroup(reviewBatchId, selectedReviewImports, importItems)
+    : null
+  const selectedReviewImportById = new Map(selectedReviewImports.map((entry) => [entry.id, entry]))
+  const reviewItems = selectedReviewGroup?.items ?? []
   const reviewCounts = summarizeImportReview(reviewItems)
-  const visibleReviewItems = reviewItems.filter((item) => item.status !== 'ignored')
+  const visibleReviewItems = sortImportItemsByDate(
+    reviewItems.filter((item) => item.status !== 'ignored'),
+    reviewSortDirection,
+  )
   const pendingReviewActionCount = reviewCounts.ready + reviewCounts.needsReview
   const canApplyReview = reviewItems.length > 0 && (pendingReviewActionCount > 0 || reviewCounts.ignored + reviewCounts.duplicate + reviewCounts.applied === reviewItems.length)
-  const importModalStep = selectedReviewImport ? 'review' : 'upload'
-  const pendingImport = pendingImports[0] ?? null
-  const pendingImportItems = pendingImport
-    ? importItems.filter((item) => item.importId === pendingImport.id)
-    : []
-  const pendingImportCounts = summarizeImportReview(pendingImportItems)
+  const importModalStep = selectedReviewGroup ? 'review' : 'upload'
+  const pendingImportGroup = pendingImportGroups[0] ?? null
   const selectedTransferMovement = transferModalMovementId
     ? scopedMovements.find((movement) => movement.id === transferModalMovementId) ?? null
     : null
@@ -656,6 +670,14 @@ export default function Finance() {
     })
   }
 
+  function toggleMovementDateSort() {
+    setMovementSortDirection((current) => current === 'asc' ? 'desc' : 'asc')
+  }
+
+  function toggleReviewDateSort() {
+    setReviewSortDirection((current) => current === 'asc' ? 'desc' : 'asc')
+  }
+
   function clearAllFilters() {
     setActiveFilters({})
   }
@@ -707,7 +729,7 @@ export default function Finance() {
   }
 
   function openImportUpload() {
-    setReviewImportId(null)
+    setReviewBatchId(null)
     setImportModalOpen(true)
   }
 
@@ -723,12 +745,13 @@ export default function Finance() {
     setImportPhase('processing')
     setImportMessage(`Reading ${importFiles.length} file${importFiles.length === 1 ? '' : 's'}...`)
     try {
+      const batchId = crypto.randomUUID()
       let parsed = 0
       let needsReview = 0
       let duplicates = 0
       let ready = 0
       let duplicateFiles = 0
-      let latestImportId: string | null = null
+      let latestReviewBatchId: string | null = null
       for (const [index, file] of importFiles.entries()) {
         const contentBase64 = await fileToBase64(file)
         setImportMessage(`Analyzing ${index + 1}/${importFiles.length}: ${file.name}...`)
@@ -741,6 +764,7 @@ export default function Finance() {
           body: JSON.stringify({
             organizationId: selectedOrganizationId,
             accountId: targetAccountId,
+            batchId,
             fileName: file.name,
             fileType: file.type || guessFileType(file.name),
             sourceType: sourceTypeFor(file),
@@ -749,7 +773,7 @@ export default function Finance() {
         })
         const result = await readJsonResponse(response)
         if (!response.ok) throw new Error(result.message || result.error || 'Import failed')
-        if (result.importId) latestImportId = result.importId
+        if (result.batchId || result.importId) latestReviewBatchId = result.batchId || result.importId
         const summary = result.summary
         parsed += summary?.parsed ?? 0
         ready += summary?.ready ?? 0
@@ -758,7 +782,7 @@ export default function Finance() {
         if (result.duplicateFile) duplicateFiles += 1
       }
       setImportPhase('success')
-      if (latestImportId) setReviewImportId(latestImportId)
+      setReviewBatchId(duplicateFiles === importFiles.length ? latestReviewBatchId : batchId)
       setImportMessage(
         duplicateFiles === importFiles.length
           ? `Draft already exists. ${parsed} movements matched across ${importFiles.length} file${importFiles.length === 1 ? '' : 's'}.`
@@ -783,8 +807,8 @@ export default function Finance() {
     if (movement && categoryId) await learnCategorizationRule(movement, categoryId)
   }
 
-  function openImportReview(importId: string) {
-    setReviewImportId(importId)
+  function openImportReview(batchId: string) {
+    setReviewBatchId(batchId)
     setImportModalOpen(true)
     setImportPhase('success')
     setImportFiles([])
@@ -838,11 +862,15 @@ export default function Finance() {
   }
 
   async function applyReviewedImport() {
-    if (!selectedReviewImport || !token) return
+    if (!selectedReviewGroup || !token) return
     setImportPhase('processing')
     setImportMessage('Applying reviewed movements...')
     try {
-      const response = await fetch(`${config.apiUrl}/finance/imports/${selectedReviewImport.id}/apply`, {
+      const singleLegacyImport = selectedReviewImports.length === 1 && !selectedReviewImports[0]?.batchId
+      const applyUrl = singleLegacyImport
+        ? `${config.apiUrl}/finance/imports/${selectedReviewImports[0].id}/apply`
+        : `${config.apiUrl}/finance/import-batches/${selectedReviewGroup.id}/apply`
+      const response = await fetch(applyUrl, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -854,12 +882,40 @@ export default function Finance() {
       setImportPhase('success')
       setImportMessage(`Applied ${result.summary?.created ?? 0} movements. ${result.summary?.remainingReview ?? 0} still need review.`)
       if ((result.summary?.remainingReview ?? 0) === 0) {
-        setReviewImportId(null)
+        setReviewBatchId(null)
         setImportModalOpen(false)
       }
     } catch (error) {
       setImportPhase('failed')
       setImportMessage(error instanceof Error ? error.message : 'Could not apply import')
+    }
+  }
+
+  async function discardReviewedImport() {
+    if (!selectedReviewGroup || !token) return
+    setImportPhase('processing')
+    setImportMessage('Discarding import draft...')
+    try {
+      const singleLegacyImport = selectedReviewImports.length === 1 && !selectedReviewImports[0]?.batchId
+      const discardUrl = singleLegacyImport
+        ? `${config.apiUrl}/finance/imports/${selectedReviewImports[0].id}/ignore`
+        : `${config.apiUrl}/finance/import-batches/${selectedReviewGroup.id}/ignore`
+      const response = await fetch(discardUrl, {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+      })
+      const result = await readJsonResponse(response)
+      if (!response.ok) throw new Error(result.message || result.error || 'Could not discard import')
+      setImportPhase('success')
+      setImportMessage('Import draft discarded.')
+      setReviewBatchId(null)
+      setImportModalOpen(false)
+    } catch (error) {
+      setImportPhase('failed')
+      setImportMessage(error instanceof Error ? error.message : 'Could not discard import')
     }
   }
 
@@ -891,6 +947,17 @@ export default function Finance() {
     setEditingMovementLabel(null)
   }
 
+  function startEditingMovementDate(movement: FinanceMovement) {
+    setEditingMovementDate({
+      id: movement.id,
+      value: formatZeroDate(movement.transactionDate),
+    })
+  }
+
+  function cancelEditingMovementDate() {
+    setEditingMovementDate(null)
+  }
+
   async function saveEditingMovementLabel(movement: FinanceMovement) {
     if (editingMovementLabel?.id !== movement.id) return
     const value = editingMovementLabel.value.trim()
@@ -904,6 +971,29 @@ export default function Finance() {
       await z.mutate.fin_movements.update({ id: movement.id, description: value })
     }
     setEditingMovementLabel(null)
+  }
+
+  async function saveEditingMovementDate(movement: FinanceMovement) {
+    if (editingMovementDate?.id !== movement.id) return
+    const value = editingMovementDate.value
+    if (!isValidDateInput(value)) {
+      setEditingMovementDate(null)
+      return
+    }
+    const nextDate = dateInputToMs(value)
+    if (nextDate !== movement.transactionDate) {
+      await z.mutate.fin_movements.update({
+        id: movement.id,
+        transactionDate: nextDate,
+        fingerprint: await buildMovementFingerprintForUpdate({
+          accountId: movement.accountId,
+          transactionDate: value,
+          amountMinor: movement.amountMinor,
+          description: movement.description,
+        }),
+      })
+    }
+    setEditingMovementDate(null)
   }
 
   async function confirmDeleteMovement() {
@@ -1387,14 +1477,14 @@ export default function Finance() {
             </div>
           </div>
 
-          {pendingImport ? (
+          {pendingImportGroup ? (
             <button
               type="button"
-              onClick={() => openImportReview(pendingImport.id)}
+              onClick={() => openImportReview(pendingImportGroup.id)}
               className="mb-3 flex w-full items-center justify-between gap-3 border border-[rgba(0,255,140,0.16)] bg-pit-2 px-3 py-2 text-left font-mono text-xs transition hover:border-[rgba(0,255,140,0.28)] hover:bg-[rgba(0,255,136,0.04)]"
             >
               <span className="min-w-0 truncate text-fg-3">
-                // import draft · {pendingImports.length > 1 ? `${pendingImports.length} files · ` : ''}{pendingImport.fileName} · {pendingImportCounts.ready} ready · {pendingImportCounts.needsReview} need review
+                // import draft · {pendingImportGroups.length > 1 ? `${pendingImportGroups.length} batches · ` : ''}{pendingImportGroup.fileLabel} · {pendingImportGroup.counts.ready} ready · {pendingImportGroup.counts.needsReview} need review
               </span>
               <span className="shrink-0 text-accent">review import</span>
             </button>
@@ -1449,7 +1539,15 @@ export default function Finance() {
 
                   <div className="grid grid-cols-[1fr_auto] gap-2 border-t border-[rgba(0,255,140,0.08)] pt-2">
                     <div className="min-w-0">
-                      <div className="text-[10px] uppercase tracking-label text-fg-4">{formatZeroDate(movement.transactionDate)}</div>
+                      <EditableMovementDate
+                        movement={movement}
+                        editingValue={editingMovementDate?.id === movement.id ? editingMovementDate.value : null}
+                        compact
+                        onStart={() => startEditingMovementDate(movement)}
+                        onChange={(value) => setEditingMovementDate({ id: movement.id, value })}
+                        onSave={() => void saveEditingMovementDate(movement)}
+                        onCancel={cancelEditingMovementDate}
+                      />
                       <div className="mt-1">
                         <PachSelect
                           value={movement.accountId}
@@ -1520,14 +1618,14 @@ export default function Finance() {
                 <col className="w-[15%]" />
                 <col className="w-[7%]" />
               </colgroup>
-              <thead className="sticky top-0 bg-pit text-[10px] uppercase tracking-label text-fg-4">
+              <thead className="sticky top-0 z-10 bg-[#020604] text-[10px] uppercase tracking-label text-fg-4 shadow-[0_1px_0_rgba(0,255,140,0.12)]">
                 <tr>
-                  <th className="border-b border-[rgba(0,255,140,0.12)] px-3 py-2 text-left">date</th>
-                  <th className="border-b border-[rgba(0,255,140,0.12)] px-3 py-2 text-left">movement</th>
-                  <th className="border-b border-[rgba(0,255,140,0.12)] px-3 py-2 text-left">account</th>
-                  <th className="border-b border-[rgba(0,255,140,0.12)] px-3 py-2 text-left">category</th>
-                  <th className="border-b border-[rgba(0,255,140,0.12)] px-3 py-2 text-right">amount</th>
-                  <th className="border-b border-[rgba(0,255,140,0.12)] px-3 py-2 text-right">state</th>
+                  <MovementDateSortHeader direction={movementSortDirection} onSort={toggleMovementDateSort} />
+                  <MovementHeader label="movement" />
+                  <MovementHeader label="account" />
+                  <MovementHeader label="category" />
+                  <MovementHeader label="amount" align="right" />
+                  <MovementHeader label="state" align="right" />
                 </tr>
               </thead>
               <tbody>
@@ -1536,7 +1634,16 @@ export default function Finance() {
                   const category = financeCategories.find((entry) => entry.id === movement.categoryId)
                   return (
                     <tr key={movement.id} className="border-b border-[rgba(0,255,140,0.08)] text-fg-2 hover:bg-[rgba(0,255,136,0.04)]">
-                      <td className="whitespace-nowrap px-3 py-2 text-fg-3">{formatZeroDate(movement.transactionDate)}</td>
+                      <td className="whitespace-nowrap px-3 py-2 text-fg-3">
+                        <EditableMovementDate
+                          movement={movement}
+                          editingValue={editingMovementDate?.id === movement.id ? editingMovementDate.value : null}
+                          onStart={() => startEditingMovementDate(movement)}
+                          onChange={(value) => setEditingMovementDate({ id: movement.id, value })}
+                          onSave={() => void saveEditingMovementDate(movement)}
+                          onCancel={cancelEditingMovementDate}
+                        />
+                      </td>
                       <td className="min-w-0 px-3 py-2">
                         <div className="flex min-w-0 items-center gap-2">
                           <IconTooltip label={movement.transferId || movement.type === 'transfer' ? 'transfer linked' : 'link transfer'}>
@@ -1763,7 +1870,7 @@ export default function Finance() {
                 {importModalStep === 'review' ? (
                   <>
                     <span className="text-accent">review</span>
-                    <span className="min-w-0 truncate text-fg-3">{selectedReviewImport.fileName}</span>
+                    <span className="min-w-0 truncate text-fg-3">{selectedReviewGroup?.fileLabel}</span>
                   </>
                 ) : (
                   <div className="w-48">
@@ -1877,13 +1984,13 @@ export default function Finance() {
                 </>
               ) : null}
 
-              {selectedReviewImport ? (
+              {selectedReviewGroup ? (
                 <section className="border border-[rgba(0,255,140,0.12)] bg-pit font-mono">
                   <div className="flex flex-wrap items-center justify-between gap-3 border-b border-[rgba(0,255,140,0.12)] px-3 py-2">
                     <div>
                       <div className="text-[10px] uppercase tracking-label text-fg-4">step 2 · review draft</div>
-                      <div className="mt-0.5 max-w-[520px] truncate text-xs text-fg-2" title={selectedReviewImport.fileName}>
-                        {selectedReviewImport.fileName}
+                      <div className="mt-0.5 max-w-[520px] truncate text-xs text-fg-2" title={selectedReviewGroup.fileLabel}>
+                        {selectedReviewGroup.fileLabel}
                       </div>
                     </div>
                     <div className="flex flex-wrap items-center gap-3 text-[10px] uppercase tracking-label">
@@ -1907,7 +2014,7 @@ export default function Finance() {
                       </colgroup>
                       <thead className="sticky top-0 bg-pit text-[10px] uppercase tracking-label text-fg-4">
                         <tr>
-                          <th className="border-b border-[rgba(0,255,140,0.12)] px-3 py-2 text-left">date</th>
+                          <MovementDateSortHeader direction={reviewSortDirection} onSort={toggleReviewDateSort} />
                           <th className="border-b border-[rgba(0,255,140,0.12)] px-3 py-2 text-left">movement</th>
                           <th className="border-b border-[rgba(0,255,140,0.12)] px-3 py-2 text-left">account</th>
                           <th className="border-b border-[rgba(0,255,140,0.12)] px-3 py-2 text-left">category</th>
@@ -1919,6 +2026,7 @@ export default function Finance() {
                       <tbody>
                         {visibleReviewItems.map((item) => {
                           const locked = item.status === 'duplicate' || item.status === 'applied'
+                          const sourceImport = selectedReviewImportById.get(item.importId)
                           const account = scopedAccounts.find((entry) => entry.id === item.accountId)
                           const category = scopedCategories.find((entry) => entry.id === item.suggestedCategoryId)
                           return (
@@ -1931,6 +2039,11 @@ export default function Finance() {
                                 {item.merchantName ? (
                                   <div className="mt-0.5 truncate text-[10px] text-fg-4" title={item.description}>
                                     {item.description}
+                                  </div>
+                                ) : null}
+                                {selectedReviewImports.length > 1 && sourceImport ? (
+                                  <div className="mt-0.5 truncate text-[10px] uppercase tracking-label text-fg-4" title={sourceImport.fileName}>
+                                    {sourceImport.fileName}
                                   </div>
                                 ) : null}
                               </td>
@@ -2009,16 +2122,28 @@ export default function Finance() {
             </div>
 
             <div className="flex items-center justify-between border-t border-[rgba(0,255,140,0.12)] px-5 py-3">
-              <button
-                type="button"
-                onClick={() => setImportModalOpen(false)}
-                disabled={importPhase === 'processing'}
-                className="px-2 py-1.5 font-mono text-xs uppercase tracking-label text-fg-3 transition hover:text-fg-1 disabled:cursor-not-allowed disabled:opacity-40"
-              >
-                [cancel]
-              </button>
+              <div className="flex items-center gap-3">
+                <button
+                  type="button"
+                  onClick={() => setImportModalOpen(false)}
+                  disabled={importPhase === 'processing'}
+                  className="px-2 py-1.5 font-mono text-xs uppercase tracking-label text-fg-3 transition hover:text-fg-1 disabled:cursor-not-allowed disabled:opacity-40"
+                >
+                  [cancel]
+                </button>
+                {selectedReviewGroup ? (
+                  <button
+                    type="button"
+                    onClick={() => void discardReviewedImport()}
+                    disabled={importPhase === 'processing'}
+                    className="px-2 py-1.5 font-mono text-xs uppercase tracking-label text-fail transition hover:text-fail disabled:cursor-not-allowed disabled:opacity-40"
+                  >
+                    discard review
+                  </button>
+                ) : null}
+              </div>
               <div className="flex items-center gap-2">
-                {selectedReviewImport ? (
+                {selectedReviewGroup ? (
                   <button
                     type="button"
                     disabled={!canApplyReview || importPhase === 'processing'}
@@ -2718,6 +2843,42 @@ function FinanceMetric({ label, value, tone = 'default' }: { label: string; valu
   )
 }
 
+function MovementDateSortHeader({
+  direction,
+  onSort,
+}: {
+  direction: MovementSortDirection
+  onSort: () => void
+}) {
+  const Icon = direction === 'asc' ? ArrowUp : ArrowDown
+  return (
+    <th className="border-b border-[rgba(0,255,140,0.12)] px-0 py-0 text-left">
+      <button
+        type="button"
+        onClick={onSort}
+        className="flex h-9 w-full items-center justify-start gap-1.5 px-3 text-left font-mono text-[10px] uppercase tracking-label text-accent transition hover:bg-[rgba(0,255,136,0.06)] hover:text-fg-1"
+      >
+        <span>date</span>
+        <Icon className="h-3 w-3 shrink-0" />
+      </button>
+    </th>
+  )
+}
+
+function MovementHeader({
+  label,
+  align = 'left',
+}: {
+  label: string
+  align?: 'left' | 'right'
+}) {
+  return (
+    <th className={`h-9 border-b border-[rgba(0,255,140,0.12)] px-3 py-0 font-mono text-[10px] uppercase tracking-label text-fg-4 ${align === 'right' ? 'text-right' : 'text-left'}`}>
+      {label}
+    </th>
+  )
+}
+
 function MoneyStack({
   amounts,
   tone = 'default',
@@ -2850,6 +3011,58 @@ function EditableMovementLabel({
       title={`${label} · click to edit`}
     >
       {label}
+    </button>
+  )
+}
+
+function EditableMovementDate({
+  movement,
+  editingValue,
+  compact = false,
+  onStart,
+  onChange,
+  onSave,
+  onCancel,
+}: {
+  movement: FinanceMovement
+  editingValue: string | null
+  compact?: boolean
+  onStart: () => void
+  onChange: (value: string) => void
+  onSave: () => void
+  onCancel: () => void
+}) {
+  if (editingValue != null) {
+    return (
+      <input
+        type="date"
+        value={editingValue}
+        onChange={(event) => onChange(event.target.value)}
+        onBlur={onSave}
+        onKeyDown={(event) => {
+          if (event.key === 'Enter') {
+            event.preventDefault()
+            onSave()
+          }
+          if (event.key === 'Escape') {
+            event.preventDefault()
+            onCancel()
+          }
+        }}
+        className={`${compact ? 'h-8 w-full text-xs' : 'h-7 w-[9.5rem] text-xs'} border border-[rgba(0,255,140,0.24)] bg-pit-3 px-2 font-mono text-fg-1 outline-none focus:border-accent focus:shadow-glow-xs`}
+        autoFocus
+      />
+    )
+  }
+
+  return (
+    <button
+      type="button"
+      onClick={onStart}
+      className={`${compact ? 'text-[10px] uppercase tracking-label' : 'text-xs'} whitespace-nowrap text-left text-fg-3 transition hover:text-accent`}
+      title="click to edit date"
+    >
+      {formatZeroDate(movement.transactionDate)}
     </button>
   )
 }
@@ -2999,6 +3212,39 @@ function summarizeImportReview(items: FinanceImportItem[]) {
   }
 }
 
+function importBatchKey(entry: FinanceImport) {
+  return entry.batchId ?? entry.id
+}
+
+function buildImportReviewGroups(imports: FinanceImport[], items: FinanceImportItem[]) {
+  const grouped = new Map<string, FinanceImport[]>()
+  for (const entry of imports) {
+    const key = importBatchKey(entry)
+    grouped.set(key, [...(grouped.get(key) ?? []), entry])
+  }
+
+  return Array.from(grouped.entries())
+    .map(([id, batchImports]) => buildImportReviewGroup(id, batchImports, items))
+    .sort((a, b) => Math.max(...b.imports.map((entry) => entry.updatedAt)) - Math.max(...a.imports.map((entry) => entry.updatedAt)))
+}
+
+function buildImportReviewGroup(id: string, imports: FinanceImport[], items: FinanceImportItem[]): ImportReviewGroup {
+  const importIds = new Set(imports.map((entry) => entry.id))
+  const groupItems = items.filter((item) => importIds.has(item.importId))
+  const fileNames = imports.map((entry) => entry.fileName)
+  const fileLabel = fileNames.length <= 1
+    ? fileNames[0] ?? 'import draft'
+    : `${fileNames.length} files · ${fileNames.slice(0, 2).join(', ')}${fileNames.length > 2 ? ', ...' : ''}`
+
+  return {
+    id,
+    imports,
+    items: groupItems,
+    counts: summarizeImportReview(groupItems),
+    fileLabel,
+  }
+}
+
 function importItemStatusLabel(status: string) {
   if (status === 'parsed') return 'ready'
   if (status === 'needs_review') return 'needs review'
@@ -3019,6 +3265,28 @@ function movementTypeLabel(type: string) {
 
 function statusLabel(status: string) {
   return MOVEMENT_STATUSES.find((entry) => entry.value === status)?.label ?? status
+}
+
+function sortMovementsByDate(
+  movements: FinanceMovement[],
+  direction: MovementSortDirection,
+) {
+  const directionValue = direction === 'asc' ? 1 : -1
+  return [...movements].sort((a, b) => {
+    const compared = (a.transactionDate - b.transactionDate) * directionValue
+    return compared || a.description.localeCompare(b.description)
+  })
+}
+
+function sortImportItemsByDate(
+  items: FinanceImportItem[],
+  direction: MovementSortDirection,
+) {
+  const directionValue = direction === 'asc' ? 1 : -1
+  return [...items].sort((a, b) => {
+    const compared = (a.transactionDate - b.transactionDate) * directionValue
+    return compared || a.description.localeCompare(b.description)
+  })
 }
 
 function StatusIcon({ status }: { status: string }) {
@@ -3080,6 +3348,30 @@ function dateInputToMs(value: string) {
   const [year, month, day] = value.split('-').map(Number)
   if (!year || !month || !day) return Date.now()
   return Date.UTC(year, month - 1, day)
+}
+
+function isValidDateInput(value: string) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false
+  return formatZeroDate(dateInputToMs(value)) === value
+}
+
+async function buildMovementFingerprintForUpdate(input: {
+  accountId: string
+  transactionDate: string
+  amountMinor: number
+  description: string
+}) {
+  return sha256Text(`${input.accountId}|${input.transactionDate}|${input.amountMinor}|${normalizeFingerprintText(input.description)}`)
+}
+
+function normalizeFingerprintText(value: string) {
+  return value.toLowerCase().replace(/\s+/g, ' ').trim()
+}
+
+async function sha256Text(value: string) {
+  const data = new TextEncoder().encode(value)
+  const digest = await crypto.subtle.digest('SHA-256', data)
+  return Array.from(new Uint8Array(digest)).map((byte) => byte.toString(16).padStart(2, '0')).join('')
 }
 
 function monthKey(value: number) {

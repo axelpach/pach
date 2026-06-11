@@ -21,6 +21,7 @@ export type FinanceImportInput = {
   organizationId: string
   accountId: string
   userId: string
+  batchId?: string | null
   fileName: string
   fileType: string
   sourceType: SourceType
@@ -118,8 +119,18 @@ export async function importFinanceMovements(input: FinanceImportInput) {
     .limit(1)
 
   if (existingImport && ['ready', 'partially_applied', 'applied'].includes(existingImport.status)) {
+    const reviewBatchId = input.batchId && ['ready', 'partially_applied'].includes(existingImport.status)
+      ? input.batchId
+      : existingImport.batchId ?? existingImport.id
+    if (reviewBatchId !== (existingImport.batchId ?? existingImport.id) && ['ready', 'partially_applied'].includes(existingImport.status)) {
+      await db
+        .update(finImports)
+        .set({ batchId: reviewBatchId, updatedAt: new Date() })
+        .where(eq(finImports.id, existingImport.id))
+    }
     return {
       importId: existingImport.id,
+      batchId: reviewBatchId,
       duplicateFile: true,
       summary: {
         parsed: existingImport.itemsParsed,
@@ -137,6 +148,7 @@ export async function importFinanceMovements(input: FinanceImportInput) {
       organizationId: input.organizationId,
       accountId: input.accountId,
       createdByUserId: input.userId,
+      batchId: input.batchId ?? null,
       status: 'parsing',
       sourceType: input.sourceType,
       fileName: input.fileName,
@@ -255,6 +267,7 @@ export async function importFinanceMovements(input: FinanceImportInput) {
 
     return {
       importId: importRow.id,
+      batchId: importRow.batchId ?? importRow.id,
       duplicateFile: false,
       summary: {
         parsed: parsed.transactions.length,
@@ -381,6 +394,42 @@ export async function applyFinanceImport(importId: string) {
   }
 }
 
+export async function applyFinanceImportBatch(batchId: string) {
+  const db = getDb()
+  const batchImports = await db
+    .select()
+    .from(finImports)
+    .where(and(eq(finImports.batchId, batchId), inArray(finImports.status, ['ready', 'partially_applied', 'applied'])))
+
+  if (batchImports.length === 0) return { error: 'NOT_FOUND' as const, message: 'Import batch not found.' }
+
+  let created = 0
+  let skipped = 0
+  let remainingReview = 0
+  let duplicates = 0
+  const updatedImports = []
+
+  for (const entry of batchImports) {
+    const result = await applyFinanceImport(entry.id)
+    if ('error' in result) return result
+    updatedImports.push(result.import)
+    created += result.summary.created
+    skipped += result.summary.skipped
+    remainingReview += result.summary.remainingReview
+    duplicates += result.summary.duplicates
+  }
+
+  return {
+    imports: updatedImports,
+    summary: {
+      created,
+      skipped,
+      remainingReview,
+      duplicates,
+    },
+  }
+}
+
 async function parseWithHaiku(input: {
   sourceType: SourceType
   fileName: string
@@ -407,7 +456,7 @@ async function parseWithHaiku(input: {
       max_tokens: 8192,
       temperature: 0,
       system:
-        'You extract bank and credit card movements for a finance ledger. Use the provided tool to return structured data. Amounts must be signed: income/deposits positive, expenses/card purchases negative, transfers may be positive or negative as shown by the source account.',
+        `You extract bank and credit card movements for a finance ledger. Use the provided tool to return structured data. Amounts must be signed: income/deposits positive, expenses/card purchases negative, transfers may be positive or negative as shown by the source account. If a movement date does not show a year, use ${new Date().getFullYear()} as the year.`,
       tools: [FINANCE_STATEMENT_TOOL],
       tool_choice: { type: 'tool', name: FINANCE_STATEMENT_TOOL_NAME },
       messages: [
@@ -439,6 +488,7 @@ function buildAnthropicContent(input: {
   accountCurrencyCode: string
   existingCategoryNames: string[]
 }) {
+  const currentYear = new Date().getFullYear()
   const categoryInstructions = input.existingCategoryNames.length > 0
     ? `\n\nExisting categories you may use exactly when they fit: ${input.existingCategoryNames.join(', ')}.\nIf none of these categories clearly fit a movement, omit categoryName. Do not invent or translate new category names.`
     : '\n\nNo existing categories were provided. Omit categoryName for every movement.'
@@ -446,7 +496,7 @@ function buildAnthropicContent(input: {
 
 Use the ${FINANCE_STATEMENT_TOOL_NAME} tool with every movement you can read.
 
-Do not invent movements. Preserve transaction dates. If the document has both charges and payments, sign each movement from this account's perspective.${categoryInstructions}`
+Do not invent movements. Preserve transaction dates. If a visible movement date does not include a year, return it using ${currentYear} as the year. If the document has both charges and payments, sign each movement from this account's perspective.${categoryInstructions}`
 
   const base = [{ type: 'text', text: prompt }]
   if (input.fileType.startsWith('image/')) {
@@ -499,8 +549,9 @@ function parseToolResponse(input: unknown): ParsedStatement {
 }
 
 function normalizeParsedMovement(tx: ParsedMovement, fallbackCurrency: string) {
-  const transactionDate = normalizeSourceDate(tx.transactionDate)
-  const postedDate = tx.postedDate ? normalizeSourceDate(tx.postedDate) : null
+  const currentYear = new Date().getFullYear()
+  const transactionDate = normalizeSourceDate(tx.transactionDate, currentYear)
+  const postedDate = tx.postedDate ? normalizeSourceDate(tx.postedDate, currentYear) : null
   if (!transactionDate || !tx.description || typeof tx.amount !== 'number') return null
   const currencyCode = (tx.currencyCode || fallbackCurrency).trim().toUpperCase()
   return {
@@ -694,12 +745,99 @@ function formatDateForFingerprint(value: string | Date | number) {
   return new Date(value).toISOString().slice(0, 10)
 }
 
-function normalizeSourceDate(value: unknown) {
+function normalizeSourceDate(value: unknown, defaultYear = new Date().getFullYear()) {
   if (typeof value !== 'string') return null
   const trimmed = value.trim()
   const match = trimmed.match(/^(\d{4}-\d{2}-\d{2})(?:[T\s](\d{2}:\d{2})(?::(\d{2}))?(?:\.\d+)?(?:Z|[+-]\d{2}:?\d{2})?)?$/)
-  if (!match) return null
-  const [, date, minutes, seconds] = match
-  if (!minutes) return { date, exact: date }
-  return { date, exact: `${date}T${minutes}${seconds ? `:${seconds}` : ''}` }
+  if (match) {
+    const [, date, minutes, seconds] = match
+    if (!minutes) return { date, exact: date }
+    return { date, exact: `${date}T${minutes}${seconds ? `:${seconds}` : ''}` }
+  }
+
+  const yearlessDate = normalizeYearlessDate(trimmed, defaultYear)
+  if (yearlessDate) return { date: yearlessDate, exact: yearlessDate }
+
+  return null
+}
+
+function normalizeYearlessDate(value: string, defaultYear: number) {
+  const normalized = removeDiacritics(value)
+    .toLowerCase()
+    .replace(/[,.\s]+/g, ' ')
+    .trim()
+  const monthNames = new Map([
+    ['enero', 1],
+    ['ene', 1],
+    ['january', 1],
+    ['jan', 1],
+    ['febrero', 2],
+    ['feb', 2],
+    ['february', 2],
+    ['marzo', 3],
+    ['mar', 3],
+    ['march', 3],
+    ['abril', 4],
+    ['abr', 4],
+    ['april', 4],
+    ['apr', 4],
+    ['mayo', 5],
+    ['may', 5],
+    ['junio', 6],
+    ['jun', 6],
+    ['june', 6],
+    ['julio', 7],
+    ['jul', 7],
+    ['july', 7],
+    ['agosto', 8],
+    ['ago', 8],
+    ['august', 8],
+    ['aug', 8],
+    ['septiembre', 9],
+    ['setiembre', 9],
+    ['sep', 9],
+    ['sept', 9],
+    ['september', 9],
+    ['octubre', 10],
+    ['oct', 10],
+    ['october', 10],
+    ['noviembre', 11],
+    ['nov', 11],
+    ['november', 11],
+    ['diciembre', 12],
+    ['dic', 12],
+    ['december', 12],
+    ['dec', 12],
+  ])
+
+  const monthFirst = normalized.match(/^([a-z]+)\s+(\d{1,2})$/)
+  if (monthFirst) {
+    const month = monthNames.get(monthFirst[1])
+    const day = Number(monthFirst[2])
+    if (month && isValidMonthDay(month, day)) return formatYmd(defaultYear, month, day)
+  }
+
+  const dayFirst = normalized.match(/^(\d{1,2})\s+(?:de\s+)?([a-z]+)$/)
+  if (dayFirst) {
+    const day = Number(dayFirst[1])
+    const month = monthNames.get(dayFirst[2])
+    if (month && isValidMonthDay(month, day)) return formatYmd(defaultYear, month, day)
+  }
+
+  return null
+}
+
+function removeDiacritics(value: string) {
+  return value.normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+}
+
+function isValidMonthDay(month: number, day: number) {
+  return Number.isInteger(month) && Number.isInteger(day) && month >= 1 && month <= 12 && day >= 1 && day <= 31
+}
+
+function formatYmd(year: number, month: number, day: number) {
+  const date = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`
+  const parsed = new Date(`${date}T00:00:00Z`)
+  if (Number.isNaN(parsed.getTime()) || parsed.toISOString().slice(0, 10) !== date) return null
+  return date
 }

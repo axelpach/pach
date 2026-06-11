@@ -191,6 +191,7 @@ const finImports = table('fin_imports')
     organizationId: string().from('organization_id'),
     accountId: string().from('account_id'),
     createdByUserId: string().optional().from('created_by_user_id'),
+    batchId: string().optional().from('batch_id'),
     status: string(),
     sourceType: string().from('source_type'),
     fileName: string().from('file_name'),

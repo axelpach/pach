@@ -1,8 +1,8 @@
 import { Router } from 'express'
-import { asc, eq } from 'drizzle-orm'
-import { finCategories, finImports } from '../../../db/schema.js'
+import { and, asc, eq, inArray } from 'drizzle-orm'
+import { finCategories, finImportItems, finImports } from '../../../db/schema.js'
 import { getDb } from '../db.js'
-import { applyFinanceImport, importFinanceMovements } from '../services/finance-import.js'
+import { applyFinanceImport, applyFinanceImportBatch, importFinanceMovements } from '../services/finance-import.js'
 
 const router = Router()
 
@@ -52,6 +52,7 @@ router.post('/imports', async (req, res) => {
     const {
       organizationId,
       accountId,
+      batchId,
       fileName,
       fileType,
       sourceType,
@@ -61,6 +62,7 @@ router.post('/imports', async (req, res) => {
     if (
       typeof organizationId !== 'string' ||
       typeof accountId !== 'string' ||
+      (batchId != null && typeof batchId !== 'string') ||
       typeof fileName !== 'string' ||
       typeof fileType !== 'string' ||
       typeof sourceType !== 'string' ||
@@ -84,6 +86,7 @@ router.post('/imports', async (req, res) => {
       organizationId,
       accountId,
       userId: req.user.sub,
+      batchId: batchId ?? null,
       fileName,
       fileType,
       sourceType: sourceType as SourceType,
@@ -101,6 +104,39 @@ router.post('/imports', async (req, res) => {
     res.status(500).json({
       error: 'IMPORT_FAILED',
       message: error instanceof Error ? error.message : 'Import failed.',
+    })
+  }
+})
+
+router.post('/import-batches/:batchId/apply', async (req, res) => {
+  try {
+    const batchId = req.params.batchId
+    const db = getDb()
+    const batchImports = await db.select().from(finImports).where(eq(finImports.batchId, batchId))
+
+    if (batchImports.length === 0) {
+      res.status(404).json({ error: 'NOT_FOUND', message: 'Import batch not found.' })
+      return
+    }
+
+    const unauthorized = batchImports.some((entry) => !req.user?.organizationIds.includes(entry.organizationId))
+    if (unauthorized) {
+      res.status(403).json({ error: 'NOT_AUTHORIZED', message: 'Not authorized for this organization.' })
+      return
+    }
+
+    const result = await applyFinanceImportBatch(batchId)
+    if ('error' in result) {
+      const status = result.error === 'NOT_FOUND' ? 404 : 500
+      res.status(status).json(result)
+      return
+    }
+
+    res.json(result)
+  } catch (error) {
+    res.status(500).json({
+      error: 'APPLY_FAILED',
+      message: error instanceof Error ? error.message : 'Could not apply import batch.',
     })
   }
 })
@@ -137,6 +173,37 @@ router.post('/imports/:id/apply', async (req, res) => {
   }
 })
 
+router.patch('/import-batches/:batchId/ignore', async (req, res) => {
+  const batchId = req.params.batchId
+  const db = getDb()
+  const batchImports = await db.select().from(finImports).where(eq(finImports.batchId, batchId))
+
+  if (batchImports.length === 0) {
+    res.status(404).json({ error: 'NOT_FOUND', message: 'Import batch not found.' })
+    return
+  }
+
+  const unauthorized = batchImports.some((entry) => !req.user?.organizationIds.includes(entry.organizationId))
+  if (unauthorized) {
+    res.status(403).json({ error: 'NOT_AUTHORIZED', message: 'Not authorized for this organization.' })
+    return
+  }
+
+  const importIds = batchImports.map((entry) => entry.id)
+  await db
+    .update(finImportItems)
+    .set({ status: 'ignored', errorMessage: null, updatedAt: new Date() })
+    .where(and(inArray(finImportItems.importId, importIds), inArray(finImportItems.status, ['parsed', 'needs_review', 'duplicate', 'ignored', 'failed'])))
+
+  const updated = await db
+    .update(finImports)
+    .set({ status: 'ignored', updatedAt: new Date() })
+    .where(eq(finImports.batchId, batchId))
+    .returning()
+
+  res.json({ imports: updated })
+})
+
 router.patch('/imports/:id/ignore', async (req, res) => {
   const importId = req.params.id
   const db = getDb()
@@ -151,6 +218,11 @@ router.patch('/imports/:id/ignore', async (req, res) => {
     res.status(403).json({ error: 'NOT_AUTHORIZED', message: 'Not authorized for this organization.' })
     return
   }
+
+  await db
+    .update(finImportItems)
+    .set({ status: 'ignored', errorMessage: null, updatedAt: new Date() })
+    .where(and(eq(finImportItems.importId, importId), inArray(finImportItems.status, ['parsed', 'needs_review', 'duplicate', 'ignored', 'failed'])))
 
   const [updated] = await db
     .update(finImports)

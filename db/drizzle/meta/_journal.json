@@ -141,6 +141,13 @@
       "when": 1780800100000,
       "tag": "0019_fin_account_holder",
       "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "7",
+      "when": 1780800200000,
+      "tag": "0020_fin_import_batches",
+      "breakpoints": true
     }
   ]
 }

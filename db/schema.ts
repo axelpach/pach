@@ -198,6 +198,7 @@ export const finImports = pgTable('fin_imports', {
   organizationId: uuid('organization_id').notNull().references(() => organizations.id),
   accountId: uuid('account_id').notNull().references(() => finAccounts.id),
   createdByUserId: uuid('created_by_user_id').references(() => users.id),
+  batchId: uuid('batch_id'),
   /** uploading | parsing | ready | applied | partially_applied | failed | ignored */
   status: text('status').notNull().default('parsing'),
   /** statement_csv | statement_pdf | screenshot | manual_csv */
@@ -222,6 +223,7 @@ export const finImports = pgTable('fin_imports', {
 }, (table) => ({
   organizationIdIdx: index('fin_imports_organization_idx').on(table.organizationId),
   accountIdIdx: index('fin_imports_account_idx').on(table.accountId),
+  batchIdIdx: index('fin_imports_batch_idx').on(table.batchId),
   fileShaIdx: index('fin_imports_file_sha_idx').on(table.fileSha256),
 }))
 
