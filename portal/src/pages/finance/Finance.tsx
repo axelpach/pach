@@ -17,6 +17,7 @@ type FinanceCategory = Schema['tables']['fin_categories']['row']
 type FinanceImport = Schema['tables']['fin_imports']['row']
 type FinanceImportItem = Schema['tables']['fin_import_items']['row']
 type MovementSortDirection = 'asc' | 'desc'
+type ReviewStatusFilter = 'all' | 'parsed' | 'needs_review' | 'duplicate' | 'ignored' | 'applied'
 type AccountDraft = {
   name: string
   institutionName: string
@@ -59,6 +60,7 @@ type CategoryBreakdownEntry = {
 type CategoryBreakdownGroup = {
   currencyCode: string
   entries: CategoryBreakdownEntry[]
+  missingCurrencies: string[]
 }
 type MonthlyBalanceEntry = {
   id: string
@@ -140,6 +142,13 @@ const MOVEMENT_STATUSES = [
   { value: 'ignored', label: 'ignored' },
 ]
 
+const IMPORT_ITEM_STATUS_OPTIONS = [
+  { value: 'parsed', label: 'ready' },
+  { value: 'needs_review', label: 'needs review' },
+  { value: 'ignored', label: 'ignored' },
+  { value: 'duplicate', label: 'duplicate' },
+]
+
 const CATEGORY_CHART_COLORS = [
   '#56f08b',
   '#ff5f87',
@@ -174,6 +183,7 @@ export default function Finance() {
   })
   const [activeFilters, setActiveFilters] = useState<ActiveFilters>({})
   const [dashboardFilters, setDashboardFilters] = useState<ActiveFilters>({})
+  const [reviewStatusFilter, setReviewStatusFilter] = useState<ReviewStatusFilter>('all')
   const [search, setSearch] = useState('')
   const [movementSortDirection, setMovementSortDirection] = useState<MovementSortDirection>('desc')
   const [reviewSortDirection, setReviewSortDirection] = useState<MovementSortDirection>('desc')
@@ -184,6 +194,7 @@ export default function Finance() {
     currencyCode: string
     points: MonthlyBalanceChartPoint[]
   } | null>(null)
+  const [dashboardCategorySnapshot, setDashboardCategorySnapshot] = useState<CategoryBreakdownGroup | null>(null)
   const [dashboardFx, setDashboardFx] = useState<FxRateState>({
     status: 'idle',
     baseCurrencyCode: 'MXN',
@@ -354,7 +365,16 @@ export default function Finance() {
   const monthlyBalanceChartCurrencyCode = readyMonthlyBalanceChartPoints
     ? dashboardReportingCurrencyCode
     : dashboardChartSnapshot?.currencyCode ?? dashboardReportingCurrencyCode
-  const categoryBreakdown = buildCategoryBreakdown(dashboardNonTransferMovements, scopedCategories)
+  const readyCategoryBreakdown = dashboardConversionRates
+    ? buildCategoryBreakdown(dashboardNonTransferMovements, scopedCategories, dashboardReportingCurrencyCode, dashboardConversionRates)
+    : null
+  const categoryBreakdown = readyCategoryBreakdown ?? dashboardCategorySnapshot
+  const categoryBreakdownIsLoading = !readyCategoryBreakdown && Boolean(dashboardCategorySnapshot)
+  const categoryBreakdownEmptyMessage = dashboardConversionRates == null && dashboardFx.status === 'loading'
+    ? '// loading fx rates...'
+    : categoryBreakdown?.missingCurrencies.length
+      ? `// no converted spend · missing ${categoryBreakdown.missingCurrencies.join(', ')}`
+      : '// no spend to chart'
   const accountStats = useMemo(
     () => new Map(scopedAccounts.map((account) => [account.id, buildAccountStats(account, scopedMovements)])),
     [scopedAccounts, scopedMovements],
@@ -371,12 +391,27 @@ export default function Finance() {
   const selectedReviewImportById = new Map(selectedReviewImports.map((entry) => [entry.id, entry]))
   const reviewItems = selectedReviewGroup?.items ?? []
   const reviewCounts = summarizeImportReview(reviewItems)
+  const reviewStatusFilterOptions: { value: ReviewStatusFilter; label: string; count: number }[] = [
+    { value: 'all', label: 'all', count: reviewItems.length },
+    { value: 'parsed', label: 'ready', count: reviewCounts.ready },
+    { value: 'needs_review', label: 'review', count: reviewCounts.needsReview },
+    { value: 'duplicate', label: 'duplicate', count: reviewCounts.duplicate },
+    { value: 'ignored', label: 'ignored', count: reviewCounts.ignored },
+    { value: 'applied', label: 'applied', count: reviewCounts.applied },
+  ]
   const visibleReviewItems = sortImportItemsByDate(
-    reviewItems.filter((item) => item.status !== 'ignored'),
+    reviewItems.filter((item) => reviewStatusFilter === 'all' || item.status === reviewStatusFilter),
     reviewSortDirection,
   )
-  const pendingReviewActionCount = reviewCounts.ready + reviewCounts.needsReview
-  const canApplyReview = reviewItems.length > 0 && (pendingReviewActionCount > 0 || reviewCounts.ignored + reviewCounts.duplicate + reviewCounts.applied === reviewItems.length)
+  const reviewIsResolved = reviewCounts.needsReview === 0
+  const canApplyReview = reviewItems.length > 0 && reviewIsResolved && (reviewCounts.ready > 0 || reviewCounts.ignored + reviewCounts.duplicate + reviewCounts.applied === reviewItems.length)
+  const finishReviewDisabledReason = importPhase === 'processing'
+    ? 'review is applying'
+    : reviewCounts.needsReview > 0
+      ? `${reviewCounts.needsReview} item${reviewCounts.needsReview === 1 ? '' : 's'} still need${reviewCounts.needsReview === 1 ? 's' : ''} review`
+      : reviewItems.length === 0
+        ? 'no draft movements to apply'
+        : null
   const importModalStep = selectedReviewGroup ? 'review' : 'upload'
   const pendingImportGroup = pendingImportGroups[0] ?? null
   const selectedTransferMovement = transferModalMovementId
@@ -417,12 +452,7 @@ export default function Finance() {
   ]
   const movementTypeOptions: PachSelectOption[] = MOVEMENT_TYPES.map((entry) => ({ value: entry.value, label: entry.label }))
   const movementStatusOptions: PachSelectOption[] = MOVEMENT_STATUSES.map((entry) => ({ value: entry.value, label: entry.label }))
-  const importItemStatusOptions: PachSelectOption[] = [
-    { value: 'parsed', label: 'ready' },
-    { value: 'needs_review', label: 'needs review' },
-    { value: 'ignored', label: 'ignored' },
-    { value: 'duplicate', label: 'duplicate' },
-  ]
+  const importItemStatusOptions: PachSelectOption[] = IMPORT_ITEM_STATUS_OPTIONS
   const monthFilterOptions = uniqueBy(
     scopedMovements.map((movement) => ({
       value: monthKey(movement.transactionDate),
@@ -847,6 +877,8 @@ export default function Finance() {
 
   function stageImportFiles(files: File[]) {
     setImportModalOpen(true)
+    setReviewBatchId(null)
+    setReviewStatusFilter('all')
     const nextFiles = files.filter((file) => file.size > 0)
     const totalBytes = nextFiles.reduce((sum, file) => sum + file.size, 0)
     if (nextFiles.length === 0) {
@@ -880,6 +912,7 @@ export default function Finance() {
 
   function openImportUpload() {
     setReviewBatchId(null)
+    setReviewStatusFilter('all')
     setImportModalOpen(true)
   }
 
@@ -932,6 +965,7 @@ export default function Finance() {
         if (result.duplicateFile) duplicateFiles += 1
       }
       setImportPhase('success')
+      setReviewStatusFilter('all')
       setReviewBatchId(duplicateFiles === importFiles.length ? latestReviewBatchId : batchId)
       setImportMessage(
         duplicateFiles === importFiles.length
@@ -959,6 +993,7 @@ export default function Finance() {
 
   function openImportReview(batchId: string) {
     setReviewBatchId(batchId)
+    setReviewStatusFilter('all')
     setImportModalOpen(true)
     setImportPhase('success')
     setImportFiles([])
@@ -1568,6 +1603,7 @@ export default function Finance() {
                             points: monthlyBalanceChartPoints,
                           })
                         }
+                        if (categoryBreakdown) setDashboardCategorySnapshot(categoryBreakdown)
                         setDashboardReportingCurrencyCode(currencyCode)
                       }}
                       className={`border px-2.5 py-1.5 text-[10px] uppercase tracking-label transition ${
@@ -1627,34 +1663,42 @@ export default function Finance() {
               <div className="flex items-center justify-between border-b border-[rgba(0,255,140,0.12)] px-4 py-3 font-mono">
                 <div>
                   <div className="text-[10px] uppercase tracking-label text-fg-4">where money goes</div>
-                  <div className="mt-1 text-sm lowercase text-fg-1">spend by category</div>
+                  <div className="mt-1 text-sm lowercase text-fg-1">spend by category · reported in {dashboardReportingCurrencyCode}</div>
                 </div>
                 <ChartPie className="h-4 w-4 text-accent" />
               </div>
               <div className="grid gap-6 p-4 lg:grid-cols-[320px_1fr]">
-                {categoryBreakdown.length === 0 ? (
+                {!categoryBreakdown || categoryBreakdown.entries.length === 0 ? (
                   <div className="flex min-h-52 items-center justify-center border border-dashed border-[rgba(0,255,140,0.12)] font-mono text-sm text-fg-4 lg:col-span-2">
-                    // no spend to chart
+                    {categoryBreakdownEmptyMessage}
                   </div>
                 ) : (
-                  categoryBreakdown.map((group) => (
-                    <div key={group.currencyCode} className="grid gap-6 border-b border-[rgba(0,255,140,0.08)] pb-4 last:border-b-0 last:pb-0 lg:col-span-2 lg:grid-cols-[320px_1fr]">
-                      <div className="flex flex-col items-center justify-center gap-2">
-                        <CategoryPieChart slices={group.entries} />
-                        <div className="font-mono text-[10px] uppercase tracking-label text-fg-4">{group.currencyCode}</div>
-                      </div>
-                      <div className="grid content-center gap-2">
-                        {group.entries.map((entry) => (
-                          <div key={entry.id} className="grid grid-cols-[12px_1fr_auto_auto] items-center gap-2 font-mono text-xs">
-                            <span className="h-3 w-3" style={{ backgroundColor: entry.color }} />
-                            <span className="truncate text-fg-2">{entry.name}</span>
-                            <span className="text-fg-4">{entry.percent.toFixed(1)}%</span>
-                            <span className="text-fail">{formatMoney(-entry.amountMinor, entry.currencyCode)}</span>
-                          </div>
-                        ))}
-                      </div>
+                  <>
+                    <div className={`flex flex-col items-center justify-center gap-2 ${categoryBreakdownIsLoading ? 'opacity-60' : ''}`}>
+                      <CategoryPieChart slices={categoryBreakdown.entries} />
+                      <div className="font-mono text-[10px] uppercase tracking-label text-fg-4">{categoryBreakdown.currencyCode}</div>
                     </div>
-                  ))
+                    <div className={`grid content-center gap-2 ${categoryBreakdownIsLoading ? 'opacity-60' : ''}`}>
+                      {categoryBreakdown.entries.map((entry) => (
+                        <div key={entry.id} className="grid grid-cols-[12px_1fr_auto_auto] items-center gap-2 font-mono text-xs">
+                          <span className="h-3 w-3" style={{ backgroundColor: entry.color }} />
+                          <span className="truncate text-fg-2">{entry.name}</span>
+                          <span className="text-fg-4">{entry.percent.toFixed(1)}%</span>
+                          <span className="text-fail">{formatMoney(-entry.amountMinor, entry.currencyCode)}</span>
+                        </div>
+                      ))}
+                      {categoryBreakdown.missingCurrencies.length > 0 ? (
+                        <div className="mt-2 border-t border-[rgba(0,255,140,0.08)] pt-2 font-mono text-[10px] uppercase tracking-label text-fail">
+                          missing {categoryBreakdown.missingCurrencies.join(', ')}
+                        </div>
+                      ) : null}
+                      {categoryBreakdownIsLoading ? (
+                        <div className="mt-2 border-t border-[rgba(0,255,140,0.08)] pt-2 font-mono text-[10px] uppercase tracking-label text-fg-4">
+                          updating fx...
+                        </div>
+                      ) : null}
+                    </div>
+                  </>
                 )}
               </div>
             </section>
@@ -2131,7 +2175,7 @@ export default function Finance() {
           onClick={() => setImportModalOpen(false)}
         >
           <div
-            className="flex max-h-[calc(100vh-2rem)] w-full max-w-5xl flex-col overflow-hidden border border-[rgba(0,255,140,0.2)] bg-pit-2 shadow-[0_30px_80px_rgba(0,0,0,0.5)] sm:max-h-[calc(100vh-3rem)]"
+            className="flex h-[calc(100vh-4rem)] w-full max-w-5xl flex-col overflow-hidden border border-[rgba(0,255,140,0.2)] bg-pit-2 shadow-[0_30px_80px_rgba(0,0,0,0.5)] sm:h-[84vh]"
             onClick={(event) => event.stopPropagation()}
           >
             <div className="flex shrink-0 items-center justify-between border-b border-[rgba(0,255,140,0.12)] px-5 py-3">
@@ -2258,7 +2302,7 @@ export default function Finance() {
               ) : null}
 
               {selectedReviewGroup ? (
-                <section className="border border-[rgba(0,255,140,0.12)] bg-pit font-mono">
+                <section className="flex h-full min-h-0 flex-col border border-[rgba(0,255,140,0.12)] bg-pit font-mono">
                   <div className="flex flex-wrap items-center justify-between gap-3 border-b border-[rgba(0,255,140,0.12)] px-3 py-2">
                     <div>
                       <div className="text-[10px] uppercase tracking-label text-fg-4">step 2 · review draft</div>
@@ -2267,14 +2311,27 @@ export default function Finance() {
                       </div>
                     </div>
                     <div className="flex flex-wrap items-center gap-3 text-[10px] uppercase tracking-label">
-                      <span className="text-accent">{reviewCounts.ready} ready</span>
-                      <span className="text-amber">{reviewCounts.needsReview} review</span>
-                      <span className="text-fg-4">{reviewCounts.duplicate} duplicate</span>
-                      <span className="text-fg-4">{reviewCounts.ignored} ignored</span>
+                      {reviewStatusFilterOptions.map((option) => {
+                        const active = reviewStatusFilter === option.value
+                        const colorClass =
+                          option.value === 'parsed' ? 'text-accent' :
+                          option.value === 'needs_review' ? 'text-amber' :
+                          active ? 'text-fg-2' : 'text-fg-4'
+                        return (
+                          <button
+                            key={option.value}
+                            type="button"
+                            onClick={() => setReviewStatusFilter(option.value)}
+                            className={`font-mono transition hover:underline hover:underline-offset-4 ${colorClass} ${active ? 'underline underline-offset-4' : ''}`}
+                          >
+                            {option.count} {option.label}
+                          </button>
+                        )
+                      })}
                     </div>
                   </div>
 
-                  <div className="max-h-[62vh] overflow-auto">
+                  <div className="min-h-0 flex-1 overflow-auto">
                     <table className="w-full table-fixed border-collapse text-xs">
                       <colgroup>
                         <col className="w-[12%]" />
@@ -2396,7 +2453,7 @@ export default function Finance() {
                         {visibleReviewItems.length === 0 ? (
                           <tr>
                             <td colSpan={7} className="px-3 py-10 text-center text-sm text-fg-4">
-                              // no draft movements
+                              {reviewStatusFilter === 'all' ? '// no draft movements' : '// no draft movements match this status'}
                             </td>
                           </tr>
                         ) : null}
@@ -2430,15 +2487,22 @@ export default function Finance() {
               </div>
               <div className="flex items-center gap-2">
                 {selectedReviewGroup ? (
-                  <button
-                    type="button"
-                    disabled={!canApplyReview || importPhase === 'processing'}
-                    onClick={() => void applyReviewedImport()}
-                    className="inline-flex items-center gap-2 border border-[rgba(0,255,140,0.3)] bg-[rgba(0,255,136,0.08)] px-3 py-1.5 font-mono text-xs uppercase tracking-label text-accent transition hover:bg-[rgba(0,255,136,0.16)] hover:shadow-glow-xs disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-[rgba(0,255,136,0.08)] disabled:hover:shadow-none"
-                  >
-                    {importPhase === 'processing' ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <FileUp className="h-3.5 w-3.5" />}
-                    finish review
-                  </button>
+                  <div className="group relative">
+                    <button
+                      type="button"
+                      disabled={!canApplyReview || importPhase === 'processing'}
+                      onClick={() => void applyReviewedImport()}
+                      className="inline-flex items-center gap-2 border border-[rgba(0,255,140,0.3)] bg-[rgba(0,255,136,0.08)] px-3 py-1.5 font-mono text-xs uppercase tracking-label text-accent transition hover:bg-[rgba(0,255,136,0.16)] hover:shadow-glow-xs disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-[rgba(0,255,136,0.08)] disabled:hover:shadow-none"
+                    >
+                      {importPhase === 'processing' ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <FileUp className="h-3.5 w-3.5" />}
+                      finish review
+                    </button>
+                    {finishReviewDisabledReason ? (
+                      <div className="pointer-events-none absolute bottom-full right-0 z-20 mb-2 hidden whitespace-nowrap border border-[rgba(0,255,140,0.2)] bg-pit-2 px-2 py-1 font-mono text-[10px] uppercase tracking-label text-fg-2 shadow-[0_12px_30px_rgba(0,0,0,0.45)] group-hover:block">
+                        {finishReviewDisabledReason}
+                      </div>
+                    ) : null}
+                  </div>
                 ) : null}
                 <button
                   type="button"
@@ -4296,48 +4360,55 @@ function withZeroCurrencies(totals: Map<string, number>, currencies: string[]) {
 function buildCategoryBreakdown(
   movements: Schema['tables']['fin_movements']['row'][],
   categories: Schema['tables']['fin_categories']['row'][],
-): CategoryBreakdownGroup[] {
+  reportingCurrencyCode: string,
+  ratesFromReportingCurrency: Record<string, number>,
+): CategoryBreakdownGroup {
   const categoryMap = new Map(categories.map((category) => [category.id, category]))
-  const totals = new Map<string, Map<string, { name: string; amountMinor: number; currencyCode: string }>>()
+  const totals = new Map<string, { name: string; amountMinor: number }>()
+  const missingCurrencies = new Set<string>()
 
   for (const movement of movements) {
     if (movement.amountMinor >= 0) continue
+    const rate = conversionRateToReportingCurrency(movement.currencyCode, reportingCurrencyCode, ratesFromReportingCurrency)
+    if (rate == null) {
+      missingCurrencies.add(movement.currencyCode)
+      continue
+    }
     const category = movement.categoryId ? categoryMap.get(movement.categoryId) : null
     const id = category?.id ?? UNCATEGORIZED_VALUE
-    const currencyTotals = totals.get(movement.currencyCode) ?? new Map<string, { name: string; amountMinor: number; currencyCode: string }>()
-    const current = currencyTotals.get(id) ?? {
+    const current = totals.get(id) ?? {
       name: category?.name ?? 'uncategorized',
       amountMinor: 0,
-      currencyCode: movement.currencyCode,
     }
-    current.amountMinor += Math.abs(movement.amountMinor)
-    currencyTotals.set(id, current)
-    totals.set(movement.currencyCode, currencyTotals)
+    current.amountMinor += Math.round(Math.abs(movement.amountMinor) * rate)
+    totals.set(id, current)
   }
 
-  return Array.from(totals.entries())
-    .sort(([a], [b]) => currencySortValue(a).localeCompare(currencySortValue(b)))
-    .map(([currencyCode, currencyTotals]) => {
-      const entries = Array.from(currencyTotals.entries())
-        .map(([id, value], index) => ({
-          id: `${currencyCode}:${id}`,
-          name: value.name,
-          amountMinor: value.amountMinor,
-          currencyCode: value.currencyCode,
-          percent: 0,
-          color: CATEGORY_CHART_COLORS[index % CATEGORY_CHART_COLORS.length],
-        }))
-        .sort((a, b) => b.amountMinor - a.amountMinor)
-        .slice(0, 9)
-      const total = entries.reduce((sum, entry) => sum + entry.amountMinor, 0)
-      return {
-        currencyCode,
-        entries: entries.map((entry) => ({
-          ...entry,
-          percent: total === 0 ? 0 : (entry.amountMinor / total) * 100,
-        })),
-      }
-    })
+  const entries = Array.from(totals.entries())
+    .map(([id, value]) => ({
+      id,
+      name: value.name,
+      amountMinor: value.amountMinor,
+      currencyCode: reportingCurrencyCode,
+      percent: 0,
+      color: CATEGORY_CHART_COLORS[0],
+    }))
+    .sort((a, b) => b.amountMinor - a.amountMinor)
+    .slice(0, 9)
+    .map((entry, index) => ({
+      ...entry,
+      color: CATEGORY_CHART_COLORS[index % CATEGORY_CHART_COLORS.length],
+    }))
+  const total = entries.reduce((sum, entry) => sum + entry.amountMinor, 0)
+
+  return {
+    currencyCode: reportingCurrencyCode,
+    missingCurrencies: Array.from(missingCurrencies).sort((a, b) => currencySortValue(a).localeCompare(currencySortValue(b))),
+    entries: entries.map((entry) => ({
+      ...entry,
+      percent: total === 0 ? 0 : (entry.amountMinor / total) * 100,
+    })),
+  }
 }
 
 function isTransferLikeMovement(
