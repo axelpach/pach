@@ -1,5 +1,5 @@
 import { useQuery, useZero } from '@rocicorp/zero/react'
-import { AlertTriangle, ArrowDown, ArrowRightLeft, ArrowUp, Building2, CalendarDays, ChartPie, CheckCircle, CircleDollarSign, CreditCard, FileText, FileUp, Landmark, Layers2, Loader2, Plus, Search, Tag, Trash2, UploadCloud, UserRound, WalletCards, X } from 'lucide-react'
+import { AlertTriangle, ArrowDown, ArrowRightLeft, ArrowUp, Building2, CalendarDays, ChartPie, CheckCircle, ChevronDown, ChevronRight, CircleDollarSign, CreditCard, FileText, FileUp, Landmark, Layers2, Loader2, Plus, Search, Tag, Trash2, UploadCloud, UserRound, WalletCards, X } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState, type MouseEvent, type ReactNode } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { config } from '../../config'
@@ -38,6 +38,16 @@ type MovementSummary = {
   negativeAmounts: MoneyAmount[]
   netAmounts: MoneyAmount[]
 }
+type AccountBalanceEntry = {
+  accountId: string
+  accountName: string
+  currencyCode: string
+  movementCount: number
+  startingAmountMinor: number
+  positiveMinor: number
+  negativeMinor: number
+  endingAmountMinor: number
+}
 type CategoryBreakdownEntry = {
   id: string
   name: string
@@ -57,7 +67,30 @@ type MonthlyBalanceEntry = {
   positiveAmounts: MoneyAmount[]
   negativeAmounts: MoneyAmount[]
   endingAmounts: MoneyAmount[]
+  accountBalances: AccountBalanceEntry[]
 }
+type ConvertedMoney = {
+  currencyCode: string
+  amountMinor: number
+  missingCurrencies: string[]
+}
+type MonthlyBalanceChartPoint = {
+  id: string
+  label: string
+  shortLabel: string
+  amountMinor: number
+  missingCurrencies: string[]
+}
+type FxRateState = {
+  status: 'idle' | 'loading' | 'ready' | 'failed'
+  baseCurrencyCode: string
+  date: string | null
+  rates: Record<string, number>
+  error: string | null
+}
+type FrankfurterRatesPayload =
+  | { date?: string; rates?: Record<string, number> }
+  | { date?: string; base?: string; quote?: string; rate?: number }[]
 type ImportReviewGroup = {
   id: string
   imports: FinanceImport[]
@@ -144,6 +177,20 @@ export default function Finance() {
   const [search, setSearch] = useState('')
   const [movementSortDirection, setMovementSortDirection] = useState<MovementSortDirection>('desc')
   const [reviewSortDirection, setReviewSortDirection] = useState<MovementSortDirection>('desc')
+  const [dashboardBalanceExpanded, setDashboardBalanceExpanded] = useState(false)
+  const [dashboardReportingCurrencyCode, setDashboardReportingCurrencyCode] = useState('MXN')
+  const [dashboardBalanceSnapshot, setDashboardBalanceSnapshot] = useState<ConvertedMoney | null>(null)
+  const [dashboardChartSnapshot, setDashboardChartSnapshot] = useState<{
+    currencyCode: string
+    points: MonthlyBalanceChartPoint[]
+  } | null>(null)
+  const [dashboardFx, setDashboardFx] = useState<FxRateState>({
+    status: 'idle',
+    baseCurrencyCode: 'MXN',
+    date: null,
+    rates: {},
+    error: null,
+  })
   const [editingMovementLabel, setEditingMovementLabel] = useState<{ id: string; value: string } | null>(null)
   const [editingMovementDate, setEditingMovementDate] = useState<{ id: string; value: string } | null>(null)
   const [accountDraft, setAccountDraft] = useState<AccountDraft>(EMPTY_ACCOUNT_DRAFT)
@@ -287,8 +334,24 @@ export default function Finance() {
     .filter((movement) => selectedDashboardCurrencyFilterIds.length === 0 || selectedDashboardCurrencyFilterIds.includes(movement.currencyCode))
   const dashboardAccountMovements = dashboardPeriodMovements.filter((movement) => movement.status !== 'ignored')
   const dashboardNonTransferMovements = dashboardAccountMovements.filter((movement) => !isTransferLikeMovement(movement, scopedCategories))
-  const dashboardBalanceTotals = summarizeMovements(dashboardNonTransferMovements)
-  const monthlyBalance = buildMonthlyBalance(dashboardNonTransferMovements)
+  const dashboardAccountBalances = buildAccountBalanceBreakdown(dashboardAccountMovements, scopedAccounts, selectedDashboardCurrencyFilterIds)
+  const dashboardBalanceTotals = summarizeAccountBalances(dashboardAccountBalances)
+  const monthlyBalance = buildMonthlyBalance(dashboardAccountMovements, scopedAccounts, selectedDashboardCurrencyFilterIds)
+  const dashboardFxReady = dashboardFx.status === 'ready' && dashboardFx.baseCurrencyCode === dashboardReportingCurrencyCode
+  const dashboardFxFailed = dashboardFx.status === 'failed' && dashboardFx.baseCurrencyCode === dashboardReportingCurrencyCode
+  const dashboardConversionRates = dashboardFxReady ? dashboardFx.rates : dashboardFxFailed ? {} : null
+  const convertedDashboardBalance = dashboardConversionRates
+    ? convertMoneyAmounts(dashboardBalanceTotals.netAmounts, dashboardReportingCurrencyCode, dashboardConversionRates)
+    : null
+  const displayedDashboardBalance = convertedDashboardBalance ?? dashboardBalanceSnapshot
+  const dashboardBalanceIsLoading = !convertedDashboardBalance && Boolean(dashboardBalanceSnapshot)
+  const readyMonthlyBalanceChartPoints = dashboardConversionRates
+    ? buildMonthlyBalanceChartPoints(monthlyBalance, dashboardReportingCurrencyCode, dashboardConversionRates)
+    : null
+  const monthlyBalanceChartPoints = readyMonthlyBalanceChartPoints ?? dashboardChartSnapshot?.points ?? []
+  const monthlyBalanceChartCurrencyCode = readyMonthlyBalanceChartPoints
+    ? dashboardReportingCurrencyCode
+    : dashboardChartSnapshot?.currencyCode ?? dashboardReportingCurrencyCode
   const categoryBreakdown = buildCategoryBreakdown(dashboardNonTransferMovements, scopedCategories)
   const accountStats = useMemo(
     () => new Map(scopedAccounts.map((account) => [account.id, buildAccountStats(account, scopedMovements)])),
@@ -503,6 +566,59 @@ export default function Finance() {
     if (!organizationStorageKey || !selectedOrganizationId) return
     localStorage.setItem(organizationStorageKey, selectedOrganizationId)
   }, [organizationStorageKey, selectedOrganizationId])
+
+  useEffect(() => {
+    const targetCurrencies = CURRENCIES.filter((currencyCode) => currencyCode !== dashboardReportingCurrencyCode)
+    if (targetCurrencies.length === 0) {
+      setDashboardFx({
+        status: 'ready',
+        baseCurrencyCode: dashboardReportingCurrencyCode,
+        date: null,
+        rates: {},
+        error: null,
+      })
+      return
+    }
+
+    const controller = new AbortController()
+    setDashboardFx((current) => ({
+      ...current,
+      status: 'loading',
+      baseCurrencyCode: dashboardReportingCurrencyCode,
+      error: null,
+    }))
+
+    void fetch(`https://api.frankfurter.dev/v2/rates?base=${encodeURIComponent(dashboardReportingCurrencyCode)}&quotes=${targetCurrencies.join(',')}`, {
+      signal: controller.signal,
+    })
+      .then((response) => {
+        if (!response.ok) throw new Error(`fx request failed (${response.status})`)
+        return response.json() as Promise<FrankfurterRatesPayload>
+      })
+      .then((payload) => {
+        if (controller.signal.aborted) return
+        const parsed = parseFrankfurterRates(payload, dashboardReportingCurrencyCode)
+        setDashboardFx({
+          status: 'ready',
+          baseCurrencyCode: dashboardReportingCurrencyCode,
+          date: parsed.date,
+          rates: parsed.rates,
+          error: null,
+        })
+      })
+      .catch((error: unknown) => {
+        if (controller.signal.aborted) return
+        setDashboardFx({
+          status: 'failed',
+          baseCurrencyCode: dashboardReportingCurrencyCode,
+          date: null,
+          rates: {},
+          error: error instanceof Error ? error.message : 'fx request failed',
+        })
+      })
+
+    return () => controller.abort()
+  }, [dashboardReportingCurrencyCode])
 
   useEffect(() => {
     if (!selectedOrganizationId || !token) {
@@ -1329,17 +1445,73 @@ export default function Finance() {
             </div>
           </div>
 
-          <section className="border border-[rgba(0,255,140,0.14)] bg-pit-2 px-5 py-4 font-mono">
-            <div className="flex flex-wrap items-end justify-between gap-4">
-              <div>
-                <div className="text-[10px] uppercase tracking-label text-fg-4">total balance</div>
-                <MoneyStack amounts={dashboardBalanceTotals.netAmounts} size="hero" aligned />
-              </div>
-              <div className="grid gap-1 text-right text-xs">
-                <span className="text-fg-3">{dashboardNonTransferMovements.length} counted movements</span>
-                <span className="text-fg-4">transfers excluded</span>
+          <section className="border border-[rgba(0,255,140,0.14)] bg-pit-2 font-mono">
+            <div className="grid gap-4 px-5 py-4 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-end">
+              <button
+                type="button"
+                onClick={() => setDashboardBalanceExpanded((current) => !current)}
+                className="min-w-0 text-left transition hover:text-accent"
+              >
+                <div className="flex items-center gap-2 text-[10px] uppercase tracking-label text-fg-4">
+                  {dashboardBalanceExpanded ? <ChevronDown className="h-3 w-3 text-accent" /> : <ChevronRight className="h-3 w-3 text-accent" />}
+                  <span>total balance · reported in {dashboardReportingCurrencyCode}</span>
+                </div>
+                {displayedDashboardBalance ? (
+                  <div className={dashboardBalanceIsLoading ? 'finance-balance-shimmer inline-block' : undefined}>
+                    <MoneyStack
+                      amounts={[{ currencyCode: displayedDashboardBalance.currencyCode, amountMinor: displayedDashboardBalance.amountMinor }]}
+                      size="hero"
+                      aligned
+                    />
+                  </div>
+                ) : (
+                  <div className="mt-2 h-9 w-72 max-w-full animate-pulse bg-[linear-gradient(90deg,rgba(0,255,140,0.06),rgba(0,255,140,0.16),rgba(0,255,140,0.06))]" />
+                )}
+                <div className="mt-2 text-xs text-fg-4">
+                  {dashboardFx.status === 'ready' && dashboardFx.date ? `fx ${dashboardFx.date}` : null}
+                  {dashboardFx.status === 'loading' ? 'loading fx rates...' : null}
+                  {dashboardFx.status === 'failed' ? 'fx unavailable · showing convertible currencies only' : null}
+                  {convertedDashboardBalance?.missingCurrencies.length ? ` · missing ${convertedDashboardBalance.missingCurrencies.join(', ')}` : null}
+                </div>
+              </button>
+              <div className="grid gap-3 lg:min-w-80 lg:text-right">
+                <div className="flex flex-wrap gap-1 lg:justify-end">
+                  {CURRENCIES.map((currencyCode) => (
+                    <button
+                      key={currencyCode}
+                      type="button"
+                      onClick={() => {
+                        if (displayedDashboardBalance) setDashboardBalanceSnapshot(displayedDashboardBalance)
+                        if (monthlyBalanceChartPoints.length > 0) {
+                          setDashboardChartSnapshot({
+                            currencyCode: monthlyBalanceChartCurrencyCode,
+                            points: monthlyBalanceChartPoints,
+                          })
+                        }
+                        setDashboardReportingCurrencyCode(currencyCode)
+                      }}
+                      className={`border px-2.5 py-1.5 text-[10px] uppercase tracking-label transition ${
+                        dashboardReportingCurrencyCode === currencyCode
+                          ? 'border-[rgba(0,255,140,0.45)] bg-[rgba(0,255,136,0.08)] text-accent'
+                          : 'border-[rgba(0,255,140,0.14)] text-fg-4 hover:border-[rgba(0,255,140,0.28)] hover:text-fg-2'
+                      }`}
+                    >
+                      {currencyCode}
+                    </button>
+                  ))}
+                </div>
+                <div className="grid gap-1 text-xs">
+                  <span className="text-fg-3">{dashboardAccountMovements.length} counted movements</span>
+                  <span className="text-fg-4">native balances</span>
+                </div>
+                <MoneyStack amounts={dashboardBalanceTotals.netAmounts} tone="byAmount" align="right" />
               </div>
             </div>
+            {dashboardBalanceExpanded ? (
+              <div className="border-t border-[rgba(0,255,140,0.1)] px-5 py-3">
+                <AccountBalanceBreakdown entries={dashboardAccountBalances} />
+              </div>
+            ) : null}
           </section>
 
           <div className="mt-4 grid gap-4">
@@ -1347,97 +1519,27 @@ export default function Finance() {
               <div className="flex items-center justify-between border-b border-[rgba(0,255,140,0.12)] px-4 py-3 font-mono">
                 <div>
                   <div className="text-[10px] uppercase tracking-label text-fg-4">balance by month</div>
-                  <div className="mt-1 text-sm lowercase text-fg-1">starting and ending balance · transfers excluded</div>
+                  <div className="mt-1 text-sm lowercase text-fg-1">ending balance · reported in {dashboardReportingCurrencyCode}</div>
                 </div>
                 <CalendarDays className="h-4 w-4 text-accent" />
               </div>
-              <div className="grid gap-2 p-3 md:hidden">
-                {monthlyBalance.map((entry) => {
-                  return (
-                    <div key={entry.id} className="border border-[rgba(0,255,140,0.1)] bg-pit px-3 py-3 font-mono text-xs">
-                      <div className="mb-2 flex items-start justify-between gap-3">
-                        <div className="min-w-0">
-                          <div className="truncate text-fg-1">{entry.label}</div>
-                          <div className="mt-0.5 text-[10px] uppercase tracking-label text-fg-4">month balance</div>
-                        </div>
-                        <div className="shrink-0 text-right">
-                          <MoneyStack amounts={entry.endingAmounts} tone="byAmount" align="right" />
-                        </div>
-                      </div>
-                      <div className="grid grid-cols-2 gap-2">
-                        <FinanceMetric
-                          label="start"
-                          value={<MoneyStack amounts={entry.startingAmounts} tone="byAmount" />}
-                        />
-                        <FinanceMetric
-                          label="end"
-                          value={<MoneyStack amounts={entry.endingAmounts} tone="byAmount" />}
-                        />
-                      </div>
-                      <div className="mt-2 grid grid-cols-2 gap-2">
-                        <FinanceMetric
-                          label="income"
-                          value={<MoneyStack amounts={entry.positiveAmounts} tone="ok" />}
-                          tone="ok"
-                        />
-                        <FinanceMetric
-                          label="outflow"
-                          value={<MoneyStack amounts={entry.negativeAmounts} tone="fail" />}
-                          tone="fail"
-                        />
-                      </div>
-                    </div>
-                  )
-                })}
-                {monthlyBalance.length === 0 ? (
-                  <div className="px-3 py-10 text-center font-mono text-sm text-fg-4">
+              <div className="p-4">
+                {monthlyBalanceChartPoints.length === 0 ? (
+                  <div className="flex min-h-56 items-center justify-center border border-dashed border-[rgba(0,255,140,0.12)] font-mono text-sm text-fg-4">
                     // no movements in this period
                   </div>
-                ) : null}
-              </div>
-              <div className="hidden max-h-[520px] overflow-auto md:block">
-                <table className="w-full border-collapse font-mono text-xs">
-                  <thead className="sticky top-0 bg-pit text-[10px] uppercase tracking-label text-fg-4">
-                    <tr>
-                      <th className="border-b border-[rgba(0,255,140,0.12)] px-3 py-2 text-left">month</th>
-                      <th className="border-b border-[rgba(0,255,140,0.12)] px-3 py-2 text-right">start</th>
-                      <th className="border-b border-[rgba(0,255,140,0.12)] px-3 py-2 text-right">income</th>
-                      <th className="border-b border-[rgba(0,255,140,0.12)] px-3 py-2 text-right">outflow</th>
-                      <th className="border-b border-[rgba(0,255,140,0.12)] px-3 py-2 text-right">end</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {monthlyBalance.map((entry) => {
-                      return (
-                        <tr key={entry.id} className="border-b border-[rgba(0,255,140,0.08)] text-fg-2 hover:bg-[rgba(0,255,136,0.04)]">
-                          <td className="px-3 py-2">
-                            <div className="text-fg-1">{entry.label}</div>
-                            <div className="mt-0.5 text-[10px] uppercase tracking-label text-fg-4">running balance</div>
-                          </td>
-                          <td className="whitespace-nowrap px-3 py-2 text-right">
-                            <MoneyStack amounts={entry.startingAmounts} tone="byAmount" align="right" />
-                          </td>
-                          <td className="whitespace-nowrap px-3 py-2 text-right text-ok">
-                            <MoneyStack amounts={entry.positiveAmounts} tone="ok" align="right" />
-                          </td>
-                          <td className="whitespace-nowrap px-3 py-2 text-right text-fail">
-                            <MoneyStack amounts={entry.negativeAmounts} tone="fail" align="right" />
-                          </td>
-                          <td className="whitespace-nowrap px-3 py-2 text-right">
-                            <MoneyStack amounts={entry.endingAmounts} tone="byAmount" align="right" />
-                          </td>
-                        </tr>
-                      )
-                    })}
-                    {monthlyBalance.length === 0 && (
-                      <tr>
-                        <td colSpan={5} className="px-3 py-12 text-center font-mono text-sm text-fg-4">
-                          // no movements in this period
-                        </td>
-                      </tr>
-                    )}
-                  </tbody>
-                </table>
+                ) : (
+                  <>
+                    <div className="h-64">
+                      <MonthlyBalanceAreaChart points={monthlyBalanceChartPoints} currencyCode={monthlyBalanceChartCurrencyCode} />
+                    </div>
+                    <div className="mt-3 flex justify-between gap-3 overflow-hidden font-mono text-[10px] uppercase tracking-label text-fg-4">
+                      {monthlyBalanceChartPoints.map((point) => (
+                        <span key={point.id} className="truncate">{point.shortLabel}</span>
+                      ))}
+                    </div>
+                  </>
+                )}
               </div>
             </section>
 
@@ -2919,6 +3021,60 @@ export default function Finance() {
   )
 }
 
+function AccountBalanceBreakdown({
+  entries,
+  showFlow = false,
+}: {
+  entries: AccountBalanceEntry[]
+  showFlow?: boolean
+}) {
+  if (entries.length === 0) {
+    return (
+      <div className="px-1 py-4 text-center font-mono text-xs text-fg-4">
+        // no account balances in this period
+      </div>
+    )
+  }
+
+  return (
+    <div className="divide-y divide-[rgba(0,255,140,0.08)] font-mono text-xs">
+      {entries.map((entry) => (
+        <div
+          key={entry.accountId}
+          className={`grid gap-2 py-2 md:items-center ${showFlow ? 'md:grid-cols-[minmax(0,1.2fr)_0.7fr_0.7fr_0.7fr_0.7fr]' : 'md:grid-cols-[minmax(0,1fr)_auto]'}`}
+        >
+          <div className="min-w-0">
+            <div className="truncate text-fg-1">{entry.accountName}</div>
+            <div className="mt-0.5 text-[10px] uppercase tracking-label text-fg-4">
+              {entry.currencyCode} · {entry.movementCount} movements
+            </div>
+          </div>
+          {showFlow ? (
+            <>
+              <div className="flex items-center justify-between gap-2 md:block md:text-right">
+                <span className="text-[10px] uppercase tracking-label text-fg-4 md:hidden">start</span>
+                <MoneyStack amounts={[{ currencyCode: entry.currencyCode, amountMinor: entry.startingAmountMinor }]} tone="byAmount" align="right" />
+              </div>
+              <div className="flex items-center justify-between gap-2 md:block md:text-right">
+                <span className="text-[10px] uppercase tracking-label text-fg-4 md:hidden">income</span>
+                <MoneyStack amounts={[{ currencyCode: entry.currencyCode, amountMinor: entry.positiveMinor }]} tone="ok" align="right" />
+              </div>
+              <div className="flex items-center justify-between gap-2 md:block md:text-right">
+                <span className="text-[10px] uppercase tracking-label text-fg-4 md:hidden">outflow</span>
+                <MoneyStack amounts={[{ currencyCode: entry.currencyCode, amountMinor: entry.negativeMinor }]} tone="fail" align="right" />
+              </div>
+            </>
+          ) : null}
+          <div className="flex items-center justify-between gap-2 md:block md:text-right">
+            <span className="text-[10px] uppercase tracking-label text-fg-4 md:hidden">balance</span>
+            <MoneyStack amounts={[{ currencyCode: entry.currencyCode, amountMinor: entry.endingAmountMinor }]} tone="byAmount" align="right" />
+          </div>
+        </div>
+      ))}
+    </div>
+  )
+}
+
 function FinanceMetric({ label, value, tone = 'default' }: { label: string; value: ReactNode; tone?: 'default' | 'ok' | 'fail' }) {
   return (
     <div className="flex min-w-0 items-baseline gap-2">
@@ -3222,6 +3378,142 @@ function CategoryPieChart({ slices }: { slices: CategoryBreakdownEntry[] }) {
   )
 }
 
+function MonthlyBalanceAreaChart({
+  points,
+  currencyCode,
+}: {
+  points: MonthlyBalanceChartPoint[]
+  currencyCode: string
+}) {
+  const [hoverIndex, setHoverIndex] = useState<number | null>(null)
+  const wrapperRef = useRef<HTMLDivElement | null>(null)
+  const width = 640
+  const height = 220
+  const padTop = 18
+  const padBottom = 24
+  const values = points.map((point) => point.amountMinor)
+  const minValue = Math.min(0, ...values)
+  const maxValue = Math.max(0, ...values)
+  const range = Math.max(maxValue - minValue, 1)
+  const chartHeight = height - padTop - padBottom
+  const chartPoints = points.map((point, index) => ({
+    ...point,
+    x: (index / Math.max(points.length - 1, 1)) * width,
+    y: padTop + ((maxValue - point.amountMinor) / range) * chartHeight,
+  }))
+  const linePath = chartPoints.map((point, index) => `${index === 0 ? 'M' : 'L'} ${point.x},${point.y}`).join(' ')
+  const areaPath = `${linePath} L ${width},${height - padBottom} L 0,${height - padBottom} Z`
+  const zeroY = padTop + ((maxValue - 0) / range) * chartHeight
+  const hoveredPoint = hoverIndex == null ? null : chartPoints[hoverIndex]
+  const tooltipXPercent = hoveredPoint ? (hoveredPoint.x / width) * 100 : 0
+  const tooltipTransform = hoverIndex === 0
+    ? 'translateY(-100%)'
+    : hoverIndex === chartPoints.length - 1
+      ? 'translate(-100%, -100%)'
+      : 'translate(-50%, -100%)'
+
+  function handleMouseMove(event: MouseEvent<HTMLDivElement>) {
+    if (!wrapperRef.current || points.length === 0) return
+    const rect = wrapperRef.current.getBoundingClientRect()
+    const ratio = Math.max(0, Math.min(1, (event.clientX - rect.left) / rect.width))
+    setHoverIndex(Math.round(ratio * (points.length - 1)))
+  }
+
+  return (
+    <div
+      ref={wrapperRef}
+      className="relative h-full w-full cursor-crosshair"
+      onMouseMove={handleMouseMove}
+      onMouseLeave={() => setHoverIndex(null)}
+    >
+      <svg viewBox={`0 0 ${width} ${height}`} preserveAspectRatio="none" className="block h-full w-full">
+        <defs>
+          <linearGradient id="finance-monthly-balance-grad" x1="0" x2="0" y1="0" y2="1">
+            <stop offset="0%" stopColor="rgb(0,255,136)" stopOpacity="0.18" />
+            <stop offset="100%" stopColor="rgb(0,255,136)" stopOpacity="0" />
+          </linearGradient>
+        </defs>
+        {[0.2, 0.4, 0.6, 0.8].map((ratio) => (
+          <line
+            key={ratio}
+            x1="0"
+            x2={width}
+            y1={padTop + ratio * chartHeight}
+            y2={padTop + ratio * chartHeight}
+            stroke="rgba(0,255,140,0.12)"
+            strokeDasharray="2 5"
+            vectorEffect="non-scaling-stroke"
+          />
+        ))}
+        <line
+          x1="0"
+          x2={width}
+          y1={zeroY}
+          y2={zeroY}
+          stroke="rgba(220,255,231,0.18)"
+          strokeDasharray="4 5"
+          vectorEffect="non-scaling-stroke"
+        />
+        <path d={areaPath} fill="url(#finance-monthly-balance-grad)" />
+        <path d={linePath} fill="none" stroke="rgb(0,255,136)" strokeWidth="1.8" vectorEffect="non-scaling-stroke" />
+        {hoveredPoint ? (
+          <line
+            x1={hoveredPoint.x}
+            x2={hoveredPoint.x}
+            y1={0}
+            y2={height}
+            stroke="rgb(0,255,136)"
+            strokeWidth="1"
+            strokeDasharray="2 3"
+            opacity="0.5"
+            vectorEffect="non-scaling-stroke"
+          />
+        ) : null}
+      </svg>
+      {chartPoints.map((point, index) => {
+        const size = index === chartPoints.length - 1 ? 8 : 5
+        const xPercent = (point.x / width) * 100
+        const yPercent = (point.y / height) * 100
+        return (
+          <span
+            key={point.id}
+            aria-hidden
+            className="pointer-events-none absolute rounded-full"
+            style={{
+              left: `${xPercent}%`,
+              top: `${yPercent}%`,
+              width: size,
+              height: size,
+              marginLeft: index === 0 ? 0 : index === chartPoints.length - 1 ? -size : -size / 2,
+              marginTop: -size / 2,
+              backgroundColor: index === chartPoints.length - 1 ? 'rgb(0,255,136)' : 'rgb(0,7,4)',
+              border: '1px solid rgb(0,255,136)',
+              boxSizing: 'border-box',
+            }}
+          />
+        )
+      })}
+      {hoveredPoint ? (
+        <div
+          className="pointer-events-none absolute z-20 min-w-44 border border-[rgba(0,255,140,0.24)] bg-pit px-3 py-2 font-mono text-xs shadow-[0_12px_36px_rgba(0,0,0,0.55)]"
+          style={{
+            left: `${tooltipXPercent}%`,
+            top: `${(hoveredPoint.y / height) * 100}%`,
+            marginTop: '-12px',
+            transform: tooltipTransform,
+          }}
+        >
+          <div className="text-[10px] uppercase tracking-label text-fg-4">{hoveredPoint.label}</div>
+          <div className="mt-1 text-fg-1 tabular-nums">{formatMoney(hoveredPoint.amountMinor, currencyCode)}</div>
+          {hoveredPoint.missingCurrencies.length > 0 ? (
+            <div className="mt-1 text-[10px] uppercase tracking-label text-fail">missing {hoveredPoint.missingCurrencies.join(', ')}</div>
+          ) : null}
+        </div>
+      ) : null}
+    </div>
+  )
+}
+
 function FinanceEmptyState({
   title,
   body,
@@ -3489,6 +3781,32 @@ function formatMonthLabel(value: number) {
   return new Intl.DateTimeFormat('en-US', { month: 'short', year: 'numeric', timeZone: 'UTC' }).format(new Date(value))
 }
 
+function formatMonthShortLabel(value: string) {
+  const year = Number(value.slice(0, 4))
+  const month = Number(value.slice(5, 7))
+  if (!year || !month) return value
+  return new Intl.DateTimeFormat('en-US', { month: 'short', timeZone: 'UTC' }).format(new Date(Date.UTC(year, month - 1, 1)))
+}
+
+function parseFrankfurterRates(payload: FrankfurterRatesPayload, baseCurrencyCode: string) {
+  if (Array.isArray(payload)) {
+    const rates: Record<string, number> = {}
+    let date: string | null = null
+    for (const row of payload) {
+      if (row.base && row.base !== baseCurrencyCode) continue
+      if (!row.quote || typeof row.rate !== 'number') continue
+      rates[row.quote] = row.rate
+      date = date ?? row.date ?? null
+    }
+    return { date, rates }
+  }
+
+  return {
+    date: payload.date ?? null,
+    rates: payload.rates ?? {},
+  }
+}
+
 function parseMoneyToMinor(value: string) {
   const normalized = value.replace(/,/g, '').trim()
   if (!normalized) return null
@@ -3514,6 +3832,114 @@ function summarizeMovements(movements: Schema['tables']['fin_movements']['row'][
     negativeAmounts: moneyAmountsFromMap(totals, 'negativeMinor'),
     netAmounts: moneyAmountsFromMap(totals, 'netMinor'),
   }
+}
+
+function convertMoneyAmounts(
+  amounts: MoneyAmount[],
+  reportingCurrencyCode: string,
+  ratesFromReportingCurrency: Record<string, number>,
+): ConvertedMoney {
+  const missingCurrencies = new Set<string>()
+  const amountMinor = amounts.reduce((sum, amount) => {
+    const rate = conversionRateToReportingCurrency(amount.currencyCode, reportingCurrencyCode, ratesFromReportingCurrency)
+    if (rate == null) {
+      missingCurrencies.add(amount.currencyCode)
+      return sum
+    }
+    return sum + Math.round(amount.amountMinor * rate)
+  }, 0)
+
+  return {
+    currencyCode: reportingCurrencyCode,
+    amountMinor,
+    missingCurrencies: Array.from(missingCurrencies).sort((a, b) => currencySortValue(a).localeCompare(currencySortValue(b))),
+  }
+}
+
+function conversionRateToReportingCurrency(
+  sourceCurrencyCode: string,
+  reportingCurrencyCode: string,
+  ratesFromReportingCurrency: Record<string, number>,
+) {
+  if (sourceCurrencyCode === reportingCurrencyCode) return 1
+  const reportingToSourceRate = ratesFromReportingCurrency[sourceCurrencyCode]
+  if (!reportingToSourceRate || reportingToSourceRate <= 0) return null
+  return 1 / reportingToSourceRate
+}
+
+function buildMonthlyBalanceChartPoints(
+  monthlyBalance: MonthlyBalanceEntry[],
+  reportingCurrencyCode: string,
+  ratesFromReportingCurrency: Record<string, number>,
+): MonthlyBalanceChartPoint[] {
+  return [...monthlyBalance]
+    .reverse()
+    .map((entry) => {
+      const converted = convertMoneyAmounts(entry.endingAmounts, reportingCurrencyCode, ratesFromReportingCurrency)
+      return {
+        id: entry.id,
+        label: entry.label,
+        shortLabel: formatMonthShortLabel(entry.id),
+        amountMinor: converted.amountMinor,
+        missingCurrencies: converted.missingCurrencies,
+      }
+    })
+}
+
+function summarizeAccountBalances(entries: AccountBalanceEntry[]): MovementSummary {
+  const totals = new Map<string, { positiveMinor: number; negativeMinor: number; netMinor: number }>()
+  for (const entry of entries) {
+    const current = totals.get(entry.currencyCode) ?? { positiveMinor: 0, negativeMinor: 0, netMinor: 0 }
+    current.positiveMinor += entry.positiveMinor
+    current.negativeMinor += entry.negativeMinor
+    current.netMinor += entry.endingAmountMinor
+    totals.set(entry.currencyCode, current)
+  }
+  return {
+    positiveAmounts: moneyAmountsFromMap(totals, 'positiveMinor'),
+    negativeAmounts: moneyAmountsFromMap(totals, 'negativeMinor'),
+    netAmounts: moneyAmountsFromMap(totals, 'netMinor'),
+  }
+}
+
+function buildAccountBalanceBreakdown(
+  movements: FinanceMovement[],
+  accounts: FinanceAccount[],
+  currencyFilterIds: string[] = [],
+): AccountBalanceEntry[] {
+  const accountMap = new Map(
+    accounts
+      .filter((account) => currencyFilterIds.length === 0 || currencyFilterIds.includes(account.currencyCode))
+      .map((account) => [account.id, account]),
+  )
+  const stats = new Map<string, { positiveMinor: number; negativeMinor: number; netMinor: number; movementCount: number }>()
+
+  for (const movement of movements) {
+    const account = accountMap.get(movement.accountId)
+    if (!account) continue
+    const current = stats.get(account.id) ?? { positiveMinor: 0, negativeMinor: 0, netMinor: 0, movementCount: 0 }
+    current.positiveMinor += movement.amountMinor > 0 ? movement.amountMinor : 0
+    current.negativeMinor += movement.amountMinor < 0 ? movement.amountMinor : 0
+    current.netMinor += movement.amountMinor
+    current.movementCount += 1
+    stats.set(account.id, current)
+  }
+
+  return Array.from(accountMap.values())
+    .map((account) => {
+      const accountStats = stats.get(account.id) ?? { positiveMinor: 0, negativeMinor: 0, netMinor: 0, movementCount: 0 }
+      return {
+        accountId: account.id,
+        accountName: account.name,
+        currencyCode: account.currencyCode,
+        movementCount: accountStats.movementCount,
+        startingAmountMinor: 0,
+        positiveMinor: accountStats.positiveMinor,
+        negativeMinor: accountStats.negativeMinor,
+        endingAmountMinor: accountStats.netMinor,
+      }
+    })
+    .sort(sortAccountBalanceEntries)
 }
 
 function movementCurrencyTotals(movements: Schema['tables']['fin_movements']['row'][]) {
@@ -3549,27 +3975,68 @@ function currencySortValue(currencyCode: string) {
   return `${knownIndex === -1 ? 999 : knownIndex}:${currencyCode}`
 }
 
-function buildMonthlyBalance(movements: Schema['tables']['fin_movements']['row'][]): MonthlyBalanceEntry[] {
+function buildMonthlyBalance(
+  movements: FinanceMovement[],
+  accounts: FinanceAccount[],
+  currencyFilterIds: string[] = [],
+): MonthlyBalanceEntry[] {
+  const accountMap = new Map(
+    accounts
+      .filter((account) => currencyFilterIds.length === 0 || currencyFilterIds.includes(account.currencyCode))
+      .map((account) => [account.id, account]),
+  )
   const months = new Map<string, {
     totals: Map<string, { positiveMinor: number; negativeMinor: number; netMinor: number }>
+    accountTotals: Map<string, { positiveMinor: number; negativeMinor: number; netMinor: number; movementCount: number }>
   }>()
 
   for (const movement of movements) {
+    const account = accountMap.get(movement.accountId)
+    if (!account) continue
     const id = monthKey(movement.transactionDate)
     const current = months.get(id) ?? {
       totals: new Map<string, { positiveMinor: number; negativeMinor: number; netMinor: number }>(),
+      accountTotals: new Map<string, { positiveMinor: number; negativeMinor: number; netMinor: number; movementCount: number }>(),
     }
-    addMovementToCurrencyTotals(current.totals, movement)
+    addMovementToAccountCurrencyTotals(current.totals, movement, account.currencyCode)
+    const accountCurrent = current.accountTotals.get(account.id) ?? { positiveMinor: 0, negativeMinor: 0, netMinor: 0, movementCount: 0 }
+    accountCurrent.positiveMinor += movement.amountMinor > 0 ? movement.amountMinor : 0
+    accountCurrent.negativeMinor += movement.amountMinor < 0 ? movement.amountMinor : 0
+    accountCurrent.netMinor += movement.amountMinor
+    accountCurrent.movementCount += 1
+    current.accountTotals.set(account.id, accountCurrent)
     months.set(id, current)
   }
 
   const runningTotals = new Map<string, number>()
+  const runningAccountTotals = new Map<string, number>()
   const ascendingEntries = Array.from(months.entries()).sort(([a], [b]) => a.localeCompare(b))
   const entries = ascendingEntries.map(([id, value]) => {
     const monthCurrencies = Array.from(value.totals.keys())
     const startingAmounts = moneyAmountsFromSimpleMap(withZeroCurrencies(runningTotals, monthCurrencies))
+    const accountBalances = Array.from(accountMap.values())
+      .map((account) => {
+        const accountMonthTotals = value.accountTotals.get(account.id) ?? { positiveMinor: 0, negativeMinor: 0, netMinor: 0, movementCount: 0 }
+        const startingAmountMinor = runningAccountTotals.get(account.id) ?? 0
+        const endingAmountMinor = startingAmountMinor + accountMonthTotals.netMinor
+        return {
+          accountId: account.id,
+          accountName: account.name,
+          currencyCode: account.currencyCode,
+          movementCount: accountMonthTotals.movementCount,
+          startingAmountMinor,
+          positiveMinor: accountMonthTotals.positiveMinor,
+          negativeMinor: accountMonthTotals.negativeMinor,
+          endingAmountMinor,
+        }
+      })
+      .filter((entry) => entry.movementCount > 0 || entry.startingAmountMinor !== 0 || entry.endingAmountMinor !== 0)
+      .sort(sortAccountBalanceEntries)
     for (const [currencyCode, totals] of value.totals.entries()) {
       runningTotals.set(currencyCode, (runningTotals.get(currencyCode) ?? 0) + totals.netMinor)
+    }
+    for (const [accountId, totals] of value.accountTotals.entries()) {
+      runningAccountTotals.set(accountId, (runningAccountTotals.get(accountId) ?? 0) + totals.netMinor)
     }
     return {
       id,
@@ -3578,9 +4045,28 @@ function buildMonthlyBalance(movements: Schema['tables']['fin_movements']['row']
       positiveAmounts: moneyAmountsFromMap(value.totals, 'positiveMinor'),
       negativeAmounts: moneyAmountsFromMap(value.totals, 'negativeMinor'),
       endingAmounts: moneyAmountsFromSimpleMap(runningTotals),
+      accountBalances,
     }
   })
   return entries.reverse()
+}
+
+function addMovementToAccountCurrencyTotals(
+  totals: Map<string, { positiveMinor: number; negativeMinor: number; netMinor: number }>,
+  movement: FinanceMovement,
+  currencyCode: string,
+) {
+  const current = totals.get(currencyCode) ?? { positiveMinor: 0, negativeMinor: 0, netMinor: 0 }
+  current.positiveMinor += movement.amountMinor > 0 ? movement.amountMinor : 0
+  current.negativeMinor += movement.amountMinor < 0 ? movement.amountMinor : 0
+  current.netMinor += movement.amountMinor
+  totals.set(currencyCode, current)
+}
+
+function sortAccountBalanceEntries(a: AccountBalanceEntry, b: AccountBalanceEntry) {
+  return currencySortValue(a.currencyCode).localeCompare(currencySortValue(b.currencyCode)) ||
+    b.endingAmountMinor - a.endingAmountMinor ||
+    a.accountName.localeCompare(b.accountName)
 }
 
 function moneyAmountsFromSimpleMap(totals: Map<string, number>): MoneyAmount[] {

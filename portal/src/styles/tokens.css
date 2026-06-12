@@ -213,6 +213,22 @@ hr { border: 0; border-top: var(--b-hair); margin: var(--s-6) 0; }
 
 .glow      { text-shadow: var(--glow-md); }
 .cursor::after { content: '▊'; color: var(--accent); animation: pach-blink 1s var(--ease-step) infinite; }
+.finance-balance-shimmer {
+  animation: finance-balance-shimmer 0.9s linear infinite;
+  background: linear-gradient(90deg, var(--fg-1) 0%, var(--fg-1) 35%, var(--accent) 50%, var(--fg-1) 65%, var(--fg-1) 100%);
+  background-size: 220% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+}
+.finance-balance-shimmer span {
+  animation: inherit;
+  background: inherit;
+  background-size: inherit;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent !important;
+}
 
 @keyframes pach-blink { 0%, 50% { opacity: 1 } 51%, 100% { opacity: 0 } }
 @keyframes pach-rain { from { transform: translateY(-100%); } to { transform: translateY(100%); } }
+@keyframes finance-balance-shimmer { from { background-position: 120% 0; } to { background-position: -120% 0; } }
