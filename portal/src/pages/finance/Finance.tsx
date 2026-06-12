@@ -111,7 +111,7 @@ type ImportReviewGroup = {
 
 function tabFromPath(pathname: string): Tab {
   if (categoryIdFromPath(pathname)) return 'category'
-  if (pathname === '/finance/dashboard') return 'dashboard'
+  if (pathname === '/finance' || pathname === '/finance/' || pathname === '/finance/dashboard') return 'dashboard'
   return pathname === '/finance/accounts' || pathname === '/finance/accounts-cards' ? 'accounts' : 'movements'
 }
 
@@ -1842,7 +1842,6 @@ export default function Finance() {
               <div className="flex items-center justify-between border-b border-[rgba(0,255,140,0.12)] px-4 py-3 font-mono">
                 <div>
                   <div className="text-[10px] uppercase tracking-label text-fg-4">balance by month</div>
-                  <div className="mt-1 text-sm lowercase text-fg-1">ending balance · reported in {dashboardReportingCurrencyCode}</div>
                 </div>
                 <CalendarDays className="h-4 w-4 text-accent" />
               </div>

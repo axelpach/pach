@@ -29,10 +29,16 @@ const WHATSAPP_PROJECTS = new Set(['ardia', 'ardia-mkt'])
 const OUTER_NAV_ITEMS = [
   { label: 'Issues', path: '/issues' },
   { label: 'CRM', path: '/crm' },
-  { label: 'Finance', path: '/finance' },
+  { label: 'Finance', path: '/finance/dashboard' },
   { label: 'WhatsApp', path: '/whatsapp/templates', requiresWhatsApp: true },
   { label: 'Decks', path: '/decks' },
 ] as const
+
+function isNavPathActive(targetPath: string, pathname: string) {
+  if (targetPath.startsWith('/finance')) return pathname.startsWith('/finance')
+  if (targetPath.startsWith('/whatsapp')) return pathname.startsWith('/whatsapp')
+  return pathname === targetPath || pathname.startsWith(`${targetPath}/`)
+}
 
 /* ---------------- Topbar ---------------- */
 function Topbar() {
@@ -73,26 +79,23 @@ function NavItem({
   icon: ComponentType<{ className?: string }>
   label: string
 }) {
+  const location = useLocation()
+  const isActive = isNavPathActive(to, location.pathname)
+
   return (
     <NavLink
       to={to}
-      className={({ isActive }) =>
-        `group relative mx-auto flex h-11 w-11 items-center justify-center transition-colors ${
-          isActive
-            ? 'text-accent bg-[rgba(0,255,136,0.08)] ring-1 ring-[rgba(0,255,136,0.2)]'
-            : 'text-fg-3 hover:text-fg-1 hover:bg-[rgba(0,255,136,0.04)]'
-        }`
-      }
+      className={`group relative mx-auto flex h-11 w-11 items-center justify-center transition-colors ${
+        isActive
+          ? 'text-accent bg-[rgba(0,255,136,0.08)] ring-1 ring-[rgba(0,255,136,0.2)]'
+          : 'text-fg-3 hover:text-fg-1 hover:bg-[rgba(0,255,136,0.04)]'
+      }`}
       title={label}
     >
-      {({ isActive }) => (
-        <>
-          <Icon className={`h-4 w-4 ${isActive ? 'text-accent' : 'text-current'}`} />
-          <span className="pointer-events-none absolute left-[calc(100%+12px)] top-1/2 z-50 hidden -translate-y-1/2 whitespace-nowrap border border-[rgba(0,255,140,0.25)] bg-void px-2.5 py-1 font-mono text-[10px] uppercase tracking-label text-accent shadow-[0_0_12px_rgba(0,255,136,0.15),0_10px_30px_rgba(0,0,0,0.5)] group-hover:block">
-            <span className="text-fg-4">›</span> {label}
-          </span>
-        </>
-      )}
+      <Icon className={`h-4 w-4 ${isActive ? 'text-accent' : 'text-current'}`} />
+      <span className="pointer-events-none absolute left-[calc(100%+12px)] top-1/2 z-50 hidden -translate-y-1/2 whitespace-nowrap border border-[rgba(0,255,140,0.25)] bg-void px-2.5 py-1 font-mono text-[10px] uppercase tracking-label text-accent shadow-[0_0_12px_rgba(0,255,136,0.15),0_10px_30px_rgba(0,0,0,0.5)] group-hover:block">
+        <span className="text-fg-4">›</span> {label}
+      </span>
     </NavLink>
   )
 }
@@ -125,7 +128,7 @@ const MOBILE_NAV_ITEMS: Array<{
 }> = [
   { to: '/issues', label: 'issues', icon: Rows3 },
   { to: '/crm', label: 'crm', icon: FolderKanban },
-  { to: '/finance', label: 'finance', icon: CircleDollarSign },
+  { to: '/finance/dashboard', label: 'finance', icon: CircleDollarSign },
   { to: '/whatsapp/templates', label: 'whatsapp', icon: MessageCircleMore, requiresWhatsApp: true },
   { to: '/decks', label: 'decks', icon: LayoutTemplate },
 ]
@@ -200,18 +203,17 @@ function MobileMenu({ open, onClose }: { open: boolean; onClose: () => void }) {
         <nav className="flex-1 overflow-auto px-2 py-2 space-y-1">
           {items.map((item) => {
             const Icon = item.icon
+            const isActive = isNavPathActive(item.to, location.pathname)
             return (
               <NavLink
                 key={item.to}
                 to={item.to}
                 onClick={onClose}
-                className={({ isActive }) =>
-                  `flex items-center gap-3 px-3 py-2.5 font-mono text-sm lowercase transition ${
-                    isActive
-                      ? 'bg-[rgba(0,255,136,0.08)] text-accent ring-1 ring-[rgba(0,255,136,0.2)]'
-                      : 'text-fg-2 hover:bg-[rgba(0,255,136,0.04)] hover:text-fg-1'
-                  }`
-                }
+                className={`flex items-center gap-3 px-3 py-2.5 font-mono text-sm lowercase transition ${
+                  isActive
+                    ? 'bg-[rgba(0,255,136,0.08)] text-accent ring-1 ring-[rgba(0,255,136,0.2)]'
+                    : 'text-fg-2 hover:bg-[rgba(0,255,136,0.04)] hover:text-fg-1'
+                }`}
               >
                 <Icon className="h-4 w-4" />
                 {item.label}
@@ -262,7 +264,7 @@ function AppShell() {
 
       const currentIndex = visibleOuterNavItems.findIndex((item) => {
         if (item.path === '/crm') return location.pathname.startsWith('/crm')
-        if (item.path === '/finance') return location.pathname.startsWith('/finance')
+        if (item.path.startsWith('/finance')) return location.pathname.startsWith('/finance')
         if (item.path === '/decks') return location.pathname.startsWith('/decks')
         if (item.path === '/issues') return location.pathname.startsWith('/issues')
         if (item.path === '/whatsapp/templates') return location.pathname.startsWith('/whatsapp')
@@ -347,7 +349,7 @@ function useVisibleOuterNavItems() {
           icon:
             item.path === '/issues' ? Rows3 :
             item.path === '/crm' ? FolderKanban :
-            item.path === '/finance' ? CircleDollarSign :
+            item.path.startsWith('/finance') ? CircleDollarSign :
             item.path === '/whatsapp/templates' ? MessageCircleMore :
             LayoutTemplate,
         })),
