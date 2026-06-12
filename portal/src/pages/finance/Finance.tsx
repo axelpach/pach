@@ -193,6 +193,7 @@ export default function Finance() {
   })
   const [editingMovementLabel, setEditingMovementLabel] = useState<{ id: string; value: string } | null>(null)
   const [editingMovementDate, setEditingMovementDate] = useState<{ id: string; value: string } | null>(null)
+  const [editingMovementAmount, setEditingMovementAmount] = useState<{ id: string; value: string } | null>(null)
   const [accountDraft, setAccountDraft] = useState<AccountDraft>(EMPTY_ACCOUNT_DRAFT)
   const [accountModalOpen, setAccountModalOpen] = useState(false)
   const [editingAccountId, setEditingAccountId] = useState<string | null>(null)
@@ -1131,6 +1132,17 @@ export default function Finance() {
     setEditingMovementDate(null)
   }
 
+  function startEditingMovementAmount(movement: FinanceMovement) {
+    setEditingMovementAmount({
+      id: movement.id,
+      value: formatEditableMoneyInput(movement.amountMinor),
+    })
+  }
+
+  function cancelEditingMovementAmount() {
+    setEditingMovementAmount(null)
+  }
+
   async function saveEditingMovementLabel(movement: FinanceMovement) {
     if (editingMovementLabel?.id !== movement.id) return
     const value = editingMovementLabel.value.trim()
@@ -1168,6 +1180,32 @@ export default function Finance() {
       })
     }
     setEditingMovementDate(null)
+  }
+
+  async function saveEditingMovementAmount(movement: FinanceMovement) {
+    if (editingMovementAmount?.id !== movement.id) return
+    const nextAmountMinor = parseMoneyToMinor(editingMovementAmount.value)
+    if (nextAmountMinor == null) {
+      setEditingMovementAmount(null)
+      return
+    }
+    if (nextAmountMinor !== movement.amountMinor) {
+      const nextType = movement.type === 'transfer' || movement.type === 'adjustment' ? movement.type : inferType(nextAmountMinor)
+      await z.mutate.fin_movements.update({
+        id: movement.id,
+        amountMinor: nextAmountMinor,
+        reportingAmountMinor: nextAmountMinor,
+        type: nextType,
+        fingerprint: await buildMovementFingerprintForUpdate({
+          accountId: movement.accountId,
+          transactionDate: formatZeroDate(movement.transactionDate),
+          transactionTime: movement.transactionTime,
+          amountMinor: nextAmountMinor,
+          description: movement.description,
+        }),
+      })
+    }
+    setEditingMovementAmount(null)
   }
 
   async function confirmDeleteMovement() {
@@ -1693,9 +1731,15 @@ export default function Finance() {
                       ) : null}
                     </div>
                     <div className="shrink-0 text-right">
-                      <div className={`whitespace-nowrap text-sm ${movement.amountMinor < 0 ? 'text-fail' : 'text-ok'}`}>
-                        {formatMoney(movement.amountMinor, movement.currencyCode)}
-                      </div>
+                      <EditableMovementAmount
+                        movement={movement}
+                        editingValue={editingMovementAmount?.id === movement.id ? editingMovementAmount.value : null}
+                        compact
+                        onStart={() => startEditingMovementAmount(movement)}
+                        onChange={(value) => setEditingMovementAmount({ id: movement.id, value })}
+                        onSave={() => void saveEditingMovementAmount(movement)}
+                        onCancel={cancelEditingMovementAmount}
+                      />
                       <PachSelect
                         value={movement.currencyCode}
                         onChange={(next) => void updateMovementCurrency(movement.id, next)}
@@ -1865,9 +1909,14 @@ export default function Finance() {
                         {category ? null : <span className="text-[10px] text-amber">needs category</span>}
                       </td>
                       <td className="whitespace-nowrap px-3 py-2 text-right">
-                        <div className={movement.amountMinor < 0 ? 'text-fail' : 'text-ok'}>
-                          {formatMoney(movement.amountMinor, movement.currencyCode)}
-                        </div>
+                        <EditableMovementAmount
+                          movement={movement}
+                          editingValue={editingMovementAmount?.id === movement.id ? editingMovementAmount.value : null}
+                          onStart={() => startEditingMovementAmount(movement)}
+                          onChange={(value) => setEditingMovementAmount({ id: movement.id, value })}
+                          onSave={() => void saveEditingMovementAmount(movement)}
+                          onCancel={cancelEditingMovementAmount}
+                        />
                         <PachSelect
                           value={movement.currencyCode}
                           onChange={(next) => void updateMovementCurrency(movement.id, next)}
@@ -3311,6 +3360,59 @@ function EditableMovementDate({
   )
 }
 
+function EditableMovementAmount({
+  movement,
+  editingValue,
+  compact = false,
+  onStart,
+  onChange,
+  onSave,
+  onCancel,
+}: {
+  movement: FinanceMovement
+  editingValue: string | null
+  compact?: boolean
+  onStart: () => void
+  onChange: (value: string) => void
+  onSave: () => void
+  onCancel: () => void
+}) {
+  const toneClass = movement.amountMinor < 0 ? 'text-fail' : 'text-ok'
+  if (editingValue != null) {
+    return (
+      <input
+        inputMode="decimal"
+        value={editingValue}
+        onChange={(event) => onChange(event.target.value)}
+        onBlur={onSave}
+        onKeyDown={(event) => {
+          if (event.key === 'Enter') {
+            event.preventDefault()
+            onSave()
+          }
+          if (event.key === 'Escape') {
+            event.preventDefault()
+            onCancel()
+          }
+        }}
+        className={`${compact ? 'h-8 w-32 text-sm' : 'ml-auto h-7 w-32 text-xs'} border border-[rgba(0,255,140,0.24)] bg-pit-3 px-2 text-right font-mono text-fg-1 outline-none focus:border-accent focus:shadow-glow-xs`}
+        autoFocus
+      />
+    )
+  }
+
+  return (
+    <button
+      type="button"
+      onClick={onStart}
+      className={`${compact ? 'text-sm' : 'text-xs'} ml-auto block whitespace-nowrap text-right tabular-nums transition hover:text-accent ${toneClass}`}
+      title="click to edit amount"
+    >
+      {formatMoney(movement.amountMinor, movement.currencyCode)}
+    </button>
+  )
+}
+
 function CategoryPieChart({ slices }: { slices: CategoryBreakdownEntry[] }) {
   const [tooltip, setTooltip] = useState<{ slice: CategoryBreakdownEntry; x: number; y: number } | null>(null)
   const radius = 76
@@ -3808,11 +3910,15 @@ function parseFrankfurterRates(payload: FrankfurterRatesPayload, baseCurrencyCod
 }
 
 function parseMoneyToMinor(value: string) {
-  const normalized = value.replace(/,/g, '').trim()
-  if (!normalized) return null
+  const normalized = value.replace(/,/g, '').replace(/[^\d.-]/g, '').trim()
+  if (!normalized || normalized === '-' || normalized === '.' || normalized === '-.') return null
   const amount = Number(normalized)
   if (!Number.isFinite(amount)) return null
   return Math.round(amount * 100)
+}
+
+function formatEditableMoneyInput(amountMinor: number) {
+  return (amountMinor / 100).toFixed(2)
 }
 
 function signedAmountForType(amountMinor: number, type: string) {
