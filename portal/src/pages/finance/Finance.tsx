@@ -194,6 +194,7 @@ export default function Finance() {
   const [editingMovementLabel, setEditingMovementLabel] = useState<{ id: string; value: string } | null>(null)
   const [editingMovementDate, setEditingMovementDate] = useState<{ id: string; value: string } | null>(null)
   const [editingMovementAmount, setEditingMovementAmount] = useState<{ id: string; value: string } | null>(null)
+  const [editingImportItemAmount, setEditingImportItemAmount] = useState<{ id: string; value: string } | null>(null)
   const [accountDraft, setAccountDraft] = useState<AccountDraft>(EMPTY_ACCOUNT_DRAFT)
   const [accountModalOpen, setAccountModalOpen] = useState(false)
   const [editingAccountId, setEditingAccountId] = useState<string | null>(null)
@@ -1013,6 +1014,47 @@ export default function Finance() {
       rawData: duplicateOverride ? { ...item.rawData, duplicateOverride: true } : item.rawData,
       errorMessage: null,
     })
+  }
+
+  function startEditingImportItemAmount(item: FinanceImportItem) {
+    if (item.status === 'applied') return
+    setEditingImportItemAmount({
+      id: item.id,
+      value: formatEditableMoneyInput(item.amountMinor),
+    })
+  }
+
+  function cancelEditingImportItemAmount() {
+    setEditingImportItemAmount(null)
+  }
+
+  async function saveEditingImportItemAmount(item: FinanceImportItem) {
+    if (editingImportItemAmount?.id !== item.id || item.status === 'applied') return
+    const nextAmountMinor = parseMoneyToMinor(editingImportItemAmount.value)
+    if (nextAmountMinor == null) {
+      setEditingImportItemAmount(null)
+      return
+    }
+    if (nextAmountMinor !== item.amountMinor) {
+      const duplicateOverride = item.status === 'duplicate'
+      const category = scopedCategories.find((entry) => entry.id === item.suggestedCategoryId)
+      await z.mutate.fin_import_items.update({
+        id: item.id,
+        amountMinor: nextAmountMinor,
+        suggestedType: category?.type ?? inferType(nextAmountMinor),
+        status: duplicateOverride ? (item.suggestedCategoryId ? 'parsed' : 'needs_review') : item.status,
+        duplicateMovementId: duplicateOverride ? null : item.duplicateMovementId,
+        fingerprint: await buildMovementFingerprintForUpdate({
+          accountId: item.accountId,
+          transactionDate: formatZeroDate(item.transactionDate),
+          transactionTime: item.transactionTime,
+          amountMinor: nextAmountMinor,
+          description: item.description,
+        }),
+        rawData: duplicateOverride ? { ...item.rawData, duplicateOverride: true } : item.rawData,
+      })
+    }
+    setEditingImportItemAmount(null)
   }
 
   async function removeImportItem(item: FinanceImportItem) {
@@ -2303,8 +2345,16 @@ export default function Finance() {
                                   triggerClassName={`flex h-7 w-full min-w-0 items-center justify-between border border-transparent bg-transparent px-2 text-left font-mono text-xs text-fg-2 outline-none transition hover:border-[rgba(0,255,140,0.18)] hover:bg-[rgba(0,255,136,0.04)] hover:text-fg-1 focus-visible:border-accent ${locked ? 'pointer-events-none opacity-55' : ''}`}
                                 />
                               </td>
-                              <td className={`whitespace-nowrap px-3 py-2 text-right ${item.amountMinor < 0 ? 'text-fail' : 'text-ok'}`}>
-                                {formatMoney(item.amountMinor, item.currencyCode)}
+                              <td className="whitespace-nowrap px-3 py-2 text-right">
+                                <EditableImportItemAmount
+                                  item={item}
+                                  editingValue={editingImportItemAmount?.id === item.id ? editingImportItemAmount.value : null}
+                                  locked={locked}
+                                  onStart={() => startEditingImportItemAmount(item)}
+                                  onChange={(value) => setEditingImportItemAmount({ id: item.id, value })}
+                                  onSave={() => void saveEditingImportItemAmount(item)}
+                                  onCancel={cancelEditingImportItemAmount}
+                                />
                               </td>
                               <td className="px-3 py-2 text-right">
                                 {locked ? (
@@ -3409,6 +3459,60 @@ function EditableMovementAmount({
       title="click to edit amount"
     >
       {formatMoney(movement.amountMinor, movement.currencyCode)}
+    </button>
+  )
+}
+
+function EditableImportItemAmount({
+  item,
+  editingValue,
+  locked,
+  onStart,
+  onChange,
+  onSave,
+  onCancel,
+}: {
+  item: FinanceImportItem
+  editingValue: string | null
+  locked: boolean
+  onStart: () => void
+  onChange: (value: string) => void
+  onSave: () => void
+  onCancel: () => void
+}) {
+  const toneClass = item.amountMinor < 0 ? 'text-fail' : 'text-ok'
+  if (editingValue != null) {
+    return (
+      <input
+        inputMode="decimal"
+        value={editingValue}
+        onChange={(event) => onChange(event.target.value)}
+        onBlur={onSave}
+        onKeyDown={(event) => {
+          if (event.key === 'Enter') {
+            event.preventDefault()
+            onSave()
+          }
+          if (event.key === 'Escape') {
+            event.preventDefault()
+            onCancel()
+          }
+        }}
+        className="ml-auto h-7 w-32 border border-[rgba(0,255,140,0.24)] bg-pit-3 px-2 text-right font-mono text-xs text-fg-1 outline-none focus:border-accent focus:shadow-glow-xs"
+        autoFocus
+      />
+    )
+  }
+
+  return (
+    <button
+      type="button"
+      onClick={onStart}
+      disabled={locked}
+      className={`ml-auto block whitespace-nowrap text-right tabular-nums transition hover:text-accent disabled:cursor-default disabled:hover:text-current ${toneClass} ${locked ? 'opacity-55' : ''}`}
+      title={locked ? undefined : 'click to edit amount'}
+    >
+      {formatMoney(item.amountMinor, item.currencyCode)}
     </button>
   )
 }
