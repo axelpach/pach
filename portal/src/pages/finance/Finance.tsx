@@ -1,6 +1,6 @@
 import { useQuery, useZero } from '@rocicorp/zero/react'
-import { AlertTriangle, ArrowDown, ArrowRightLeft, ArrowUp, Building2, CalendarDays, ChartPie, CheckCircle, ChevronDown, ChevronRight, CircleDollarSign, CreditCard, FileText, FileUp, Landmark, Layers2, Loader2, Plus, Search, Tag, Trash2, UploadCloud, UserRound, WalletCards, X } from 'lucide-react'
-import { useEffect, useMemo, useRef, useState, type MouseEvent, type ReactNode } from 'react'
+import { AlertTriangle, ArrowDown, ArrowLeft, ArrowRightLeft, ArrowUp, Building2, CalendarDays, ChartPie, CheckCircle, ChevronDown, ChevronRight, CircleDollarSign, CreditCard, FileText, FileUp, Landmark, Layers2, Loader2, Plus, Search, Tag, Trash2, UploadCloud, UserRound, WalletCards, X } from 'lucide-react'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type MouseEvent, type ReactNode } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { config } from '../../config'
 import { PachSelect, type PachSelectOption } from '../../components/PachSelect'
@@ -9,7 +9,7 @@ import type { Mutators } from '../../mutators'
 import type { Schema } from '../../zero-schema'
 import { FilterButton, type ActiveFilters, type FilterFieldConfig } from '../issues/IssueFilters'
 
-type Tab = 'dashboard' | 'movements' | 'accounts'
+type Tab = 'dashboard' | 'movements' | 'accounts' | 'category'
 type ImportPhase = 'select' | 'ready' | 'processing' | 'success' | 'failed'
 type FinanceMovement = Schema['tables']['fin_movements']['row']
 type FinanceAccount = Schema['tables']['fin_accounts']['row']
@@ -83,6 +83,14 @@ type MonthlyBalanceChartPoint = {
   amountMinor: number
   missingCurrencies: string[]
 }
+type CategorySpendTrend = {
+  points: MonthlyBalanceChartPoint[]
+  totalAmountMinor: number
+  currentMonthAmountMinor: number
+  averageMonthlyAmountMinor: number
+  averageMonthCount: number
+  missingCurrencies: string[]
+}
 type FxRateState = {
   status: 'idle' | 'loading' | 'ready' | 'failed'
   baseCurrencyCode: string
@@ -102,6 +110,7 @@ type ImportReviewGroup = {
 }
 
 function tabFromPath(pathname: string): Tab {
+  if (categoryIdFromPath(pathname)) return 'category'
   if (pathname === '/finance/dashboard') return 'dashboard'
   return pathname === '/finance/accounts' || pathname === '/finance/accounts-cards' ? 'accounts' : 'movements'
 }
@@ -109,6 +118,22 @@ function tabFromPath(pathname: string): Tab {
 function pathForTab(tab: Tab) {
   if (tab === 'dashboard') return '/finance/dashboard'
   return tab === 'accounts' ? '/finance/accounts' : '/finance/movements'
+}
+
+function categoryIdFromPath(pathname: string) {
+  const prefix = '/finance/categories/'
+  if (!pathname.startsWith(prefix)) return null
+  const rawId = pathname.slice(prefix.length).split('/')[0]
+  if (!rawId) return null
+  try {
+    return decodeURIComponent(rawId)
+  } catch {
+    return rawId
+  }
+}
+
+function pathForCategory(categoryId: string) {
+  return `/finance/categories/${encodeURIComponent(categoryId)}`
 }
 
 function financeOrganizationStorageKey(userId: string) {
@@ -127,6 +152,7 @@ const ACCOUNT_TYPES = [
 const CURRENCIES = ['MXN', 'USD', 'EUR']
 const MAX_IMPORT_TOTAL_BYTES = 10 * 1024 * 1024
 const UNCATEGORIZED_VALUE = '__uncategorized__'
+const CATEGORY_DETAIL_START_MONTH = '2026-05'
 const EMPTY_ACCOUNT_DRAFT: AccountDraft = { name: '', institutionName: '', holderUserId: '', type: 'bank_account', currencyCode: 'MXN' }
 
 const MOVEMENT_TYPES = [
@@ -234,6 +260,9 @@ export default function Finance() {
   const [reviewBatchId, setReviewBatchId] = useState<string | null>(null)
   const [apiCategories, setApiCategories] = useState<FinanceCategory[]>([])
   const fileInputRef = useRef<HTMLInputElement | null>(null)
+  const dashboardScrollRef = useRef<HTMLDivElement | null>(null)
+  const pendingDashboardScrollRestoreRef = useRef<number | null>(null)
+  const previousTabRef = useRef<Tab | null>(null)
   const tab = tabFromPath(location.pathname)
   const organizationStorageKey = user ? financeOrganizationStorageKey(user.id) : null
 
@@ -263,6 +292,10 @@ export default function Finance() {
   const selectedDashboardMonthFilterIds = dashboardFilters.months ?? []
   const selectedDashboardQuarterFilterIds = dashboardFilters.quarters ?? []
   const selectedDashboardCurrencyFilterIds = dashboardFilters.currencies ?? []
+  const selectedFinanceCategoryId = categoryIdFromPath(location.pathname)
+  const selectedFinanceCategory = selectedFinanceCategoryId && selectedFinanceCategoryId !== UNCATEGORIZED_VALUE
+    ? scopedCategories.find((category) => category.id === selectedFinanceCategoryId) ?? null
+    : null
   const institutionSuggestions = useMemo(
     () => Array.from(new Set(scopedAccounts.map((account) => account.institutionName?.trim()).filter((value): value is string => Boolean(value)))).sort((a, b) => a.localeCompare(b)),
     [scopedAccounts],
@@ -375,6 +408,20 @@ export default function Finance() {
     : categoryBreakdown?.missingCurrencies.length
       ? `// no converted spend · missing ${categoryBreakdown.missingCurrencies.join(', ')}`
       : '// no spend to chart'
+  const categoryDetailMovements = selectedFinanceCategoryId
+    ? scopedMovements
+      .filter((movement) => movement.status !== 'ignored')
+      .filter((movement) => !isTransferLikeMovement(movement, scopedCategories))
+      .filter((movement) => movement.amountMinor < 0)
+      .filter((movement) => movementMatchesCategory(movement, selectedFinanceCategoryId))
+      .sort((a, b) => b.transactionDate - a.transactionDate || formatTransactionTime(b.transactionTime).localeCompare(formatTransactionTime(a.transactionTime)) || a.description.localeCompare(b.description))
+    : []
+  const categoryDetailTrend = selectedFinanceCategoryId && dashboardConversionRates
+    ? buildCategorySpendTrend(categoryDetailMovements, dashboardReportingCurrencyCode, dashboardConversionRates)
+    : null
+  const categoryDetailName = selectedFinanceCategoryId === UNCATEGORIZED_VALUE
+    ? 'uncategorized'
+    : selectedFinanceCategory?.name ?? 'category'
   const accountStats = useMemo(
     () => new Map(scopedAccounts.map((account) => [account.id, buildAccountStats(account, scopedMovements)])),
     [scopedAccounts, scopedMovements],
@@ -571,10 +618,32 @@ export default function Finance() {
       navigate('/finance/dashboard', { replace: true })
     } else if (location.pathname === '/finance/accounts-cards') {
       navigate('/finance/accounts', { replace: true })
+    } else if (tab === 'category') {
+      if (!selectedFinanceCategoryId) navigate('/finance/dashboard', { replace: true })
     } else if (location.pathname !== canonicalPath) {
       navigate('/finance/dashboard', { replace: true })
     }
-  }, [location.pathname, navigate, tab])
+  }, [location.pathname, navigate, selectedFinanceCategoryId, tab])
+
+  useLayoutEffect(() => {
+    const previousTab = previousTabRef.current
+    previousTabRef.current = tab
+
+    if (tab === 'dashboard' && previousTab === 'category' && pendingDashboardScrollRestoreRef.current != null) {
+      const scrollTop = pendingDashboardScrollRestoreRef.current
+      const scroller = dashboardScrollRef.current
+      if (scroller) {
+        const maxScrollTop = Math.max(0, scroller.scrollHeight - scroller.clientHeight)
+        scroller.scrollTop = Math.min(scrollTop, maxScrollTop)
+      }
+      pendingDashboardScrollRestoreRef.current = null
+      return
+    }
+
+    if (tab !== 'category') {
+      pendingDashboardScrollRestoreRef.current = null
+    }
+  }, [tab])
 
   useEffect(() => {
     if (!organizationStorageKey) return
@@ -1409,6 +1478,13 @@ export default function Finance() {
     })
   }
 
+  function openCategoryDetail(categoryId: string) {
+    if (tab === 'dashboard') {
+      pendingDashboardScrollRestoreRef.current = dashboardScrollRef.current?.scrollTop ?? 0
+    }
+    navigate(pathForCategory(categoryId))
+  }
+
   return (
     <div className="flex h-full min-h-0 flex-1 overflow-hidden">
       <aside className="hidden shrink-0 flex-col border-r border-[rgba(0,255,140,0.12)] bg-[rgba(5,6,5,0.6)] px-2 py-4 backdrop-blur-sm md:relative md:z-auto md:flex md:w-[200px]">
@@ -1544,8 +1620,139 @@ export default function Finance() {
           </div>
         </div>
 
-      {tab === 'dashboard' ? (
-        <div className="min-h-0 flex-1 overflow-auto px-3 py-3 md:px-8 md:py-4">
+      {tab === 'category' ? (
+        <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+          <div className="flex items-center justify-between gap-3 border-b border-[rgba(0,255,140,0.15)] bg-[rgba(5,6,5,0.6)] px-4 py-3 font-mono backdrop-blur-sm md:px-6">
+            <div className="flex min-w-0 items-center gap-3 text-xs">
+              <button
+                type="button"
+                onClick={() => navigate('/finance/dashboard')}
+                className="inline-flex items-center gap-1.5 uppercase tracking-label text-fg-3 transition hover:text-accent"
+              >
+                <ArrowLeft className="h-3.5 w-3.5" />
+                dashboard
+              </button>
+              <span className="text-fg-4">/</span>
+              <span className="truncate text-accent">{categoryDetailName}</span>
+            </div>
+            <div className="shrink-0 text-[10px] uppercase tracking-label text-fg-4">
+              reported in {dashboardReportingCurrencyCode}
+            </div>
+          </div>
+
+          <div className="min-h-0 flex-1 overflow-auto px-3 py-3 md:px-8 md:py-5">
+            <div className="mb-4">
+              <div className="font-mono text-[10px] uppercase tracking-label text-fg-4">category</div>
+              <h2 className="mt-1 font-mono text-2xl font-bold lowercase text-fg-1">{categoryDetailName}</h2>
+            </div>
+
+            <div className="grid border-l border-t border-[rgba(0,255,140,0.12)] font-mono md:grid-cols-3">
+              <CategoryKpi
+                label="total spend"
+                value={categoryDetailTrend ? formatMoney(categoryDetailTrend.totalAmountMinor, dashboardReportingCurrencyCode) : '...'}
+                sub={`${categoryDetailMovements.length} movements`}
+              />
+              <CategoryKpi
+                label="this month"
+                value={categoryDetailTrend ? formatMoney(categoryDetailTrend.currentMonthAmountMinor, dashboardReportingCurrencyCode) : '...'}
+                sub={formatMonthLabel(Date.now()).toLowerCase()}
+              />
+              <CategoryKpi
+                label="avg / month"
+                value={categoryDetailTrend ? formatMoney(categoryDetailTrend.averageMonthlyAmountMinor, dashboardReportingCurrencyCode) : '...'}
+                sub={`${categoryDetailTrend?.averageMonthCount ?? 0} month window`}
+              />
+            </div>
+
+            <div className="mt-5 grid gap-4 xl:h-[calc(100vh-19rem)] xl:min-h-[380px] xl:max-h-[560px] xl:grid-cols-[minmax(0,1.15fr)_minmax(360px,0.85fr)]">
+              <section className="flex min-h-0 flex-col border border-[rgba(0,255,140,0.12)] bg-pit-2 xl:h-full">
+                <div className="flex items-center justify-between border-b border-[rgba(0,255,140,0.12)] px-4 py-3 font-mono">
+                  <div>
+                    <div className="text-[10px] uppercase tracking-label text-fg-4">evolution</div>
+                    <div className="mt-1 text-sm lowercase text-fg-1">monthly spend</div>
+                  </div>
+                  <CalendarDays className="h-4 w-4 text-accent" />
+                </div>
+                <div className="flex min-h-0 flex-1 flex-col p-4">
+                  {!dashboardConversionRates ? (
+                    <div className="flex min-h-72 flex-1 items-center justify-center border border-dashed border-[rgba(0,255,140,0.12)] font-mono text-sm text-fg-4 xl:min-h-0">
+                      // loading fx rates...
+                    </div>
+                  ) : !categoryDetailTrend || categoryDetailTrend.points.length === 0 ? (
+                    <div className="flex min-h-72 flex-1 items-center justify-center border border-dashed border-[rgba(0,255,140,0.12)] font-mono text-sm text-fg-4 xl:min-h-0">
+                      // no spend in this category
+                    </div>
+                  ) : (
+                    <>
+                      <div className="min-h-72 flex-1 xl:min-h-0">
+                        <MonthlyBalanceAreaChart
+                          points={categoryDetailTrend.points}
+                          currencyCode={dashboardReportingCurrencyCode}
+                          fitYAxisToData
+                        />
+                      </div>
+                      <div className="mt-3 flex justify-between gap-3 overflow-hidden font-mono text-[10px] uppercase tracking-label text-fg-4">
+                        {categoryDetailTrend.points.map((point) => (
+                          <span key={point.id} className="truncate">{point.shortLabel}</span>
+                        ))}
+                      </div>
+                      {categoryDetailTrend.missingCurrencies.length > 0 ? (
+                        <div className="mt-3 border-t border-[rgba(0,255,140,0.08)] pt-2 font-mono text-[10px] uppercase tracking-label text-fail">
+                          missing {categoryDetailTrend.missingCurrencies.join(', ')}
+                        </div>
+                      ) : null}
+                    </>
+                  )}
+                </div>
+              </section>
+
+              <section className="flex min-h-0 flex-col border border-[rgba(0,255,140,0.12)] bg-pit-2 xl:h-full">
+                <div className="flex items-center justify-between border-b border-[rgba(0,255,140,0.12)] px-4 py-3 font-mono">
+                  <div>
+                    <div className="text-[10px] uppercase tracking-label text-fg-4">movements</div>
+                    <div className="mt-1 text-sm lowercase text-fg-1">category ledger</div>
+                  </div>
+                  <span className="text-[10px] uppercase tracking-label text-fg-4">{categoryDetailMovements.length}</span>
+                </div>
+                <div className="min-h-0 flex-1 overflow-auto overscroll-contain">
+                  {categoryDetailMovements.length === 0 ? (
+                    <div className="flex min-h-72 items-center justify-center px-4 font-mono text-sm text-fg-4">
+                      // no movements for this category
+                    </div>
+                  ) : (
+                    categoryDetailMovements.map((movement) => {
+                      const account = scopedAccounts.find((entry) => entry.id === movement.accountId)
+                      return (
+                        <div key={movement.id} className="grid grid-cols-[minmax(0,1fr)_auto] gap-3 border-b border-[rgba(0,255,140,0.08)] px-4 py-3 font-mono text-xs last:border-b-0">
+                          <div className="min-w-0">
+                            <div className="flex min-w-0 items-center gap-2">
+                              <span className="shrink-0 text-[10px] uppercase tracking-label text-fg-4">{formatZeroDate(movement.transactionDate)}</span>
+                              {isMeaningfulTransactionTime(movement.transactionTime) ? (
+                                <span className="shrink-0 text-[10px] text-fg-4">{formatTransactionTime(movement.transactionTime)}</span>
+                              ) : null}
+                            </div>
+                            <div className="mt-1 truncate text-fg-1" title={movement.merchantName || movement.description}>
+                              {movement.merchantName || movement.description}
+                            </div>
+                            <div className="mt-0.5 truncate text-[10px] text-fg-4">
+                              {account?.name ?? 'unknown account'}
+                              {movement.merchantName ? ` · ${movement.description}` : ''}
+                            </div>
+                          </div>
+                          <div className="whitespace-nowrap text-right tabular-nums text-fail">
+                            {formatMoney(movement.amountMinor, movement.currencyCode)}
+                          </div>
+                        </div>
+                      )
+                    })
+                  )}
+                </div>
+              </section>
+            </div>
+          </div>
+        </div>
+      ) : tab === 'dashboard' ? (
+        <div ref={dashboardScrollRef} className="min-h-0 flex-1 overflow-auto px-3 py-3 md:px-8 md:py-4">
           <div className="mb-3 flex items-center justify-between gap-3">
             <div className="[&>div>div>button]:h-8 [&>div>div>button]:px-3">
               <FilterButton
@@ -1675,17 +1882,25 @@ export default function Finance() {
                 ) : (
                   <>
                     <div className={`flex flex-col items-center justify-center gap-2 ${categoryBreakdownIsLoading ? 'opacity-60' : ''}`}>
-                      <CategoryPieChart slices={categoryBreakdown.entries} />
+                      <CategoryPieChart
+                        slices={categoryBreakdown.entries}
+                        onSliceClick={(slice) => openCategoryDetail(slice.id)}
+                      />
                       <div className="font-mono text-[10px] uppercase tracking-label text-fg-4">{categoryBreakdown.currencyCode}</div>
                     </div>
                     <div className={`grid content-center gap-2 ${categoryBreakdownIsLoading ? 'opacity-60' : ''}`}>
                       {categoryBreakdown.entries.map((entry) => (
-                        <div key={entry.id} className="grid grid-cols-[12px_1fr_auto_auto] items-center gap-2 font-mono text-xs">
+                        <button
+                          key={entry.id}
+                          type="button"
+                          onClick={() => openCategoryDetail(entry.id)}
+                          className="grid grid-cols-[12px_1fr_auto_auto] items-center gap-2 text-left font-mono text-xs transition hover:text-accent"
+                        >
                           <span className="h-3 w-3" style={{ backgroundColor: entry.color }} />
                           <span className="truncate text-fg-2">{entry.name}</span>
                           <span className="text-fg-4">{entry.percent.toFixed(1)}%</span>
                           <span className="text-fail">{formatMoney(-entry.amountMinor, entry.currencyCode)}</span>
-                        </div>
+                        </button>
                       ))}
                       {categoryBreakdown.missingCurrencies.length > 0 ? (
                         <div className="mt-2 border-t border-[rgba(0,255,140,0.08)] pt-2 font-mono text-[10px] uppercase tracking-label text-fail">
@@ -3247,6 +3462,16 @@ function FinanceMetric({ label, value, tone = 'default' }: { label: string; valu
   )
 }
 
+function CategoryKpi({ label, value, sub }: { label: string; value: string; sub: string }) {
+  return (
+    <div className="min-w-0 border-b border-r border-[rgba(0,255,140,0.12)] bg-pit-2 px-4 py-3">
+      <div className="text-[10px] uppercase tracking-label text-fg-4">{label}</div>
+      <div className="mt-2 truncate text-lg text-fg-1 tabular-nums">{value}</div>
+      <div className="mt-1 truncate text-[10px] uppercase tracking-label text-fg-4">{sub}</div>
+    </div>
+  )
+}
+
 function MovementDateSortHeader({
   direction,
   onSort,
@@ -3581,7 +3806,13 @@ function EditableImportItemAmount({
   )
 }
 
-function CategoryPieChart({ slices }: { slices: CategoryBreakdownEntry[] }) {
+function CategoryPieChart({
+  slices,
+  onSliceClick,
+}: {
+  slices: CategoryBreakdownEntry[]
+  onSliceClick?: (slice: CategoryBreakdownEntry) => void
+}) {
   const [tooltip, setTooltip] = useState<{ slice: CategoryBreakdownEntry; x: number; y: number } | null>(null)
   const radius = 76
   const circumference = 2 * Math.PI * radius
@@ -3615,8 +3846,9 @@ function CategoryPieChart({ slices }: { slices: CategoryBreakdownEntry[] }) {
               strokeDasharray={`${length} ${circumference - length}`}
               strokeDashoffset={-currentOffset + circumference * 0.25}
               strokeLinecap="butt"
-              className="transition hover:brightness-125"
+              className={`transition hover:brightness-125 ${onSliceClick ? 'cursor-pointer' : ''}`}
               style={{ pointerEvents: 'stroke' }}
+              onClick={() => onSliceClick?.(slice)}
               onMouseEnter={(event) => moveTooltip(event, slice)}
               onMouseMove={(event) => moveTooltip(event, slice)}
               onMouseLeave={() => setTooltip(null)}
@@ -3651,9 +3883,11 @@ function CategoryPieChart({ slices }: { slices: CategoryBreakdownEntry[] }) {
 function MonthlyBalanceAreaChart({
   points,
   currencyCode,
+  fitYAxisToData = false,
 }: {
   points: MonthlyBalanceChartPoint[]
   currencyCode: string
+  fitYAxisToData?: boolean
 }) {
   const [hoverIndex, setHoverIndex] = useState<number | null>(null)
   const wrapperRef = useRef<HTMLDivElement | null>(null)
@@ -3662,8 +3896,14 @@ function MonthlyBalanceAreaChart({
   const padTop = 18
   const padBottom = 24
   const values = points.map((point) => point.amountMinor)
-  const minValue = Math.min(0, ...values)
-  const maxValue = Math.max(0, ...values)
+  const rawMinValue = values.length > 0 ? Math.min(...values) : 0
+  const rawMaxValue = values.length > 0 ? Math.max(...values) : 0
+  const rawRange = Math.max(rawMaxValue - rawMinValue, 1)
+  const fittedPadding = Math.max(Math.round(rawRange * 0.12), Math.round(Math.max(Math.abs(rawMinValue), Math.abs(rawMaxValue), 1) * 0.04), 1)
+  const fittedMinValue = rawMinValue === 0 ? 0 : rawMinValue - fittedPadding
+  const fittedMaxValue = rawMaxValue === 0 ? fittedPadding : rawMaxValue + fittedPadding
+  const minValue = fitYAxisToData ? fittedMinValue : Math.min(0, rawMinValue)
+  const maxValue = fitYAxisToData ? fittedMaxValue : Math.max(0, rawMaxValue)
   const range = Math.max(maxValue - minValue, 1)
   const chartHeight = height - padTop - padBottom
   const chartPoints = points.map((point, index) => ({
@@ -3674,6 +3914,7 @@ function MonthlyBalanceAreaChart({
   const linePath = chartPoints.map((point, index) => `${index === 0 ? 'M' : 'L'} ${point.x},${point.y}`).join(' ')
   const areaPath = `${linePath} L ${width},${height - padBottom} L 0,${height - padBottom} Z`
   const zeroY = padTop + ((maxValue - 0) / range) * chartHeight
+  const shouldShowZeroLine = zeroY >= padTop && zeroY <= height - padBottom
   const hoveredPoint = hoverIndex == null ? null : chartPoints[hoverIndex]
   const tooltipXPercent = hoveredPoint ? (hoveredPoint.x / width) * 100 : 0
   const tooltipTransform = hoverIndex === 0
@@ -3715,15 +3956,17 @@ function MonthlyBalanceAreaChart({
             vectorEffect="non-scaling-stroke"
           />
         ))}
-        <line
-          x1="0"
-          x2={width}
-          y1={zeroY}
-          y2={zeroY}
-          stroke="rgba(220,255,231,0.18)"
-          strokeDasharray="4 5"
-          vectorEffect="non-scaling-stroke"
-        />
+        {shouldShowZeroLine ? (
+          <line
+            x1="0"
+            x2={width}
+            y1={zeroY}
+            y2={zeroY}
+            stroke="rgba(220,255,231,0.18)"
+            strokeDasharray="4 5"
+            vectorEffect="non-scaling-stroke"
+          />
+        ) : null}
         <path d={areaPath} fill="url(#finance-monthly-balance-grad)" />
         <path d={linePath} fill="none" stroke="rgb(0,255,136)" strokeWidth="1.8" vectorEffect="non-scaling-stroke" />
         {hoveredPoint ? (
@@ -4355,6 +4598,93 @@ function withZeroCurrencies(totals: Map<string, number>, currencies: string[]) {
     if (!next.has(currencyCode)) next.set(currencyCode, 0)
   }
   return next
+}
+
+function movementMatchesCategory(movement: FinanceMovement, categoryId: string) {
+  if (categoryId === UNCATEGORIZED_VALUE) return !movement.categoryId
+  return movement.categoryId === categoryId
+}
+
+function buildCategorySpendTrend(
+  movements: FinanceMovement[],
+  reportingCurrencyCode: string,
+  ratesFromReportingCurrency: Record<string, number>,
+): CategorySpendTrend {
+  const totals = new Map<string, { amountMinor: number; missingCurrencies: Set<string> }>()
+  const missingCurrencies = new Set<string>()
+  const movementMonths = new Set<string>()
+  let totalAmountMinor = 0
+
+  for (const movement of movements) {
+    const id = monthKey(movement.transactionDate)
+    movementMonths.add(id)
+    const current = totals.get(id) ?? { amountMinor: 0, missingCurrencies: new Set<string>() }
+    const rate = conversionRateToReportingCurrency(movement.currencyCode, reportingCurrencyCode, ratesFromReportingCurrency)
+    if (rate == null) {
+      current.missingCurrencies.add(movement.currencyCode)
+      missingCurrencies.add(movement.currencyCode)
+      totals.set(id, current)
+      continue
+    }
+    const amountMinor = Math.round(Math.abs(movement.amountMinor) * rate)
+    current.amountMinor += amountMinor
+    totalAmountMinor += amountMinor
+    totals.set(id, current)
+  }
+
+  const sortedMovementMonths = Array.from(movementMonths).sort()
+  const currentMonthId = monthKey(Date.now())
+  const latestMovementMonth = sortedMovementMonths[sortedMovementMonths.length - 1]
+  const detailEndMonth = latestMovementMonth && latestMovementMonth > currentMonthId ? latestMovementMonth : currentMonthId
+  const monthIds = sortedMovementMonths.length > 0 && detailEndMonth >= CATEGORY_DETAIL_START_MONTH
+    ? enumerateMonthKeys(CATEGORY_DETAIL_START_MONTH, detailEndMonth)
+    : []
+  const points = monthIds.map((id) => {
+    const value = totals.get(id) ?? { amountMinor: 0, missingCurrencies: new Set<string>() }
+    return {
+      id,
+      label: formatMonthLabel(Date.UTC(Number(id.slice(0, 4)), Number(id.slice(5, 7)) - 1, 1)),
+      shortLabel: formatMonthShortLabel(id),
+      amountMinor: value.amountMinor,
+      missingCurrencies: Array.from(value.missingCurrencies).sort((a, b) => currencySortValue(a).localeCompare(currencySortValue(b))),
+    }
+  })
+  const currentMonthAmountMinor = totals.get(monthKey(Date.now()))?.amountMinor ?? 0
+  const averageMonthIds = monthIds
+  const averageMonthlyAmountMinor = averageMonthIds.length > 0
+    ? Math.round(averageMonthIds.reduce((sum, id) => sum + (totals.get(id)?.amountMinor ?? 0), 0) / averageMonthIds.length)
+    : 0
+
+  return {
+    points,
+    totalAmountMinor,
+    currentMonthAmountMinor,
+    averageMonthlyAmountMinor,
+    averageMonthCount: averageMonthIds.length,
+    missingCurrencies: Array.from(missingCurrencies).sort((a, b) => currencySortValue(a).localeCompare(currencySortValue(b))),
+  }
+}
+
+function enumerateMonthKeys(startKey: string, endKey: string) {
+  const startYear = Number(startKey.slice(0, 4))
+  const startMonth = Number(startKey.slice(5, 7))
+  const endYear = Number(endKey.slice(0, 4))
+  const endMonth = Number(endKey.slice(5, 7))
+  if (!startYear || !startMonth || !endYear || !endMonth) return []
+
+  const keys: string[] = []
+  let year = startYear
+  let month = startMonth
+  for (let guard = 0; guard < 180; guard += 1) {
+    keys.push(`${year}-${String(month).padStart(2, '0')}`)
+    if (year === endYear && month === endMonth) break
+    month += 1
+    if (month > 12) {
+      month = 1
+      year += 1
+    }
+  }
+  return keys
 }
 
 function buildCategoryBreakdown(
