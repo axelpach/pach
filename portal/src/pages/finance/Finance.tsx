@@ -1,5 +1,5 @@
 import { useQuery, useZero } from '@rocicorp/zero/react'
-import { AlertTriangle, ArrowDown, ArrowLeft, ArrowRightLeft, ArrowUp, Building2, CalendarDays, ChartPie, CheckCircle, ChevronDown, ChevronRight, CircleDollarSign, CreditCard, FileText, FileUp, Info, Landmark, Layers2, Loader2, Plus, Search, Tag, Trash2, UploadCloud, UserRound, WalletCards, X } from 'lucide-react'
+import { AlertTriangle, ArrowDown, ArrowLeft, ArrowRightLeft, ArrowUp, Building2, Calculator, CalendarDays, ChartPie, CheckCircle, ChevronDown, ChevronRight, CircleDollarSign, CreditCard, FileText, FileUp, Info, Landmark, Layers2, Loader2, Plus, RefreshCcw, Search, Tag, Target, Trash2, TrendingUp, UploadCloud, UserRound, WalletCards, X } from 'lucide-react'
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type MouseEvent, type ReactNode } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { config } from '../../config'
@@ -9,7 +9,7 @@ import type { Mutators } from '../../mutators'
 import type { Schema } from '../../zero-schema'
 import { FilterButton, type ActiveFilters, type FilterFieldConfig } from '../issues/IssueFilters'
 
-type Tab = 'dashboard' | 'movements' | 'accounts' | 'category'
+type Tab = 'dashboard' | 'movements' | 'accounts' | 'forecasts' | 'category'
 type ImportPhase = 'select' | 'ready' | 'processing' | 'success' | 'failed'
 type FinanceMovement = Schema['tables']['fin_movements']['row']
 type FinanceAccount = Schema['tables']['fin_accounts']['row']
@@ -83,6 +83,31 @@ type MonthlyBalanceChartPoint = {
   amountMinor: number
   missingCurrencies: string[]
 }
+type ForecastProjectionRow = {
+  id: string
+  label: string
+  shortLabel: string
+  startingBalanceMinor: number
+  incomeMinor: number
+  expenseMinor: number
+  netMinor: number
+  endingBalanceMinor: number
+  targetBalanceMinor: number
+}
+type ForecastProjection = {
+  monthCount: number
+  targetAmountMinor: number
+  startingBalanceMinor: number
+  monthlyIncomeMinor: number
+  monthlyExpenseMinor: number
+  plannedNetMinor: number
+  requiredMonthlyNetMinor: number
+  recommendedExpenseMinor: number
+  projectedEndingBalanceMinor: number
+  gapAtTargetMinor: number
+  rows: ForecastProjectionRow[]
+  chartPoints: MonthlyBalanceChartPoint[]
+}
 type CategorySpendTrend = {
   points: MonthlyBalanceChartPoint[]
   totalAmountMinor: number
@@ -108,16 +133,24 @@ type ImportReviewGroup = {
   counts: ReturnType<typeof summarizeImportReview>
   fileLabel: string
 }
+type ForecastScenarioInputs = {
+  targetAmount: string
+  targetMonth: string
+  monthlyIncome: string
+  monthlyExpense: string
+}
 
 function tabFromPath(pathname: string): Tab {
   if (categoryIdFromPath(pathname)) return 'category'
   if (pathname === '/finance' || pathname === '/finance/' || pathname === '/finance/dashboard') return 'dashboard'
-  return pathname === '/finance/accounts' || pathname === '/finance/accounts-cards' ? 'accounts' : 'movements'
+  if (pathname === '/finance/accounts' || pathname === '/finance/accounts-cards') return 'accounts'
+  return pathname === '/finance/forecasts' ? 'forecasts' : 'movements'
 }
 
 function pathForTab(tab: Tab) {
   if (tab === 'dashboard') return '/finance/dashboard'
-  return tab === 'accounts' ? '/finance/accounts' : '/finance/movements'
+  if (tab === 'accounts') return '/finance/accounts'
+  return tab === 'forecasts' ? '/finance/forecasts' : '/finance/movements'
 }
 
 function categoryIdFromPath(pathname: string) {
@@ -140,6 +173,31 @@ function financeOrganizationStorageKey(userId: string) {
   return `pach:finance:organization:${userId}`
 }
 
+function financeForecastScenarioStorageKey(userId: string, organizationId: string, currencyCode: string) {
+  return `pach:finance:forecast-scenario:${userId}:${organizationId}:${currencyCode}`
+}
+
+function readForecastScenarioInputs(storageKey: string): ForecastScenarioInputs | null {
+  if (typeof window === 'undefined') return null
+
+  try {
+    const raw = window.localStorage.getItem(storageKey)
+    if (!raw) return null
+    const parsed: unknown = JSON.parse(raw)
+    if (!parsed || typeof parsed !== 'object') return null
+    const record = parsed as Record<string, unknown>
+
+    return {
+      targetAmount: typeof record.targetAmount === 'string' ? record.targetAmount : formatFinancialMoneyInput(DEFAULT_FORECAST_TARGET_AMOUNT_MINOR),
+      targetMonth: typeof record.targetMonth === 'string' && isMonthKey(record.targetMonth) ? record.targetMonth : defaultForecastTargetMonth(),
+      monthlyIncome: typeof record.monthlyIncome === 'string' ? record.monthlyIncome : '',
+      monthlyExpense: typeof record.monthlyExpense === 'string' ? record.monthlyExpense : '',
+    }
+  } catch {
+    return null
+  }
+}
+
 const ACCOUNT_TYPES = [
   { value: 'bank_account', label: 'bank account' },
   { value: 'credit_card', label: 'credit card' },
@@ -153,6 +211,7 @@ const CURRENCIES = ['MXN', 'USD', 'EUR']
 const MAX_IMPORT_TOTAL_BYTES = 10 * 1024 * 1024
 const UNCATEGORIZED_VALUE = '__uncategorized__'
 const CATEGORY_DETAIL_START_MONTH = '2026-05'
+const DEFAULT_FORECAST_TARGET_AMOUNT_MINOR = 100000000
 const EMPTY_ACCOUNT_DRAFT: AccountDraft = { name: '', institutionName: '', holderUserId: '', type: 'bank_account', currencyCode: 'MXN' }
 
 const MOVEMENT_TYPES = [
@@ -228,6 +287,11 @@ export default function Finance() {
     rates: {},
     error: null,
   })
+  const [forecastTargetAmount, setForecastTargetAmount] = useState(() => formatFinancialMoneyInput(DEFAULT_FORECAST_TARGET_AMOUNT_MINOR))
+  const [forecastTargetMonth, setForecastTargetMonth] = useState(defaultForecastTargetMonth())
+  const [forecastMonthlyIncome, setForecastMonthlyIncome] = useState('')
+  const [forecastMonthlyExpense, setForecastMonthlyExpense] = useState('')
+  const [forecastScenarioHydratedKey, setForecastScenarioHydratedKey] = useState<string | null>(null)
   const [editingMovementLabel, setEditingMovementLabel] = useState<{ id: string; value: string } | null>(null)
   const [editingMovementDate, setEditingMovementDate] = useState<{ id: string; value: string } | null>(null)
   const [editingMovementAmount, setEditingMovementAmount] = useState<{ id: string; value: string } | null>(null)
@@ -424,6 +488,32 @@ export default function Finance() {
   const monthlyBalanceChartCurrencyCode = readyMonthlyBalanceChartPoints
     ? dashboardReportingCurrencyCode
     : dashboardChartSnapshot?.currencyCode ?? dashboardReportingCurrencyCode
+  const forecastCurrencyCode = dashboardReportingCurrencyCode
+  const forecastScenarioStorageKey = user && selectedOrganizationId
+    ? financeForecastScenarioStorageKey(user.id, selectedOrganizationId, forecastCurrencyCode)
+    : null
+  const forecastBalanceMovements = scopedMovements
+    .filter((movement) => movement.status !== 'ignored')
+  const forecastBalanceTotals = summarizeAccountBalances(buildAccountBalanceBreakdown(forecastBalanceMovements, scopedAccounts))
+  const convertedForecastBalance = dashboardConversionRates
+    ? convertMoneyAmounts(forecastBalanceTotals.netAmounts, forecastCurrencyCode, dashboardConversionRates)
+    : null
+  const forecastTrailingAverages = dashboardConversionRates
+    ? buildForecastTrailingAverages(scopedMovements, scopedCategories, forecastCurrencyCode, dashboardConversionRates)
+    : null
+  const forecastTargetAmountMinor = parseMoneyToMinor(forecastTargetAmount)
+  const forecastMonthlyIncomeMinor = parseMoneyToMinor(forecastMonthlyIncome)
+  const forecastMonthlyExpenseMinor = parseMoneyToMinor(forecastMonthlyExpense)
+  const forecastProjection = convertedForecastBalance && forecastTargetAmountMinor != null && forecastMonthlyIncomeMinor != null && forecastMonthlyExpenseMinor != null
+    ? buildForecastProjection({
+        startingBalanceMinor: convertedForecastBalance.amountMinor,
+        targetAmountMinor: forecastTargetAmountMinor,
+        targetMonth: forecastTargetMonth,
+        monthlyIncomeMinor: forecastMonthlyIncomeMinor,
+        monthlyExpenseMinor: Math.abs(forecastMonthlyExpenseMinor),
+        currencyCode: forecastCurrencyCode,
+      })
+    : null
   const readyCategoryBreakdown = dashboardConversionRates
     ? buildCategoryBreakdown(dashboardNonTransferMovements, scopedCategories, dashboardReportingCurrencyCode, dashboardConversionRates)
     : null
@@ -746,6 +836,48 @@ export default function Finance() {
 
     return () => controller.abort()
   }, [dashboardReportingCurrencyCode])
+
+  useEffect(() => {
+    if (!forecastScenarioStorageKey) {
+      setForecastScenarioHydratedKey(null)
+      return
+    }
+
+    const storedScenario = readForecastScenarioInputs(forecastScenarioStorageKey)
+    setForecastTargetAmount(storedScenario?.targetAmount ?? formatFinancialMoneyInput(DEFAULT_FORECAST_TARGET_AMOUNT_MINOR))
+    setForecastTargetMonth(storedScenario?.targetMonth ?? defaultForecastTargetMonth())
+    setForecastMonthlyIncome(storedScenario?.monthlyIncome ?? '')
+    setForecastMonthlyExpense(storedScenario?.monthlyExpense ?? '')
+    setForecastScenarioHydratedKey(forecastScenarioStorageKey)
+  }, [forecastScenarioStorageKey])
+
+  useEffect(() => {
+    if (!forecastTrailingAverages) return
+    setForecastMonthlyIncome((current) => current || formatFinancialMoneyInput(forecastTrailingAverages.averageIncomeMinor))
+    setForecastMonthlyExpense((current) => current || formatFinancialMoneyInput(forecastTrailingAverages.averageExpenseMinor))
+  }, [forecastTrailingAverages?.averageExpenseMinor, forecastTrailingAverages?.averageIncomeMinor])
+
+  useEffect(() => {
+    if (!forecastScenarioStorageKey || forecastScenarioHydratedKey !== forecastScenarioStorageKey) return
+    if (typeof window === 'undefined') return
+    try {
+      window.localStorage.setItem(forecastScenarioStorageKey, JSON.stringify({
+        targetAmount: forecastTargetAmount,
+        targetMonth: forecastTargetMonth,
+        monthlyIncome: forecastMonthlyIncome,
+        monthlyExpense: forecastMonthlyExpense,
+      } satisfies ForecastScenarioInputs))
+    } catch {
+      // Ignore local persistence failures; forecast inputs still work for the current session.
+    }
+  }, [
+    forecastMonthlyExpense,
+    forecastMonthlyIncome,
+    forecastScenarioHydratedKey,
+    forecastScenarioStorageKey,
+    forecastTargetAmount,
+    forecastTargetMonth,
+  ])
 
   useEffect(() => {
     if (!selectedOrganizationId || !token) {
@@ -1517,6 +1649,12 @@ export default function Finance() {
     navigate(pathForCategory(categoryId))
   }
 
+  function applyForecastTrailingAverages() {
+    if (!forecastTrailingAverages) return
+    setForecastMonthlyIncome(formatFinancialMoneyInput(forecastTrailingAverages.averageIncomeMinor))
+    setForecastMonthlyExpense(formatFinancialMoneyInput(forecastTrailingAverages.averageExpenseMinor))
+  }
+
   return (
     <div className="flex h-full min-h-0 flex-1 overflow-hidden">
       <aside className="hidden shrink-0 flex-col border-r border-edge/12 bg-pit/60 px-2 py-4 backdrop-blur-sm md:relative md:z-auto md:flex md:w-[200px]">
@@ -1582,6 +1720,11 @@ export default function Finance() {
             meta={String(scopedAccounts.length)}
             onClick={() => navigate(pathForTab('accounts'))}
           />
+          <FinanceSidebarButton
+            active={tab === 'forecasts'}
+            label="forecasts"
+            onClick={() => navigate(pathForTab('forecasts'))}
+          />
         </div>
 
         <div className="mt-6 space-y-1">
@@ -1617,7 +1760,7 @@ export default function Finance() {
               />
             </div>
           </div>
-          <div className="grid grid-cols-3 gap-1 font-mono text-[10px] uppercase tracking-label">
+          <div className="grid grid-cols-4 gap-1 font-mono text-[10px] uppercase tracking-label">
             <button
               type="button"
               onClick={() => navigate(pathForTab('dashboard'))}
@@ -1631,6 +1774,13 @@ export default function Finance() {
               className={`border px-2 py-2 text-center transition ${tab === 'movements' ? 'border-edge/45 bg-accent-fill/8 text-accent' : 'border-edge/12 text-fg-3'}`}
             >
               movements
+            </button>
+            <button
+              type="button"
+              onClick={() => navigate(pathForTab('forecasts'))}
+              className={`border px-2 py-2 text-center transition ${tab === 'forecasts' ? 'border-edge/45 bg-accent-fill/8 text-accent' : 'border-edge/12 text-fg-3'}`}
+            >
+              forecast
             </button>
             <button
               type="button"
@@ -1975,6 +2125,205 @@ export default function Finance() {
                 )}
               </div>
             </section>
+          </div>
+        </div>
+      ) : tab === 'forecasts' ? (
+        <div className="min-h-0 flex-1 overflow-auto px-3 py-3 md:px-8 md:py-4">
+          <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
+            <div className="font-mono">
+              <div className="text-[10px] uppercase tracking-label text-fg-4">forecasts</div>
+              <div className="mt-1 text-xl lowercase text-fg-1">target balance scenario</div>
+            </div>
+            <div className="flex flex-wrap items-center gap-1 font-mono">
+              {CURRENCIES.map((currencyCode) => (
+                <button
+                  key={currencyCode}
+                  type="button"
+                  onClick={() => setDashboardReportingCurrencyCode(currencyCode)}
+                  className={`flex h-8 items-center gap-1.5 border px-2.5 text-[10px] uppercase tracking-label transition ${
+                    forecastCurrencyCode === currencyCode
+                      ? 'border-edge/45 bg-accent-fill/8 text-accent'
+                      : 'border-edge/14 text-fg-4 hover:border-edge/28 hover:text-fg-2'
+                  }`}
+                >
+                  <CircleDollarSign className="h-3 w-3" />
+                  {currencyCode}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className="grid gap-4 xl:grid-cols-[360px_minmax(0,1fr)]">
+            <section className="border border-edge/12 bg-pit-2 font-mono">
+              <div className="flex items-center justify-between border-b border-edge/12 px-4 py-3">
+                <div>
+                  <div className="text-[10px] uppercase tracking-label text-fg-4">scenario</div>
+                  <div className="mt-1 text-sm lowercase text-fg-1">editable assumptions</div>
+                </div>
+                <Target className="h-4 w-4 text-accent" />
+              </div>
+              <div className="grid gap-3 p-4">
+                <ForecastField
+                  label="target balance"
+                  value={forecastTargetAmount}
+                  onChange={setForecastTargetAmount}
+                  prefix={forecastCurrencyCode}
+                  placeholder="200000.00"
+                />
+                <label className="grid gap-1">
+                  <span className="text-[10px] uppercase tracking-label text-fg-4">target month</span>
+                  <input
+                    type="month"
+                    value={forecastTargetMonth}
+                    onChange={(event) => setForecastTargetMonth(event.currentTarget.value)}
+                    className="h-9 border border-edge/15 bg-bg-2 px-3 font-mono text-xs text-fg-1 outline-none focus:border-accent focus:shadow-glow-xs"
+                  />
+                </label>
+                <ForecastField
+                  label="monthly income"
+                  value={forecastMonthlyIncome}
+                  onChange={setForecastMonthlyIncome}
+                  prefix={forecastCurrencyCode}
+                  placeholder="0.00"
+                />
+                <ForecastField
+                  label="monthly expense"
+                  value={forecastMonthlyExpense}
+                  onChange={setForecastMonthlyExpense}
+                  prefix={forecastCurrencyCode}
+                  placeholder="0.00"
+                />
+                <button
+                  type="button"
+                  disabled={!forecastTrailingAverages}
+                  onClick={applyForecastTrailingAverages}
+                  className="mt-1 flex h-9 items-center justify-center gap-2 border border-edge/18 bg-accent-fill/6 px-3 text-[10px] uppercase tracking-label text-accent transition hover:border-edge/35 disabled:cursor-not-allowed disabled:opacity-45"
+                >
+                  <RefreshCcw className="h-3.5 w-3.5" />
+                  use actual avg
+                </button>
+                <div className="border-t border-edge/8 pt-3 text-[10px] uppercase tracking-label text-fg-4">
+                  {forecastTrailingAverages
+                    ? `${forecastTrailingAverages.monthCount} completed month${forecastTrailingAverages.monthCount === 1 ? '' : 's'} avg`
+                    : 'loading actuals'}
+                  {forecastTrailingAverages?.missingCurrencies.length ? ` · missing ${forecastTrailingAverages.missingCurrencies.join(', ')}` : ''}
+                </div>
+              </div>
+            </section>
+
+            <div className="grid gap-4">
+              <div className="grid border-l border-t border-edge/12 font-mono md:grid-cols-4">
+                <CategoryKpi
+                  label="starting"
+                  value={convertedForecastBalance ? formatMoney(convertedForecastBalance.amountMinor, forecastCurrencyCode) : '...'}
+                  sub="current balance"
+                  tooltip={`Current balance across all active accounts, converted to ${forecastCurrencyCode}.`}
+                />
+                <CategoryKpi
+                  label="required net"
+                  value={forecastProjection ? formatMoney(forecastProjection.requiredMonthlyNetMinor, forecastCurrencyCode) : '...'}
+                  sub="per month"
+                  tooltip="Monthly net change needed to reach the target by the selected month."
+                />
+                <CategoryKpi
+                  label="planned net"
+                  value={forecastProjection ? formatMoney(forecastProjection.plannedNetMinor, forecastCurrencyCode) : '...'}
+                  sub="income minus expense"
+                  tooltip="Monthly net change from the editable income and expense assumptions."
+                />
+                <CategoryKpi
+                  label="expense cap"
+                  value={forecastProjection ? formatMoney(Math.max(0, forecastProjection.recommendedExpenseMinor), forecastCurrencyCode) : '...'}
+                  sub={forecastProjection && forecastProjection.recommendedExpenseMinor < 0 ? 'income gap' : 'max monthly spend'}
+                  tooltip="Maximum monthly expense allowed by the target, assuming the income value stays unchanged."
+                />
+              </div>
+
+              <section className="border border-edge/12 bg-pit-2 font-mono">
+                <div className="flex items-center justify-between border-b border-edge/12 px-4 py-3">
+                  <div>
+                    <div className="text-[10px] uppercase tracking-label text-fg-4">recommendation</div>
+                    <div className="mt-1 text-sm lowercase text-fg-1">
+                      {forecastProjection ? forecastRecommendation(forecastProjection, forecastCurrencyCode) : 'complete the scenario inputs'}
+                    </div>
+                  </div>
+                  <Calculator className="h-4 w-4 text-accent" />
+                </div>
+                <div className="grid gap-4 p-4 xl:grid-cols-[minmax(0,1fr)_minmax(320px,0.8fr)]">
+                  <div className="min-h-72">
+                    {forecastProjection ? (
+                      <MonthlyBalanceAreaChart points={forecastProjection.chartPoints} currencyCode={forecastCurrencyCode} fitYAxisToData />
+                    ) : (
+                      <div className="flex h-full min-h-72 items-center justify-center border border-dashed border-edge/12 text-sm text-fg-4">
+                        // no forecast yet
+                      </div>
+                    )}
+                  </div>
+                  <div className="grid content-center gap-3">
+                    <ForecastMetric
+                      label="target"
+                      value={forecastProjection ? formatMoney(forecastProjection.targetAmountMinor, forecastCurrencyCode) : '...'}
+                    />
+                    <ForecastMetric
+                      label="projected ending"
+                      value={forecastProjection ? formatMoney(forecastProjection.projectedEndingBalanceMinor, forecastCurrencyCode) : '...'}
+                      tone={forecastProjection && forecastProjection.gapAtTargetMinor <= 0 ? 'ok' : forecastProjection ? 'fail' : 'default'}
+                    />
+                    <ForecastMetric
+                      label={forecastProjection && forecastProjection.gapAtTargetMinor <= 0 ? 'surplus' : 'shortfall'}
+                      value={forecastProjection ? formatMoney(Math.abs(forecastProjection.gapAtTargetMinor), forecastCurrencyCode) : '...'}
+                      tone={forecastProjection && forecastProjection.gapAtTargetMinor <= 0 ? 'ok' : forecastProjection ? 'fail' : 'default'}
+                    />
+                    <ForecastMetric
+                      label="months"
+                      value={forecastProjection ? String(forecastProjection.monthCount) : '...'}
+                    />
+                  </div>
+                </div>
+              </section>
+
+              <section className="min-h-0 overflow-hidden border border-edge/12 bg-pit-2 font-mono">
+                <div className="flex items-center justify-between border-b border-edge/12 px-4 py-3">
+                  <div className="text-[10px] uppercase tracking-label text-fg-4">monthly path</div>
+                  <TrendingUp className="h-4 w-4 text-accent" />
+                </div>
+                <div className="overflow-auto">
+                  <table className="w-full min-w-[760px] border-collapse text-xs">
+                    <thead className="sticky top-0 bg-pit text-[10px] uppercase tracking-label text-fg-4">
+                      <tr>
+                        <th className="border-b border-edge/12 px-3 py-2 text-left">month</th>
+                        <th className="border-b border-edge/12 px-3 py-2 text-right">start</th>
+                        <th className="border-b border-edge/12 px-3 py-2 text-right">income</th>
+                        <th className="border-b border-edge/12 px-3 py-2 text-right">expense</th>
+                        <th className="border-b border-edge/12 px-3 py-2 text-right">net</th>
+                        <th className="border-b border-edge/12 px-3 py-2 text-right">ending</th>
+                        <th className="border-b border-edge/12 px-3 py-2 text-right">path gap</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {forecastProjection ? forecastProjection.rows.map((row) => {
+                        const pathGap = row.targetBalanceMinor - row.endingBalanceMinor
+                        return (
+                          <tr key={row.id} className="border-b border-edge/8 text-fg-2">
+                            <td className="whitespace-nowrap px-3 py-2 text-fg-1">{row.label}</td>
+                            <td className="whitespace-nowrap px-3 py-2 text-right">{formatMoney(row.startingBalanceMinor, forecastCurrencyCode)}</td>
+                            <td className="whitespace-nowrap px-3 py-2 text-right text-ok">{formatMoney(row.incomeMinor, forecastCurrencyCode)}</td>
+                            <td className="whitespace-nowrap px-3 py-2 text-right text-fail">{formatMoney(-row.expenseMinor, forecastCurrencyCode)}</td>
+                            <td className={`whitespace-nowrap px-3 py-2 text-right ${row.netMinor < 0 ? 'text-fail' : 'text-ok'}`}>{formatMoney(row.netMinor, forecastCurrencyCode)}</td>
+                            <td className="whitespace-nowrap px-3 py-2 text-right text-fg-1">{formatMoney(row.endingBalanceMinor, forecastCurrencyCode)}</td>
+                            <td className={`whitespace-nowrap px-3 py-2 text-right ${pathGap > 0 ? 'text-fail' : 'text-ok'}`}>{formatMoney(pathGap, forecastCurrencyCode)}</td>
+                          </tr>
+                        )
+                      }) : (
+                        <tr>
+                          <td colSpan={7} className="px-3 py-12 text-center text-sm text-fg-4">// no forecast yet</td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </section>
+            </div>
           </div>
         </div>
       ) : tab === 'movements' ? (
@@ -3554,6 +3903,57 @@ function CategoryKpi({ label, value, sub, tooltip }: { label: string; value: str
   )
 }
 
+function ForecastField({
+  label,
+  value,
+  onChange,
+  prefix,
+  placeholder,
+}: {
+  label: string
+  value: string
+  onChange: (value: string) => void
+  prefix: string
+  placeholder?: string
+}) {
+  return (
+    <label className="grid gap-1">
+      <span className="text-[10px] uppercase tracking-label text-fg-4">{label}</span>
+      <div className="flex h-9 items-center border border-edge/15 bg-bg-2 focus-within:border-accent focus-within:shadow-glow-xs">
+        <span className="shrink-0 border-r border-edge/12 px-2 text-[10px] uppercase tracking-label text-fg-4">{prefix}</span>
+        <input
+          value={value}
+          onChange={(event) => onChange(formatFinancialInputValue(event.currentTarget.value))}
+          onBlur={() => {
+            const amountMinor = parseMoneyToMinor(value)
+            if (amountMinor != null) onChange(formatFinancialMoneyInput(amountMinor))
+          }}
+          inputMode="decimal"
+          placeholder={placeholder}
+          className="min-w-0 flex-1 bg-transparent px-3 font-mono text-xs text-fg-1 outline-none placeholder:text-fg-4"
+        />
+      </div>
+    </label>
+  )
+}
+
+function ForecastMetric({
+  label,
+  value,
+  tone = 'default',
+}: {
+  label: string
+  value: string
+  tone?: 'default' | 'ok' | 'fail'
+}) {
+  return (
+    <div className="flex items-center justify-between gap-4 border-b border-edge/8 pb-2 last:border-b-0">
+      <span className="text-[10px] uppercase tracking-label text-fg-4">{label}</span>
+      <span className={`whitespace-nowrap text-right text-sm tabular-nums ${tone === 'ok' ? 'text-ok' : tone === 'fail' ? 'text-fail' : 'text-fg-1'}`}>{value}</span>
+    </div>
+  )
+}
+
 function MovementDateSortHeader({
   direction,
   onSort,
@@ -4355,6 +4755,10 @@ function todayInputDate() {
   return date.toISOString().slice(0, 10)
 }
 
+function defaultForecastTargetMonth() {
+  return addMonthsToMonthKey(monthKey(Date.now()), 6)
+}
+
 function dateInputToMs(value: string) {
   const [year, month, day] = value.split('-').map(Number)
   if (!year || !month || !day) return Date.now()
@@ -4388,6 +4792,23 @@ async function sha256Text(value: string) {
 
 function monthKey(value: number) {
   return formatZeroDate(value).slice(0, 7)
+}
+
+function isMonthKey(value: string) {
+  return /^\d{4}-\d{2}$/.test(value)
+}
+
+function addMonthsToMonthKey(value: string, offset: number) {
+  const year = Number(value.slice(0, 4))
+  const month = Number(value.slice(5, 7))
+  if (!year || !month) return value
+  const date = new Date(Date.UTC(year, month - 1 + offset, 1))
+  return `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, '0')}`
+}
+
+function previousCompletedMonthKeys(count: number) {
+  const currentMonth = monthKey(Date.now())
+  return Array.from({ length: count }, (_, index) => addMonthsToMonthKey(currentMonth, -count + index))
 }
 
 function quarterKey(value: number) {
@@ -4438,6 +4859,13 @@ function formatMonthShortLabel(value: string) {
   return new Intl.DateTimeFormat('en-US', { month: 'short', timeZone: 'UTC' }).format(new Date(Date.UTC(year, month - 1, 1)))
 }
 
+function formatMonthKeyLabel(value: string) {
+  const year = Number(value.slice(0, 4))
+  const month = Number(value.slice(5, 7))
+  if (!year || !month) return value
+  return new Intl.DateTimeFormat('en-US', { month: 'short', year: 'numeric', timeZone: 'UTC' }).format(new Date(Date.UTC(year, month - 1, 1)))
+}
+
 function parseFrankfurterRates(payload: FrankfurterRatesPayload, baseCurrencyCode: string) {
   if (Array.isArray(payload)) {
     const rates: Record<string, number> = {}
@@ -4467,6 +4895,39 @@ function parseMoneyToMinor(value: string) {
 
 function formatEditableMoneyInput(amountMinor: number) {
   return (amountMinor / 100).toFixed(2)
+}
+
+function formatFinancialMoneyInput(amountMinor: number) {
+  return new Intl.NumberFormat('en-US', {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  }).format(amountMinor / 100)
+}
+
+function formatFinancialInputValue(value: string) {
+  const raw = value.replace(/,/g, '').trim()
+  if (!raw) return ''
+  const negative = raw.startsWith('-')
+  const unsigned = raw.replace(/-/g, '')
+  const [integerRaw = '', ...decimalParts] = unsigned.split('.')
+  const integerDigits = integerRaw.replace(/\D/g, '')
+  const decimalSource = decimalParts.join('')
+  const decimalDigits = decimalSource.replace(/\D/g, '').slice(0, 2)
+  const hasDecimal = unsigned.includes('.')
+  const integerValue = integerDigits ? Number(integerDigits) : 0
+  const groupedInteger = new Intl.NumberFormat('en-US', { maximumFractionDigits: 0 }).format(integerValue)
+  return `${negative ? '-' : ''}${groupedInteger}${hasDecimal ? `.${decimalDigits}` : ''}`
+}
+
+function forecastRecommendation(forecast: ForecastProjection, currencyCode: string) {
+  if (forecast.gapAtTargetMinor <= 0) {
+    return `on track · projected surplus ${formatMoney(Math.abs(forecast.gapAtTargetMinor), currencyCode)}`
+  }
+  const monthlyGap = forecast.requiredMonthlyNetMinor - forecast.plannedNetMinor
+  if (forecast.recommendedExpenseMinor < 0) {
+    return `income gap · add ${formatMoney(Math.abs(forecast.recommendedExpenseMinor), currencyCode)} per month even at zero spend`
+  }
+  return `reduce expenses or add income by ${formatMoney(Math.max(0, monthlyGap), currencyCode)} per month`
 }
 
 function signedAmountForType(amountMinor: number, type: string) {
@@ -4507,6 +4968,99 @@ function convertMoneyAmounts(
     currencyCode: reportingCurrencyCode,
     amountMinor,
     missingCurrencies: Array.from(missingCurrencies).sort((a, b) => currencySortValue(a).localeCompare(currencySortValue(b))),
+  }
+}
+
+function buildForecastTrailingAverages(
+  movements: FinanceMovement[],
+  categories: FinanceCategory[],
+  reportingCurrencyCode: string,
+  ratesFromReportingCurrency: Record<string, number>,
+) {
+  const monthIds = previousCompletedMonthKeys(2)
+  const monthTotals = new Map(monthIds.map((id) => [id, { incomeMinor: 0, expenseMinor: 0 }]))
+  const missingCurrencies = new Set<string>()
+
+  for (const movement of movements) {
+    if (movement.status === 'ignored') continue
+    if (isTransferLikeMovement(movement, categories)) continue
+    const id = monthKey(movement.transactionDate)
+    const current = monthTotals.get(id)
+    if (!current) continue
+    const rate = conversionRateToReportingCurrency(movement.currencyCode, reportingCurrencyCode, ratesFromReportingCurrency)
+    if (rate == null) {
+      missingCurrencies.add(movement.currencyCode)
+      continue
+    }
+    const convertedAmountMinor = Math.round(movement.amountMinor * rate)
+    if (convertedAmountMinor > 0) current.incomeMinor += convertedAmountMinor
+    if (convertedAmountMinor < 0) current.expenseMinor += Math.abs(convertedAmountMinor)
+  }
+
+  const values = Array.from(monthTotals.values())
+  const divisor = Math.max(values.length, 1)
+  return {
+    monthCount: values.length,
+    averageIncomeMinor: Math.round(values.reduce((sum, entry) => sum + entry.incomeMinor, 0) / divisor),
+    averageExpenseMinor: Math.round(values.reduce((sum, entry) => sum + entry.expenseMinor, 0) / divisor),
+    missingCurrencies: Array.from(missingCurrencies).sort((a, b) => currencySortValue(a).localeCompare(currencySortValue(b))),
+  }
+}
+
+function buildForecastProjection(input: {
+  startingBalanceMinor: number
+  targetAmountMinor: number
+  targetMonth: string
+  monthlyIncomeMinor: number
+  monthlyExpenseMinor: number
+  currencyCode: string
+}): ForecastProjection {
+  const startMonth = addMonthsToMonthKey(monthKey(Date.now()), 1)
+  const endMonth = isMonthKey(input.targetMonth) && input.targetMonth >= startMonth ? input.targetMonth : startMonth
+  const monthIds = enumerateMonthKeys(startMonth, endMonth)
+  const monthCount = Math.max(monthIds.length, 1)
+  const plannedNetMinor = input.monthlyIncomeMinor - input.monthlyExpenseMinor
+  const requiredMonthlyNetMinor = Math.ceil((input.targetAmountMinor - input.startingBalanceMinor) / monthCount)
+  const recommendedExpenseMinor = input.monthlyIncomeMinor - requiredMonthlyNetMinor
+  let balanceMinor = input.startingBalanceMinor
+  const rows = monthIds.map((id, index) => {
+    const startingBalanceMinor = balanceMinor
+    const targetBalanceMinor = input.startingBalanceMinor + Math.round(((input.targetAmountMinor - input.startingBalanceMinor) * (index + 1)) / monthCount)
+    balanceMinor += plannedNetMinor
+    return {
+      id,
+      label: formatMonthKeyLabel(id),
+      shortLabel: formatMonthShortLabel(id),
+      startingBalanceMinor,
+      incomeMinor: input.monthlyIncomeMinor,
+      expenseMinor: input.monthlyExpenseMinor,
+      netMinor: plannedNetMinor,
+      endingBalanceMinor: balanceMinor,
+      targetBalanceMinor,
+    }
+  })
+
+  const chartPoints = rows.map((row) => ({
+    id: row.id,
+    label: row.label,
+    shortLabel: row.shortLabel,
+    amountMinor: row.endingBalanceMinor,
+    missingCurrencies: [],
+  }))
+
+  return {
+    monthCount,
+    targetAmountMinor: input.targetAmountMinor,
+    startingBalanceMinor: input.startingBalanceMinor,
+    monthlyIncomeMinor: input.monthlyIncomeMinor,
+    monthlyExpenseMinor: input.monthlyExpenseMinor,
+    plannedNetMinor,
+    requiredMonthlyNetMinor,
+    recommendedExpenseMinor,
+    projectedEndingBalanceMinor: balanceMinor,
+    gapAtTargetMinor: input.targetAmountMinor - balanceMinor,
+    rows,
+    chartPoints,
   }
 }
 
