@@ -386,6 +386,11 @@ export default function Finance() {
     .filter((movement) => selectedDashboardMonthFilterIds.length === 0 || selectedDashboardMonthFilterIds.includes(monthKey(movement.transactionDate)))
     .filter((movement) => selectedDashboardQuarterFilterIds.length === 0 || selectedDashboardQuarterFilterIds.includes(quarterKey(movement.transactionDate)))
     .filter((movement) => selectedDashboardCurrencyFilterIds.length === 0 || selectedDashboardCurrencyFilterIds.includes(movement.currencyCode))
+  const dashboardPeriodIsInProgress = dashboardPeriodIncludesCurrentMonth(
+    selectedDashboardMonthFilterIds,
+    selectedDashboardQuarterFilterIds,
+    dashboardPeriodMovements,
+  )
   const dashboardBalanceMovements = scopedMovements
     .filter((movement) => dashboardBalanceCutoffMs == null || movement.transactionDate < dashboardBalanceCutoffMs)
     .filter((movement) => selectedDashboardCurrencyFilterIds.length === 0 || selectedDashboardCurrencyFilterIds.includes(movement.currencyCode))
@@ -1779,7 +1784,7 @@ export default function Finance() {
           </div>
         </div>
       ) : tab === 'dashboard' ? (
-        <div ref={dashboardScrollRef} className="flex min-h-0 flex-1 flex-col overflow-auto px-3 py-3 md:px-8 md:py-4">
+        <div ref={dashboardScrollRef} className="flex min-h-0 flex-1 flex-col overflow-y-auto overflow-x-hidden px-3 py-3 md:px-8 md:py-4">
           <div className="mb-3 flex items-center justify-between gap-3">
             <div className="[&>div>div>button]:h-8 [&>div>div>button]:px-3">
               <FilterButton
@@ -1907,7 +1912,7 @@ export default function Finance() {
                 ) : (
                   <>
                     <div className="min-h-64 flex-1">
-                      <MonthlyBalanceAreaChart points={monthlyBalanceChartPoints} currencyCode={monthlyBalanceChartCurrencyCode} />
+                      <MonthlyBalanceAreaChart points={monthlyBalanceChartPoints} currencyCode={monthlyBalanceChartCurrencyCode} markCurrentMonth={dashboardPeriodIsInProgress} />
                     </div>
                     <div className="mt-3 flex justify-between gap-3 overflow-hidden font-mono text-[10px] uppercase tracking-label text-fg-4">
                       {monthlyBalanceChartPoints.map((point) => (
@@ -1927,7 +1932,7 @@ export default function Finance() {
                 </div>
                 <ChartPie className="h-4 w-4 text-accent" />
               </div>
-              <div className="grid min-h-0 flex-1 gap-5 overflow-y-auto p-4">
+              <div className="grid min-h-0 flex-1 gap-5 overflow-y-auto overflow-x-hidden p-4">
                 {!categoryBreakdown || categoryBreakdown.entries.length === 0 ? (
                   <div className="flex min-h-52 items-center justify-center border border-dashed border-edge/12 font-mono text-sm text-fg-4">
                     {categoryBreakdownEmptyMessage}
@@ -1947,7 +1952,7 @@ export default function Finance() {
                           key={entry.id}
                           type="button"
                           onClick={() => openCategoryDetail(entry.id)}
-                          className="grid grid-cols-[12px_1fr_auto_auto] items-center gap-2 text-left font-mono text-xs transition hover:text-accent"
+                          className="grid min-w-0 grid-cols-[12px_minmax(0,1fr)_auto_auto] items-center gap-2 text-left font-mono text-xs transition hover:text-accent"
                         >
                           <span className="h-3 w-3" style={{ backgroundColor: entry.color }} />
                           <span className="truncate text-fg-2">{entry.name}</span>
@@ -3537,7 +3542,7 @@ function CategoryKpi({ label, value, sub, tooltip }: { label: string; value: str
         {tooltip ? (
           <span className="group/info relative inline-flex" tabIndex={0} aria-label={tooltip}>
             <Info className="h-3 w-3 text-fg-4 transition group-hover/info:text-accent group-focus/info:text-accent" />
-            <span className="pointer-events-none absolute left-0 top-[calc(100%+8px)] z-40 w-72 max-w-[calc(100vw-2rem)] border border-edge/20 bg-pit px-3 py-2 font-mono text-[10px] uppercase tracking-label text-fg-2 opacity-0 shadow-terminal-popover transition group-hover/info:opacity-100 group-focus/info:opacity-100">
+            <span className="pointer-events-none absolute left-0 top-[calc(100%+8px)] z-40 hidden w-72 max-w-[calc(100vw-2rem)] border border-edge/20 bg-pit px-3 py-2 font-mono text-[10px] uppercase tracking-label text-fg-2 shadow-terminal-popover group-hover/info:block group-focus/info:block">
               {tooltip}
             </span>
           </span>
@@ -3961,13 +3966,16 @@ function MonthlyBalanceAreaChart({
   points,
   currencyCode,
   fitYAxisToData = false,
+  markCurrentMonth = false,
 }: {
   points: MonthlyBalanceChartPoint[]
   currencyCode: string
   fitYAxisToData?: boolean
+  markCurrentMonth?: boolean
 }) {
   const [hoverIndex, setHoverIndex] = useState<number | null>(null)
   const wrapperRef = useRef<HTMLDivElement | null>(null)
+  const currentMonthId = monthKey(Date.now())
   const width = 640
   const height = 220
   const padTop = 18
@@ -3988,7 +3996,11 @@ function MonthlyBalanceAreaChart({
     x: (index / Math.max(points.length - 1, 1)) * width,
     y: padTop + ((maxValue - point.amountMinor) / range) * chartHeight,
   }))
-  const linePath = chartPoints.map((point, index) => `${index === 0 ? 'M' : 'L'} ${point.x},${point.y}`).join(' ')
+  const pathForChartPoints = (entries: typeof chartPoints) => entries.map((point, index) => `${index === 0 ? 'M' : 'L'} ${point.x},${point.y}`).join(' ')
+  const linePath = pathForChartPoints(chartPoints)
+  const shouldDotCurrentMonthSegment = markCurrentMonth && chartPoints.length > 1 && chartPoints[chartPoints.length - 1]?.id === currentMonthId
+  const solidLinePath = shouldDotCurrentMonthSegment ? pathForChartPoints(chartPoints.slice(0, -1)) : linePath
+  const dottedLinePath = shouldDotCurrentMonthSegment ? pathForChartPoints(chartPoints.slice(-2)) : ''
   const areaPath = `${linePath} L ${width},${height - padBottom} L 0,${height - padBottom} Z`
   const zeroY = padTop + ((maxValue - 0) / range) * chartHeight
   const shouldShowZeroLine = zeroY >= padTop && zeroY <= height - padBottom
@@ -4045,7 +4057,12 @@ function MonthlyBalanceAreaChart({
           />
         ) : null}
         <path d={areaPath} fill="url(#finance-monthly-balance-grad)" />
-        <path d={linePath} fill="none" stroke="rgb(var(--accent-rgb))" strokeWidth="1.8" vectorEffect="non-scaling-stroke" />
+        {solidLinePath ? (
+          <path d={solidLinePath} fill="none" stroke="rgb(var(--accent-rgb))" strokeWidth="1.8" vectorEffect="non-scaling-stroke" />
+        ) : null}
+        {dottedLinePath ? (
+          <path d={dottedLinePath} fill="none" stroke="rgb(var(--accent-rgb))" strokeWidth="1.8" strokeDasharray="5 6" vectorEffect="non-scaling-stroke" />
+        ) : null}
         {hoveredPoint ? (
           <line
             x1={hoveredPoint.x}
@@ -4378,6 +4395,13 @@ function quarterKey(value: number) {
   const year = date.getUTCFullYear()
   const quarter = Math.floor(date.getUTCMonth() / 3) + 1
   return `${year}-Q${quarter}`
+}
+
+function dashboardPeriodIncludesCurrentMonth(monthIds: string[], quarterIds: string[], movements: FinanceMovement[]) {
+  const currentMonthId = monthKey(Date.now())
+  if (monthIds.length > 0) return monthIds.includes(currentMonthId)
+  if (quarterIds.length > 0) return quarterIds.includes(quarterKey(Date.now()))
+  return movements.some((movement) => monthKey(movement.transactionDate) === currentMonthId)
 }
 
 function dashboardPeriodEndExclusiveMs(monthIds: string[], quarterIds: string[]) {
