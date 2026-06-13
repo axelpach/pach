@@ -466,8 +466,54 @@ export function createServerMutators(authData?: JWTPayload) {
         const { id, ...updates } = args
         await tx.mutate.pm_teams.update({ id, ...updates, updatedAt: Date.now() })
       },
-      async delete(tx: Tx, args: { id: string }) {
+      async delete(tx: Tx, args: {
+        id: string
+        targetTeamId: string
+        issueReassignments?: Array<{ id: string; number: number; identifier: string }>
+        projectIds?: string[]
+        statusIds?: string[]
+        labelIds?: string[]
+        savedViewIds?: string[]
+        taskTriggerIds?: string[]
+      }) {
+        if (args.targetTeamId === args.id) throw new Error('Target team must be different')
         await requireExistingOrganizationAccess(tx, 'pm_teams', args.id)
+        await requireExistingOrganizationAccess(tx, 'pm_teams', args.targetTeamId)
+        await tx.dbTransaction.query(
+          `with target as (
+            select
+              "key",
+              coalesce((select max("number") from "pm_issues" where "team_id" = $2), 0) as base_number
+            from "pm_teams"
+            where "id" = $2
+          ),
+          moved as (
+            select
+              "id",
+              row_number() over (order by "number", "created_at", "id") as move_index
+            from "pm_issues"
+            where "team_id" = $1
+          )
+          update "pm_issues"
+          set
+            "team_id" = $2,
+            "project_id" = null,
+            "number" = (target.base_number + moved.move_index)::integer,
+            "identifier" = target."key" || '-' || (target.base_number + moved.move_index)::text,
+            "last_activity_at" = now(),
+            "updated_at" = now()
+          from moved, target
+          where "pm_issues"."id" = moved."id"`,
+          [args.id, args.targetTeamId],
+        )
+        await tx.dbTransaction.query('update "pm_projects" set "team_id" = null, "updated_at" = now() where "team_id" = $1', [args.id])
+        await tx.dbTransaction.query('update "pm_statuses" set "team_id" = null, "updated_at" = now() where "team_id" = $1', [args.id])
+        await tx.dbTransaction.query('update "pm_labels" set "team_id" = null, "updated_at" = now() where "team_id" = $1', [args.id])
+        await tx.dbTransaction.query('update "pm_saved_views" set "team_id" = null, "updated_at" = now() where "team_id" = $1', [args.id])
+        await tx.dbTransaction.query(
+          'update "pm_task_triggers" set "team_id" = $2, "project_id" = null, "updated_at" = now() where "team_id" = $1',
+          [args.id, args.targetTeamId],
+        )
         await tx.mutate.pm_teams.delete({ id: args.id })
       },
     },
@@ -478,7 +524,7 @@ export function createServerMutators(authData?: JWTPayload) {
         const now = Date.now()
         await tx.mutate.pm_projects.insert({ status: 'active', ...args, createdAt: now, updatedAt: now })
       },
-      async update(tx: Tx, args: { id: string; companyId?: string | null; teamId?: string; name?: string; slug?: string; description?: string; color?: string; icon?: string; status?: string; targetDate?: number | null }) {
+      async update(tx: Tx, args: { id: string; companyId?: string | null; teamId?: string | null; name?: string; slug?: string; description?: string; color?: string; icon?: string; status?: string; targetDate?: number | null }) {
         await requireExistingOrganizationAccess(tx, 'pm_projects', args.id)
         if ('companyId' in args) requireOrganizationAccess(args.companyId)
         const { id, ...updates } = args
@@ -496,7 +542,7 @@ export function createServerMutators(authData?: JWTPayload) {
         const now = Date.now()
         await tx.mutate.pm_statuses.insert({ type: 'unstarted', position: 0, ...args, createdAt: now, updatedAt: now })
       },
-      async update(tx: Tx, args: { id: string; name?: string; key?: string; type?: string; description?: string; color?: string; position?: number }) {
+      async update(tx: Tx, args: { id: string; name?: string; key?: string; type?: string; description?: string; color?: string; position?: number; teamId?: string | null }) {
         await requireExistingOrganizationAccess(tx, 'pm_statuses', args.id)
         const { id, ...updates } = args
         await tx.mutate.pm_statuses.update({ id, ...updates, updatedAt: Date.now() })

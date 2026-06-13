@@ -274,7 +274,43 @@ export const mutators = {
       const { id, ...updates } = args
       await tx.mutate.pm_teams.update({ id, ...updates, updatedAt: Date.now() })
     },
-    async delete(tx: Tx, args: { id: string }) {
+    async delete(tx: Tx, args: {
+      id: string
+      targetTeamId: string
+      issueReassignments?: Array<{ id: string; number: number; identifier: string }>
+      projectIds?: string[]
+      statusIds?: string[]
+      labelIds?: string[]
+      savedViewIds?: string[]
+      taskTriggerIds?: string[]
+    }) {
+      const now = Date.now()
+      for (const issue of args.issueReassignments ?? []) {
+        await tx.mutate.pm_issues.update({
+          id: issue.id,
+          teamId: args.targetTeamId,
+          projectId: null,
+          number: issue.number,
+          identifier: issue.identifier,
+          lastActivityAt: now,
+          updatedAt: now,
+        })
+      }
+      for (const id of args.projectIds ?? []) {
+        await tx.mutate.pm_projects.update({ id, teamId: null, updatedAt: now })
+      }
+      for (const id of args.statusIds ?? []) {
+        await tx.mutate.pm_statuses.update({ id, teamId: null, updatedAt: now })
+      }
+      for (const id of args.labelIds ?? []) {
+        await tx.mutate.pm_labels.update({ id, teamId: null, updatedAt: now })
+      }
+      for (const id of args.savedViewIds ?? []) {
+        await tx.mutate.pm_saved_views.update({ id, teamId: null, updatedAt: now })
+      }
+      for (const id of args.taskTriggerIds ?? []) {
+        await tx.mutate.pm_task_triggers.update({ id, teamId: args.targetTeamId, projectId: null, updatedAt: now })
+      }
       await tx.mutate.pm_teams.delete({ id: args.id })
     },
   },
@@ -284,7 +320,7 @@ export const mutators = {
       const now = Date.now()
       await tx.mutate.pm_projects.insert({ status: 'active', ...args, createdAt: now, updatedAt: now })
     },
-    async update(tx: Tx, args: { id: string; companyId?: string | null; teamId?: string; name?: string; slug?: string; description?: string; color?: string; icon?: string; status?: string; targetDate?: number | null }) {
+    async update(tx: Tx, args: { id: string; companyId?: string | null; teamId?: string | null; name?: string; slug?: string; description?: string; color?: string; icon?: string; status?: string; targetDate?: number | null }) {
       const { id, ...updates } = args
       await tx.mutate.pm_projects.update({ id, ...updates, updatedAt: Date.now() })
     },
@@ -298,7 +334,7 @@ export const mutators = {
       const now = Date.now()
       await tx.mutate.pm_statuses.insert({ type: 'unstarted', position: 0, ...args, createdAt: now, updatedAt: now })
     },
-    async update(tx: Tx, args: { id: string; name?: string; key?: string; type?: string; description?: string; color?: string; position?: number }) {
+    async update(tx: Tx, args: { id: string; name?: string; key?: string; type?: string; description?: string; color?: string; position?: number; teamId?: string | null }) {
       const { id, ...updates } = args
       await tx.mutate.pm_statuses.update({ id, ...updates, updatedAt: Date.now() })
     },

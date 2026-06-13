@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Outlet, useLocation, useNavigate, useOutletContext } from 'react-router-dom'
 import { useQuery, useZero } from '@rocicorp/zero/react'
-import { ChevronDown, ChevronRight, Menu, Pencil, Plus, X } from 'lucide-react'
+import { ChevronDown, ChevronRight, Menu, Pencil, Plus, Trash2, X } from 'lucide-react'
 import type { Schema } from '../../zero-schema'
 import type { Mutators } from '../../mutators'
 import { useAuth } from '../../lib/auth'
+import { PachSelect } from '../../components/PachSelect'
 
 export type TrackerSection =
   | { kind: 'all' }
@@ -35,8 +36,11 @@ export default function IssuesLayout() {
 
   const [teams] = useQuery(z.query.pm_teams.orderBy('position', 'asc'))
   const [issues] = useQuery(z.query.pm_issues)
+  const [projects] = useQuery(z.query.pm_projects)
   const [statuses] = useQuery(z.query.pm_statuses)
+  const [labels] = useQuery(z.query.pm_labels)
   const [savedViews] = useQuery(z.query.pm_saved_views.orderBy('position', 'asc'))
+  const [taskTriggers] = useQuery(z.query.pm_task_triggers)
   const accessibleOrganizationIds = useMemo(() => new Set(user?.organizationIds ?? []), [user?.organizationIds])
   const canAccessOrganization = (organizationId: string | null | undefined) =>
     organizationId ? accessibleOrganizationIds.has(organizationId) : user?.canAccessUnscoped ?? false
@@ -66,9 +70,16 @@ export default function IssuesLayout() {
   const [teamModal, setTeamModal] = useState<TeamModalState>(null)
   const [teamDraftName, setTeamDraftName] = useState('')
   const [savingTeam, setSavingTeam] = useState(false)
+  const [deletingTeam, setDeletingTeam] = useState(false)
+  const [replacementTeamId, setReplacementTeamId] = useState('')
+  const [teamDeleteStep, setTeamDeleteStep] = useState(false)
   const [composerRequestId, setComposerRequestId] = useState(0)
   const [mobileTrackerOpen, setMobileTrackerOpen] = useState(false)
   const suppressNextViewUrlSyncRef = useRef(false)
+  const replacementTeams = useMemo(
+    () => teamModal?.mode === 'edit' ? teams.filter((team) => team.id !== teamModal.teamId) : [],
+    [teams, teamModal],
+  )
   const personalSavedViews = useMemo(
     () => scopedSavedViews
       .filter((view) => view.scope === 'personal' && view.ownerId === user?.id && view.slug !== 'all-issues')
@@ -116,6 +127,7 @@ export default function IssuesLayout() {
 
   function openEditTeamModal(team: Schema['tables']['pm_teams']['row']) {
     setTeamDraftName(team.name)
+    setReplacementTeamId(teams.find((entry) => entry.id !== team.id)?.id ?? '')
     setTeamModal({ mode: 'edit', teamId: team.id })
   }
 
@@ -123,7 +135,16 @@ export default function IssuesLayout() {
     setTeamModal(null)
     setTeamDraftName('')
     setSavingTeam(false)
+    setDeletingTeam(false)
+    setReplacementTeamId('')
+    setTeamDeleteStep(false)
   }
+
+  useEffect(() => {
+    if (teamModal?.mode !== 'edit') return
+    if (replacementTeams.some((team) => team.id === replacementTeamId)) return
+    setReplacementTeamId(replacementTeams[0]?.id ?? '')
+  }, [replacementTeamId, replacementTeams, teamModal])
 
   function deriveTeamKey(name: string, teamIdToIgnore?: string) {
     const cleanedWords = name
@@ -207,6 +228,64 @@ export default function IssuesLayout() {
       closeTeamModal()
     } finally {
       setSavingTeam(false)
+    }
+  }
+
+  async function deleteTeam() {
+    if (teamModal?.mode !== 'edit' || deletingTeam) return
+
+    const teamId = teamModal.teamId
+    const team = teams.find((entry) => entry.id === teamId)
+    const targetTeam = replacementTeams.find((entry) => entry.id === replacementTeamId)
+    if (!targetTeam) return
+
+    const affectedIssues = scopedIssues
+      .filter((issue) => issue.teamId === teamId)
+      .sort((a, b) => {
+        const numberDiff = a.number - b.number
+        if (numberDiff !== 0) return numberDiff
+        const createdDiff = a.createdAt - b.createdAt
+        if (createdDiff !== 0) return createdDiff
+        return a.id.localeCompare(b.id)
+      })
+    const targetBaseNumber = issues
+      .filter((issue) => issue.teamId === targetTeam.id)
+      .reduce((max, issue) => Math.max(max, issue.number), 0)
+    const issueReassignments = affectedIssues.map((issue, index) => {
+      const number = targetBaseNumber + index + 1
+      return {
+        id: issue.id,
+        number,
+        identifier: `${targetTeam.key}-${number}`,
+      }
+    })
+    const affectedProjectIds = projects.filter((project) => project.teamId === teamId).map((project) => project.id)
+    const affectedStatusIds = statuses.filter((status) => status.teamId === teamId).map((status) => status.id)
+    const affectedLabelIds = labels.filter((label) => label.teamId === teamId).map((label) => label.id)
+    const affectedSavedViewIds = savedViews.filter((view) => view.teamId === teamId).map((view) => view.id)
+    const affectedTaskTriggerIds = taskTriggers.filter((trigger) => trigger.teamId === teamId).map((trigger) => trigger.id)
+
+    setDeletingTeam(true)
+    try {
+      await z.mutate.pm_teams.delete({
+        id: teamId,
+        targetTeamId: targetTeam.id,
+        issueReassignments,
+        projectIds: affectedProjectIds,
+        statusIds: affectedStatusIds,
+        labelIds: affectedLabelIds,
+        savedViewIds: affectedSavedViewIds,
+        taskTriggerIds: affectedTaskTriggerIds,
+      })
+      setCollapsedTeams((prev) => {
+        const next = new Set(prev)
+        next.delete(teamId)
+        return next
+      })
+      if (section.kind === 'team' && section.teamId === teamId) setSection({ kind: 'all' })
+      closeTeamModal()
+    } finally {
+      setDeletingTeam(false)
     }
   }
 
@@ -505,8 +584,22 @@ export default function IssuesLayout() {
           name={teamDraftName}
           onNameChange={setTeamDraftName}
           saving={savingTeam}
+          deleting={deletingTeam}
+          deleteStep={teamDeleteStep}
+          replacementTeams={replacementTeams}
+          replacementTeamId={replacementTeamId}
+          teamName={teamModal.mode === 'edit' ? teams.find((team) => team.id === teamModal.teamId)?.name ?? teamDraftName : teamDraftName}
+          deleteIssueCount={
+            teamModal.mode === 'edit'
+              ? scopedIssues.filter((issue) => issue.teamId === teamModal.teamId).length
+              : 0
+          }
+          onReplacementTeamChange={setReplacementTeamId}
           onClose={closeTeamModal}
           onSubmit={submitTeamModal}
+          onRequestDelete={teamModal.mode === 'edit' ? () => setTeamDeleteStep(true) : undefined}
+          onBackFromDelete={() => setTeamDeleteStep(false)}
+          onConfirmDelete={teamModal.mode === 'edit' ? deleteTeam : undefined}
         />
       )}
     </div>
@@ -565,16 +658,42 @@ function TeamNameModal({
   name,
   onNameChange,
   saving,
+  deleting,
+  deleteStep,
+  replacementTeams,
+  replacementTeamId,
+  teamName,
+  deleteIssueCount,
+  onReplacementTeamChange,
   onClose,
   onSubmit,
+  onRequestDelete,
+  onBackFromDelete,
+  onConfirmDelete,
 }: {
   mode: 'create' | 'edit'
   name: string
   onNameChange: (value: string) => void
   saving: boolean
+  deleting: boolean
+  deleteStep: boolean
+  replacementTeams: Schema['tables']['pm_teams']['row'][]
+  replacementTeamId: string
+  teamName: string
+  deleteIssueCount: number
+  onReplacementTeamChange: (value: string) => void
   onClose: () => void
   onSubmit: () => void
+  onRequestDelete?: () => void
+  onBackFromDelete: () => void
+  onConfirmDelete?: () => void
 }) {
+  const replacementTeam = replacementTeams.find((team) => team.id === replacementTeamId)
+  const deleteIssueText = replacementTeam
+    ? `${deleteIssueCount === 1 ? '1 issue' : `${deleteIssueCount} issues`} will move to ${replacementTeam.name.toLowerCase()}.`
+    : 'create another team before deleting this one.'
+  const isDeleteStep = mode === 'edit' && deleteStep
+
   return (
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-overlay/70 px-4 backdrop-blur-sm"
@@ -586,41 +705,94 @@ function TeamNameModal({
       >
         <div className="border-b border-edge/12 px-6 py-5">
           <div className="text-[10px] uppercase tracking-label text-fg-3">
-            {mode === 'create' ? '◊ teams · create' : '◊ teams · edit'}
+            {mode === 'create' ? '◊ teams · create' : isDeleteStep ? '◊ teams · delete' : '◊ teams · edit'}
           </div>
           <div className="mt-1.5 font-mono text-xl lowercase text-fg-1">
-            {mode === 'create' ? 'new team' : 'edit team name'}
+            {mode === 'create' ? 'new team' : isDeleteStep ? `delete ${teamName.toLowerCase()}` : 'edit team name'}
           </div>
         </div>
 
         <div className="px-6 py-5">
-          <label className="block">
-            <div className="mb-2 font-mono text-[10px] uppercase tracking-label text-fg-3">team name</div>
-            <input
-              autoFocus
-              value={name}
-              onChange={(event) => onNameChange(event.target.value)}
-              placeholder="$ product"
-              className="w-full bg-rim border border-edge/15 px-3 py-2 text-sm text-fg-1 outline-none focus:border-accent focus:shadow-glow-xs placeholder:text-fg-4"
-            />
-          </label>
+          {isDeleteStep ? (
+            <div className="space-y-3">
+              <label className="block">
+                <div className="mb-2 font-mono text-[10px] uppercase tracking-label text-fg-3">move issues to</div>
+                <PachSelect
+                  value={replacementTeamId}
+                  onChange={onReplacementTeamChange}
+                  display={replacementTeam?.name.toLowerCase() ?? 'no other teams'}
+                  options={deleting ? [] : replacementTeams.map((team) => ({ value: team.id, label: team.name.toLowerCase() }))}
+                  triggerClassName={`flex w-full items-center justify-between border px-3 py-2 text-left font-mono text-sm lowercase transition ${
+                    deleting || replacementTeams.length === 0
+                      ? 'border-edge/10 bg-rim text-fg-4 opacity-40'
+                      : 'border-edge/20 bg-rim text-fg-1 hover:border-edge/30 hover:bg-accent-fill/4 focus:border-accent focus:shadow-glow-xs'
+                  }`}
+                />
+              </label>
+              <div className="border border-fail/28 bg-fail/6 px-3 py-2 font-mono text-[11px] lowercase text-fail">
+                deleting this team reassigns its issues. {deleteIssueText}
+              </div>
+            </div>
+          ) : (
+            <label className="block">
+              <div className="mb-2 font-mono text-[10px] uppercase tracking-label text-fg-3">team name</div>
+              <input
+                autoFocus
+                value={name}
+                onChange={(event) => onNameChange(event.target.value)}
+                placeholder="$ product"
+                className="w-full bg-rim border border-edge/15 px-3 py-2 text-sm text-fg-1 outline-none focus:border-accent focus:shadow-glow-xs placeholder:text-fg-4"
+              />
+            </label>
+          )}
         </div>
 
         <div className="flex items-center justify-between border-t border-edge/12 px-6 py-4">
-          <button
-            onClick={onClose}
-            className="px-3 py-2 font-mono text-xs uppercase tracking-label text-fg-3 transition hover:text-fg-1"
-          >
-            [cancel]
-          </button>
-          <button
-            onClick={onSubmit}
-            disabled={!name.trim() || saving}
-            className="inline-flex items-center gap-2 border border-edge/30 bg-accent-fill/8 px-4 py-2 font-mono text-xs uppercase tracking-label text-accent transition hover:bg-accent-fill/16 hover:shadow-glow-xs disabled:opacity-40 disabled:hover:bg-accent-fill/8 disabled:hover:shadow-none"
-          >
-            <Plus className="h-3.5 w-3.5" />
-            {saving ? (mode === 'create' ? 'creating…' : 'saving…') : (mode === 'create' ? 'create team' : 'save team')}
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={onClose}
+              className="px-3 py-2 font-mono text-xs uppercase tracking-label text-fg-3 transition hover:text-fg-1"
+            >
+              [cancel]
+            </button>
+            {isDeleteStep ? (
+              <button
+                onClick={onBackFromDelete}
+                disabled={deleting}
+                className="px-3 py-2 font-mono text-xs uppercase tracking-label text-fg-3 transition hover:text-fg-1 disabled:opacity-40"
+              >
+                [back]
+              </button>
+            ) : mode === 'edit' && onRequestDelete ? (
+              <button
+                onClick={onRequestDelete}
+                disabled={saving || deleting}
+                className="inline-flex items-center gap-2 px-3 py-2 font-mono text-xs uppercase tracking-label text-fail transition hover:text-fg-1 disabled:opacity-40"
+              >
+                <Trash2 className="h-3.5 w-3.5" />
+                delete team
+              </button>
+            ) : null}
+          </div>
+          {isDeleteStep ? (
+            <button
+              onClick={onConfirmDelete}
+              disabled={deleting || !replacementTeamId}
+              className="inline-flex items-center gap-2 border border-fail/34 bg-fail/8 px-4 py-2 font-mono text-xs uppercase tracking-label text-fail transition hover:bg-fail/14 disabled:opacity-40"
+            >
+              <Trash2 className="h-3.5 w-3.5" />
+              {deleting ? 'deleting…' : 'confirm delete'}
+            </button>
+          ) : (
+            <button
+              onClick={onSubmit}
+              disabled={!name.trim() || saving || deleting}
+              className="inline-flex items-center gap-2 border border-edge/30 bg-accent-fill/8 px-4 py-2 font-mono text-xs uppercase tracking-label text-accent transition hover:bg-accent-fill/16 hover:shadow-glow-xs disabled:opacity-40 disabled:hover:bg-accent-fill/8 disabled:hover:shadow-none"
+            >
+              <Plus className="h-3.5 w-3.5" />
+              {saving ? (mode === 'create' ? 'creating…' : 'saving…') : (mode === 'create' ? 'create team' : 'save team')}
+            </button>
+          )}
         </div>
       </div>
     </div>

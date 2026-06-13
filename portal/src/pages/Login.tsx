@@ -66,7 +66,7 @@ export default function Login() {
           />
 
           {error && (
-            <div className="text-[10px] text-red-400 mb-3 uppercase tracking-label">
+            <div className="mb-3 text-[10px] uppercase tracking-label text-fail">
               // {error}
             </div>
           )}
