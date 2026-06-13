@@ -7,7 +7,8 @@
 /* ---------- FONTS (Google Fonts CDN — see fonts/README.md) ---------- */
 @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:ital,wght@0,300;0,400;0,500;0,600;0,700;1,400;1,500&display=swap');
 
-:root {
+:root,
+:root[data-theme='dark'] {
   /* ---------- COLORS · base scale ---------- */
   --c-void:        #000000;       /* deepest bg, beyond panels */
   --c-pit:         #050605;       /* base canvas */
@@ -53,11 +54,31 @@
   --fail:          var(--c-fault);
   --info:          var(--c-info);
 
-  --border:        rgba(0, 255, 140, 0.15);
-  --border-strong: rgba(0, 255, 140, 0.35);
-  --border-hot:    rgba(0, 255, 140, 0.7);
-  --border-amber:  rgba(255, 181, 71, 0.35);
-  --border-fault:  rgba(255, 77, 109, 0.45);
+  --bg-0-rgb:      0 0 0;
+  --bg-1-rgb:      5 6 5;
+  --bg-2-rgb:      10 14 12;
+  --bg-3-rgb:      20 26 23;
+  --bg-input-rgb:  28 38 32;
+  --fg-1-rgb:      207 251 225;
+  --fg-2-rgb:      155 217 179;
+  --fg-3-rgb:      90 138 114;
+  --fg-4-rgb:      46 74 60;
+  --accent-rgb:    0 255 136;
+  --accent-soft-rgb: 34 204 119;
+  --accent-deep-rgb: 14 102 56;
+  --accent-fill-rgb: 0 255 136;
+  --ok-rgb:        0 255 136;
+  --warn-rgb:      255 181 71;
+  --fail-rgb:      255 77 109;
+  --info-rgb:      90 214 255;
+  --edge-rgb:      0 255 140;
+  --overlay-rgb:   0 0 0;
+
+  --border:        rgb(var(--edge-rgb) / 0.15);
+  --border-strong: rgb(var(--edge-rgb) / 0.35);
+  --border-hot:    rgb(var(--edge-rgb) / 0.7);
+  --border-amber:  rgb(var(--warn-rgb) / 0.35);
+  --border-fault:  rgb(var(--fail-rgb) / 0.45);
 
   /* ---------- TYPE · families ---------- */
   --font-mono:     "JetBrains Mono", ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
@@ -117,14 +138,17 @@
   --b-hair-hot:    1px solid var(--border-hot);
 
   /* ---------- SHADOWS · phosphor glow system ---------- */
-  --glow-xs:  0 0 6px  rgba(0, 255, 136, 0.25);
-  --glow-sm:  0 0 12px rgba(0, 255, 136, 0.35);
-  --glow-md:  0 0 24px rgba(0, 255, 136, 0.45), 0 0 2px rgba(0, 255, 136, 0.9);
-  --glow-lg:  0 0 48px rgba(0, 255, 136, 0.55), 0 0 4px rgba(0, 255, 136, 1);
-  --glow-amber: 0 0 18px rgba(255, 181, 71, 0.4);
-  --glow-fault: 0 0 18px rgba(255, 77, 109, 0.5);
+  --glow-xs:  0 0 6px  rgb(var(--accent-rgb) / 0.25);
+  --glow-sm:  0 0 12px rgb(var(--accent-rgb) / 0.35);
+  --glow-md:  0 0 24px rgb(var(--accent-rgb) / 0.45), 0 0 2px rgb(var(--accent-rgb) / 0.9);
+  --glow-lg:  0 0 48px rgb(var(--accent-rgb) / 0.55), 0 0 4px rgb(var(--accent-rgb));
+  --glow-amber: 0 0 18px rgb(var(--warn-rgb) / 0.4);
+  --glow-fault: 0 0 18px rgb(var(--fail-rgb) / 0.5);
   --inset-edge: inset 0 0 0 1px var(--border);
   --inset-edge-strong: inset 0 0 0 1px var(--border-strong);
+  --shadow-panel: 0 0 18px rgb(var(--accent-rgb) / 0.18), 0 18px 44px rgb(0 0 0 / 0.6);
+  --shadow-popover: 0 0 18px rgb(var(--accent-rgb) / 0.18), 0 18px 44px rgb(0 0 0 / 0.6);
+  --shadow-overlay: 0 30px 80px rgb(0 0 0 / 0.65);
 
   /* ---------- MOTION ---------- */
   --ease-step:     steps(2, end);          /* hard step — terminal */
@@ -136,10 +160,104 @@
 
   /* ---------- PATTERNS ---------- */
   --pattern-scanlines: repeating-linear-gradient(
-    0deg, rgba(0, 255, 136, 0.025) 0 1px, transparent 1px 3px
+    0deg, rgb(var(--accent-rgb) / 0.025) 0 1px, transparent 1px 3px
   );
-  --pattern-grid: linear-gradient(rgba(0,255,140,0.05) 1px, transparent 1px),
-                  linear-gradient(90deg, rgba(0,255,140,0.05) 1px, transparent 1px);
+  --pattern-grid: linear-gradient(rgb(var(--edge-rgb) / 0.05) 1px, transparent 1px),
+                  linear-gradient(90deg, rgb(var(--edge-rgb) / 0.05) 1px, transparent 1px);
+  --scanline-blend-mode: screen;
+  color-scheme: dark;
+}
+
+:root[data-theme='light'] {
+  /* ---------- COLORS · warm paper terminal ---------- */
+  --c-void:        #fffaf0;
+  --c-pit:         #fffaf0;
+  --c-pit-2:       #fffaf0;
+  --c-pit-3:       #fffaf0;
+  --c-rim:         #fffaf0;
+
+  --c-phosphor:    #006f3c;
+  --c-glow:        #008f4f;
+  --c-glow-dim:    #bfd8bd;
+
+  --c-text:        #123524;
+  --c-text-soft:   #315a42;
+  --c-dim:         #667963;
+  --c-dimmer:      #9aa78e;
+  --c-faint:       #d9dfcd;
+
+  --c-amber:       #9a5a00;
+  --c-amber-soft:  #7a4a0c;
+  --c-fault:       #b42345;
+  --c-fault-soft:  #8a1f36;
+  --c-info:        #006c86;
+  --c-violet:      #5f4aa6;
+
+  --bg-0:          var(--c-void);
+  --bg-1:          var(--c-pit);
+  --bg-2:          var(--c-pit-2);
+  --bg-3:          var(--c-pit-3);
+  --bg-input:      var(--c-rim);
+
+  --fg-1:          var(--c-text);
+  --fg-2:          var(--c-text-soft);
+  --fg-3:          var(--c-dim);
+  --fg-4:          var(--c-dimmer);
+
+  --accent:        var(--c-phosphor);
+  --accent-soft:   var(--c-glow);
+  --accent-deep:   var(--c-glow-dim);
+
+  --ok:            var(--c-phosphor);
+  --warn:          var(--c-amber);
+  --fail:          var(--c-fault);
+  --info:          var(--c-info);
+
+  --bg-0-rgb:      255 250 240;
+  --bg-1-rgb:      255 250 240;
+  --bg-2-rgb:      255 250 240;
+  --bg-3-rgb:      255 250 240;
+  --bg-input-rgb:  255 250 240;
+  --fg-1-rgb:      18 53 36;
+  --fg-2-rgb:      49 90 66;
+  --fg-3-rgb:      102 121 99;
+  --fg-4-rgb:      154 167 142;
+  --accent-rgb:    0 111 60;
+  --accent-soft-rgb: 0 143 79;
+  --accent-deep-rgb: 191 216 189;
+  --accent-fill-rgb: 0 111 60;
+  --ok-rgb:        0 111 60;
+  --warn-rgb:      154 90 0;
+  --fail-rgb:      180 35 69;
+  --info-rgb:      0 108 134;
+  --edge-rgb:      0 111 60;
+  --overlay-rgb:   49 42 22;
+
+  --border:        rgb(var(--edge-rgb) / 0.18);
+  --border-strong: rgb(var(--edge-rgb) / 0.34);
+  --border-hot:    rgb(var(--edge-rgb) / 0.58);
+  --border-amber:  rgb(var(--warn-rgb) / 0.34);
+  --border-fault:  rgb(var(--fail-rgb) / 0.38);
+
+  --glow-xs:  0 0 0 1px rgb(var(--accent-rgb) / 0.12);
+  --glow-sm:  0 0 0 1px rgb(var(--accent-rgb) / 0.18), 0 6px 18px rgb(var(--accent-rgb) / 0.08);
+  --glow-md:  0 0 0 1px rgb(var(--accent-rgb) / 0.22), 0 14px 30px rgb(var(--accent-rgb) / 0.12);
+  --glow-lg:  0 0 0 1px rgb(var(--accent-rgb) / 0.25), 0 22px 44px rgb(var(--accent-rgb) / 0.16);
+  --glow-amber: 0 0 0 1px rgb(var(--warn-rgb) / 0.18), 0 12px 28px rgb(var(--warn-rgb) / 0.1);
+  --glow-fault: 0 0 0 1px rgb(var(--fail-rgb) / 0.16), 0 12px 28px rgb(var(--fail-rgb) / 0.1);
+  --inset-edge: inset 0 0 0 1px var(--border);
+  --inset-edge-strong: inset 0 0 0 1px var(--border-strong);
+  --shadow-panel: 0 1px 0 rgb(var(--edge-rgb) / 0.12), 0 16px 36px rgb(86 72 34 / 0.14);
+  --shadow-popover: 0 1px 0 rgb(var(--edge-rgb) / 0.16), 0 20px 44px rgb(86 72 34 / 0.18);
+  --shadow-overlay: 0 24px 70px rgb(68 55 26 / 0.24);
+
+  --pattern-scanlines: repeating-linear-gradient(
+    0deg, rgb(var(--accent-rgb) / 0.035) 0 1px, transparent 1px 4px
+  );
+  --pattern-grid: linear-gradient(rgb(var(--edge-rgb) / 0.06) 1px, transparent 1px),
+                  linear-gradient(90deg, rgb(var(--edge-rgb) / 0.06) 1px, transparent 1px);
+  --scanline-blend-mode: multiply;
+  color-scheme: light;
 }
 
 /* ============================================================

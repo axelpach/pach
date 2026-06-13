@@ -163,8 +163,8 @@ export function PachSelect(props: Props) {
             props.triggerClassName ??
             `flex w-full items-center justify-between border px-2 py-1 text-left font-mono text-xs lowercase text-fg-1 transition ${
               open
-                ? 'border-[rgba(0,255,140,0.35)] bg-[rgba(0,255,136,0.06)] shadow-glow-xs'
-                : 'border-transparent hover:border-[rgba(0,255,140,0.2)] hover:bg-[rgba(0,255,136,0.04)]'
+                ? 'border-edge/35 bg-accent-fill/6 shadow-glow-xs'
+                : 'border-transparent hover:border-edge/20 hover:bg-accent-fill/4'
             }`
           }
         >
@@ -179,7 +179,7 @@ export function PachSelect(props: Props) {
         <div
           ref={popupRef}
           style={popupStyle}
-          className={`z-[1000] overflow-auto border border-[rgba(0,255,140,0.25)] bg-pit shadow-[0_0_18px_rgba(0,255,136,0.18),0_18px_44px_rgba(0,0,0,0.6)] ${popupClassName ?? ''}`}
+          className={`z-[1000] overflow-auto border border-edge/25 bg-pit shadow-terminal-popover ${popupClassName ?? ''}`}
         >
           {options.map((option, index) => {
             const isSelected = option.value === value
@@ -197,7 +197,7 @@ export function PachSelect(props: Props) {
                 }}
                 className={`flex w-full items-center gap-2 px-3 py-1.5 text-left font-mono text-xs lowercase transition ${
                   isHighlighted
-                    ? 'bg-[rgba(0,255,136,0.12)] text-accent'
+                    ? 'bg-accent-fill/12 text-accent'
                     : isSelected
                       ? 'text-accent'
                       : 'text-fg-2 hover:text-fg-1'

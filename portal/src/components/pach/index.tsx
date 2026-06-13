@@ -10,8 +10,8 @@ export function Scanlines({ opacity = 1 }: { opacity?: number }) {
       aria-hidden
       className="pointer-events-none absolute inset-0"
       style={{
-        background: 'repeating-linear-gradient(0deg, rgba(0,255,136,0.025) 0 1px, transparent 1px 3px)',
-        mixBlendMode: 'screen',
+        background: 'var(--pattern-scanlines)',
+        mixBlendMode: 'var(--scanline-blend-mode)' as CSSProperties['mixBlendMode'],
         opacity,
         zIndex: 1,
       }}
@@ -50,7 +50,7 @@ export function GlyphRain({ density = 22, opacity = 0.12 }: { density?: number; 
             fontFamily: 'JetBrains Mono, monospace',
             fontSize: 13,
             lineHeight: 1.15,
-            color: '#00ff88',
+            color: 'var(--accent)',
             opacity: l.op,
             whiteSpace: 'pre',
             animation: `pach-rain ${l.dur}s linear ${l.delay}s infinite`,
@@ -92,8 +92,8 @@ export function Panel({
 }) {
   return (
     <div
-      className={`relative border border-[rgba(0,255,140,0.15)] ${padded ? 'px-4 pt-3.5 pb-4' : ''} ${className || ''}`}
-      style={{ background: 'rgba(5,6,5,0.6)', ...style }}
+      className={`relative border border-edge/15 ${padded ? 'px-4 pt-3.5 pb-4' : ''} ${className || ''}`}
+      style={{ background: 'rgb(var(--bg-1-rgb) / 0.6)', ...style }}
     >
       {title && <SectionHeader right={right}>◊ {title}</SectionHeader>}
       {children}
@@ -113,13 +113,13 @@ export function Button({
 }: ButtonHTMLAttributes<HTMLButtonElement> & { kind?: ButtonKind; icon?: ReactNode; kbd?: string }) {
   const palette: Record<ButtonKind, string> = {
     default:
-      'border border-[rgba(0,255,140,0.35)] text-fg-1 hover:border-accent hover:text-accent hover:bg-[rgba(0,255,136,0.04)]',
+      'border border-edge/35 text-fg-1 hover:border-accent hover:text-accent hover:bg-accent-fill/4',
     primary:
-      'border border-accent text-accent [text-shadow:0_0_6px_rgba(0,255,136,0.25)] hover:bg-[rgba(0,255,136,0.10)] hover:shadow-glow-xs hover:[text-shadow:0_0_10px_rgba(0,255,136,0.6)]',
+      'border border-accent text-accent glow hover:bg-accent-fill/10 hover:shadow-glow-xs hover:glow',
     danger:
-      'border border-[rgba(255,77,109,0.45)] text-fail hover:bg-[rgba(255,77,109,0.08)]',
+      'border border-fail/45 text-fail hover:bg-fail/8',
     ghost:
-      'border border-transparent text-fg-3 hover:text-accent hover:border-[rgba(0,255,140,0.15)]',
+      'border border-transparent text-fg-3 hover:text-accent hover:border-edge/15',
   }
   return (
     <button
@@ -129,7 +129,7 @@ export function Button({
       {icon && <span className={kind === 'primary' ? 'text-accent' : 'text-fg-3'}>{icon}</span>}
       <span>{children}</span>
       {kbd && (
-        <span className="ml-1.5 px-1 border border-[rgba(0,255,140,0.15)] text-[9px] tracking-wider text-fg-3">
+        <span className="ml-1.5 px-1 border border-edge/15 text-[9px] tracking-wider text-fg-3">
           {kbd}
         </span>
       )}
@@ -149,11 +149,11 @@ export function StatusPill({
   pulse?: boolean
 }) {
   const map: Record<StatusKind, { c: string; b: string }> = {
-    ok: { c: '#00ff88', b: 'rgba(0,255,136,0.45)' },
-    warn: { c: '#ffb547', b: 'rgba(255,181,71,0.45)' },
-    fail: { c: '#ff4d6d', b: 'rgba(255,77,109,0.5)' },
-    info: { c: '#5ad6ff', b: 'rgba(90,214,255,0.4)' },
-    idle: { c: '#5a8a72', b: 'rgba(0,255,140,0.15)' },
+    ok: { c: 'rgb(var(--ok-rgb))', b: 'rgb(var(--ok-rgb) / 0.45)' },
+    warn: { c: 'rgb(var(--warn-rgb))', b: 'rgb(var(--warn-rgb) / 0.45)' },
+    fail: { c: 'rgb(var(--fail-rgb))', b: 'rgb(var(--fail-rgb) / 0.5)' },
+    info: { c: 'rgb(var(--info-rgb))', b: 'rgb(var(--info-rgb) / 0.4)' },
+    idle: { c: 'rgb(var(--fg-3-rgb))', b: 'rgb(var(--edge-rgb) / 0.15)' },
   }
   const p = map[kind]
   return (
@@ -187,9 +187,9 @@ export function Metric({
   deltaKind?: 'ok' | 'fail'
 }) {
   return (
-    <div className="min-w-[120px] flex-1 border border-[rgba(0,255,140,0.15)] px-3.5 py-3">
+    <div className="min-w-[120px] flex-1 border border-edge/15 px-3.5 py-3">
       <div className="text-[10px] uppercase tracking-label text-fg-3">{label}</div>
-      <div className="mt-1 font-mono text-2xl font-bold text-fg-1 [text-shadow:0_0_6px_rgba(0,255,136,0.15)]">{value}</div>
+      <div className="mt-1 font-mono text-2xl font-bold text-fg-1 glow">{value}</div>
       {delta && (
         <div className={`mt-0.5 text-[11px] ${deltaKind === 'ok' ? 'text-ok' : 'text-fail'}`}>{delta}</div>
       )}
@@ -202,7 +202,7 @@ export function TermInput({ className, ...rest }: InputHTMLAttributes<HTMLInputE
   return (
     <input
       {...rest}
-      className={`w-full bg-rim border border-[rgba(0,255,140,0.15)] px-3 py-2 text-sm text-fg-1 outline-none focus:border-accent focus:shadow-glow-xs placeholder:text-fg-4 transition-colors ${className || ''}`}
+      className={`w-full bg-rim border border-edge/15 px-3 py-2 text-sm text-fg-1 outline-none focus:border-accent focus:shadow-glow-xs placeholder:text-fg-4 transition-colors ${className || ''}`}
     />
   )
 }
@@ -211,7 +211,7 @@ export function TermTextarea({ className, ...rest }: TextareaHTMLAttributes<HTML
   return (
     <textarea
       {...rest}
-      className={`w-full bg-rim border border-[rgba(0,255,140,0.15)] px-3 py-2 text-sm text-fg-1 outline-none focus:border-accent focus:shadow-glow-xs placeholder:text-fg-4 transition-colors resize-none ${className || ''}`}
+      className={`w-full bg-rim border border-edge/15 px-3 py-2 text-sm text-fg-1 outline-none focus:border-accent focus:shadow-glow-xs placeholder:text-fg-4 transition-colors resize-none ${className || ''}`}
     />
   )
 }
@@ -247,7 +247,7 @@ export function FramedPanel({
       <div className="text-[11px] tracking-label text-fg-4">
         ┌── <span className="text-accent">{title}</span> {'─'.repeat(padded)}┐
       </div>
-      <div className="px-3.5 py-2.5 border-l border-r border-[rgba(0,255,140,0.15)]">{children}</div>
+      <div className="px-3.5 py-2.5 border-l border-r border-edge/15">{children}</div>
       <div className="text-[11px] tracking-label text-fg-4">└{'─'.repeat(width)}┘</div>
     </div>
   )

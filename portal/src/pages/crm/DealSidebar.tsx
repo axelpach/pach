@@ -15,14 +15,14 @@ const STAGES = [
 
 const TEMPERATURES = [
   { value: '', label: 'None' },
-  { value: 'hot', label: 'Hot', color: '#ff4d6d' },
-  { value: 'warm', label: 'Warm', color: '#ffb547' },
-  { value: 'cold', label: 'Cold', color: '#5ad6ff' },
-  { value: 'ghosted', label: 'Ghosted', color: '#5a8a72' },
+  { value: 'hot', label: 'Hot', color: 'rgb(var(--fail-rgb))' },
+  { value: 'warm', label: 'Warm', color: 'rgb(var(--warn-rgb))' },
+  { value: 'cold', label: 'Cold', color: 'rgb(var(--info-rgb))' },
+  { value: 'ghosted', label: 'Ghosted', color: 'rgb(var(--fg-3-rgb))' },
 ]
 
 const INPUT_CLS =
-  'w-full bg-rim border border-[rgba(0,255,140,0.15)] px-3 py-2 text-sm text-fg-1 outline-none focus:border-accent focus:shadow-glow-xs placeholder:text-fg-4'
+  'w-full bg-rim border border-edge/15 px-3 py-2 text-sm text-fg-1 outline-none focus:border-accent focus:shadow-glow-xs placeholder:text-fg-4'
 
 const LABEL_CLS = 'text-[10px] uppercase tracking-label text-fg-3 mb-1.5 flex items-center gap-1.5'
 
@@ -133,11 +133,11 @@ export default function DealSidebar({ dealId, organizationId, onClose }: DealSid
     <div className="fixed inset-0 z-50 flex justify-end" onClick={onClose}>
       <div className="absolute inset-0 bg-black/70 backdrop-blur-sm" />
       <div
-        className="relative w-[480px] h-full bg-bg-2 border-l border-[rgba(0,255,140,0.35)] overflow-y-auto font-mono"
+        className="relative w-[480px] h-full bg-bg-2 border-l border-edge/35 overflow-y-auto font-mono"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
-        <div className="sticky top-0 bg-bg-2 border-b border-[rgba(0,255,140,0.15)] px-6 py-4 flex items-center justify-between z-10">
+        <div className="sticky top-0 bg-bg-2 border-b border-edge/15 px-6 py-4 flex items-center justify-between z-10">
           <div className="flex items-center gap-3 flex-1 min-w-0">
             {editingTitle ? (
               <input
@@ -198,8 +198,8 @@ export default function DealSidebar({ dealId, organizationId, onClose }: DealSid
                     onClick={() => handleUpdateField('temperature', t.value || undefined)}
                     className={`px-2.5 py-1 text-[10px] uppercase tracking-label transition-colors border ${
                       active
-                        ? 'border-accent text-accent bg-[rgba(0,255,136,0.06)]'
-                        : 'border-[rgba(0,255,140,0.15)] text-fg-3 hover:text-fg-1'
+                        ? 'border-accent text-accent bg-accent-fill/6'
+                        : 'border-edge/15 text-fg-3 hover:text-fg-1'
                     }`}
                   >
                     {t.color && <span className="inline-block w-1.5 h-1.5 rounded-full mr-1.5 align-middle" style={{ backgroundColor: t.color }} />}
@@ -230,7 +230,7 @@ export default function DealSidebar({ dealId, organizationId, onClose }: DealSid
               <Building2 className="w-3 h-3" /> company
             </label>
             {company ? (
-              <div className="border border-[rgba(0,255,140,0.15)] bg-[rgba(5,6,5,0.6)] p-3 space-y-2">
+              <div className="border border-edge/15 bg-pit/60 p-3 space-y-2">
                 <div className="flex items-center justify-between">
                   <div className="text-sm text-fg-1">▸ {company.name}</div>
                   <button onClick={handleUnlinkCompany} className="text-fg-4 hover:text-fail transition-colors">
@@ -258,13 +258,13 @@ export default function DealSidebar({ dealId, organizationId, onClose }: DealSid
                 />
               </div>
             ) : showCompanyPicker ? (
-              <div className="border border-[rgba(0,255,140,0.15)] bg-[rgba(5,6,5,0.6)]">
+              <div className="border border-edge/15 bg-pit/60">
                 <input
                   autoFocus
                   value={companySearch}
                   onChange={(e) => setCompanySearch(e.target.value)}
                   placeholder="$ search or create company…"
-                  className="w-full bg-transparent px-3 py-2 text-sm text-fg-1 outline-none placeholder:text-fg-4 border-b border-[rgba(0,255,140,0.15)]"
+                  className="w-full bg-transparent px-3 py-2 text-sm text-fg-1 outline-none placeholder:text-fg-4 border-b border-edge/15"
                   onKeyDown={(e) => {
                     if (e.key === 'Escape') { setShowCompanyPicker(false); setCompanySearch('') }
                     if (e.key === 'Enter' && companySearch.trim() && filteredCompanies.length === 0) {
@@ -277,7 +277,7 @@ export default function DealSidebar({ dealId, organizationId, onClose }: DealSid
                     <button
                       key={c.id}
                       onClick={() => handleLinkCompany(c.id)}
-                      className="w-full text-left px-3 py-2 text-sm text-fg-2 hover:bg-[rgba(0,255,136,0.06)] hover:text-fg-1 transition-colors flex items-center gap-2"
+                      className="w-full text-left px-3 py-2 text-sm text-fg-2 hover:bg-accent-fill/6 hover:text-fg-1 transition-colors flex items-center gap-2"
                     >
                       <span className="text-fg-4">▸</span>
                       {c.name}
@@ -286,7 +286,7 @@ export default function DealSidebar({ dealId, organizationId, onClose }: DealSid
                   {companySearch.trim() && (
                     <button
                       onClick={() => handleCreateCompany(companySearch.trim())}
-                      className="w-full text-left px-3 py-2 text-sm text-accent hover:bg-[rgba(0,255,136,0.06)] transition-colors flex items-center gap-2"
+                      className="w-full text-left px-3 py-2 text-sm text-accent hover:bg-accent-fill/6 transition-colors flex items-center gap-2"
                     >
                       <Plus className="w-3.5 h-3.5" />
                       create "{companySearch.trim()}"
@@ -311,7 +311,7 @@ export default function DealSidebar({ dealId, organizationId, onClose }: DealSid
             </label>
             <div className="space-y-2">
               {linkedContacts.map((ct) => (
-                <div key={ct.id} className="border border-[rgba(0,255,140,0.15)] bg-[rgba(5,6,5,0.6)] p-3 space-y-2">
+                <div key={ct.id} className="border border-edge/15 bg-pit/60 p-3 space-y-2">
                   <div className="flex items-center justify-between">
                     <div className="text-sm text-fg-1">▸ {ct.name}</div>
                     <button onClick={() => handleUnlinkContact(ct.id)} className="text-fg-4 hover:text-fail transition-colors">
@@ -347,13 +347,13 @@ export default function DealSidebar({ dealId, organizationId, onClose }: DealSid
               ))}
 
               {showContactPicker ? (
-                <div className="border border-[rgba(0,255,140,0.15)] bg-[rgba(5,6,5,0.6)]">
+                <div className="border border-edge/15 bg-pit/60">
                   <input
                     autoFocus
                     value={contactSearch}
                     onChange={(e) => setContactSearch(e.target.value)}
                     placeholder="$ search or create contact…"
-                    className="w-full bg-transparent px-3 py-2 text-sm text-fg-1 outline-none placeholder:text-fg-4 border-b border-[rgba(0,255,140,0.15)]"
+                    className="w-full bg-transparent px-3 py-2 text-sm text-fg-1 outline-none placeholder:text-fg-4 border-b border-edge/15"
                     onKeyDown={(e) => {
                       if (e.key === 'Escape') { setShowContactPicker(false); setContactSearch('') }
                       if (e.key === 'Enter' && contactSearch.trim() && filteredContacts.length === 0) {
@@ -366,7 +366,7 @@ export default function DealSidebar({ dealId, organizationId, onClose }: DealSid
                       <button
                         key={c.id}
                         onClick={() => handleLinkContact(c.id)}
-                        className="w-full text-left px-3 py-2 text-sm text-fg-2 hover:bg-[rgba(0,255,136,0.06)] hover:text-fg-1 transition-colors flex items-center gap-2"
+                        className="w-full text-left px-3 py-2 text-sm text-fg-2 hover:bg-accent-fill/6 hover:text-fg-1 transition-colors flex items-center gap-2"
                       >
                         <span className="text-fg-4">▸</span>
                         <span>{c.name}</span>
@@ -376,7 +376,7 @@ export default function DealSidebar({ dealId, organizationId, onClose }: DealSid
                     {contactSearch.trim() && (
                       <button
                         onClick={() => handleCreateContact(contactSearch.trim())}
-                        className="w-full text-left px-3 py-2 text-sm text-accent hover:bg-[rgba(0,255,136,0.06)] transition-colors flex items-center gap-2"
+                        className="w-full text-left px-3 py-2 text-sm text-accent hover:bg-accent-fill/6 transition-colors flex items-center gap-2"
                       >
                         <Plus className="w-3.5 h-3.5" />
                         create "{contactSearch.trim()}"
@@ -424,7 +424,7 @@ export default function DealSidebar({ dealId, organizationId, onClose }: DealSid
               <button
                 onClick={handleAddNote}
                 disabled={!newNote.trim()}
-                className="px-3 py-2 border border-[rgba(0,255,140,0.35)] text-accent hover:bg-[rgba(0,255,136,0.06)] hover:shadow-glow-xs transition-all disabled:opacity-30"
+                className="px-3 py-2 border border-edge/35 text-accent hover:bg-accent-fill/6 hover:shadow-glow-xs transition-all disabled:opacity-30"
               >
                 <Plus className="w-3.5 h-3.5" />
               </button>
@@ -432,7 +432,7 @@ export default function DealSidebar({ dealId, organizationId, onClose }: DealSid
 
             <div className="space-y-2">
               {notes.map((note) => (
-                <div key={note.id} className="group border border-[rgba(0,255,140,0.15)] bg-[rgba(5,6,5,0.6)] px-3 py-2.5">
+                <div key={note.id} className="group border border-edge/15 bg-pit/60 px-3 py-2.5">
                   <div className="flex items-start justify-between gap-2">
                     <p className="text-sm text-fg-2 leading-relaxed">
                       <span className="text-fg-4">› </span>{note.body}
@@ -453,7 +453,7 @@ export default function DealSidebar({ dealId, organizationId, onClose }: DealSid
             </div>
           </div>
 
-          <div className="text-[10px] uppercase tracking-label text-fg-4 pt-3 border-t border-[rgba(0,255,140,0.10)]">
+          <div className="text-[10px] uppercase tracking-label text-fg-4 pt-3 border-t border-edge/10">
             // created {new Date(deal.createdAt).toLocaleDateString('es-MX', { day: 'numeric', month: 'short', year: 'numeric' })}
           </div>
         </div>

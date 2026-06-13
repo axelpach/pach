@@ -1487,10 +1487,10 @@ export default function Finance() {
 
   return (
     <div className="flex h-full min-h-0 flex-1 overflow-hidden">
-      <aside className="hidden shrink-0 flex-col border-r border-[rgba(0,255,140,0.12)] bg-[rgba(5,6,5,0.6)] px-2 py-4 backdrop-blur-sm md:relative md:z-auto md:flex md:w-[200px]">
+      <aside className="hidden shrink-0 flex-col border-r border-edge/12 bg-pit/60 px-2 py-4 backdrop-blur-sm md:relative md:z-auto md:flex md:w-[200px]">
         <div className="mb-2 flex items-start justify-between gap-2 px-4 pb-3">
           <div>
-            <div className="font-bold text-base tracking-wide text-accent [text-shadow:0_0_6px_rgba(0,255,136,0.5)]">
+            <div className="font-bold text-base tracking-wide text-accent glow">
               p@ch_
             </div>
             <div className="mt-1 text-[9px] uppercase tracking-label text-fg-4">
@@ -1514,7 +1514,7 @@ export default function Finance() {
               options={organizationOptions}
               display={selectedOrganizationLabel}
               popupWidth="200"
-              triggerClassName="flex h-8 w-full items-center justify-between border border-[rgba(0,255,140,0.18)] bg-rim pl-9 pr-2 text-left font-mono text-xs text-fg-1 outline-none transition hover:border-[rgba(0,255,140,0.32)] hover:bg-[rgba(0,255,136,0.04)] focus-visible:border-accent focus-visible:shadow-glow-xs"
+              triggerClassName="flex h-8 w-full items-center justify-between border border-edge/18 bg-rim pl-9 pr-2 text-left font-mono text-xs text-fg-1 outline-none transition hover:border-edge/32 hover:bg-accent-fill/4 focus-visible:border-accent focus-visible:shadow-glow-xs"
             />
           </div>
         </div>
@@ -1554,7 +1554,7 @@ export default function Finance() {
 
         <div className="mt-6 space-y-1">
           <div className="px-3 pb-1 font-mono text-[10px] uppercase tracking-label text-fg-4">quick read</div>
-          <div className="space-y-2 border border-[rgba(0,255,140,0.12)] bg-pit-2 px-3 py-2 font-mono text-xs">
+          <div className="space-y-2 border border-edge/12 bg-pit-2 px-3 py-2 font-mono text-xs">
             <FinanceMetric label="pending" value={`${pendingCount}`} tone={pendingCount ? 'fail' : 'default'} />
             <FinanceMetric label="accounts" value={`${scopedAccounts.length}`} />
           </div>
@@ -1562,7 +1562,7 @@ export default function Finance() {
       </aside>
 
       <main className="flex min-w-0 flex-1 flex-col overflow-hidden">
-        <div className="border-b border-[rgba(0,255,140,0.12)] bg-[rgba(5,6,5,0.72)] px-3 py-3 md:hidden">
+        <div className="border-b border-edge/12 bg-pit/72 px-3 py-3 md:hidden">
           <div className="mb-3 flex items-start justify-between gap-3">
             <div>
               <div className="font-mono text-xl font-bold lowercase text-fg-1">finance</div>
@@ -1581,7 +1581,7 @@ export default function Finance() {
                 options={organizationOptions}
                 display={selectedOrganizationLabel}
                 popupWidth="240"
-                triggerClassName="flex h-9 w-full items-center justify-between border border-[rgba(0,255,140,0.18)] bg-rim pl-9 pr-2 text-left font-mono text-xs text-fg-1 outline-none transition hover:border-[rgba(0,255,140,0.32)] hover:bg-[rgba(0,255,136,0.04)] focus-visible:border-accent focus-visible:shadow-glow-xs"
+                triggerClassName="flex h-9 w-full items-center justify-between border border-edge/18 bg-rim pl-9 pr-2 text-left font-mono text-xs text-fg-1 outline-none transition hover:border-edge/32 hover:bg-accent-fill/4 focus-visible:border-accent focus-visible:shadow-glow-xs"
               />
             </div>
           </div>
@@ -1589,21 +1589,21 @@ export default function Finance() {
             <button
               type="button"
               onClick={() => navigate(pathForTab('dashboard'))}
-              className={`border px-2 py-2 text-center transition ${tab === 'dashboard' ? 'border-[rgba(0,255,140,0.45)] bg-[rgba(0,255,136,0.08)] text-accent' : 'border-[rgba(0,255,140,0.12)] text-fg-3'}`}
+              className={`border px-2 py-2 text-center transition ${tab === 'dashboard' ? 'border-edge/45 bg-accent-fill/8 text-accent' : 'border-edge/12 text-fg-3'}`}
             >
               dashboard
             </button>
             <button
               type="button"
               onClick={() => navigate(pathForTab('movements'))}
-              className={`border px-2 py-2 text-center transition ${tab === 'movements' ? 'border-[rgba(0,255,140,0.45)] bg-[rgba(0,255,136,0.08)] text-accent' : 'border-[rgba(0,255,140,0.12)] text-fg-3'}`}
+              className={`border px-2 py-2 text-center transition ${tab === 'movements' ? 'border-edge/45 bg-accent-fill/8 text-accent' : 'border-edge/12 text-fg-3'}`}
             >
               movements
             </button>
             <button
               type="button"
               onClick={() => navigate(pathForTab('accounts'))}
-              className={`border px-2 py-2 text-center transition ${tab === 'accounts' ? 'border-[rgba(0,255,140,0.45)] bg-[rgba(0,255,136,0.08)] text-accent' : 'border-[rgba(0,255,140,0.12)] text-fg-3'}`}
+              className={`border px-2 py-2 text-center transition ${tab === 'accounts' ? 'border-edge/45 bg-accent-fill/8 text-accent' : 'border-edge/12 text-fg-3'}`}
             >
               accounts
             </button>
@@ -1622,7 +1622,7 @@ export default function Finance() {
 
       {tab === 'category' ? (
         <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
-          <div className="flex items-center justify-between gap-3 border-b border-[rgba(0,255,140,0.15)] bg-[rgba(5,6,5,0.6)] px-4 py-3 font-mono backdrop-blur-sm md:px-6">
+          <div className="flex items-center justify-between gap-3 border-b border-edge/15 bg-pit/60 px-4 py-3 font-mono backdrop-blur-sm md:px-6">
             <div className="flex min-w-0 items-center gap-3 text-xs">
               <button
                 type="button"
@@ -1646,7 +1646,7 @@ export default function Finance() {
               <h2 className="mt-1 font-mono text-2xl font-bold lowercase text-fg-1">{categoryDetailName}</h2>
             </div>
 
-            <div className="grid border-l border-t border-[rgba(0,255,140,0.12)] font-mono md:grid-cols-3">
+            <div className="grid border-l border-t border-edge/12 font-mono md:grid-cols-3">
               <CategoryKpi
                 label="total spend"
                 value={categoryDetailTrend ? formatMoney(categoryDetailTrend.totalAmountMinor, dashboardReportingCurrencyCode) : '...'}
@@ -1665,8 +1665,8 @@ export default function Finance() {
             </div>
 
             <div className="mt-5 grid gap-4 xl:h-[calc(100vh-19rem)] xl:min-h-[380px] xl:max-h-[560px] xl:grid-cols-[minmax(0,1.15fr)_minmax(360px,0.85fr)]">
-              <section className="flex min-h-0 flex-col border border-[rgba(0,255,140,0.12)] bg-pit-2 xl:h-full">
-                <div className="flex items-center justify-between border-b border-[rgba(0,255,140,0.12)] px-4 py-3 font-mono">
+              <section className="flex min-h-0 flex-col border border-edge/12 bg-pit-2 xl:h-full">
+                <div className="flex items-center justify-between border-b border-edge/12 px-4 py-3 font-mono">
                   <div>
                     <div className="text-[10px] uppercase tracking-label text-fg-4">evolution</div>
                     <div className="mt-1 text-sm lowercase text-fg-1">monthly spend</div>
@@ -1675,11 +1675,11 @@ export default function Finance() {
                 </div>
                 <div className="flex min-h-0 flex-1 flex-col p-4">
                   {!dashboardConversionRates ? (
-                    <div className="flex min-h-72 flex-1 items-center justify-center border border-dashed border-[rgba(0,255,140,0.12)] font-mono text-sm text-fg-4 xl:min-h-0">
+                    <div className="flex min-h-72 flex-1 items-center justify-center border border-dashed border-edge/12 font-mono text-sm text-fg-4 xl:min-h-0">
                       // loading fx rates...
                     </div>
                   ) : !categoryDetailTrend || categoryDetailTrend.points.length === 0 ? (
-                    <div className="flex min-h-72 flex-1 items-center justify-center border border-dashed border-[rgba(0,255,140,0.12)] font-mono text-sm text-fg-4 xl:min-h-0">
+                    <div className="flex min-h-72 flex-1 items-center justify-center border border-dashed border-edge/12 font-mono text-sm text-fg-4 xl:min-h-0">
                       // no spend in this category
                     </div>
                   ) : (
@@ -1697,7 +1697,7 @@ export default function Finance() {
                         ))}
                       </div>
                       {categoryDetailTrend.missingCurrencies.length > 0 ? (
-                        <div className="mt-3 border-t border-[rgba(0,255,140,0.08)] pt-2 font-mono text-[10px] uppercase tracking-label text-fail">
+                        <div className="mt-3 border-t border-edge/8 pt-2 font-mono text-[10px] uppercase tracking-label text-fail">
                           missing {categoryDetailTrend.missingCurrencies.join(', ')}
                         </div>
                       ) : null}
@@ -1706,8 +1706,8 @@ export default function Finance() {
                 </div>
               </section>
 
-              <section className="flex min-h-0 flex-col border border-[rgba(0,255,140,0.12)] bg-pit-2 xl:h-full">
-                <div className="flex items-center justify-between border-b border-[rgba(0,255,140,0.12)] px-4 py-3 font-mono">
+              <section className="flex min-h-0 flex-col border border-edge/12 bg-pit-2 xl:h-full">
+                <div className="flex items-center justify-between border-b border-edge/12 px-4 py-3 font-mono">
                   <div>
                     <div className="text-[10px] uppercase tracking-label text-fg-4">movements</div>
                     <div className="mt-1 text-sm lowercase text-fg-1">category ledger</div>
@@ -1723,7 +1723,7 @@ export default function Finance() {
                     categoryDetailMovements.map((movement) => {
                       const account = scopedAccounts.find((entry) => entry.id === movement.accountId)
                       return (
-                        <div key={movement.id} className="grid grid-cols-[minmax(0,1fr)_auto] gap-3 border-b border-[rgba(0,255,140,0.08)] px-4 py-3 font-mono text-xs last:border-b-0">
+                        <div key={movement.id} className="grid grid-cols-[minmax(0,1fr)_auto] gap-3 border-b border-edge/8 px-4 py-3 font-mono text-xs last:border-b-0">
                           <div className="min-w-0">
                             <div className="flex min-w-0 items-center gap-2">
                               <span className="shrink-0 text-[10px] uppercase tracking-label text-fg-4">{formatZeroDate(movement.transactionDate)}</span>
@@ -1767,7 +1767,7 @@ export default function Finance() {
             </div>
           </div>
 
-          <section className="border border-[rgba(0,255,140,0.14)] bg-pit-2 font-mono">
+          <section className="border border-edge/14 bg-pit-2 font-mono">
             <div className="grid gap-4 px-5 py-4 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-end">
               <button
                 type="button"
@@ -1787,7 +1787,7 @@ export default function Finance() {
                     />
                   </div>
                 ) : (
-                  <div className="mt-2 h-9 w-72 max-w-full animate-pulse bg-[linear-gradient(90deg,rgba(0,255,140,0.06),rgba(0,255,140,0.16),rgba(0,255,140,0.06))]" />
+                  <div className="mt-2 h-9 w-72 max-w-full animate-pulse bg-accent-fill/8" />
                 )}
                 <div className="mt-2 text-xs text-fg-4">
                   {dashboardFx.status === 'ready' && dashboardFx.date ? `fx ${dashboardFx.date}` : null}
@@ -1815,8 +1815,8 @@ export default function Finance() {
                       }}
                       className={`border px-2.5 py-1.5 text-[10px] uppercase tracking-label transition ${
                         dashboardReportingCurrencyCode === currencyCode
-                          ? 'border-[rgba(0,255,140,0.45)] bg-[rgba(0,255,136,0.08)] text-accent'
-                          : 'border-[rgba(0,255,140,0.14)] text-fg-4 hover:border-[rgba(0,255,140,0.28)] hover:text-fg-2'
+                          ? 'border-edge/45 bg-accent-fill/8 text-accent'
+                          : 'border-edge/14 text-fg-4 hover:border-edge/28 hover:text-fg-2'
                       }`}
                     >
                       {currencyCode}
@@ -1831,15 +1831,15 @@ export default function Finance() {
               </div>
             </div>
             {dashboardBalanceExpanded ? (
-              <div className="border-t border-[rgba(0,255,140,0.1)] px-5 py-3">
+              <div className="border-t border-edge/10 px-5 py-3">
                 <AccountBalanceBreakdown entries={dashboardAccountBalances} />
               </div>
             ) : null}
           </section>
 
           <div className="mt-4 grid gap-4">
-            <section className="border border-[rgba(0,255,140,0.12)] bg-pit-2">
-              <div className="flex items-center justify-between border-b border-[rgba(0,255,140,0.12)] px-4 py-3 font-mono">
+            <section className="border border-edge/12 bg-pit-2">
+              <div className="flex items-center justify-between border-b border-edge/12 px-4 py-3 font-mono">
                 <div>
                   <div className="text-[10px] uppercase tracking-label text-fg-4">balance by month</div>
                 </div>
@@ -1847,7 +1847,7 @@ export default function Finance() {
               </div>
               <div className="p-4">
                 {monthlyBalanceChartPoints.length === 0 ? (
-                  <div className="flex min-h-56 items-center justify-center border border-dashed border-[rgba(0,255,140,0.12)] font-mono text-sm text-fg-4">
+                  <div className="flex min-h-56 items-center justify-center border border-dashed border-edge/12 font-mono text-sm text-fg-4">
                     // no movements in this period
                   </div>
                 ) : (
@@ -1865,8 +1865,8 @@ export default function Finance() {
               </div>
             </section>
 
-            <section className="border border-[rgba(0,255,140,0.12)] bg-pit-2">
-              <div className="flex items-center justify-between border-b border-[rgba(0,255,140,0.12)] px-4 py-3 font-mono">
+            <section className="border border-edge/12 bg-pit-2">
+              <div className="flex items-center justify-between border-b border-edge/12 px-4 py-3 font-mono">
                 <div>
                   <div className="text-[10px] uppercase tracking-label text-fg-4">where money goes</div>
                   <div className="mt-1 text-sm lowercase text-fg-1">spend by category · reported in {dashboardReportingCurrencyCode}</div>
@@ -1875,7 +1875,7 @@ export default function Finance() {
               </div>
               <div className="grid gap-6 p-4 lg:grid-cols-[320px_1fr]">
                 {!categoryBreakdown || categoryBreakdown.entries.length === 0 ? (
-                  <div className="flex min-h-52 items-center justify-center border border-dashed border-[rgba(0,255,140,0.12)] font-mono text-sm text-fg-4 lg:col-span-2">
+                  <div className="flex min-h-52 items-center justify-center border border-dashed border-edge/12 font-mono text-sm text-fg-4 lg:col-span-2">
                     {categoryBreakdownEmptyMessage}
                   </div>
                 ) : (
@@ -1902,12 +1902,12 @@ export default function Finance() {
                         </button>
                       ))}
                       {categoryBreakdown.missingCurrencies.length > 0 ? (
-                        <div className="mt-2 border-t border-[rgba(0,255,140,0.08)] pt-2 font-mono text-[10px] uppercase tracking-label text-fail">
+                        <div className="mt-2 border-t border-edge/8 pt-2 font-mono text-[10px] uppercase tracking-label text-fail">
                           missing {categoryBreakdown.missingCurrencies.join(', ')}
                         </div>
                       ) : null}
                       {categoryBreakdownIsLoading ? (
-                        <div className="mt-2 border-t border-[rgba(0,255,140,0.08)] pt-2 font-mono text-[10px] uppercase tracking-label text-fg-4">
+                        <div className="mt-2 border-t border-edge/8 pt-2 font-mono text-[10px] uppercase tracking-label text-fg-4">
                           updating fx...
                         </div>
                       ) : null}
@@ -1935,7 +1935,7 @@ export default function Finance() {
                   type="button"
                   disabled={scopedAccounts.length === 0}
                   onClick={() => openMovementModal()}
-                  className="flex h-8 w-8 items-center justify-center border border-[rgba(0,255,140,0.15)] bg-pit-3 text-fg-3 transition hover:border-[rgba(0,255,140,0.3)] hover:text-accent disabled:cursor-not-allowed disabled:opacity-45"
+                  className="flex h-8 w-8 items-center justify-center border border-edge/15 bg-pit-3 text-fg-3 transition hover:border-edge/30 hover:text-accent disabled:cursor-not-allowed disabled:opacity-45"
                   aria-label="Add movement"
                 >
                   <Plus className="h-3.5 w-3.5" />
@@ -1945,12 +1945,12 @@ export default function Finance() {
                 <button
                   type="button"
                   onClick={() => setCategoryModalOpen(true)}
-                  className="flex h-8 w-8 items-center justify-center border border-[rgba(0,255,140,0.15)] bg-pit-3 text-fg-3 transition hover:border-[rgba(0,255,140,0.3)] hover:text-accent"
+                  className="flex h-8 w-8 items-center justify-center border border-edge/15 bg-pit-3 text-fg-3 transition hover:border-edge/30 hover:text-accent"
                   aria-label="Create category"
                 >
                   <Tag className="h-3.5 w-3.5" />
                 </button>
-                <div className="pointer-events-none absolute left-0 top-[calc(100%+6px)] z-30 whitespace-nowrap border border-[rgba(0,255,140,0.2)] bg-pit px-2 py-1 font-mono text-[10px] uppercase tracking-label text-fg-2 opacity-0 shadow-[0_8px_24px_rgba(0,0,0,0.45)] transition group-hover:opacity-100">
+                <div className="pointer-events-none absolute left-0 top-[calc(100%+6px)] z-30 whitespace-nowrap border border-edge/20 bg-pit px-2 py-1 font-mono text-[10px] uppercase tracking-label text-fg-2 opacity-0 shadow-terminal-popover transition group-hover:opacity-100">
                   + Create category
                 </div>
               </div>
@@ -1960,14 +1960,14 @@ export default function Finance() {
                   value={search}
                   onChange={(event) => setSearch(event.target.value)}
                   placeholder="$ search movements..."
-                  className="h-8 w-full border border-[rgba(0,255,140,0.15)] bg-bg-2 pl-9 pr-3 font-mono text-xs text-fg-1 outline-none placeholder:text-fg-4 focus:border-accent focus:shadow-glow-xs"
+                  className="h-8 w-full border border-edge/15 bg-bg-2 pl-9 pr-3 font-mono text-xs text-fg-1 outline-none placeholder:text-fg-4 focus:border-accent focus:shadow-glow-xs"
                 />
               </div>
               <button
                 type="button"
                 disabled={importPhase === 'processing' || scopedAccounts.length === 0}
                 onClick={openImportUpload}
-                className="flex h-8 items-center gap-2 border border-[rgba(0,255,140,0.24)] bg-[rgba(0,255,136,0.06)] px-3 font-mono text-[10px] uppercase tracking-label text-accent transition hover:border-[rgba(0,255,140,0.45)] disabled:cursor-not-allowed disabled:opacity-45"
+                className="flex h-8 items-center gap-2 border border-edge/24 bg-accent-fill/6 px-3 font-mono text-[10px] uppercase tracking-label text-accent transition hover:border-edge/45 disabled:cursor-not-allowed disabled:opacity-45"
               >
                 <FileUp className="h-3.5 w-3.5" />
                 import
@@ -1979,7 +1979,7 @@ export default function Finance() {
             <button
               type="button"
               onClick={() => openImportReview(pendingImportGroup.id)}
-              className="mb-3 flex w-full items-center justify-between gap-3 border border-[rgba(0,255,140,0.16)] bg-pit-2 px-3 py-2 text-left font-mono text-xs transition hover:border-[rgba(0,255,140,0.28)] hover:bg-[rgba(0,255,136,0.04)]"
+              className="mb-3 flex w-full items-center justify-between gap-3 border border-edge/16 bg-pit-2 px-3 py-2 text-left font-mono text-xs transition hover:border-edge/28 hover:bg-accent-fill/4"
             >
               <span className="min-w-0 truncate text-fg-3">
                 // import draft · {pendingImportGroups.length > 1 ? `${pendingImportGroups.length} batches · ` : ''}{pendingImportGroup.fileLabel} · {pendingImportGroup.counts.ready} ready · {pendingImportGroup.counts.needsReview} need review
@@ -1988,7 +1988,7 @@ export default function Finance() {
             </button>
           ) : null}
 
-          <div className="mb-3 grid gap-2 border border-[rgba(0,255,140,0.12)] bg-pit-2 px-3 py-2 font-mono text-xs sm:grid-cols-4">
+          <div className="mb-3 grid gap-2 border border-edge/12 bg-pit-2 px-3 py-2 font-mono text-xs sm:grid-cols-4">
             <FinanceMetric label="income" value={<MoneyStack amounts={visibleTotals.positiveAmounts} tone="ok" />} tone="ok" />
             <FinanceMetric label="outflow" value={<MoneyStack amounts={visibleTotals.negativeAmounts} tone="fail" />} tone="fail" />
             <FinanceMetric label="net" value={<MoneyStack amounts={visibleTotals.netAmounts} tone="byAmount" />} />
@@ -2000,7 +2000,7 @@ export default function Finance() {
               const account = accounts.find((entry) => entry.id === movement.accountId)
               const category = financeCategories.find((entry) => entry.id === movement.categoryId)
               return (
-                <article key={movement.id} className="border border-[rgba(0,255,140,0.12)] bg-pit-2 px-3 py-3 font-mono text-xs">
+                <article key={movement.id} className="border border-edge/12 bg-pit-2 px-3 py-3 font-mono text-xs">
                   <div className="mb-2 flex items-start justify-between gap-3">
                     <div className="min-w-0">
                       <div className="flex min-w-0 items-center gap-2">
@@ -2008,7 +2008,7 @@ export default function Finance() {
                           <button
                             type="button"
                             onClick={() => setTransferModalMovementId(movement.id)}
-                            className={`flex h-7 w-7 shrink-0 items-center justify-center border transition ${movement.transferId || movement.type === 'transfer' ? 'border-[rgba(0,255,140,0.28)] bg-[rgba(0,255,136,0.08)] text-accent' : 'border-[rgba(0,255,140,0.1)] bg-transparent text-fg-4 hover:border-[rgba(0,255,140,0.18)] hover:bg-[rgba(0,255,136,0.04)] hover:text-fg-1'}`}
+                            className={`flex h-7 w-7 shrink-0 items-center justify-center border transition ${movement.transferId || movement.type === 'transfer' ? 'border-edge/28 bg-accent-fill/8 text-accent' : 'border-edge/10 bg-transparent text-fg-4 hover:border-edge/18 hover:bg-accent-fill/4 hover:text-fg-1'}`}
                             aria-label="Link transfer"
                           >
                             <ArrowRightLeft className="h-3.5 w-3.5" />
@@ -2047,12 +2047,12 @@ export default function Finance() {
                         display={movement.currencyCode}
                         align="right"
                         popupWidth="120px"
-                        triggerClassName="ml-auto mt-1 flex h-6 w-16 items-center justify-end border border-transparent bg-transparent px-1 text-right font-mono text-[10px] uppercase tracking-label text-fg-4 outline-none transition hover:border-[rgba(0,255,140,0.18)] hover:bg-[rgba(0,255,136,0.04)] hover:text-fg-1 focus-visible:border-accent"
+                        triggerClassName="ml-auto mt-1 flex h-6 w-16 items-center justify-end border border-transparent bg-transparent px-1 text-right font-mono text-[10px] uppercase tracking-label text-fg-4 outline-none transition hover:border-edge/18 hover:bg-accent-fill/4 hover:text-fg-1 focus-visible:border-accent"
                       />
                     </div>
                   </div>
 
-                  <div className="grid grid-cols-[1fr_auto] gap-2 border-t border-[rgba(0,255,140,0.08)] pt-2">
+                  <div className="grid grid-cols-[1fr_auto] gap-2 border-t border-edge/8 pt-2">
                     <div className="min-w-0">
                       <EditableMovementDate
                         movement={movement}
@@ -2070,7 +2070,7 @@ export default function Finance() {
                           options={importAccountOptions}
                           display={account?.name ?? 'unknown'}
                           popupWidth="260px"
-                          triggerClassName="flex h-8 w-full min-w-0 items-center justify-between border border-[rgba(0,255,140,0.12)] bg-pit px-2 text-left font-mono text-xs text-fg-2 outline-none transition hover:border-[rgba(0,255,140,0.22)] hover:bg-[rgba(0,255,136,0.04)] hover:text-fg-1 focus-visible:border-accent"
+                          triggerClassName="flex h-8 w-full min-w-0 items-center justify-between border border-edge/12 bg-pit px-2 text-left font-mono text-xs text-fg-2 outline-none transition hover:border-edge/22 hover:bg-accent-fill/4 hover:text-fg-1 focus-visible:border-accent"
                         />
                       </div>
                     </div>
@@ -2081,7 +2081,7 @@ export default function Finance() {
                         onChange={(next) => void updateMovementStatus(movement.id, next)}
                         options={movementStatusOptions}
                         trigger={
-                          <span className={`inline-flex h-8 w-8 items-center justify-center border transition ${movement.status === 'pending_review' ? 'border-[rgba(255,184,77,0.28)] bg-[rgba(255,184,77,0.06)] text-amber' : movement.status === 'ignored' ? 'border-[rgba(133,167,145,0.16)] bg-transparent text-fg-4' : 'border-[rgba(0,255,140,0.22)] bg-[rgba(0,255,136,0.06)] text-accent'}`}>
+                          <span className={`inline-flex h-8 w-8 items-center justify-center border transition ${movement.status === 'pending_review' ? 'border-warn/28 bg-warn/6 text-amber' : movement.status === 'ignored' ? 'border-edge/16 bg-transparent text-fg-4' : 'border-edge/22 bg-accent-fill/6 text-accent'}`}>
                             <StatusIcon status={movement.status} />
                           </span>
                         }
@@ -2094,7 +2094,7 @@ export default function Finance() {
                         <button
                           type="button"
                           onClick={() => setDeleteMovementId(movement.id)}
-                          className="flex h-8 w-8 items-center justify-center border border-[rgba(0,255,140,0.1)] bg-transparent text-fg-4 transition hover:border-[rgba(255,83,124,0.28)] hover:bg-[rgba(255,83,124,0.06)] hover:text-fail"
+                          className="flex h-8 w-8 items-center justify-center border border-edge/10 bg-transparent text-fg-4 transition hover:border-fail/28 hover:bg-fail/6 hover:text-fail"
                           aria-label="Delete movement"
                         >
                           <Trash2 className="h-3.5 w-3.5" />
@@ -2110,20 +2110,20 @@ export default function Finance() {
                       options={categoryOptions}
                       display={category?.name ?? 'uncategorized'}
                       popupWidth="260px"
-                      triggerClassName="flex h-8 w-full min-w-0 items-center justify-between border border-[rgba(0,255,140,0.12)] bg-pit px-2 text-left font-mono text-xs text-fg-2 outline-none transition hover:border-[rgba(0,255,140,0.22)] hover:bg-[rgba(0,255,136,0.04)] hover:text-fg-1 focus-visible:border-accent"
+                      triggerClassName="flex h-8 w-full min-w-0 items-center justify-between border border-edge/12 bg-pit px-2 text-left font-mono text-xs text-fg-2 outline-none transition hover:border-edge/22 hover:bg-accent-fill/4 hover:text-fg-1 focus-visible:border-accent"
                     />
                   </div>
                 </article>
               )
             })}
             {visibleMovements.length === 0 ? (
-              <div className="border border-[rgba(0,255,140,0.12)] bg-pit-2 px-3 py-12 text-center font-mono text-sm text-fg-4">
+              <div className="border border-edge/12 bg-pit-2 px-3 py-12 text-center font-mono text-sm text-fg-4">
                 // no movements yet
               </div>
             ) : null}
           </div>
 
-          <div className="hidden min-h-0 flex-1 overflow-auto border border-[rgba(0,255,140,0.12)] md:block">
+          <div className="hidden min-h-0 flex-1 overflow-auto border border-edge/12 md:block">
             <table className="w-full table-fixed border-collapse font-mono text-xs">
               <colgroup>
                 <col className="w-[11%]" />
@@ -2133,7 +2133,7 @@ export default function Finance() {
                 <col className="w-[15%]" />
                 <col className="w-[7%]" />
               </colgroup>
-              <thead className="sticky top-0 z-10 bg-[#020604] text-[10px] uppercase tracking-label text-fg-4 shadow-[0_1px_0_rgba(0,255,140,0.12)]">
+              <thead className="sticky top-0 z-10 bg-bg-2 text-[10px] uppercase tracking-label text-fg-4 shadow-[0_1px_0_var(--border)]">
                 <tr>
                   <MovementDateSortHeader direction={movementSortDirection} onSort={toggleMovementDateSort} />
                   <MovementHeader label="movement" />
@@ -2148,7 +2148,7 @@ export default function Finance() {
                   const account = accounts.find((entry) => entry.id === movement.accountId)
                   const category = financeCategories.find((entry) => entry.id === movement.categoryId)
                   return (
-                    <tr key={movement.id} className="border-b border-[rgba(0,255,140,0.08)] text-fg-2 hover:bg-[rgba(0,255,136,0.04)]">
+                    <tr key={movement.id} className="border-b border-edge/8 text-fg-2 hover:bg-accent-fill/4">
                       <td className="whitespace-nowrap px-3 py-2 text-fg-3">
                         <EditableMovementDate
                           movement={movement}
@@ -2165,7 +2165,7 @@ export default function Finance() {
                             <button
                               type="button"
                               onClick={() => setTransferModalMovementId(movement.id)}
-                              className={`flex h-6 w-6 shrink-0 items-center justify-center border transition ${movement.transferId || movement.type === 'transfer' ? 'border-[rgba(0,255,140,0.28)] bg-[rgba(0,255,136,0.08)] text-accent' : 'border-transparent bg-transparent text-fg-4 hover:border-[rgba(0,255,140,0.18)] hover:bg-[rgba(0,255,136,0.04)] hover:text-fg-1'}`}
+                              className={`flex h-6 w-6 shrink-0 items-center justify-center border transition ${movement.transferId || movement.type === 'transfer' ? 'border-edge/28 bg-accent-fill/8 text-accent' : 'border-transparent bg-transparent text-fg-4 hover:border-edge/18 hover:bg-accent-fill/4 hover:text-fg-1'}`}
                               aria-label="Link transfer"
                             >
                               <ArrowRightLeft className="h-3.5 w-3.5" />
@@ -2194,7 +2194,7 @@ export default function Finance() {
                           options={importAccountOptions}
                           display={account?.name ?? 'unknown'}
                           popupWidth="260px"
-                          triggerClassName="flex h-7 w-full min-w-0 items-center justify-between border border-transparent bg-transparent px-2 text-left font-mono text-xs text-fg-2 outline-none transition hover:border-[rgba(0,255,140,0.18)] hover:bg-[rgba(0,255,136,0.04)] hover:text-fg-1 focus-visible:border-accent"
+                          triggerClassName="flex h-7 w-full min-w-0 items-center justify-between border border-transparent bg-transparent px-2 text-left font-mono text-xs text-fg-2 outline-none transition hover:border-edge/18 hover:bg-accent-fill/4 hover:text-fg-1 focus-visible:border-accent"
                         />
                       </td>
                       <td className="min-w-0 px-3 py-2">
@@ -2204,7 +2204,7 @@ export default function Finance() {
                           options={categoryOptions}
                           display={category?.name ?? 'uncategorized'}
                           popupWidth="260px"
-                          triggerClassName="flex h-7 w-full min-w-0 items-center justify-between border border-transparent bg-transparent px-2 text-left font-mono text-xs text-fg-2 outline-none transition hover:border-[rgba(0,255,140,0.18)] hover:bg-[rgba(0,255,136,0.04)] hover:text-fg-1 focus-visible:border-accent"
+                          triggerClassName="flex h-7 w-full min-w-0 items-center justify-between border border-transparent bg-transparent px-2 text-left font-mono text-xs text-fg-2 outline-none transition hover:border-edge/18 hover:bg-accent-fill/4 hover:text-fg-1 focus-visible:border-accent"
                         />
                         {category ? null : <span className="text-[10px] text-amber">needs category</span>}
                       </td>
@@ -2224,7 +2224,7 @@ export default function Finance() {
                           display={movement.currencyCode}
                           align="right"
                           popupWidth="120px"
-                          triggerClassName="ml-auto mt-0.5 flex h-5 w-14 items-center justify-end border border-transparent bg-transparent px-1 text-right font-mono text-[9px] uppercase tracking-label text-fg-4 outline-none transition hover:border-[rgba(0,255,140,0.18)] hover:bg-[rgba(0,255,136,0.04)] hover:text-fg-1 focus-visible:border-accent"
+                          triggerClassName="ml-auto mt-0.5 flex h-5 w-14 items-center justify-end border border-transparent bg-transparent px-1 text-right font-mono text-[9px] uppercase tracking-label text-fg-4 outline-none transition hover:border-edge/18 hover:bg-accent-fill/4 hover:text-fg-1 focus-visible:border-accent"
                         />
                       </td>
                       <td className="px-3 py-2 text-right">
@@ -2235,7 +2235,7 @@ export default function Finance() {
                             onChange={(next) => void updateMovementStatus(movement.id, next)}
                             options={movementStatusOptions}
                             trigger={
-                              <span className={`inline-flex h-7 w-7 items-center justify-center border transition ${movement.status === 'pending_review' ? 'border-[rgba(255,184,77,0.28)] bg-[rgba(255,184,77,0.06)] text-amber' : movement.status === 'ignored' ? 'border-[rgba(133,167,145,0.16)] bg-transparent text-fg-4' : 'border-[rgba(0,255,140,0.22)] bg-[rgba(0,255,136,0.06)] text-accent'}`}>
+                              <span className={`inline-flex h-7 w-7 items-center justify-center border transition ${movement.status === 'pending_review' ? 'border-warn/28 bg-warn/6 text-amber' : movement.status === 'ignored' ? 'border-edge/16 bg-transparent text-fg-4' : 'border-edge/22 bg-accent-fill/6 text-accent'}`}>
                                 <StatusIcon status={movement.status} />
                               </span>
                             }
@@ -2248,7 +2248,7 @@ export default function Finance() {
                             <button
                               type="button"
                               onClick={() => setDeleteMovementId(movement.id)}
-                              className="flex h-7 w-7 items-center justify-center border border-transparent bg-transparent text-fg-4 transition hover:border-[rgba(255,83,124,0.28)] hover:bg-[rgba(255,83,124,0.06)] hover:text-fail"
+                              className="flex h-7 w-7 items-center justify-center border border-transparent bg-transparent text-fg-4 transition hover:border-fail/28 hover:bg-fail/6 hover:text-fail"
                               aria-label="Delete movement"
                             >
                               <Trash2 className="h-3.5 w-3.5" />
@@ -2276,7 +2276,7 @@ export default function Finance() {
             <button
               type="button"
               onClick={() => openAccountModal()}
-              className="flex h-8 items-center gap-2 border border-[rgba(0,255,140,0.24)] bg-[rgba(0,255,136,0.06)] px-3 font-mono text-[10px] uppercase tracking-label text-accent transition hover:border-[rgba(0,255,140,0.45)]"
+              className="flex h-8 items-center gap-2 border border-edge/24 bg-accent-fill/6 px-3 font-mono text-[10px] uppercase tracking-label text-accent transition hover:border-edge/45"
             >
               <Plus className="h-3.5 w-3.5" />
               add account
@@ -2296,7 +2296,7 @@ export default function Finance() {
                 const holder = account.holderUserId ? holderUserMap.get(account.holderUserId) : undefined
                 const stats = accountStats.get(account.id)
                 return (
-                  <article key={account.id} className="border border-[rgba(0,255,140,0.12)] bg-pit-2 px-3 py-3 font-mono text-xs">
+                  <article key={account.id} className="border border-edge/12 bg-pit-2 px-3 py-3 font-mono text-xs">
                     <div className="mb-3 flex items-start justify-between gap-3">
                       <div className="min-w-0">
                         <div className="truncate text-sm text-fg-1" title={account.name}>{account.name}</div>
@@ -2313,7 +2313,7 @@ export default function Finance() {
                       />
                       <FinanceMetric label="movements" value={`${stats?.movementCount ?? 0}`} />
                     </div>
-                    <div className="mt-3 flex items-center justify-between border-t border-[rgba(0,255,140,0.08)] pt-2">
+                    <div className="mt-3 flex items-center justify-between border-t border-edge/8 pt-2">
                       <span className="truncate text-fg-4">{holder ? displayUser(holder) : 'unassigned'}</span>
                       <button
                         type="button"
@@ -2328,18 +2328,18 @@ export default function Finance() {
               })}
             </div>
 
-            <div className="hidden min-h-0 overflow-auto border border-[rgba(0,255,140,0.12)] md:block">
+            <div className="hidden min-h-0 overflow-auto border border-edge/12 md:block">
               <table className="w-full border-collapse font-mono text-xs">
                 <thead className="sticky top-0 bg-pit text-[10px] uppercase tracking-label text-fg-4">
                   <tr>
-                    <th className="border-b border-[rgba(0,255,140,0.12)] px-3 py-2 text-left">account/card</th>
-                    <th className="border-b border-[rgba(0,255,140,0.12)] px-3 py-2 text-left">institution</th>
-                    <th className="border-b border-[rgba(0,255,140,0.12)] px-3 py-2 text-left">type</th>
-                    <th className="border-b border-[rgba(0,255,140,0.12)] px-3 py-2 text-left">holder</th>
-                    <th className="border-b border-[rgba(0,255,140,0.12)] px-3 py-2 text-right">currency</th>
-                    <th className="border-b border-[rgba(0,255,140,0.12)] px-3 py-2 text-right">movements</th>
-                    <th className="border-b border-[rgba(0,255,140,0.12)] px-3 py-2 text-right">balance</th>
-                    <th className="border-b border-[rgba(0,255,140,0.12)] px-3 py-2 text-right">actions</th>
+                    <th className="border-b border-edge/12 px-3 py-2 text-left">account/card</th>
+                    <th className="border-b border-edge/12 px-3 py-2 text-left">institution</th>
+                    <th className="border-b border-edge/12 px-3 py-2 text-left">type</th>
+                    <th className="border-b border-edge/12 px-3 py-2 text-left">holder</th>
+                    <th className="border-b border-edge/12 px-3 py-2 text-right">currency</th>
+                    <th className="border-b border-edge/12 px-3 py-2 text-right">movements</th>
+                    <th className="border-b border-edge/12 px-3 py-2 text-right">balance</th>
+                    <th className="border-b border-edge/12 px-3 py-2 text-right">actions</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -2347,7 +2347,7 @@ export default function Finance() {
                     const holder = account.holderUserId ? holderUserMap.get(account.holderUserId) : undefined
                     const stats = accountStats.get(account.id)
                     return (
-                      <tr key={account.id} className="border-b border-[rgba(0,255,140,0.08)] text-fg-2 hover:bg-[rgba(0,255,136,0.04)]">
+                      <tr key={account.id} className="border-b border-edge/8 text-fg-2 hover:bg-accent-fill/4">
                         <td className="px-3 py-2">
                           <div className="text-fg-1">{account.name}</div>
                           <div className="mt-0.5 text-[10px] uppercase tracking-label text-fg-4">{account.status}</div>
@@ -2385,16 +2385,16 @@ export default function Finance() {
 
       {importModalOpen && (
         <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-[rgba(0,0,0,0.7)] px-4 py-4 backdrop-blur-sm sm:py-6"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-overlay/70 px-4 py-4 backdrop-blur-sm sm:py-6"
           onClick={() => setImportModalOpen(false)}
         >
           <div
-            className="flex h-[calc(100vh-4rem)] w-full max-w-5xl flex-col overflow-hidden border border-[rgba(0,255,140,0.2)] bg-pit-2 shadow-[0_30px_80px_rgba(0,0,0,0.5)] sm:h-[84vh]"
+            className="flex h-[calc(100vh-4rem)] w-full max-w-5xl flex-col overflow-hidden border border-edge/20 bg-pit-2 shadow-terminal-overlay sm:h-[84vh]"
             onClick={(event) => event.stopPropagation()}
           >
-            <div className="flex shrink-0 items-center justify-between border-b border-[rgba(0,255,140,0.12)] px-5 py-3">
+            <div className="flex shrink-0 items-center justify-between border-b border-edge/12 px-5 py-3">
               <div className="flex min-w-0 items-center gap-2 font-mono text-xs">
-                <span className="inline-flex items-center gap-1.5 border border-[rgba(0,255,140,0.25)] bg-[rgba(0,255,136,0.05)] px-2 py-0.5 font-mono text-[10px] uppercase tracking-label text-accent">
+                <span className="inline-flex items-center gap-1.5 border border-edge/25 bg-accent-fill/5 px-2 py-0.5 font-mono text-[10px] uppercase tracking-label text-accent">
                   import
                 </span>
                 <span className="text-fg-4">›</span>
@@ -2410,7 +2410,7 @@ export default function Finance() {
                       onChange={setImportAccountId}
                       options={importPhase === 'processing' ? [] : importAccountOptions}
                       display={importAccountLabel}
-                      triggerClassName={`flex h-7 w-full items-center justify-between border border-transparent bg-transparent px-1 text-left font-mono text-xs lowercase text-fg-2 outline-none transition hover:border-[rgba(0,255,140,0.18)] hover:text-fg-1 ${importPhase === 'processing' ? 'cursor-not-allowed opacity-50' : ''}`}
+                      triggerClassName={`flex h-7 w-full items-center justify-between border border-transparent bg-transparent px-1 text-left font-mono text-xs lowercase text-fg-2 outline-none transition hover:border-edge/18 hover:text-fg-1 ${importPhase === 'processing' ? 'cursor-not-allowed opacity-50' : ''}`}
                       popupWidth="240px"
                     />
                   </div>
@@ -2450,8 +2450,8 @@ export default function Finance() {
                     }}
                     className={`flex min-h-56 flex-col items-center justify-center border border-dashed px-6 py-10 text-center transition ${
                       importDragActive
-                        ? 'border-accent bg-[rgba(0,255,136,0.08)] shadow-glow-xs'
-                        : 'border-[rgba(0,255,140,0.22)] bg-pit hover:border-[rgba(0,255,140,0.4)] hover:bg-[rgba(0,255,136,0.04)]'
+                        ? 'border-accent bg-accent-fill/8 shadow-glow-xs'
+                        : 'border-edge/22 bg-pit hover:border-edge/40 hover:bg-accent-fill/4'
                     } disabled:cursor-not-allowed disabled:opacity-45`}
                   >
                     <UploadCloud className={`h-7 w-7 ${importDragActive ? 'text-accent' : 'text-fg-3'}`} />
@@ -2479,9 +2479,9 @@ export default function Finance() {
                         ) : null}
                       </div>
 
-                      <div className="max-h-[34vh] overflow-auto border-y border-[rgba(0,255,140,0.12)] font-mono text-xs">
+                      <div className="max-h-[34vh] overflow-auto border-y border-edge/12 font-mono text-xs">
                         {importFiles.length > 0 ? importFiles.map((file) => (
-                          <div key={`${file.name}:${file.size}:${file.lastModified}`} className="grid grid-cols-[20px_1fr_150px_32px] items-center gap-3 border-b border-[rgba(0,255,140,0.08)] py-2.5 last:border-b-0">
+                          <div key={`${file.name}:${file.size}:${file.lastModified}`} className="grid grid-cols-[20px_1fr_150px_32px] items-center gap-3 border-b border-edge/8 py-2.5 last:border-b-0">
                             <FileText className="h-3.5 w-3.5 text-fg-4" />
                             <div className="min-w-0">
                               <div className="truncate text-fg-1" title={file.name}>
@@ -2516,8 +2516,8 @@ export default function Finance() {
               ) : null}
 
               {selectedReviewGroup ? (
-                <section className="flex h-full min-h-0 flex-col border border-[rgba(0,255,140,0.12)] bg-pit font-mono">
-                  <div className="flex flex-wrap items-center justify-between gap-3 border-b border-[rgba(0,255,140,0.12)] px-3 py-2">
+                <section className="flex h-full min-h-0 flex-col border border-edge/12 bg-pit font-mono">
+                  <div className="flex flex-wrap items-center justify-between gap-3 border-b border-edge/12 px-3 py-2">
                     <div>
                       <div className="text-[10px] uppercase tracking-label text-fg-4">step 2 · review draft</div>
                       <div className="mt-0.5 max-w-[520px] truncate text-xs text-fg-2" title={selectedReviewGroup.fileLabel}>
@@ -2559,12 +2559,12 @@ export default function Finance() {
                       <thead className="sticky top-0 bg-pit text-[10px] uppercase tracking-label text-fg-4">
                         <tr>
                           <MovementDateSortHeader direction={reviewSortDirection} onSort={toggleReviewDateSort} />
-                          <th className="border-b border-[rgba(0,255,140,0.12)] px-3 py-2 text-left">movement</th>
-                          <th className="border-b border-[rgba(0,255,140,0.12)] px-3 py-2 text-left">account</th>
-                          <th className="border-b border-[rgba(0,255,140,0.12)] px-3 py-2 text-left">category</th>
-                          <th className="border-b border-[rgba(0,255,140,0.12)] px-3 py-2 text-right">amount</th>
-                          <th className="border-b border-[rgba(0,255,140,0.12)] px-3 py-2 text-right">status</th>
-                          <th className="border-b border-[rgba(0,255,140,0.12)] px-2 py-2 text-right"> </th>
+                          <th className="border-b border-edge/12 px-3 py-2 text-left">movement</th>
+                          <th className="border-b border-edge/12 px-3 py-2 text-left">account</th>
+                          <th className="border-b border-edge/12 px-3 py-2 text-left">category</th>
+                          <th className="border-b border-edge/12 px-3 py-2 text-right">amount</th>
+                          <th className="border-b border-edge/12 px-3 py-2 text-right">status</th>
+                          <th className="border-b border-edge/12 px-2 py-2 text-right"> </th>
                         </tr>
                       </thead>
                       <tbody>
@@ -2574,7 +2574,7 @@ export default function Finance() {
                           const account = scopedAccounts.find((entry) => entry.id === item.accountId)
                           const category = scopedCategories.find((entry) => entry.id === item.suggestedCategoryId)
                           return (
-                            <tr key={item.id} className="border-b border-[rgba(0,255,140,0.08)] text-fg-2">
+                            <tr key={item.id} className="border-b border-edge/8 text-fg-2">
                               <td className="whitespace-nowrap px-3 py-2 text-fg-3">
                                 <div>{formatZeroDate(item.transactionDate)}</div>
                                 {isMeaningfulTransactionTime(item.transactionTime) ? (
@@ -2603,7 +2603,7 @@ export default function Finance() {
                                   options={locked ? [] : importAccountOptions}
                                   display={account?.name ?? 'unknown'}
                                   popupWidth="240px"
-                                  triggerClassName={`flex h-7 w-full min-w-0 items-center justify-between border border-transparent bg-transparent px-2 text-left font-mono text-xs text-fg-2 outline-none transition hover:border-[rgba(0,255,140,0.18)] hover:bg-[rgba(0,255,136,0.04)] hover:text-fg-1 focus-visible:border-accent ${locked ? 'pointer-events-none opacity-55' : ''}`}
+                                  triggerClassName={`flex h-7 w-full min-w-0 items-center justify-between border border-transparent bg-transparent px-2 text-left font-mono text-xs text-fg-2 outline-none transition hover:border-edge/18 hover:bg-accent-fill/4 hover:text-fg-1 focus-visible:border-accent ${locked ? 'pointer-events-none opacity-55' : ''}`}
                                 />
                               </td>
                               <td className="min-w-0 px-3 py-2">
@@ -2613,7 +2613,7 @@ export default function Finance() {
                                   options={locked ? [] : categoryOptions}
                                   display={category?.name ?? 'uncategorized'}
                                   popupWidth="240px"
-                                  triggerClassName={`flex h-7 w-full min-w-0 items-center justify-between border border-transparent bg-transparent px-2 text-left font-mono text-xs text-fg-2 outline-none transition hover:border-[rgba(0,255,140,0.18)] hover:bg-[rgba(0,255,136,0.04)] hover:text-fg-1 focus-visible:border-accent ${locked ? 'pointer-events-none opacity-55' : ''}`}
+                                  triggerClassName={`flex h-7 w-full min-w-0 items-center justify-between border border-transparent bg-transparent px-2 text-left font-mono text-xs text-fg-2 outline-none transition hover:border-edge/18 hover:bg-accent-fill/4 hover:text-fg-1 focus-visible:border-accent ${locked ? 'pointer-events-none opacity-55' : ''}`}
                                 />
                               </td>
                               <td className="whitespace-nowrap px-3 py-2 text-right">
@@ -2640,7 +2640,7 @@ export default function Finance() {
                                     display={importItemStatusLabel(item.status)}
                                     popupWidth="160px"
                                     align="right"
-                                    triggerClassName="ml-auto flex h-7 w-full min-w-0 items-center justify-between border border-transparent bg-transparent px-2 text-left font-mono text-xs text-fg-2 outline-none transition hover:border-[rgba(0,255,140,0.18)] hover:bg-[rgba(0,255,136,0.04)] hover:text-fg-1 focus-visible:border-accent"
+                                    triggerClassName="ml-auto flex h-7 w-full min-w-0 items-center justify-between border border-transparent bg-transparent px-2 text-left font-mono text-xs text-fg-2 outline-none transition hover:border-edge/18 hover:bg-accent-fill/4 hover:text-fg-1 focus-visible:border-accent"
                                   />
                                 )}
                               </td>
@@ -2651,11 +2651,11 @@ export default function Finance() {
                                   <button
                                     type="button"
                                     onClick={() => void removeImportItem(item)}
-                                    className="group relative inline-flex h-7 w-7 items-center justify-center border border-transparent text-fg-4 transition hover:border-[rgba(255,83,124,0.35)] hover:bg-[rgba(255,83,124,0.08)] hover:text-fail"
+                                    className="group relative inline-flex h-7 w-7 items-center justify-center border border-transparent text-fg-4 transition hover:border-fail/35 hover:bg-fail/8 hover:text-fail"
                                     aria-label="Remove from import"
                                   >
                                     <Trash2 className="h-3.5 w-3.5" />
-                                    <span className="pointer-events-none absolute bottom-full right-0 mb-1 hidden whitespace-nowrap border border-[rgba(255,83,124,0.25)] bg-pit-2 px-2 py-1 font-mono text-[10px] uppercase tracking-label text-fail shadow-[0_12px_30px_rgba(0,0,0,0.45)] group-hover:block">
+                                    <span className="pointer-events-none absolute bottom-full right-0 mb-1 hidden whitespace-nowrap border border-fail/25 bg-pit-2 px-2 py-1 font-mono text-[10px] uppercase tracking-label text-fail shadow-terminal-popover group-hover:block">
                                       remove
                                     </span>
                                   </button>
@@ -2678,7 +2678,7 @@ export default function Finance() {
               ) : null}
             </div>
 
-            <div className="flex shrink-0 items-center justify-between border-t border-[rgba(0,255,140,0.12)] px-5 py-3">
+            <div className="flex shrink-0 items-center justify-between border-t border-edge/12 px-5 py-3">
               <div className="flex items-center gap-3">
                 <button
                   type="button"
@@ -2706,13 +2706,13 @@ export default function Finance() {
                       type="button"
                       disabled={!canApplyReview || importPhase === 'processing'}
                       onClick={() => void applyReviewedImport()}
-                      className="inline-flex items-center gap-2 border border-[rgba(0,255,140,0.3)] bg-[rgba(0,255,136,0.08)] px-3 py-1.5 font-mono text-xs uppercase tracking-label text-accent transition hover:bg-[rgba(0,255,136,0.16)] hover:shadow-glow-xs disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-[rgba(0,255,136,0.08)] disabled:hover:shadow-none"
+                      className="inline-flex items-center gap-2 border border-edge/30 bg-accent-fill/8 px-3 py-1.5 font-mono text-xs uppercase tracking-label text-accent transition hover:bg-accent-fill/16 hover:shadow-glow-xs disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-accent-fill/8 disabled:hover:shadow-none"
                     >
                       {importPhase === 'processing' ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <FileUp className="h-3.5 w-3.5" />}
                       finish review
                     </button>
                     {finishReviewDisabledReason ? (
-                      <div className="pointer-events-none absolute bottom-full right-0 z-20 mb-2 hidden whitespace-nowrap border border-[rgba(0,255,140,0.2)] bg-pit-2 px-2 py-1 font-mono text-[10px] uppercase tracking-label text-fg-2 shadow-[0_12px_30px_rgba(0,0,0,0.45)] group-hover:block">
+                      <div className="pointer-events-none absolute bottom-full right-0 z-20 mb-2 hidden whitespace-nowrap border border-edge/20 bg-pit-2 px-2 py-1 font-mono text-[10px] uppercase tracking-label text-fg-2 shadow-terminal-popover group-hover:block">
                         {finishReviewDisabledReason}
                       </div>
                     ) : null}
@@ -2722,7 +2722,7 @@ export default function Finance() {
                   type="button"
                   disabled={importFiles.length === 0 || !importAccountId || importPhase === 'processing' || scopedAccounts.length === 0}
                   onClick={() => void confirmImport()}
-                  className={`inline-flex items-center gap-2 border border-[rgba(0,255,140,0.3)] bg-[rgba(0,255,136,0.08)] px-3 py-1.5 font-mono text-xs uppercase tracking-label text-accent transition hover:bg-[rgba(0,255,136,0.16)] hover:shadow-glow-xs disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-[rgba(0,255,136,0.08)] disabled:hover:shadow-none ${importModalStep === 'review' ? 'hidden' : ''}`}
+                  className={`inline-flex items-center gap-2 border border-edge/30 bg-accent-fill/8 px-3 py-1.5 font-mono text-xs uppercase tracking-label text-accent transition hover:bg-accent-fill/16 hover:shadow-glow-xs disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-accent-fill/8 disabled:hover:shadow-none ${importModalStep === 'review' ? 'hidden' : ''}`}
                 >
                   {importPhase === 'processing' ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <FileUp className="h-3.5 w-3.5" />}
                   {importPhase === 'processing' ? 'processing' : 'process import'}
@@ -2735,16 +2735,16 @@ export default function Finance() {
 
       {selectedDeleteMovement && (
         <div
-          className="fixed inset-0 z-50 flex items-start justify-center bg-[rgba(0,0,0,0.72)] px-4 pt-[12vh] backdrop-blur-sm"
+          className="fixed inset-0 z-50 flex items-start justify-center bg-overlay/72 px-4 pt-[12vh] backdrop-blur-sm"
           onClick={() => setDeleteMovementId(null)}
         >
           <div
-            className="w-full max-w-lg border border-[rgba(255,83,124,0.28)] bg-pit-2 shadow-[0_30px_80px_rgba(0,0,0,0.55)]"
+            className="w-full max-w-lg border border-fail/28 bg-pit-2 shadow-terminal-overlay"
             onClick={(event) => event.stopPropagation()}
           >
-            <div className="flex items-center justify-between border-b border-[rgba(255,83,124,0.16)] px-5 py-3">
+            <div className="flex items-center justify-between border-b border-fail/16 px-5 py-3">
               <div className="flex items-center gap-2 font-mono text-xs">
-                <span className="inline-flex items-center gap-1.5 border border-[rgba(255,83,124,0.3)] bg-[rgba(255,83,124,0.07)] px-2 py-0.5 font-mono text-[10px] uppercase tracking-label text-fail">
+                <span className="inline-flex items-center gap-1.5 border border-fail/30 bg-fail/7 px-2 py-0.5 font-mono text-[10px] uppercase tracking-label text-fail">
                   <Trash2 className="h-3 w-3" />
                   delete
                 </span>
@@ -2769,7 +2769,7 @@ export default function Finance() {
                 </div>
               </div>
 
-              <section className="border border-[rgba(0,255,140,0.12)] bg-pit px-3 py-3">
+              <section className="border border-edge/12 bg-pit px-3 py-3">
                 <div className="flex flex-wrap items-start justify-between gap-3">
                   <div className="min-w-0">
                     <div className="truncate text-sm text-fg-1" title={selectedDeleteMovement.merchantName || selectedDeleteMovement.description}>
@@ -2791,7 +2791,7 @@ export default function Finance() {
               </section>
             </div>
 
-            <div className="flex items-center justify-between border-t border-[rgba(255,83,124,0.16)] px-5 py-3">
+            <div className="flex items-center justify-between border-t border-fail/16 px-5 py-3">
               <button
                 type="button"
                 onClick={() => setDeleteMovementId(null)}
@@ -2802,7 +2802,7 @@ export default function Finance() {
               <button
                 type="button"
                 onClick={() => void confirmDeleteMovement()}
-                className="inline-flex items-center gap-2 border border-[rgba(255,83,124,0.34)] bg-[rgba(255,83,124,0.08)] px-3 py-1.5 font-mono text-xs uppercase tracking-label text-fail transition hover:bg-[rgba(255,83,124,0.14)]"
+                className="inline-flex items-center gap-2 border border-fail/34 bg-fail/8 px-3 py-1.5 font-mono text-xs uppercase tracking-label text-fail transition hover:bg-fail/14"
               >
                 <Trash2 className="h-3.5 w-3.5" />
                 delete movement
@@ -2814,16 +2814,16 @@ export default function Finance() {
 
       {transferModalMovementId && selectedTransferMovement && (
         <div
-          className="fixed inset-0 z-50 flex items-start justify-center bg-[rgba(0,0,0,0.7)] px-4 pt-[8vh] backdrop-blur-sm"
+          className="fixed inset-0 z-50 flex items-start justify-center bg-overlay/70 px-4 pt-[8vh] backdrop-blur-sm"
           onClick={() => setTransferModalMovementId(null)}
         >
           <div
-            className="w-full max-w-3xl border border-[rgba(0,255,140,0.2)] bg-pit-2 shadow-[0_30px_80px_rgba(0,0,0,0.5)]"
+            className="w-full max-w-3xl border border-edge/20 bg-pit-2 shadow-terminal-overlay"
             onClick={(event) => event.stopPropagation()}
           >
-            <div className="flex items-center justify-between border-b border-[rgba(0,255,140,0.12)] px-5 py-3">
+            <div className="flex items-center justify-between border-b border-edge/12 px-5 py-3">
               <div className="flex items-center gap-2 font-mono text-xs">
-                <span className="inline-flex items-center gap-1.5 border border-[rgba(0,255,140,0.25)] bg-[rgba(0,255,136,0.05)] px-2 py-0.5 font-mono text-[10px] uppercase tracking-label text-accent">
+                <span className="inline-flex items-center gap-1.5 border border-edge/25 bg-accent-fill/5 px-2 py-0.5 font-mono text-[10px] uppercase tracking-label text-accent">
                   transfer
                 </span>
                 <span className="text-fg-4">›</span>
@@ -2840,7 +2840,7 @@ export default function Finance() {
             </div>
 
             <div className="grid gap-4 px-5 py-4">
-              <section className="border border-[rgba(0,255,140,0.12)] bg-pit px-3 py-3 font-mono">
+              <section className="border border-edge/12 bg-pit px-3 py-3 font-mono">
                 <div className="flex flex-wrap items-start justify-between gap-3">
                   <div>
                     <div className="text-sm text-fg-1">{selectedTransferMovement.merchantName || selectedTransferMovement.description}</div>
@@ -2853,18 +2853,18 @@ export default function Finance() {
                   </div>
                 </div>
                 {selectedTransfer ? (
-                  <div className="mt-3 border-t border-[rgba(0,255,140,0.08)] pt-3 text-xs text-fg-3">
+                  <div className="mt-3 border-t border-edge/8 pt-3 text-xs text-fg-3">
                     linked transfer · {selectedTransfer.status}
                   </div>
                 ) : (
-                  <div className="mt-3 border-t border-[rgba(0,255,140,0.08)] pt-3 text-xs text-fg-4">
+                  <div className="mt-3 border-t border-edge/8 pt-3 text-xs text-fg-4">
                     transfers are excluded from income, outflow, and category spend, but still affect account balances.
                   </div>
                 )}
               </section>
 
-              <section className="border border-[rgba(0,255,140,0.12)] bg-pit">
-                <div className="flex items-center justify-between border-b border-[rgba(0,255,140,0.12)] px-3 py-2 font-mono text-[10px] uppercase tracking-label text-fg-4">
+              <section className="border border-edge/12 bg-pit">
+                <div className="flex items-center justify-between border-b border-edge/12 px-3 py-2 font-mono text-[10px] uppercase tracking-label text-fg-4">
                   <span>suggested matches</span>
                   <span>{transferCandidates.length}</span>
                 </div>
@@ -2879,7 +2879,7 @@ export default function Finance() {
                         key={candidate.movement.id}
                         type="button"
                         onClick={() => void linkTransferMovement(selectedTransferMovement.id, candidate.movement.id)}
-                        className="grid w-full grid-cols-[1fr_auto_auto] items-center gap-3 border-b border-[rgba(0,255,140,0.08)] px-3 py-3 text-left font-mono text-xs transition hover:bg-[rgba(0,255,136,0.05)]"
+                        className="grid w-full grid-cols-[1fr_auto_auto] items-center gap-3 border-b border-edge/8 px-3 py-3 text-left font-mono text-xs transition hover:bg-accent-fill/5"
                       >
                         <span className="min-w-0">
                           <span className="block truncate text-fg-1">{candidate.movement.merchantName || candidate.movement.description}</span>
@@ -2898,7 +2898,7 @@ export default function Finance() {
               </section>
             </div>
 
-            <div className="flex items-center justify-between border-t border-[rgba(0,255,140,0.12)] px-5 py-3">
+            <div className="flex items-center justify-between border-t border-edge/12 px-5 py-3">
               <button
                 type="button"
                 onClick={() => setTransferModalMovementId(null)}
@@ -2911,7 +2911,7 @@ export default function Finance() {
                   <button
                     type="button"
                     onClick={() => void unmarkTransferMovement(selectedTransferMovement.id)}
-                    className="inline-flex items-center gap-2 border border-[rgba(255,95,135,0.28)] bg-[rgba(255,95,135,0.06)] px-3 py-1.5 font-mono text-xs uppercase tracking-label text-fail transition hover:bg-[rgba(255,95,135,0.12)]"
+                    className="inline-flex items-center gap-2 border border-fail/28 bg-fail/6 px-3 py-1.5 font-mono text-xs uppercase tracking-label text-fail transition hover:bg-fail/12"
                   >
                     <X className="h-3.5 w-3.5" />
                     unmark transfer
@@ -2920,7 +2920,7 @@ export default function Finance() {
                 <button
                   type="button"
                   onClick={() => void markMovementAsTransfer(selectedTransferMovement.id)}
-                  className="inline-flex items-center gap-2 border border-[rgba(0,255,140,0.3)] bg-[rgba(0,255,136,0.08)] px-3 py-1.5 font-mono text-xs uppercase tracking-label text-accent transition hover:bg-[rgba(0,255,136,0.16)] hover:shadow-glow-xs"
+                  className="inline-flex items-center gap-2 border border-edge/30 bg-accent-fill/8 px-3 py-1.5 font-mono text-xs uppercase tracking-label text-accent transition hover:bg-accent-fill/16 hover:shadow-glow-xs"
                 >
                   <ArrowRightLeft className="h-3.5 w-3.5" />
                   mark transfer only
@@ -2933,11 +2933,11 @@ export default function Finance() {
 
       {movementModalOpen && (
         <div
-          className="fixed inset-0 z-50 flex items-start justify-center bg-[rgba(0,0,0,0.7)] px-4 pt-[10vh] backdrop-blur-sm"
+          className="fixed inset-0 z-50 flex items-start justify-center bg-overlay/70 px-4 pt-[10vh] backdrop-blur-sm"
           onClick={() => setMovementModalOpen(false)}
         >
           <div
-            className="w-full max-w-2xl border border-[rgba(0,255,140,0.2)] bg-pit-2 shadow-[0_30px_80px_rgba(0,0,0,0.5)]"
+            className="w-full max-w-2xl border border-edge/20 bg-pit-2 shadow-terminal-overlay"
             onClick={(event) => event.stopPropagation()}
             onKeyDown={(event) => {
               if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') {
@@ -2946,9 +2946,9 @@ export default function Finance() {
               }
             }}
           >
-            <div className="flex items-center justify-between border-b border-[rgba(0,255,140,0.12)] px-5 py-3">
+            <div className="flex items-center justify-between border-b border-edge/12 px-5 py-3">
               <div className="flex items-center gap-2 font-mono text-xs">
-                <span className="inline-flex items-center gap-1.5 border border-[rgba(0,255,140,0.25)] bg-[rgba(0,255,136,0.05)] px-2 py-0.5 font-mono text-[10px] uppercase tracking-label text-accent">
+                <span className="inline-flex items-center gap-1.5 border border-edge/25 bg-accent-fill/5 px-2 py-0.5 font-mono text-[10px] uppercase tracking-label text-accent">
                   finance
                 </span>
                 <span className="text-fg-4">›</span>
@@ -3038,7 +3038,7 @@ export default function Finance() {
                   label={selectedMovementAccount.currencyCode}
                 />
               ) : null}
-              <label className="inline-flex items-center gap-1.5 border border-[rgba(0,255,140,0.2)] bg-pit-3 px-2.5 py-1 font-mono text-[11px] lowercase text-fg-2 transition hover:border-[rgba(0,255,140,0.4)] hover:bg-[rgba(0,255,136,0.04)] hover:text-fg-1">
+              <label className="inline-flex items-center gap-1.5 border border-edge/20 bg-pit-3 px-2.5 py-1 font-mono text-[11px] lowercase text-fg-2 transition hover:border-edge/40 hover:bg-accent-fill/4 hover:text-fg-1">
                 <CalendarDays className="h-3 w-3" />
                 <input
                   type="date"
@@ -3049,7 +3049,7 @@ export default function Finance() {
               </label>
             </div>
 
-            <div className="flex items-center justify-between border-t border-[rgba(0,255,140,0.12)] px-5 py-3">
+            <div className="flex items-center justify-between border-t border-edge/12 px-5 py-3">
               <button
                 type="button"
                 onClick={() => setMovementModalOpen(false)}
@@ -3061,7 +3061,7 @@ export default function Finance() {
                 type="button"
                 disabled={!canCreateMovement}
                 onClick={() => void createMovement()}
-                className="inline-flex items-center gap-2 border border-[rgba(0,255,140,0.3)] bg-[rgba(0,255,136,0.08)] px-3 py-1.5 font-mono text-xs uppercase tracking-label text-accent transition hover:bg-[rgba(0,255,136,0.16)] hover:shadow-glow-xs disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-[rgba(0,255,136,0.08)] disabled:hover:shadow-none"
+                className="inline-flex items-center gap-2 border border-edge/30 bg-accent-fill/8 px-3 py-1.5 font-mono text-xs uppercase tracking-label text-accent transition hover:bg-accent-fill/16 hover:shadow-glow-xs disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-accent-fill/8 disabled:hover:shadow-none"
               >
                 <Plus className="h-3.5 w-3.5" />
                 add movement
@@ -3073,11 +3073,11 @@ export default function Finance() {
 
       {accountModalOpen && (
         <div
-          className="fixed inset-0 z-50 flex items-start justify-center bg-[rgba(0,0,0,0.7)] px-4 pt-[10vh] backdrop-blur-sm"
+          className="fixed inset-0 z-50 flex items-start justify-center bg-overlay/70 px-4 pt-[10vh] backdrop-blur-sm"
           onClick={closeAccountModal}
         >
           <div
-            className="w-full max-w-2xl border border-[rgba(0,255,140,0.2)] bg-pit-2 shadow-[0_30px_80px_rgba(0,0,0,0.5)]"
+            className="w-full max-w-2xl border border-edge/20 bg-pit-2 shadow-terminal-overlay"
             onClick={(event) => event.stopPropagation()}
             onKeyDown={(event) => {
               if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') {
@@ -3086,9 +3086,9 @@ export default function Finance() {
               }
             }}
           >
-            <div className="flex items-center justify-between border-b border-[rgba(0,255,140,0.12)] px-5 py-3">
+            <div className="flex items-center justify-between border-b border-edge/12 px-5 py-3">
               <div className="flex items-center gap-2 font-mono text-xs">
-                <span className="inline-flex items-center gap-1.5 border border-[rgba(0,255,140,0.25)] bg-[rgba(0,255,136,0.05)] px-2 py-0.5 font-mono text-[10px] uppercase tracking-label text-accent">
+                <span className="inline-flex items-center gap-1.5 border border-edge/25 bg-accent-fill/5 px-2 py-0.5 font-mono text-[10px] uppercase tracking-label text-accent">
                   finance
                 </span>
                 <span className="text-fg-4">›</span>
@@ -3134,7 +3134,7 @@ export default function Finance() {
                     className="w-full bg-transparent px-0 py-2 font-mono text-sm leading-relaxed text-fg-2 outline-none placeholder:text-fg-4"
                   />
                   {institutionSuggestionsOpen && institutionSuggestions.length > 0 && (
-                    <div className="absolute left-0 right-0 top-[calc(100%+4px)] z-[70] max-h-44 overflow-auto border border-[rgba(0,255,140,0.25)] bg-pit shadow-[0_0_18px_rgba(0,255,136,0.18),0_18px_44px_rgba(0,0,0,0.6)]">
+                    <div className="absolute left-0 right-0 top-[calc(100%+4px)] z-[70] max-h-44 overflow-auto border border-edge/25 bg-pit shadow-terminal-popover">
                       {filteredInstitutionSuggestions.length > 0 ? (
                         filteredInstitutionSuggestions.map((institution) => (
                           <button
@@ -3145,7 +3145,7 @@ export default function Finance() {
                               setAccountDraft((draft) => ({ ...draft, institutionName: institution }))
                               setInstitutionSuggestionsOpen(false)
                             }}
-                            className="flex w-full items-center gap-2 px-3 py-1.5 text-left font-mono text-xs normal-case tracking-normal text-fg-2 transition hover:bg-[rgba(0,255,136,0.12)] hover:text-accent"
+                            className="flex w-full items-center gap-2 px-3 py-1.5 text-left font-mono text-xs normal-case tracking-normal text-fg-2 transition hover:bg-accent-fill/12 hover:text-accent"
                           >
                             <Landmark className="h-3.5 w-3.5 text-fg-4" />
                             <span className="flex-1 truncate">{institution}</span>
@@ -3212,7 +3212,7 @@ export default function Finance() {
               />
             </div>
 
-            <div className="flex items-center justify-between border-t border-[rgba(0,255,140,0.12)] px-5 py-3">
+            <div className="flex items-center justify-between border-t border-edge/12 px-5 py-3">
               <button
                 type="button"
                 onClick={closeAccountModal}
@@ -3224,7 +3224,7 @@ export default function Finance() {
                 type="button"
                 disabled={!canCreateAccount}
                 onClick={saveAccount}
-                className="inline-flex items-center gap-2 border border-[rgba(0,255,140,0.3)] bg-[rgba(0,255,136,0.08)] px-3 py-1.5 font-mono text-xs uppercase tracking-label text-accent transition hover:bg-[rgba(0,255,136,0.16)] hover:shadow-glow-xs disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-[rgba(0,255,136,0.08)] disabled:hover:shadow-none"
+                className="inline-flex items-center gap-2 border border-edge/30 bg-accent-fill/8 px-3 py-1.5 font-mono text-xs uppercase tracking-label text-accent transition hover:bg-accent-fill/16 hover:shadow-glow-xs disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-accent-fill/8 disabled:hover:shadow-none"
               >
                 {editingAccountId ? <CheckCircle className="h-3.5 w-3.5" /> : <Plus className="h-3.5 w-3.5" />}
                 {editingAccountId ? 'save account' : 'add account'}
@@ -3236,11 +3236,11 @@ export default function Finance() {
 
       {categoryModalOpen && (
         <div
-          className="fixed inset-0 z-50 flex items-start justify-center bg-[rgba(0,0,0,0.7)] px-4 pt-[8vh] backdrop-blur-sm"
+          className="fixed inset-0 z-50 flex items-start justify-center bg-overlay/70 px-4 pt-[8vh] backdrop-blur-sm"
           onClick={() => setCategoryModalOpen(false)}
         >
           <div
-            className="w-full max-w-2xl border border-[rgba(0,255,140,0.2)] bg-pit-2 shadow-[0_30px_80px_rgba(0,0,0,0.5)]"
+            className="w-full max-w-2xl border border-edge/20 bg-pit-2 shadow-terminal-overlay"
             onClick={(event) => event.stopPropagation()}
             onKeyDown={(event) => {
               if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') {
@@ -3249,9 +3249,9 @@ export default function Finance() {
               }
             }}
           >
-            <div className="flex items-center justify-between border-b border-[rgba(0,255,140,0.12)] px-5 py-3">
+            <div className="flex items-center justify-between border-b border-edge/12 px-5 py-3">
               <div className="flex items-center gap-2 font-mono text-xs">
-                <span className="inline-flex items-center gap-1.5 border border-[rgba(0,255,140,0.25)] bg-[rgba(0,255,136,0.05)] px-2 py-0.5 font-mono text-[10px] uppercase tracking-label text-accent">
+                <span className="inline-flex items-center gap-1.5 border border-edge/25 bg-accent-fill/5 px-2 py-0.5 font-mono text-[10px] uppercase tracking-label text-accent">
                   finance
                 </span>
                 <span className="text-fg-4">›</span>
@@ -3268,7 +3268,7 @@ export default function Finance() {
             </div>
 
             <div className="grid max-h-[70vh] gap-4 overflow-auto px-5 py-4">
-              <section className="border border-[rgba(0,255,140,0.12)] bg-pit px-3 py-3">
+              <section className="border border-edge/12 bg-pit px-3 py-3">
                 <div className="mb-3 font-mono text-[10px] uppercase tracking-label text-fg-4">new category</div>
                 <input
                   value={categoryDraft.name}
@@ -3297,7 +3297,7 @@ export default function Finance() {
                     type="button"
                     disabled={!canCreateCategory}
                     onClick={createCategory}
-                    className="inline-flex items-center gap-2 border border-[rgba(0,255,140,0.3)] bg-[rgba(0,255,136,0.08)] px-3 py-1.5 font-mono text-xs uppercase tracking-label text-accent transition hover:bg-[rgba(0,255,136,0.16)] hover:shadow-glow-xs disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-[rgba(0,255,136,0.08)] disabled:hover:shadow-none"
+                    className="inline-flex items-center gap-2 border border-edge/30 bg-accent-fill/8 px-3 py-1.5 font-mono text-xs uppercase tracking-label text-accent transition hover:bg-accent-fill/16 hover:shadow-glow-xs disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-accent-fill/8 disabled:hover:shadow-none"
                   >
                     <Plus className="h-3.5 w-3.5" />
                     add category
@@ -3305,8 +3305,8 @@ export default function Finance() {
                 </div>
               </section>
 
-              <section className="border border-[rgba(0,255,140,0.12)] bg-pit">
-                <div className="flex items-center justify-between border-b border-[rgba(0,255,140,0.12)] px-3 py-2 font-mono text-[10px] uppercase tracking-label text-fg-4">
+              <section className="border border-edge/12 bg-pit">
+                <div className="flex items-center justify-between border-b border-edge/12 px-3 py-2 font-mono text-[10px] uppercase tracking-label text-fg-4">
                   <span>manage categories</span>
                   <span>{scopedCategories.length}</span>
                 </div>
@@ -3320,7 +3320,7 @@ export default function Finance() {
                       .map((entry) => ({ value: entry.id, label: entry.name, icon: <Tag className="h-3.5 w-3.5" /> }))
 
                     return (
-                      <div key={category.id} className="border-b border-[rgba(0,255,140,0.08)] px-3 py-3 font-mono text-xs">
+                      <div key={category.id} className="border-b border-edge/8 px-3 py-3 font-mono text-xs">
                         <div className="flex items-start justify-between gap-3">
                           <div className="min-w-0">
                             <div className="truncate text-fg-1">{category.name}</div>
@@ -3341,14 +3341,14 @@ export default function Finance() {
                           </button>
                         </div>
                         {isMerging ? (
-                          <div className="mt-3 grid gap-2 border border-[rgba(255,95,135,0.16)] bg-[rgba(255,95,135,0.04)] p-2 sm:grid-cols-[1fr_auto_auto]">
+                          <div className="mt-3 grid gap-2 border border-fail/16 bg-fail/4 p-2 sm:grid-cols-[1fr_auto_auto]">
                             <PachSelect
                               value={categoryMergeDraft.targetCategoryId}
                               onChange={(next) => setCategoryMergeDraft((draft) => ({ ...draft, targetCategoryId: next }))}
                               options={targetOptions}
                               display={targetOptions.find((option) => option.value === categoryMergeDraft.targetCategoryId)?.label ?? 'select replacement'}
                               popupWidth="260px"
-                              triggerClassName="flex h-8 w-full items-center justify-between border border-[rgba(0,255,140,0.12)] bg-pit px-2 text-left font-mono text-xs text-fg-2 outline-none transition hover:border-[rgba(0,255,140,0.22)] hover:bg-[rgba(0,255,136,0.04)] hover:text-fg-1 focus-visible:border-accent"
+                              triggerClassName="flex h-8 w-full items-center justify-between border border-edge/12 bg-pit px-2 text-left font-mono text-xs text-fg-2 outline-none transition hover:border-edge/22 hover:bg-accent-fill/4 hover:text-fg-1 focus-visible:border-accent"
                             />
                             <button
                               type="button"
@@ -3379,7 +3379,7 @@ export default function Finance() {
               </section>
             </div>
 
-            <div className="flex items-center justify-between border-t border-[rgba(0,255,140,0.12)] px-5 py-3">
+            <div className="flex items-center justify-between border-t border-edge/12 px-5 py-3">
               <button
                 type="button"
                 onClick={() => setCategoryModalOpen(false)}
@@ -3414,7 +3414,7 @@ function AccountBalanceBreakdown({
   }
 
   return (
-    <div className="divide-y divide-[rgba(0,255,140,0.08)] font-mono text-xs">
+    <div className="divide-y divide-edge/8 font-mono text-xs">
       {entries.map((entry) => (
         <div
           key={entry.accountId}
@@ -3463,7 +3463,7 @@ function FinanceMetric({ label, value, tone = 'default' }: { label: string; valu
 
 function CategoryKpi({ label, value, sub }: { label: string; value: string; sub: string }) {
   return (
-    <div className="min-w-0 border-b border-r border-[rgba(0,255,140,0.12)] bg-pit-2 px-4 py-3">
+    <div className="min-w-0 border-b border-r border-edge/12 bg-pit-2 px-4 py-3">
       <div className="text-[10px] uppercase tracking-label text-fg-4">{label}</div>
       <div className="mt-2 truncate text-lg text-fg-1 tabular-nums">{value}</div>
       <div className="mt-1 truncate text-[10px] uppercase tracking-label text-fg-4">{sub}</div>
@@ -3480,11 +3480,11 @@ function MovementDateSortHeader({
 }) {
   const Icon = direction === 'asc' ? ArrowUp : ArrowDown
   return (
-    <th className="border-b border-[rgba(0,255,140,0.12)] px-0 py-0 text-left">
+    <th className="border-b border-edge/12 px-0 py-0 text-left">
       <button
         type="button"
         onClick={onSort}
-        className="flex h-9 w-full items-center justify-start gap-1.5 px-3 text-left font-mono text-[10px] uppercase tracking-label text-accent transition hover:bg-[rgba(0,255,136,0.06)] hover:text-fg-1"
+        className="flex h-9 w-full items-center justify-start gap-1.5 px-3 text-left font-mono text-[10px] uppercase tracking-label text-accent transition hover:bg-accent-fill/6 hover:text-fg-1"
       >
         <span>date</span>
         <Icon className="h-3 w-3 shrink-0" />
@@ -3501,7 +3501,7 @@ function MovementHeader({
   align?: 'left' | 'right'
 }) {
   return (
-    <th className={`h-9 border-b border-[rgba(0,255,140,0.12)] px-3 py-0 font-mono text-[10px] uppercase tracking-label text-fg-4 ${align === 'right' ? 'text-right' : 'text-left'}`}>
+    <th className={`h-9 border-b border-edge/12 px-3 py-0 font-mono text-[10px] uppercase tracking-label text-fg-4 ${align === 'right' ? 'text-right' : 'text-left'}`}>
       {label}
     </th>
   )
@@ -3571,8 +3571,8 @@ function FinanceSidebarButton({
       onClick={onClick}
       className={`flex w-full items-center justify-between px-3 py-2 text-left font-mono text-xs lowercase transition ${
         active
-          ? 'bg-[rgba(0,255,136,0.08)] text-accent ring-1 ring-[rgba(0,255,136,0.2)]'
-          : 'text-fg-2 hover:bg-[rgba(0,255,136,0.04)] hover:text-fg-1'
+          ? 'bg-accent-fill/8 text-accent ring-1 ring-accent-fill/20'
+          : 'text-fg-2 hover:bg-accent-fill/4 hover:text-fg-1'
       }`}
     >
       <span className="min-w-0 flex-1 truncate">{label}</span>
@@ -3585,7 +3585,7 @@ function IconTooltip({ label, children, align = 'left' }: { label: string; child
   return (
     <div className="group relative">
       {children}
-      <div className={`pointer-events-none absolute top-[calc(100%+6px)] z-30 whitespace-nowrap border border-[rgba(0,255,140,0.2)] bg-pit px-2 py-1 font-mono text-[10px] uppercase tracking-label text-fg-2 opacity-0 shadow-[0_8px_24px_rgba(0,0,0,0.45)] transition group-hover:opacity-100 ${align === 'right' ? 'right-0' : 'left-0'}`}>
+      <div className={`pointer-events-none absolute top-[calc(100%+6px)] z-30 whitespace-nowrap border border-edge/20 bg-pit px-2 py-1 font-mono text-[10px] uppercase tracking-label text-fg-2 opacity-0 shadow-terminal-popover transition group-hover:opacity-100 ${align === 'right' ? 'right-0' : 'left-0'}`}>
         {label}
       </div>
     </div>
@@ -3626,7 +3626,7 @@ function EditableMovementLabel({
             onCancel()
           }
         }}
-        className={`h-7 min-w-0 flex-1 border border-[rgba(0,255,140,0.24)] bg-pit-3 px-2 font-mono text-xs text-fg-1 outline-none focus:border-accent focus:shadow-glow-xs ${className ?? ''}`}
+        className={`h-7 min-w-0 flex-1 border border-edge/24 bg-pit-3 px-2 font-mono text-xs text-fg-1 outline-none focus:border-accent focus:shadow-glow-xs ${className ?? ''}`}
         autoFocus
       />
     )
@@ -3677,7 +3677,7 @@ function EditableMovementDate({
             onCancel()
           }
         }}
-        className={`${compact ? 'h-8 w-full text-xs' : 'h-7 w-[9.5rem] text-xs'} border border-[rgba(0,255,140,0.24)] bg-pit-3 px-2 font-mono text-fg-1 outline-none focus:border-accent focus:shadow-glow-xs`}
+        className={`${compact ? 'h-8 w-full text-xs' : 'h-7 w-[9.5rem] text-xs'} border border-edge/24 bg-pit-3 px-2 font-mono text-fg-1 outline-none focus:border-accent focus:shadow-glow-xs`}
         autoFocus
       />
     )
@@ -3733,7 +3733,7 @@ function EditableMovementAmount({
             onCancel()
           }
         }}
-        className={`${compact ? 'h-8 w-32 text-sm' : 'ml-auto h-7 w-32 text-xs'} border border-[rgba(0,255,140,0.24)] bg-pit-3 px-2 text-right font-mono text-fg-1 outline-none focus:border-accent focus:shadow-glow-xs`}
+        className={`${compact ? 'h-8 w-32 text-sm' : 'ml-auto h-7 w-32 text-xs'} border border-edge/24 bg-pit-3 px-2 text-right font-mono text-fg-1 outline-none focus:border-accent focus:shadow-glow-xs`}
         autoFocus
       />
     )
@@ -3786,7 +3786,7 @@ function EditableImportItemAmount({
             onCancel()
           }
         }}
-        className="ml-auto h-7 w-32 border border-[rgba(0,255,140,0.24)] bg-pit-3 px-2 text-right font-mono text-xs text-fg-1 outline-none focus:border-accent focus:shadow-glow-xs"
+        className="ml-auto h-7 w-32 border border-edge/24 bg-pit-3 px-2 text-right font-mono text-xs text-fg-1 outline-none focus:border-accent focus:shadow-glow-xs"
         autoFocus
       />
     )
@@ -3828,7 +3828,7 @@ function CategoryPieChart({
   return (
     <div className="relative">
       <svg viewBox="0 0 200 200" className="h-56 w-56" role="img" aria-label="Spend by category">
-        <circle cx="100" cy="100" r={radius} fill="transparent" stroke="rgba(0,255,140,0.08)" strokeWidth="28" />
+        <circle cx="100" cy="100" r={radius} fill="transparent" stroke="rgb(var(--edge-rgb) / 0.08)" strokeWidth="28" />
         {slices.map((slice) => {
           const length = (slice.percent / 100) * circumference
           const currentOffset = offset
@@ -3854,17 +3854,17 @@ function CategoryPieChart({
             />
           )
         })}
-        <circle cx="100" cy="100" r="48" fill="rgb(0,7,4)" stroke="rgba(0,255,140,0.12)" pointerEvents="none" />
-        <text x="100" y="96" textAnchor="middle" className="fill-[rgb(119,150,132)] font-mono text-[10px] uppercase tracking-label" pointerEvents="none">
+        <circle cx="100" cy="100" r="48" fill="rgb(var(--bg-1-rgb))" stroke="rgb(var(--edge-rgb) / 0.12)" pointerEvents="none" />
+        <text x="100" y="96" textAnchor="middle" className="fill-[rgb(var(--fg-3-rgb))] font-mono text-[10px] uppercase tracking-label" pointerEvents="none">
           spend
         </text>
-        <text x="100" y="114" textAnchor="middle" className="fill-[rgb(220,255,231)] font-mono text-sm" pointerEvents="none">
+        <text x="100" y="114" textAnchor="middle" className="fill-[rgb(var(--fg-1-rgb))] font-mono text-sm" pointerEvents="none">
           {slices.length}
         </text>
       </svg>
       {tooltip ? (
         <div
-          className="pointer-events-none absolute z-20 min-w-44 border border-[rgba(0,255,140,0.22)] bg-pit px-3 py-2 font-mono text-xs shadow-[0_12px_36px_rgba(0,0,0,0.55)]"
+          className="pointer-events-none absolute z-20 min-w-44 border border-edge/22 bg-pit px-3 py-2 font-mono text-xs shadow-terminal-popover"
           style={{ left: tooltip.x + 12, top: tooltip.y + 12 }}
         >
           <div className="flex items-center gap-2 text-fg-1">
@@ -3939,8 +3939,8 @@ function MonthlyBalanceAreaChart({
       <svg viewBox={`0 0 ${width} ${height}`} preserveAspectRatio="none" className="block h-full w-full">
         <defs>
           <linearGradient id="finance-monthly-balance-grad" x1="0" x2="0" y1="0" y2="1">
-            <stop offset="0%" stopColor="rgb(0,255,136)" stopOpacity="0.18" />
-            <stop offset="100%" stopColor="rgb(0,255,136)" stopOpacity="0" />
+            <stop offset="0%" stopColor="rgb(var(--accent-rgb))" stopOpacity="0.18" />
+            <stop offset="100%" stopColor="rgb(var(--accent-rgb))" stopOpacity="0" />
           </linearGradient>
         </defs>
         {[0.2, 0.4, 0.6, 0.8].map((ratio) => (
@@ -3950,7 +3950,7 @@ function MonthlyBalanceAreaChart({
             x2={width}
             y1={padTop + ratio * chartHeight}
             y2={padTop + ratio * chartHeight}
-            stroke="rgba(0,255,140,0.12)"
+            stroke="rgb(var(--edge-rgb) / 0.12)"
             strokeDasharray="2 5"
             vectorEffect="non-scaling-stroke"
           />
@@ -3961,20 +3961,20 @@ function MonthlyBalanceAreaChart({
             x2={width}
             y1={zeroY}
             y2={zeroY}
-            stroke="rgba(220,255,231,0.18)"
+            stroke="rgb(var(--fg-1-rgb) / 0.18)"
             strokeDasharray="4 5"
             vectorEffect="non-scaling-stroke"
           />
         ) : null}
         <path d={areaPath} fill="url(#finance-monthly-balance-grad)" />
-        <path d={linePath} fill="none" stroke="rgb(0,255,136)" strokeWidth="1.8" vectorEffect="non-scaling-stroke" />
+        <path d={linePath} fill="none" stroke="rgb(var(--accent-rgb))" strokeWidth="1.8" vectorEffect="non-scaling-stroke" />
         {hoveredPoint ? (
           <line
             x1={hoveredPoint.x}
             x2={hoveredPoint.x}
             y1={0}
             y2={height}
-            stroke="rgb(0,255,136)"
+            stroke="rgb(var(--accent-rgb))"
             strokeWidth="1"
             strokeDasharray="2 3"
             opacity="0.5"
@@ -3998,8 +3998,8 @@ function MonthlyBalanceAreaChart({
               height: size,
               marginLeft: index === 0 ? 0 : index === chartPoints.length - 1 ? -size : -size / 2,
               marginTop: -size / 2,
-              backgroundColor: index === chartPoints.length - 1 ? 'rgb(0,255,136)' : 'rgb(0,7,4)',
-              border: '1px solid rgb(0,255,136)',
+              backgroundColor: index === chartPoints.length - 1 ? 'rgb(var(--accent-rgb))' : 'rgb(var(--bg-1-rgb))',
+              border: '1px solid rgb(var(--accent-rgb))',
               boxSizing: 'border-box',
             }}
           />
@@ -4007,7 +4007,7 @@ function MonthlyBalanceAreaChart({
       })}
       {hoveredPoint ? (
         <div
-          className="pointer-events-none absolute z-20 min-w-44 border border-[rgba(0,255,140,0.24)] bg-pit px-3 py-2 font-mono text-xs shadow-[0_12px_36px_rgba(0,0,0,0.55)]"
+          className="pointer-events-none absolute z-20 min-w-44 border border-edge/24 bg-pit px-3 py-2 font-mono text-xs shadow-terminal-popover"
           style={{
             left: `${tooltipXPercent}%`,
             top: `${(hoveredPoint.y / height) * 100}%`,
@@ -4038,14 +4038,14 @@ function FinanceEmptyState({
   onAction: () => void
 }) {
   return (
-    <div className="flex min-h-[320px] items-center justify-center border border-dashed border-[rgba(0,255,140,0.15)] bg-pit-2 px-6">
+    <div className="flex min-h-[320px] items-center justify-center border border-dashed border-edge/15 bg-pit-2 px-6">
       <div className="max-w-lg text-center">
         <div className="font-mono text-xl lowercase text-fg-1">{title}</div>
         <div className="mt-3 text-sm leading-6 text-fg-3">{body}</div>
         <button
           type="button"
           onClick={onAction}
-          className="mt-5 inline-flex items-center gap-2 border border-[rgba(0,255,140,0.3)] bg-[rgba(0,255,136,0.08)] px-4 py-2 font-mono text-xs uppercase tracking-label text-accent transition hover:bg-[rgba(0,255,136,0.16)] hover:shadow-glow-xs"
+          className="mt-5 inline-flex items-center gap-2 border border-edge/30 bg-accent-fill/8 px-4 py-2 font-mono text-xs uppercase tracking-label text-accent transition hover:bg-accent-fill/16 hover:shadow-glow-xs"
         >
           <Plus className="h-3.5 w-3.5" />
           {actionLabel}
@@ -4057,7 +4057,7 @@ function FinanceEmptyState({
 
 function FinanceComposerPill({ icon, label }: { icon: ReactNode; label: string }) {
   return (
-    <span className="inline-flex items-center gap-1.5 border border-[rgba(0,255,140,0.2)] bg-pit-3 px-2.5 py-1 font-mono text-[11px] lowercase text-fg-2 transition hover:border-[rgba(0,255,140,0.4)] hover:bg-[rgba(0,255,136,0.04)] hover:text-fg-1">
+    <span className="inline-flex items-center gap-1.5 border border-edge/20 bg-pit-3 px-2.5 py-1 font-mono text-[11px] lowercase text-fg-2 transition hover:border-edge/40 hover:bg-accent-fill/4 hover:text-fg-1">
       <span className="flex h-3.5 w-3.5 items-center justify-center">{icon}</span>
       <span className="max-w-[160px] truncate">{label}</span>
     </span>

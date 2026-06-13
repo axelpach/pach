@@ -5,10 +5,10 @@ import type { Schema } from '../../zero-schema'
 import type { Mutators } from '../../mutators'
 
 const TEMPERATURES = [
-  { value: 'hot', label: 'Hot', color: '#ff4d6d' },
-  { value: 'warm', label: 'Warm', color: '#ffb547' },
-  { value: 'cold', label: 'Cold', color: '#5ad6ff' },
-  { value: 'ghosted', label: 'Ghosted', color: '#5a8a72' },
+  { value: 'hot', label: 'Hot', color: 'rgb(var(--fail-rgb))' },
+  { value: 'warm', label: 'Warm', color: 'rgb(var(--warn-rgb))' },
+  { value: 'cold', label: 'Cold', color: 'rgb(var(--info-rgb))' },
+  { value: 'ghosted', label: 'Ghosted', color: 'rgb(var(--fg-3-rgb))' },
 ]
 
 const tempColors: Record<string, string> = Object.fromEntries(TEMPERATURES.map((t) => [t.value, t.color]))
@@ -141,7 +141,7 @@ export default function BoardView({ boardId, organizationId, search, onDealClick
             key={col.id}
             columnId={col.id}
             label={col.label}
-            color={col.color || '#5a8a72'}
+            color={col.color || 'var(--fg-3)'}
             value={col.value}
             deals={deals}
             companyMap={companyMap}
@@ -197,7 +197,7 @@ function TemperaturePicker({
   return (
     <div
       ref={ref}
-      className="fixed z-[100] bg-bg-2 border border-[rgba(0,255,140,0.35)] shadow-glow-sm py-1 min-w-[180px] font-mono"
+      className="fixed z-[100] bg-bg-2 border border-edge/35 shadow-glow-sm py-1 min-w-[180px] font-mono"
       style={{ left: position.x, top: position.y }}
     >
       <div className="px-3 py-1.5 text-[10px] text-fg-3 uppercase tracking-label">◊ temperature</div>
@@ -205,7 +205,7 @@ function TemperaturePicker({
         <button
           key={t.value}
           onClick={() => onSelect(dealId, t.value)}
-          className="w-full flex items-center gap-3 px-3 py-2 text-sm text-fg-2 hover:bg-[rgba(0,255,136,0.06)] hover:text-fg-1 transition-colors"
+          className="w-full flex items-center gap-3 px-3 py-2 text-sm text-fg-2 hover:bg-accent-fill/6 hover:text-fg-1 transition-colors"
         >
           <div className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: t.color }} />
           <span className="flex-1 text-left lowercase">{t.label}</span>
@@ -254,15 +254,15 @@ function KanbanColumn({
   const handleDragOver = (e: React.DragEvent) => {
     e.preventDefault()
     if (e.dataTransfer.types.includes('application/deal-id')) {
-      e.currentTarget.classList.add('bg-[rgba(0,255,136,0.04)]')
+      e.currentTarget.classList.add('bg-accent-fill/4')
     }
   }
   const handleDragLeave = (e: React.DragEvent) => {
-    e.currentTarget.classList.remove('bg-[rgba(0,255,136,0.04)]')
+    e.currentTarget.classList.remove('bg-accent-fill/4')
   }
   const handleDrop = (e: React.DragEvent) => {
     e.preventDefault()
-    e.currentTarget.classList.remove('bg-[rgba(0,255,136,0.04)]')
+    e.currentTarget.classList.remove('bg-accent-fill/4')
     const dealId = e.dataTransfer.getData('application/deal-id')
     if (dealId) onDrop(dealId, value)
   }
@@ -288,10 +288,10 @@ function KanbanColumn({
     <div
       className={`flex flex-col min-w-[280px] w-[280px] max-h-full border transition-all ${
         isDragging
-          ? 'opacity-40 border-[rgba(0,255,140,0.15)]'
+          ? 'opacity-40 border-edge/15'
           : isDropTarget
-            ? 'border-accent bg-[rgba(0,255,136,0.03)]'
-            : 'border-[rgba(0,255,140,0.15)] bg-[rgba(5,6,5,0.6)]'
+            ? 'border-accent bg-accent-fill/3'
+            : 'border-edge/15 bg-pit/60'
       }`}
       onDragOver={handleDragOver}
       onDragLeave={handleDragLeave}
@@ -303,12 +303,12 @@ function KanbanColumn({
         onDragOver={handleHeaderDragOver}
         onDrop={handleHeaderDrop}
         onDragEnd={onColumnDragEnd}
-        className="px-3.5 py-2.5 border-b border-[rgba(0,255,140,0.15)] flex items-center justify-between cursor-grab active:cursor-grabbing"
+        className="px-3.5 py-2.5 border-b border-edge/15 flex items-center justify-between cursor-grab active:cursor-grabbing"
       >
         <div className="flex items-center gap-2 min-w-0">
           <div className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: color, boxShadow: `0 0 4px ${color}` }} />
           <span className="text-xs font-mono uppercase tracking-label text-fg-1 truncate">{label}</span>
-          <span className="text-[10px] text-fg-3 border border-[rgba(0,255,140,0.15)] px-1.5">{deals.length}</span>
+          <span className="text-[10px] text-fg-3 border border-edge/15 px-1.5">{deals.length}</span>
         </div>
         <button onClick={() => onAddDeal(value)} className="text-fg-4 hover:text-accent transition-colors">
           <Plus className="w-3.5 h-3.5" />
@@ -354,14 +354,14 @@ function DealCard({
       onClick={onClick}
       onMouseEnter={() => onHover(deal.id)}
       onMouseLeave={() => onHover(null)}
-      className="p-3 border border-[rgba(0,255,140,0.15)] bg-[rgba(5,6,5,0.6)] hover:border-accent hover:bg-[rgba(0,255,136,0.04)] hover:shadow-glow-xs cursor-grab active:cursor-grabbing transition-all"
+      className="p-3 border border-edge/15 bg-pit/60 hover:border-accent hover:bg-accent-fill/4 hover:shadow-glow-xs cursor-grab active:cursor-grabbing transition-all"
     >
       <div className="flex items-start justify-between gap-2">
         <div className="text-sm font-mono text-fg-1 leading-snug">{deal.title}</div>
         {deal.temperature && (
           <div
             className="w-2 h-2 rounded-full shrink-0 mt-1.5"
-            style={{ backgroundColor: tempColors[deal.temperature] || '#5a8a72', boxShadow: `0 0 4px ${tempColors[deal.temperature] || '#5a8a72'}` }}
+            style={{ backgroundColor: tempColors[deal.temperature] || 'var(--fg-3)', boxShadow: `0 0 4px ${tempColors[deal.temperature] || 'var(--fg-3)'}` }}
           />
         )}
       </div>

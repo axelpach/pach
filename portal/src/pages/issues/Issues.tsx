@@ -716,7 +716,7 @@ export default function Issues() {
         {
           value: 'unassigned',
           label: 'no vps agent',
-          icon: <span className="h-2 w-2 rounded-full border border-[rgba(0,255,140,0.25)]" />,
+          icon: <span className="h-2 w-2 rounded-full border border-edge/25" />,
         },
       ],
     },
@@ -1188,7 +1188,7 @@ export default function Issues() {
                           onClick={openSaveViewModal}
                           disabled={!user}
                           title={user ? 'save as view' : 'sign in to save view'}
-                          className="flex h-6 w-6 items-center justify-center border border-[rgba(0,255,140,0.15)] bg-pit-3 text-fg-3 transition hover:border-[rgba(0,255,140,0.25)] hover:text-fg-1 disabled:opacity-40 disabled:hover:border-[rgba(0,255,140,0.15)] disabled:hover:text-fg-3"
+                          className="flex h-6 w-6 items-center justify-center border border-edge/15 bg-pit-3 text-fg-3 transition hover:border-edge/25 hover:text-fg-1 disabled:opacity-40 disabled:hover:border-edge/15 disabled:hover:text-fg-3"
                         >
                           <BookmarkPlus className="h-3 w-3" />
                         </button>
@@ -1204,8 +1204,8 @@ export default function Issues() {
                           }
                           className={`flex h-6 w-6 items-center justify-center border transition ${
                             activeSavedViewIsDirty
-                              ? 'border-[rgba(0,255,140,0.3)] bg-[rgba(0,255,136,0.08)] text-accent hover:bg-[rgba(0,255,136,0.16)] hover:shadow-glow-xs'
-                              : 'border-[rgba(0,255,140,0.12)] bg-pit-3 text-fg-4 opacity-60'
+                              ? 'border-edge/30 bg-accent-fill/8 text-accent hover:bg-accent-fill/16 hover:shadow-glow-xs'
+                              : 'border-edge/12 bg-pit-3 text-fg-4 opacity-60'
                           } disabled:cursor-not-allowed`}
                         >
                           <Save className="h-3 w-3" />
@@ -1238,10 +1238,10 @@ export default function Issues() {
                   {groupedIssues.map((group) => {
                     const isCollapsed = collapsedPriorities.has(group.value)
                     return (
-                      <section key={group.value} className="overflow-hidden border-y border-[rgba(0,255,140,0.12)] bg-[rgba(10,14,12,0.6)] backdrop-blur-sm">
+                      <section key={group.value} className="overflow-hidden border-y border-edge/12 bg-pit-2/60 backdrop-blur-sm">
                         <button
                           onClick={() => togglePriority(group.value)}
-                          className="flex w-full items-center gap-3 border-b border-[rgba(0,255,140,0.1)] bg-[rgba(20,26,23,0.6)] px-5 py-3 text-left"
+                          className="flex w-full items-center gap-3 border-b border-edge/10 bg-pit-3/60 px-5 py-3 text-left"
                         >
                           {isCollapsed
                             ? <ChevronRight className="h-3.5 w-3.5 text-fg-4 shrink-0" />
@@ -1263,7 +1263,7 @@ export default function Issues() {
                               const statusKey = `${group.value}:${status.key}`
                               const statusCollapsed = collapsedStatuses.has(statusKey)
                               return (
-                                <div key={status.key} className="border-b border-[rgba(0,255,140,0.08)] last:border-b-0">
+                                <div key={status.key} className="border-b border-edge/8 last:border-b-0">
                                   <button
                                     onClick={() => toggleStatusGroup(statusKey)}
                                     className="flex w-full items-center gap-2 px-5 py-2.5 text-left font-mono text-[11px] uppercase tracking-label text-fg-3"
@@ -1335,7 +1335,7 @@ export default function Issues() {
                 </div>
                 <DragOverlay dropAnimation={null}>
                   {activeDragIssue ? (
-                    <div className="border border-[rgba(0,255,140,0.4)] bg-[rgba(20,26,23,0.95)] shadow-[0_12px_40px_rgba(0,0,0,0.6),0_0_22px_rgba(0,255,136,0.25)] backdrop-blur-sm">
+                    <div className="border border-edge/40 bg-pit-3/95 shadow-terminal-popover backdrop-blur-sm">
                       <IssueRow
                         issue={activeDragIssue}
                         company={activeDragIssue.contextCompanyId ? companyMap.get(activeDragIssue.contextCompanyId) ?? null : null}
@@ -1469,14 +1469,14 @@ function TeamProjectsPanel({
   }
 
   return (
-    <section className="overflow-hidden border-y border-[rgba(0,255,140,0.12)] bg-[rgba(10,14,12,0.6)] backdrop-blur-sm">
-      <div className="flex items-center justify-between border-b border-[rgba(0,255,140,0.1)] bg-[rgba(20,26,23,0.6)] px-5 py-3">
+    <section className="overflow-hidden border-y border-edge/12 bg-pit-2/60 backdrop-blur-sm">
+      <div className="flex items-center justify-between border-b border-edge/10 bg-pit-3/60 px-5 py-3">
         <div className="font-mono text-xs uppercase tracking-label text-fg-3">
           {team.name.toLowerCase()} · projects <span className="text-fg-4">· {projects.length}</span>
         </div>
         <button
           onClick={() => onCreate(team.id)}
-          className="inline-flex items-center gap-1.5 border border-[rgba(0,255,140,0.3)] bg-[rgba(0,255,136,0.08)] px-3 py-1 font-mono text-[10px] uppercase tracking-label text-accent transition hover:bg-[rgba(0,255,136,0.16)] hover:shadow-glow-xs"
+          className="inline-flex items-center gap-1.5 border border-edge/30 bg-accent-fill/8 px-3 py-1 font-mono text-[10px] uppercase tracking-label text-accent transition hover:bg-accent-fill/16 hover:shadow-glow-xs"
         >
           <Plus className="h-3 w-3" />
           new project
@@ -1487,7 +1487,7 @@ function TeamProjectsPanel({
         <div className="px-5 py-10 text-center font-mono text-xs text-fg-4">// no projects in this team yet</div>
       ) : (
         <div>
-          <div className="flex items-center gap-4 border-b border-[rgba(0,255,140,0.08)] px-5 py-2 font-mono text-[10px] uppercase tracking-label text-fg-4">
+          <div className="flex items-center gap-4 border-b border-edge/8 px-5 py-2 font-mono text-[10px] uppercase tracking-label text-fg-4">
             <div className="min-w-0 flex-1">name</div>
             <div className="w-[110px] shrink-0">status</div>
             <div className="w-[80px] shrink-0 text-right">issues</div>
@@ -1502,7 +1502,7 @@ function TeamProjectsPanel({
               <button
                 key={project.id}
                 onClick={() => onEdit(project)}
-                className="flex w-full items-center gap-4 border-b border-[rgba(0,255,140,0.06)] px-5 py-2.5 text-left transition hover:bg-[rgba(0,255,136,0.04)] last:border-b-0"
+                className="flex w-full items-center gap-4 border-b border-edge/6 px-5 py-2.5 text-left transition hover:bg-accent-fill/4 last:border-b-0"
               >
                 <FolderKanban className="h-3.5 w-3.5 shrink-0 text-fg-3" />
                 <div className="min-w-0 flex-1 truncate font-mono text-sm lowercase text-fg-1">{project.name}</div>
@@ -1535,14 +1535,14 @@ function EmptyState({
   onAction?: () => void
 }) {
   return (
-    <div className="flex min-h-[320px] items-center justify-center border border-dashed border-[rgba(0,255,140,0.15)] bg-pit-2 px-6">
+    <div className="flex min-h-[320px] items-center justify-center border border-dashed border-edge/15 bg-pit-2 px-6">
       <div className="max-w-lg text-center">
         <div className="font-mono text-xl lowercase text-fg-1">{title}</div>
         <div className="mt-3 text-sm leading-6 text-fg-3">{body}</div>
         {actionLabel && onAction ? (
           <button
             onClick={onAction}
-            className="mt-5 inline-flex items-center gap-2 border border-[rgba(0,255,140,0.3)] bg-[rgba(0,255,136,0.08)] px-4 py-2 font-mono text-xs uppercase tracking-label text-accent transition hover:bg-[rgba(0,255,136,0.16)] hover:shadow-glow-xs"
+            className="mt-5 inline-flex items-center gap-2 border border-edge/30 bg-accent-fill/8 px-4 py-2 font-mono text-xs uppercase tracking-label text-accent transition hover:bg-accent-fill/16 hover:shadow-glow-xs"
           >
             <Plus className="h-3.5 w-3.5" />
             {actionLabel}
@@ -1630,16 +1630,16 @@ function IssueComposerModal({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-start justify-center bg-[rgba(0,0,0,0.7)] px-4 pt-[10vh] backdrop-blur-sm"
+      className="fixed inset-0 z-50 flex items-start justify-center bg-overlay/70 px-4 pt-[10vh] backdrop-blur-sm"
       onClick={onClose}
     >
       <div
-        className="w-full max-w-2xl border border-[rgba(0,255,140,0.2)] bg-pit-2 shadow-[0_30px_80px_rgba(0,0,0,0.5)]"
+        className="w-full max-w-2xl border border-edge/20 bg-pit-2 shadow-terminal-overlay"
         onClick={(event) => event.stopPropagation()}
         onKeyDown={handleKeyDown}
       >
         {/* breadcrumb header */}
-        <div className="flex items-center justify-between border-b border-[rgba(0,255,140,0.12)] px-5 py-3">
+        <div className="flex items-center justify-between border-b border-edge/12 px-5 py-3">
           <div className="flex items-center gap-2 font-mono text-xs">
             <PachSelect
               variant="button"
@@ -1647,7 +1647,7 @@ function IssueComposerModal({
               onChange={onTeamChange}
               options={teams.map((t) => ({ value: t.id, label: t.name.toLowerCase() }))}
               trigger={
-                <span className="inline-flex items-center gap-1.5 border border-[rgba(0,255,140,0.25)] bg-[rgba(0,255,136,0.05)] px-2 py-0.5 font-mono text-[10px] uppercase tracking-label text-accent">
+                <span className="inline-flex items-center gap-1.5 border border-edge/25 bg-accent-fill/5 px-2 py-0.5 font-mono text-[10px] uppercase tracking-label text-accent">
                   {team?.key ?? 'team'}
                 </span>
               }
@@ -1803,7 +1803,7 @@ function IssueComposerModal({
         </div>
 
         {/* footer */}
-        <div className="flex items-center justify-between border-t border-[rgba(0,255,140,0.12)] px-5 py-3">
+        <div className="flex items-center justify-between border-t border-edge/12 px-5 py-3">
           <button
             onClick={onClose}
             className="px-2 py-1.5 font-mono text-xs uppercase tracking-label text-fg-3 transition hover:text-fg-1"
@@ -1820,8 +1820,8 @@ function IssueComposerModal({
               <span
                 className={`flex h-3.5 w-3.5 items-center justify-center border transition ${
                   createMore
-                    ? 'border-accent bg-[rgba(0,255,136,0.2)]'
-                    : 'border-[rgba(0,255,140,0.25)]'
+                    ? 'border-accent bg-accent-fill/20'
+                    : 'border-edge/25'
                 }`}
               >
                 {createMore ? <span className="text-accent text-[10px] leading-none">×</span> : null}
@@ -1831,7 +1831,7 @@ function IssueComposerModal({
             <button
               onClick={onCreate}
               disabled={!title.trim() || (organizationRequired && !companyId) || creating}
-              className="inline-flex items-center gap-2 border border-[rgba(0,255,140,0.3)] bg-[rgba(0,255,136,0.08)] px-3 py-1.5 font-mono text-xs uppercase tracking-label text-accent transition hover:bg-[rgba(0,255,136,0.16)] hover:shadow-glow-xs disabled:opacity-40 disabled:hover:bg-[rgba(0,255,136,0.08)] disabled:hover:shadow-none"
+              className="inline-flex items-center gap-2 border border-edge/30 bg-accent-fill/8 px-3 py-1.5 font-mono text-xs uppercase tracking-label text-accent transition hover:bg-accent-fill/16 hover:shadow-glow-xs disabled:opacity-40 disabled:hover:bg-accent-fill/8 disabled:hover:shadow-none"
             >
               <Plus className="h-3.5 w-3.5" />
               {creating ? 'creating…' : 'create issue'}
@@ -1845,7 +1845,7 @@ function IssueComposerModal({
 
 function ComposerPill({ icon, label }: { icon: React.ReactNode; label: string }) {
   return (
-    <span className="inline-flex items-center gap-1.5 border border-[rgba(0,255,140,0.2)] bg-pit-3 px-2.5 py-1 font-mono text-[11px] lowercase text-fg-2 hover:border-[rgba(0,255,140,0.4)] hover:bg-[rgba(0,255,136,0.04)] hover:text-fg-1 transition">
+    <span className="inline-flex items-center gap-1.5 border border-edge/20 bg-pit-3 px-2.5 py-1 font-mono text-[11px] lowercase text-fg-2 hover:border-edge/40 hover:bg-accent-fill/4 hover:text-fg-1 transition">
       <span className="flex h-3.5 w-3.5 items-center justify-center">{icon}</span>
       <span className="truncate max-w-[160px]">{label}</span>
     </span>
@@ -1875,15 +1875,15 @@ function SaveViewModal({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-[rgba(0,0,0,0.7)] px-4 backdrop-blur-sm"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-overlay/70 px-4 backdrop-blur-sm"
       onClick={onClose}
     >
       <form
-        className="w-full max-w-lg border border-[rgba(0,255,140,0.2)] bg-pit-2 shadow-[0_30px_80px_rgba(0,0,0,0.5)]"
+        className="w-full max-w-lg border border-edge/20 bg-pit-2 shadow-terminal-overlay"
         onClick={(event) => event.stopPropagation()}
         onSubmit={handleSubmit}
       >
-        <div className="border-b border-[rgba(0,255,140,0.12)] px-6 py-5">
+        <div className="border-b border-edge/12 px-6 py-5">
           <div className="text-[10px] uppercase tracking-label text-fg-3">
             ◊ views · save
           </div>
@@ -1900,12 +1900,12 @@ function SaveViewModal({
               value={name}
               onChange={(event) => onNameChange(event.target.value)}
               placeholder="$ my open work"
-              className="w-full bg-rim border border-[rgba(0,255,140,0.15)] px-3 py-2 text-sm text-fg-1 outline-none focus:border-accent focus:shadow-glow-xs placeholder:text-fg-4"
+              className="w-full bg-rim border border-edge/15 px-3 py-2 text-sm text-fg-1 outline-none focus:border-accent focus:shadow-glow-xs placeholder:text-fg-4"
             />
           </label>
         </div>
 
-        <div className="flex items-center justify-between border-t border-[rgba(0,255,140,0.12)] px-6 py-4">
+        <div className="flex items-center justify-between border-t border-edge/12 px-6 py-4">
           <button
             type="button"
             onClick={onClose}
@@ -1916,7 +1916,7 @@ function SaveViewModal({
           <button
             type="submit"
             disabled={!name.trim() || saving}
-            className="inline-flex items-center gap-2 border border-[rgba(0,255,140,0.3)] bg-[rgba(0,255,136,0.08)] px-4 py-2 font-mono text-xs uppercase tracking-label text-accent transition hover:bg-[rgba(0,255,136,0.16)] hover:shadow-glow-xs disabled:opacity-40 disabled:hover:bg-[rgba(0,255,136,0.08)] disabled:hover:shadow-none"
+            className="inline-flex items-center gap-2 border border-edge/30 bg-accent-fill/8 px-4 py-2 font-mono text-xs uppercase tracking-label text-accent transition hover:bg-accent-fill/16 hover:shadow-glow-xs disabled:opacity-40 disabled:hover:bg-accent-fill/8 disabled:hover:shadow-none"
           >
             <BookmarkPlus className="h-3.5 w-3.5" />
             {saving ? 'saving…' : 'save view'}
@@ -1952,14 +1952,14 @@ function ProjectModal({
 }) {
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-[rgba(0,0,0,0.7)] px-4 backdrop-blur-sm"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-overlay/70 px-4 backdrop-blur-sm"
       onClick={onClose}
     >
       <div
-        className="w-full max-w-lg border border-[rgba(0,255,140,0.2)] bg-pit-2 shadow-[0_30px_80px_rgba(0,0,0,0.5)]"
+        className="w-full max-w-lg border border-edge/20 bg-pit-2 shadow-terminal-overlay"
         onClick={(event) => event.stopPropagation()}
       >
-        <div className="border-b border-[rgba(0,255,140,0.12)] px-6 py-5">
+        <div className="border-b border-edge/12 px-6 py-5">
           <div className="text-[10px] uppercase tracking-label text-fg-3">
             {mode === 'create' ? '◊ projects · create' : '◊ projects · edit'}
           </div>
@@ -1976,7 +1976,7 @@ function ProjectModal({
               value={name}
               onChange={(event) => onNameChange(event.target.value)}
               placeholder="$ core platform"
-              className="w-full bg-rim border border-[rgba(0,255,140,0.15)] px-3 py-2 text-sm text-fg-1 outline-none focus:border-accent focus:shadow-glow-xs placeholder:text-fg-4"
+              className="w-full bg-rim border border-edge/15 px-3 py-2 text-sm text-fg-1 outline-none focus:border-accent focus:shadow-glow-xs placeholder:text-fg-4"
             />
           </label>
 
@@ -1987,7 +1987,7 @@ function ProjectModal({
               onChange={(event) => onDescriptionChange(event.target.value)}
               placeholder="$ what is this project about?"
               rows={3}
-              className="w-full resize-none bg-rim border border-[rgba(0,255,140,0.15)] px-3 py-2 text-sm text-fg-1 outline-none focus:border-accent focus:shadow-glow-xs placeholder:text-fg-4"
+              className="w-full resize-none bg-rim border border-edge/15 px-3 py-2 text-sm text-fg-1 outline-none focus:border-accent focus:shadow-glow-xs placeholder:text-fg-4"
             />
           </label>
 
@@ -1996,7 +1996,7 @@ function ProjectModal({
             <select
               value={status}
               onChange={(event) => onStatusChange(event.target.value)}
-              className="w-full bg-rim border border-[rgba(0,255,140,0.15)] px-3 py-2 text-sm text-fg-1 outline-none focus:border-accent focus:shadow-glow-xs"
+              className="w-full bg-rim border border-edge/15 px-3 py-2 text-sm text-fg-1 outline-none focus:border-accent focus:shadow-glow-xs"
             >
               {PROJECT_STATUS_OPTIONS.map((option) => (
                 <option key={option} value={option}>
@@ -2007,7 +2007,7 @@ function ProjectModal({
           </label>
         </div>
 
-        <div className="flex items-center justify-between border-t border-[rgba(0,255,140,0.12)] px-6 py-4">
+        <div className="flex items-center justify-between border-t border-edge/12 px-6 py-4">
           <button
             onClick={onClose}
             className="px-3 py-2 font-mono text-xs uppercase tracking-label text-fg-3 transition hover:text-fg-1"
@@ -2017,7 +2017,7 @@ function ProjectModal({
           <button
             onClick={onSubmit}
             disabled={!name.trim() || saving}
-            className="inline-flex items-center gap-2 border border-[rgba(0,255,140,0.3)] bg-[rgba(0,255,136,0.08)] px-4 py-2 font-mono text-xs uppercase tracking-label text-accent transition hover:bg-[rgba(0,255,136,0.16)] hover:shadow-glow-xs disabled:opacity-40 disabled:hover:bg-[rgba(0,255,136,0.08)] disabled:hover:shadow-none"
+            className="inline-flex items-center gap-2 border border-edge/30 bg-accent-fill/8 px-4 py-2 font-mono text-xs uppercase tracking-label text-accent transition hover:bg-accent-fill/16 hover:shadow-glow-xs disabled:opacity-40 disabled:hover:bg-accent-fill/8 disabled:hover:shadow-none"
           >
             <Plus className="h-3.5 w-3.5" />
             {saving ? (mode === 'create' ? 'creating…' : 'saving…') : (mode === 'create' ? 'create project' : 'save project')}
@@ -2045,7 +2045,7 @@ function SelectField({
       <select
         value={value}
         onChange={(event) => onChange(event.target.value)}
-        className="w-full bg-rim border border-[rgba(0,255,140,0.15)] px-3 py-2 text-sm text-fg-1 outline-none focus:border-accent focus:shadow-glow-xs"
+        className="w-full bg-rim border border-edge/15 px-3 py-2 text-sm text-fg-1 outline-none focus:border-accent focus:shadow-glow-xs"
       >
         {options.map((option) => (
           <option key={option.value} value={option.value}>
@@ -2114,7 +2114,7 @@ function DropIndicator({ position }: { position: 'top' | 'bottom' }) {
   return (
     <div
       aria-hidden
-      className={`pointer-events-none absolute left-0 right-0 z-30 h-[1.5px] bg-[rgba(0,255,136,0.55)] shadow-[0_0_5px_rgba(0,255,136,0.3)] ${
+      className={`pointer-events-none absolute left-0 right-0 z-30 h-[1.5px] bg-accent-fill/55 shadow-glow-xs ${
         position === 'top' ? '-top-px' : '-bottom-px'
       }`}
     />
@@ -2125,7 +2125,7 @@ function AgentRunDot() {
   return (
     <>
       <span className="absolute h-2.5 w-2.5 animate-ping rounded-full bg-accent opacity-40" />
-      <span className="h-2 w-2 rounded-full bg-accent shadow-[0_0_12px_rgba(0,255,136,0.95)]" />
+      <span className="h-2 w-2 rounded-full bg-accent shadow-glow-sm" />
     </>
   )
 }
@@ -2210,7 +2210,7 @@ function IssueRow({
           navigate(`/issues/${issue.id}`)
         }
       }}
-      className="flex items-center gap-2 px-3 md:px-4 py-2 border-t border-[rgba(0,255,140,0.06)] transition hover:bg-[rgba(0,255,136,0.04)] cursor-pointer focus:outline-none focus-visible:bg-[rgba(0,255,136,0.06)]"
+      className="flex items-center gap-2 px-3 md:px-4 py-2 border-t border-edge/6 transition hover:bg-accent-fill/4 cursor-pointer focus:outline-none focus-visible:bg-accent-fill/6"
     >
       {dragHandleProps ? (
         <button
@@ -2241,7 +2241,7 @@ function IssueRow({
             }))}
             trigger={<StatusIcon statusType={status?.type ?? 'backlog'} />}
             triggerTitle={status ? `status · ${status.name.toLowerCase()}` : 'change status'}
-            triggerClassName="flex h-6 w-6 items-center justify-center border border-transparent hover:border-[rgba(0,255,140,0.25)] hover:bg-[rgba(0,255,136,0.06)] transition"
+            triggerClassName="flex h-6 w-6 items-center justify-center border border-transparent hover:border-edge/25 hover:bg-accent-fill/6 transition"
             popupWidth="200px"
             openSignal={statusOpenSignal}
           />
@@ -2260,7 +2260,7 @@ function IssueRow({
             }))}
             trigger={<PriorityIcon priority={issue.priority} />}
             triggerTitle={`priority · ${PRIORITY_META[issue.priority]?.label ?? '—'}`}
-            triggerClassName="flex h-6 w-6 items-center justify-center border border-transparent hover:border-[rgba(0,255,140,0.25)] hover:bg-[rgba(0,255,136,0.06)] transition"
+            triggerClassName="flex h-6 w-6 items-center justify-center border border-transparent hover:border-edge/25 hover:bg-accent-fill/6 transition"
             popupWidth="180px"
           />
         </div>
@@ -2279,7 +2279,7 @@ function IssueRow({
       ) : null}
       <div className="min-w-0 flex-1 truncate text-sm text-fg-1">{issue.title}</div>
       {shows('company') && showCompany && (
-        <span className="hidden md:inline-flex shrink-0 h-5 items-center gap-1 border border-[rgba(0,255,140,0.15)] bg-pit-3 px-2 font-mono text-[10px] uppercase tracking-label text-fg-3">
+        <span className="hidden md:inline-flex shrink-0 h-5 items-center gap-1 border border-edge/15 bg-pit-3 px-2 font-mono text-[10px] uppercase tracking-label text-fg-3">
           <Building2 className="h-3 w-3" />
           {company.name}
         </span>
@@ -2299,7 +2299,7 @@ function IssueRow({
               })),
             ]}
             trigger={
-              <span className="inline-flex h-5 items-center gap-1 border border-[rgba(0,255,140,0.15)] bg-pit-3 px-2 font-mono text-[10px] uppercase tracking-label text-fg-3">
+              <span className="inline-flex h-5 items-center gap-1 border border-edge/15 bg-pit-3 px-2 font-mono text-[10px] uppercase tracking-label text-fg-3">
                 <FolderKanban className="h-3 w-3" />
                 {project?.name ?? 'no project'}
               </span>
@@ -2318,7 +2318,7 @@ function IssueRow({
             onChange={(next) => onTeamChange(issue.id, next)}
             options={allTeams.map((t) => ({ value: t.id, label: t.name.toLowerCase() }))}
             trigger={
-              <span className="inline-flex shrink-0 h-5 items-center border border-[rgba(0,255,140,0.15)] bg-pit-3 px-2 font-mono text-[10px] uppercase tracking-label text-fg-3">
+              <span className="inline-flex shrink-0 h-5 items-center border border-edge/15 bg-pit-3 px-2 font-mono text-[10px] uppercase tracking-label text-fg-3">
                 {team?.name ?? '—'}
               </span>
             }
@@ -2361,7 +2361,7 @@ function IssueRow({
               ...users.map((u) => ({ value: u.id, label: (u.name ?? u.email).toLowerCase() })),
             ]}
             trigger={
-              <span className="inline-flex h-5 min-w-6 items-center justify-center border border-[rgba(0,255,140,0.15)] bg-pit-3 px-1.5 font-mono text-[10px] uppercase tracking-label text-fg-3">
+              <span className="inline-flex h-5 min-w-6 items-center justify-center border border-edge/15 bg-pit-3 px-1.5 font-mono text-[10px] uppercase tracking-label text-fg-3">
                 {getUserInitials(assignee)}
               </span>
             }
@@ -2383,7 +2383,7 @@ function IssueRow({
               ...ESTIMATE_VALUES.map((n) => ({ value: String(n), label: `${n} pts` })),
             ]}
             trigger={
-              <span className="font-mono text-xs text-fg-3 tabular-nums px-1.5 py-0.5 border border-transparent hover:border-[rgba(0,255,140,0.2)] hover:bg-[rgba(0,255,136,0.04)] transition">
+              <span className="font-mono text-xs text-fg-3 tabular-nums px-1.5 py-0.5 border border-transparent hover:border-edge/20 hover:bg-accent-fill/4 transition">
                 {issue.estimate != null ? `${issue.estimate} pts` : '— pts'}
               </span>
             }
@@ -2437,17 +2437,17 @@ function SortMenu({
         title={`sort · ${currentLabel}${isManual ? '' : ` (${value.direction})`}`}
         className={`flex h-6 w-6 items-center justify-center border transition ${
           open
-            ? 'border-[rgba(0,255,140,0.35)] bg-[rgba(0,255,136,0.06)] text-accent shadow-glow-xs'
+            ? 'border-edge/35 bg-accent-fill/6 text-accent shadow-glow-xs'
             : !isManual
-              ? 'border-[rgba(0,255,140,0.25)] bg-pit-3 text-accent'
-              : 'border-[rgba(0,255,140,0.15)] bg-pit-3 text-fg-3 hover:text-fg-1 hover:border-[rgba(0,255,140,0.25)]'
+              ? 'border-edge/25 bg-pit-3 text-accent'
+              : 'border-edge/15 bg-pit-3 text-fg-3 hover:text-fg-1 hover:border-edge/25'
         }`}
       >
         <ArrowUpDown className="h-3 w-3" />
       </button>
       {open && (
-        <div className="absolute right-0 top-full z-50 mt-1.5 w-[240px] border border-[rgba(0,255,140,0.25)] bg-pit shadow-[0_0_18px_rgba(0,255,136,0.18),0_18px_44px_rgba(0,0,0,0.6)]">
-          <div className="border-b border-[rgba(0,255,140,0.12)] px-3 py-2 font-mono text-[10px] uppercase tracking-label text-fg-3">
+        <div className="absolute right-0 top-full z-50 mt-1.5 w-[240px] border border-edge/25 bg-pit shadow-terminal-popover">
+          <div className="border-b border-edge/12 px-3 py-2 font-mono text-[10px] uppercase tracking-label text-fg-3">
             sort by
           </div>
           <div className="max-h-72 overflow-auto py-1">
@@ -2470,8 +2470,8 @@ function SortMenu({
                   }}
                   className={`flex w-full items-center justify-between gap-2 px-3 py-1.5 text-left font-mono text-xs lowercase transition ${
                     isActive
-                      ? 'bg-[rgba(0,255,136,0.08)] text-accent'
-                      : 'text-fg-2 hover:bg-[rgba(0,255,136,0.04)] hover:text-fg-1'
+                      ? 'bg-accent-fill/8 text-accent'
+                      : 'text-fg-2 hover:bg-accent-fill/4 hover:text-fg-1'
                   }`}
                 >
                   <span className="truncate">{field.label}</span>
@@ -2486,7 +2486,7 @@ function SortMenu({
             })}
           </div>
           {!isManual && (
-            <div className="border-t border-[rgba(0,255,140,0.12)] px-3 py-2 font-mono text-[10px] uppercase tracking-label text-fg-4">
+            <div className="border-t border-edge/12 px-3 py-2 font-mono text-[10px] uppercase tracking-label text-fg-4">
               // dragging disabled while sorted
             </div>
           )}
@@ -2536,20 +2536,20 @@ function DisplayMenu({
         title="display"
         className={`flex h-6 w-6 items-center justify-center border transition ${
           open
-            ? 'border-[rgba(0,255,140,0.35)] bg-[rgba(0,255,136,0.06)] text-accent shadow-glow-xs'
-            : 'border-[rgba(0,255,140,0.15)] bg-pit-3 text-fg-3 hover:text-fg-1 hover:border-[rgba(0,255,140,0.25)]'
+            ? 'border-edge/35 bg-accent-fill/6 text-accent shadow-glow-xs'
+            : 'border-edge/15 bg-pit-3 text-fg-3 hover:text-fg-1 hover:border-edge/25'
         }`}
       >
         <Settings2 className="h-3 w-3" />
       </button>
       {open && (
-        <div className="absolute right-0 top-full z-50 mt-1.5 w-[220px] border border-[rgba(0,255,140,0.25)] bg-pit shadow-[0_0_18px_rgba(0,255,136,0.18),0_18px_44px_rgba(0,0,0,0.6)]">
-          <div className="border-b border-[rgba(0,255,140,0.12)] px-3 py-2 font-mono text-[10px] uppercase tracking-label text-fg-3">
+        <div className="absolute right-0 top-full z-50 mt-1.5 w-[220px] border border-edge/25 bg-pit shadow-terminal-popover">
+          <div className="border-b border-edge/12 px-3 py-2 font-mono text-[10px] uppercase tracking-label text-fg-3">
             show on row
           </div>
           <div className="max-h-72 overflow-auto py-1">
             <div className="flex items-center gap-2.5 px-3 py-1.5 font-mono text-xs lowercase text-fg-4">
-              <span className="inline-flex h-3.5 w-3.5 shrink-0 items-center justify-center border border-[rgba(0,255,140,0.15)] bg-pit-3">
+              <span className="inline-flex h-3.5 w-3.5 shrink-0 items-center justify-center border border-edge/15 bg-pit-3">
                 <Check className="h-2.5 w-2.5 text-fg-4" strokeWidth={3} />
               </span>
               <span className="truncate">title (always)</span>
@@ -2560,12 +2560,12 @@ function DisplayMenu({
                 <button
                   key={field.value}
                   onClick={() => toggle(field.value)}
-                  className="flex w-full items-center gap-2.5 px-3 py-1.5 text-left font-mono text-xs lowercase text-fg-2 hover:bg-[rgba(0,255,136,0.04)] hover:text-fg-1 transition"
+                  className="flex w-full items-center gap-2.5 px-3 py-1.5 text-left font-mono text-xs lowercase text-fg-2 hover:bg-accent-fill/4 hover:text-fg-1 transition"
                 >
                   <span
                     aria-hidden
                     className={`inline-flex h-3.5 w-3.5 shrink-0 items-center justify-center border transition ${
-                      isChecked ? 'border-accent bg-accent' : 'border-[rgba(0,255,140,0.2)] bg-transparent'
+                      isChecked ? 'border-accent bg-accent' : 'border-edge/20 bg-transparent'
                     }`}
                   >
                     {isChecked && <Check className="h-2.5 w-2.5 text-pit" strokeWidth={3} />}
@@ -2582,10 +2582,10 @@ function DisplayMenu({
 }
 
 function LabelChip({ label }: { label: Schema['tables']['pm_labels']['row'] }) {
-  const color = label.color || '#5a8a72'
+  const color = label.color || 'var(--fg-3)'
   return (
     <span
-      className="inline-flex h-5 shrink-0 items-center gap-1 border border-[rgba(0,255,140,0.15)] bg-pit-3 px-1.5 font-mono text-[10px] tracking-label lowercase text-fg-3"
+      className="inline-flex h-5 shrink-0 items-center gap-1 border border-edge/15 bg-pit-3 px-1.5 font-mono text-[10px] tracking-label lowercase text-fg-3"
       title={label.name}
     >
       <span aria-hidden className="block h-1.5 w-1.5 rounded-full" style={{ background: color }} />

@@ -12,15 +12,15 @@ html, body, #root {
 }
 
 ::selection {
-  background: rgba(0, 255, 136, 0.25);
+  background: rgb(var(--accent-fill-rgb) / 0.25);
   color: var(--fg-1);
 }
 
 /* Scrollbars: minimal, terminal */
 ::-webkit-scrollbar { width: 8px; height: 8px; }
 ::-webkit-scrollbar-track { background: transparent; }
-::-webkit-scrollbar-thumb { background: rgba(0,255,140,0.12); }
-::-webkit-scrollbar-thumb:hover { background: rgba(0,255,140,0.3); }
+::-webkit-scrollbar-thumb { background: rgb(var(--edge-rgb) / 0.14); }
+::-webkit-scrollbar-thumb:hover { background: rgb(var(--edge-rgb) / 0.3); }
 
 /* Eyebrow header */
 .eyebrow {
@@ -123,14 +123,14 @@ input::placeholder, textarea::placeholder { color: var(--fg-4); }
 
 .doc-editor figure[data-media-kind='image']:hover,
 .doc-editor figure[data-media-kind='image']:focus-within {
-  background: rgba(0, 255, 136, 0.025);
-  border-color: rgba(0, 255, 140, 0.18);
+  background: rgb(var(--accent-fill-rgb) / 0.03);
+  border-color: rgb(var(--edge-rgb) / 0.18);
 }
 
 .doc-editor figure[data-media-kind='image'] [data-media-delete='true'] {
   align-items: center;
   background: var(--bg-2);
-  border: 1px solid rgba(0, 255, 140, 0.24);
+  border: 1px solid rgb(var(--edge-rgb) / 0.24);
   color: var(--fg-3);
   cursor: pointer;
   display: flex;
@@ -181,8 +181,8 @@ input::placeholder, textarea::placeholder { color: var(--fg-4); }
 .doc-editor figure[data-media-kind='image'][data-media-loading='true'] img:not([src]) {
   background: repeating-linear-gradient(
     90deg,
-    rgba(0, 255, 136, 0.04) 0 8px,
-    rgba(0, 255, 136, 0.08) 8px 16px
+    rgb(var(--accent-fill-rgb) / 0.04) 0 8px,
+    rgb(var(--accent-fill-rgb) / 0.08) 8px 16px
   );
 }
 
@@ -197,8 +197,8 @@ input::placeholder, textarea::placeholder { color: var(--fg-4); }
 
 .doc-editor [data-attachment-kind='file'] {
   align-items: center;
-  background: rgba(0, 255, 136, 0.025);
-  border: 1px solid rgba(0, 255, 140, 0.16);
+  background: rgb(var(--accent-fill-rgb) / 0.025);
+  border: 1px solid rgb(var(--edge-rgb) / 0.16);
   display: flex;
   gap: 0.75rem;
   margin: 0.7rem 0 0.9rem;
@@ -210,8 +210,8 @@ input::placeholder, textarea::placeholder { color: var(--fg-4); }
 
 .doc-editor [data-attachment-kind='file']:hover,
 .doc-editor [data-attachment-kind='file']:focus-within {
-  background: rgba(0, 255, 136, 0.045);
-  border-color: rgba(0, 255, 140, 0.28);
+  background: rgb(var(--accent-fill-rgb) / 0.045);
+  border-color: rgb(var(--edge-rgb) / 0.28);
 }
 
 .doc-editor [data-attachment-icon='true'] {
@@ -310,7 +310,7 @@ input::placeholder, textarea::placeholder { color: var(--fg-4); }
 }
 
 .doc-editor [data-checklist-item='true'][data-checked='true'] [data-checklist-toggle='true'] {
-  border-color: rgba(0, 255, 140, 0.45);
+  border-color: rgb(var(--edge-rgb) / 0.45);
 }
 
 .doc-editor [data-checklist-item='true'][data-checked='true'] [data-checklist-toggle='true']::before {
@@ -329,7 +329,7 @@ input::placeholder, textarea::placeholder { color: var(--fg-4); }
 }
 
 .doc-editor blockquote {
-  border-left: 1px solid rgba(0, 255, 140, 0.28);
+  border-left: 1px solid rgb(var(--edge-rgb) / 0.28);
   color: var(--fg-2);
   font-style: italic;
   padding-left: 0.9rem;
@@ -423,8 +423,8 @@ input::placeholder, textarea::placeholder { color: var(--fg-4); }
 }
 
 .doc-editor pre {
-  background: rgba(0, 255, 136, 0.035);
-  border: 1px solid rgba(0, 255, 140, 0.16);
+  background: rgb(var(--accent-fill-rgb) / 0.035);
+  border: 1px solid rgb(var(--edge-rgb) / 0.16);
   color: var(--fg-1);
   font-size: 0.875rem;
   line-height: 1.65;
@@ -447,12 +447,12 @@ input::placeholder, textarea::placeholder { color: var(--fg-4); }
   color: var(--accent);
   cursor: pointer;
   text-decoration-line: underline;
-  text-decoration-color: rgba(0, 255, 140, 0.5);
+  text-decoration-color: rgb(var(--edge-rgb) / 0.5);
   text-underline-offset: 4px;
 }
 
 .doc-editor a:hover {
-  background: rgba(0, 255, 136, 0.08);
-  box-shadow: 0 0 0 2px rgba(0, 255, 136, 0.08);
+  background: rgb(var(--accent-fill-rgb) / 0.08);
+  box-shadow: 0 0 0 2px rgb(var(--accent-fill-rgb) / 0.08);
   text-decoration-color: var(--accent);
 }

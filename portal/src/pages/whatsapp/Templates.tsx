@@ -21,8 +21,8 @@ const PROJECT_NAME: Record<ProjectId, string> = {
 }
 
 const PROJECT_BADGE: Record<ProjectId, string> = {
-  ardia: 'text-fg-3 border-[rgba(255,255,255,0.15)]',
-  'ardia-mkt': 'text-accent border-[rgba(0,255,136,0.35)]',
+  ardia: 'text-fg-3 border-edge/15',
+  'ardia-mkt': 'text-accent border-accent-fill/35',
 }
 
 const STATUS_STYLES: Record<string, { kind: 'ok' | 'warn' | 'fail' | 'idle'; label: string }> = {
@@ -317,7 +317,7 @@ export default function WhatsAppTemplates() {
 
   return (
     <div className="flex-1 flex flex-col overflow-hidden">
-      <div className="px-8 py-3 border-b border-[rgba(0,255,140,0.15)] flex items-center justify-between">
+      <div className="px-8 py-3 border-b border-edge/15 flex items-center justify-between">
         <p className="text-xs text-fg-3 uppercase tracking-label">
           › whatsapp templates · sync-only view · {remoteTemplates.length} remotas
         </p>
@@ -327,7 +327,7 @@ export default function WhatsAppTemplates() {
       </div>
 
       {statusMessage && (
-        <div className="px-8 py-2 text-xs text-fg-2 border-b border-[rgba(0,255,140,0.10)] bg-[rgba(0,255,136,0.03)] font-mono whitespace-pre-wrap">
+        <div className="px-8 py-2 text-xs text-fg-2 border-b border-edge/10 bg-accent-fill/3 font-mono whitespace-pre-wrap">
           {statusMessage}
         </div>
       )}
@@ -335,7 +335,7 @@ export default function WhatsAppTemplates() {
       <div className="flex-1 overflow-auto px-8 py-6 space-y-6">
         <section className="grid grid-cols-1 xl:grid-cols-2 gap-4">
           {projectStats.map(stat => (
-            <div key={stat.projectId} className="border border-[rgba(0,255,140,0.15)] bg-bg-2 p-4 font-mono">
+            <div key={stat.projectId} className="border border-edge/15 bg-bg-2 p-4 font-mono">
               <div className="flex items-center justify-between gap-3">
                 <div className="min-w-0">
                   <div className="text-[10px] uppercase tracking-label text-fg-3">waba</div>
@@ -358,7 +358,7 @@ export default function WhatsAppTemplates() {
             title="Templates"
             subtitle="Vista operativa: lo que existe hoy en Meta, sincronizado por WABA. La creación y edición viven en Kapso; Pach solo sincroniza y luego enviará."
           />
-          <div className="border border-[rgba(0,255,140,0.15)] bg-bg-2">
+          <div className="border border-edge/15 bg-bg-2">
             {remoteTemplates.length === 0 ? (
               <EmptyState text="no hay plantillas remotas todavía · usa sync con meta" />
             ) : (
@@ -380,8 +380,8 @@ export default function WhatsAppTemplates() {
                     }}
                     role="button"
                     tabIndex={0}
-                    className={`w-full text-left px-5 py-3 flex items-center gap-4 border-b border-[rgba(0,255,140,0.08)] last:border-b-0 hover:bg-[rgba(0,255,136,0.03)] transition-colors cursor-pointer ${
-                      isActive ? 'bg-[rgba(0,255,136,0.05)] border-l-2 border-l-accent' : ''
+                    className={`w-full text-left px-5 py-3 flex items-center gap-4 border-b border-edge/8 last:border-b-0 hover:bg-accent-fill/3 transition-colors cursor-pointer ${
+                      isActive ? 'bg-accent-fill/5 border-l-2 border-l-accent' : ''
                     }`}
                   >
                     {projectId ? <ProjectBadge projectId={projectId} /> : <span className="text-fg-4 text-[10px] uppercase tracking-label">—</span>}
@@ -483,8 +483,8 @@ function TemplateDetail({ template: t, projectId, onClose }: { template: RemoteT
   return (
     <>
       <div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-40" onClick={onClose} />
-      <div className="fixed right-0 top-0 bottom-0 w-full max-w-xl bg-bg-2 border-l border-[rgba(0,255,140,0.35)] z-50 flex flex-col font-mono">
-        <div className="px-6 py-4 border-b border-[rgba(0,255,140,0.15)] flex items-start justify-between gap-4">
+      <div className="fixed right-0 top-0 bottom-0 w-full max-w-xl bg-bg-2 border-l border-edge/35 z-50 flex flex-col font-mono">
+        <div className="px-6 py-4 border-b border-edge/15 flex items-start justify-between gap-4">
           <div className="min-w-0">
             <div className="text-base text-fg-1 truncate">▸ {t.name}</div>
             <div className="text-[10px] uppercase tracking-label text-fg-3 mt-1 flex items-center gap-2 flex-wrap">
@@ -503,7 +503,7 @@ function TemplateDetail({ template: t, projectId, onClose }: { template: RemoteT
         <div className="flex-1 overflow-auto p-6 space-y-5">
           <div>
             <div className="text-[10px] uppercase tracking-label text-fg-3 mb-2">◊ vista previa</div>
-            <div className="bg-[#0B141A] p-3 max-w-sm border border-[rgba(0,255,140,0.10)]">
+            <div className="bg-[#0B141A] p-3 max-w-sm border border-edge/10">
               <div className="bg-[#1F2C33] overflow-hidden">
                 {t.headerSampleUrl && t.headerFormat === 'IMAGE' && (
                   <img src={t.headerSampleUrl} alt="" className="w-full h-48 object-cover" />
@@ -528,7 +528,7 @@ function TemplateDetail({ template: t, projectId, onClose }: { template: RemoteT
               <div className="text-[10px] uppercase tracking-label text-fg-3 mb-2">◊ variables</div>
               <div className="flex flex-wrap gap-1.5">
                 {t.variables.map(v => (
-                  <span key={v} className="text-xs px-2 py-1 border border-[rgba(0,255,140,0.15)] text-accent">{v}</span>
+                  <span key={v} className="text-xs px-2 py-1 border border-edge/15 text-accent">{v}</span>
                 ))}
               </div>
             </div>
@@ -548,7 +548,7 @@ function TemplateDetail({ template: t, projectId, onClose }: { template: RemoteT
 
           <div>
             <div className="text-[10px] uppercase tracking-label text-fg-3 mb-2">◊ components (raw)</div>
-            <pre className="text-[11px] text-fg-3 bg-void border border-[rgba(0,255,140,0.10)] p-3 overflow-auto max-h-64">
+            <pre className="text-[11px] text-fg-3 bg-void border border-edge/10 p-3 overflow-auto max-h-64">
               {JSON.stringify(t.components ?? [], null, 2)}
             </pre>
           </div>
@@ -653,10 +653,10 @@ function SendTemplateModal({
     <>
       <div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-40" onClick={onClose} />
       <div className="fixed inset-0 z-50 flex items-center justify-center p-4 pointer-events-none">
-        <div className="bg-bg-2 border border-[rgba(0,255,140,0.35)] shadow-glow-sm w-full max-w-2xl max-h-[78vh] flex flex-col pointer-events-auto font-mono">
-          <div className="px-6 py-4 border-b border-[rgba(0,255,140,0.15)] flex items-start justify-between gap-4">
+        <div className="bg-bg-2 border border-edge/35 shadow-glow-sm w-full max-w-2xl max-h-[78vh] flex flex-col pointer-events-auto font-mono">
+          <div className="px-6 py-4 border-b border-edge/15 flex items-start justify-between gap-4">
             <div className="min-w-0">
-              <div className="text-base text-accent uppercase tracking-label [text-shadow:0_0_6px_rgba(0,255,136,0.4)]">
+              <div className="text-base text-accent uppercase tracking-label glow">
                 ◊ enviar template
               </div>
               <div className="text-sm text-fg-1 mt-2 truncate">{template.name}</div>
@@ -671,12 +671,12 @@ function SendTemplateModal({
           </div>
 
           {message && (
-            <div className="px-6 py-2 text-xs text-fg-2 border-b border-[rgba(0,255,140,0.10)] bg-[rgba(0,255,136,0.03)] whitespace-pre-wrap">
+            <div className="px-6 py-2 text-xs text-fg-2 border-b border-edge/10 bg-accent-fill/3 whitespace-pre-wrap">
               {message}
             </div>
           )}
 
-          <div className="px-6 py-3 border-b border-[rgba(0,255,140,0.10)] text-[11px] text-fg-3 uppercase tracking-label leading-relaxed">
+          <div className="px-6 py-3 border-b border-edge/10 text-[11px] text-fg-3 uppercase tracking-label leading-relaxed">
             › {eligibleContacts.length} contactos con teléfono normalizado · todos vienen preseleccionados · solo local dev redirige a `WHATSAPP_DEV_PHONE`
             {!canSendFromPach ? '\n› los templates OPS quedan solo de referencia hasta conectar Pach con datos de Ardia' : ''}
           </div>
@@ -691,13 +691,13 @@ function SendTemplateModal({
                   return (
                     <label
                       key={contact.id}
-                      className="w-full flex items-center gap-3 px-6 py-2.5 border-b border-[rgba(0,255,140,0.08)] hover:bg-[rgba(0,255,136,0.03)] cursor-pointer"
+                      className="w-full flex items-center gap-3 px-6 py-2.5 border-b border-edge/8 hover:bg-accent-fill/3 cursor-pointer"
                     >
                       <input
                         type="checkbox"
                         checked={checked}
                         onChange={() => toggleContact(contact.id)}
-                        className="w-4 h-4 accent-[rgb(0,255,136)]"
+                        className="w-4 h-4 accent-accent"
                       />
                       <div className="flex-1 min-w-0">
                         <div className="text-sm text-fg-1 truncate">{contact.name}</div>
@@ -710,7 +710,7 @@ function SendTemplateModal({
             )}
           </div>
 
-          <div className="px-6 py-4 border-t border-[rgba(0,255,140,0.15)] flex items-center justify-between gap-3">
+          <div className="px-6 py-4 border-t border-edge/15 flex items-center justify-between gap-3">
             <div className="text-xs text-fg-3 uppercase tracking-label">
               seleccionados: <span className="text-fg-1">{selectedIds.length}</span>
             </div>

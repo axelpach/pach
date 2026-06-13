@@ -116,9 +116,9 @@ export function LabelMenu({
         <div
           ref={popupRef}
           style={popupStyle}
-          className="z-[1000] overflow-auto border border-[rgba(0,255,140,0.25)] bg-pit shadow-[0_0_18px_rgba(0,255,136,0.18),0_18px_44px_rgba(0,0,0,0.6)]"
+          className="z-[1000] overflow-auto border border-edge/25 bg-pit shadow-terminal-popover"
         >
-          <div className="border-b border-[rgba(0,255,140,0.12)] px-3 py-2 font-mono text-[10px] uppercase tracking-label text-fg-3">
+          <div className="border-b border-edge/12 px-3 py-2 font-mono text-[10px] uppercase tracking-label text-fg-3">
             labels
           </div>
           <div className="py-1">
@@ -127,7 +127,7 @@ export function LabelMenu({
             ) : (
               available.map((label) => {
                 const checked = selectedIds.has(label.id)
-                const color = label.color || '#5a8a72'
+                const color = label.color || 'var(--fg-3)'
                 return (
                   <button
                     key={label.id}
@@ -137,12 +137,12 @@ export function LabelMenu({
                       event.stopPropagation()
                       onToggle(label.id)
                     }}
-                    className="flex w-full items-center gap-2.5 px-3 py-1.5 text-left font-mono text-xs lowercase text-fg-2 hover:bg-[rgba(0,255,136,0.04)] hover:text-fg-1 transition"
+                    className="flex w-full items-center gap-2.5 px-3 py-1.5 text-left font-mono text-xs lowercase text-fg-2 hover:bg-accent-fill/4 hover:text-fg-1 transition"
                   >
                     <span
                       aria-hidden
                       className={`inline-flex h-3.5 w-3.5 shrink-0 items-center justify-center border transition ${
-                        checked ? 'border-accent bg-accent' : 'border-[rgba(0,255,140,0.2)] bg-transparent'
+                        checked ? 'border-accent bg-accent' : 'border-edge/20 bg-transparent'
                       }`}
                     >
                       {checked && <Check className="h-2.5 w-2.5 text-pit" strokeWidth={3} />}

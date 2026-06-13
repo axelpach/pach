@@ -360,7 +360,7 @@ export default function IssueDetail() {
     <div className="h-full min-h-0 overflow-hidden text-fg-1">
       <div className="flex h-full min-h-0 flex-col">
         {/* top bar */}
-        <div className="flex items-center justify-between gap-3 border-b border-[rgba(0,255,140,0.15)] bg-[rgba(5,6,5,0.6)] backdrop-blur-sm px-6 py-3">
+        <div className="flex items-center justify-between gap-3 border-b border-edge/15 bg-pit/60 backdrop-blur-sm px-6 py-3">
           <div className="flex min-w-0 items-center gap-3 font-mono text-xs">
             <Link
               to="/issues"
@@ -381,7 +381,7 @@ export default function IssueDetail() {
             <button
               onClick={() => prevIssue && navigate(`/issues/${prevIssue.id}`)}
               disabled={!prevIssue}
-              className="flex h-7 w-7 items-center justify-center border border-[rgba(0,255,140,0.15)] hover:border-accent hover:text-accent transition disabled:opacity-30 disabled:hover:border-[rgba(0,255,140,0.15)] disabled:hover:text-fg-3"
+              className="flex h-7 w-7 items-center justify-center border border-edge/15 hover:border-accent hover:text-accent transition disabled:opacity-30 disabled:hover:border-edge/15 disabled:hover:text-fg-3"
               title={prevIssue ? `prev ${prevIssue.identifier}` : 'no previous'}
             >
               <ChevronUp className="h-3.5 w-3.5" />
@@ -389,7 +389,7 @@ export default function IssueDetail() {
             <button
               onClick={() => nextIssue && navigate(`/issues/${nextIssue.id}`)}
               disabled={!nextIssue}
-              className="flex h-7 w-7 items-center justify-center border border-[rgba(0,255,140,0.15)] hover:border-accent hover:text-accent transition disabled:opacity-30 disabled:hover:border-[rgba(0,255,140,0.15)] disabled:hover:text-fg-3"
+              className="flex h-7 w-7 items-center justify-center border border-edge/15 hover:border-accent hover:text-accent transition disabled:opacity-30 disabled:hover:border-edge/15 disabled:hover:text-fg-3"
               title={nextIssue ? `next ${nextIssue.identifier}` : 'no next'}
             >
               <ChevronDown className="h-3.5 w-3.5" />
@@ -427,7 +427,7 @@ export default function IssueDetail() {
                 }}
                 rows={1}
                 placeholder="issue title"
-                className="block w-full resize-none overflow-hidden bg-transparent font-mono text-2xl font-bold leading-tight text-fg-1 outline-none placeholder:text-fg-4 focus:bg-[rgba(0,255,136,0.03)] px-2 py-1 -ml-2"
+                className="block w-full resize-none overflow-hidden bg-transparent font-mono text-2xl font-bold leading-tight text-fg-1 outline-none placeholder:text-fg-4 focus:bg-accent-fill/3 px-2 py-1 -ml-2"
               />
 
               <RichEditor
@@ -454,8 +454,8 @@ export default function IssueDetail() {
                 }}
               />
 
-              <div className="mt-10 border-t border-[rgba(0,255,140,0.12)] pt-6">
-                <div className="mb-5 flex items-center gap-2 border border-[rgba(0,255,140,0.12)] bg-[rgba(0,255,136,0.025)] p-1">
+              <div className="mt-10 border-t border-edge/12 pt-6">
+                <div className="mb-5 flex items-center gap-2 border border-edge/12 bg-accent-fill/[0.025] p-1">
                   <IssueDetailTab
                     active={mainTab === 'activity'}
                     label="activity"
@@ -480,7 +480,7 @@ export default function IssueDetail() {
                     )}
                   </div>
                 ) : (
-                  <div className="border border-[rgba(0,255,140,0.12)] bg-[rgba(0,255,136,0.025)] p-4">
+                  <div className="border border-edge/12 bg-accent-fill/[0.025] p-4">
                     <AgentRunPanel
                       run={activeRun}
                       branch={activeBranches[0] ?? null}
@@ -504,8 +504,8 @@ export default function IssueDetail() {
           </div>
 
           {/* properties sidebar */}
-          <aside className="w-full md:w-[300px] shrink-0 border-t md:border-t-0 md:border-l border-[rgba(0,255,140,0.12)] bg-[rgba(5,6,5,0.6)] backdrop-blur-sm md:overflow-auto">
-            <div className="border-b border-[rgba(0,255,140,0.1)] px-5 py-4">
+          <aside className="w-full md:w-[300px] shrink-0 border-t md:border-t-0 md:border-l border-edge/12 bg-pit/60 backdrop-blur-sm md:overflow-auto">
+            <div className="border-b border-edge/10 px-5 py-4">
               <div className="mb-3 font-mono text-[10px] uppercase tracking-label text-fg-4">◊ properties</div>
 
               <PropertyRow label="status" icon={<StatusIcon statusType={status?.type ?? 'backlog'} />}>
@@ -593,7 +593,7 @@ export default function IssueDetail() {
               </PropertyRow>
             </div>
 
-            <div className="border-b border-[rgba(0,255,140,0.1)] px-5 py-4">
+            <div className="border-b border-edge/10 px-5 py-4">
               <div className="mb-3 font-mono text-[10px] uppercase tracking-label text-fg-4">◊ context</div>
 
               <PropertyRow label="team" icon={<TeamIcon />}>
@@ -639,7 +639,7 @@ export default function IssueDetail() {
               </PropertyRow>
             </div>
 
-            <div className="border-b border-[rgba(0,255,140,0.1)] px-5 py-4">
+            <div className="border-b border-edge/10 px-5 py-4">
               <div className="mb-3 flex items-center justify-between">
                 <span className="font-mono text-[10px] uppercase tracking-label text-fg-4">◊ labels</span>
                 <LabelPicker
@@ -653,7 +653,7 @@ export default function IssueDetail() {
               ) : (
                 <div className="flex flex-wrap gap-1.5">
                   {currentLabels.map(({ label }) => {
-                    const color = label.color || '#5a8a72'
+                    const color = label.color || 'var(--fg-3)'
                     return (
                       <button
                         key={label.id}
@@ -693,7 +693,7 @@ function NotFound({ onBack }: { onBack: () => void }) {
           <div className="font-mono text-sm uppercase tracking-label text-fg-3">// issue not found</div>
           <button
             onClick={onBack}
-            className="mt-3 inline-flex items-center gap-2 border border-[rgba(0,255,140,0.3)] bg-[rgba(0,255,136,0.08)] px-3 py-1.5 font-mono text-xs uppercase tracking-label text-accent transition hover:bg-[rgba(0,255,136,0.16)]"
+            className="mt-3 inline-flex items-center gap-2 border border-edge/30 bg-accent-fill/8 px-3 py-1.5 font-mono text-xs uppercase tracking-label text-accent transition hover:bg-accent-fill/16"
           >
             <ArrowLeft className="h-3.5 w-3.5" />
             back to issues
@@ -722,15 +722,15 @@ function IssueDetailTab({
       onClick={onClick}
       className={`flex min-w-0 flex-1 items-center justify-between gap-3 px-3 py-2 text-left font-mono text-[10px] uppercase tracking-label transition ${
         active
-          ? 'bg-[rgba(0,255,136,0.08)] text-accent shadow-[inset_0_0_0_1px_rgba(0,255,140,0.24),0_0_18px_rgba(0,255,136,0.08)]'
-          : 'text-fg-4 hover:bg-[rgba(0,255,136,0.04)] hover:text-fg-2'
+          ? 'bg-accent-fill/8 text-accent shadow-glow-xs ring-1 ring-edge/24'
+          : 'text-fg-4 hover:bg-accent-fill/4 hover:text-fg-2'
       }`}
     >
       <span className="inline-flex min-w-0 items-center gap-2">
         {tone === 'online' ? (
           <span className="relative flex h-2 w-2 shrink-0">
             <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-accent opacity-50" />
-            <span className="relative inline-flex h-2 w-2 rounded-full bg-accent shadow-[0_0_10px_rgba(0,255,136,0.9)]" />
+            <span className="relative inline-flex h-2 w-2 rounded-full bg-accent shadow-glow-sm" />
           </span>
         ) : (
           <span className="text-fg-4">◊</span>
@@ -822,6 +822,10 @@ function AgentRunPanel({
       return
     }
 
+    const rootStyles = getComputedStyle(document.documentElement)
+    const cssColor = (name: string) => rootStyles.getPropertyValue(name).trim()
+    const cssRgb = (name: string, alpha: number) => `rgb(${cssColor(`${name}-rgb`)} / ${alpha})`
+
     const term = new XTerm({
       cursorBlink: true,
       fontFamily: '"JetBrains Mono", "SFMono-Regular", ui-monospace, monospace',
@@ -829,13 +833,13 @@ function AgentRunPanel({
       lineHeight: 1.25,
       scrollback: 5_000,
       theme: {
-        background: '#020602',
-        foreground: '#b8ffd2',
-        cursor: '#00ff88',
-        selectionBackground: '#00ff8844',
-        black: '#020602',
-        green: '#00ff88',
-        brightGreen: '#8dffc0',
+        background: cssColor('--bg-1'),
+        foreground: cssColor('--fg-2'),
+        cursor: cssColor('--accent'),
+        selectionBackground: cssRgb('--accent', 0.24),
+        black: cssColor('--bg-1'),
+        green: cssColor('--accent'),
+        brightGreen: cssColor('--accent-soft'),
       },
     })
     const fitAddon = new FitAddon()
@@ -1097,7 +1101,7 @@ function AgentRunPanel({
               void onCreateRun()
             }}
             disabled={!canCreateRun}
-            className="inline-flex h-7 items-center gap-1.5 border border-[rgba(0,255,140,0.2)] bg-pit-3 px-2 font-mono text-[10px] uppercase tracking-label text-fg-3 transition hover:border-accent hover:text-accent disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:border-[rgba(0,255,140,0.2)] disabled:hover:text-fg-3"
+            className="inline-flex h-7 items-center gap-1.5 border border-edge/20 bg-pit-3 px-2 font-mono text-[10px] uppercase tracking-label text-fg-3 transition hover:border-accent hover:text-accent disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:border-edge/20 disabled:hover:text-fg-3"
             title={canCreateRun ? 'reserve idle worker' : 'needs a repository and idle worker'}
           >
             <TerminalSquare className="h-3 w-3" />
@@ -1111,7 +1115,7 @@ function AgentRunPanel({
           onClick={() => {
             void onSeedRepositories()
           }}
-          className="mb-3 w-full border border-[rgba(0,255,140,0.18)] bg-[rgba(0,255,136,0.04)] px-3 py-2 text-left font-mono text-xs text-fg-2 transition hover:border-accent hover:text-accent"
+          className="mb-3 w-full border border-edge/18 bg-accent-fill/4 px-3 py-2 text-left font-mono text-xs text-fg-2 transition hover:border-accent hover:text-accent"
         >
           seed default GitHub repos
         </button>
@@ -1152,20 +1156,20 @@ function AgentRunPanel({
                 void onBootstrapRun()
               }}
               disabled={bootstrapping}
-              className="w-full border border-[rgba(0,255,140,0.18)] bg-[rgba(0,255,136,0.04)] px-2.5 py-2 text-left font-mono text-xs uppercase tracking-label text-accent transition hover:border-accent disabled:cursor-wait disabled:opacity-50"
+              className="w-full border border-edge/18 bg-accent-fill/4 px-2.5 py-2 text-left font-mono text-xs uppercase tracking-label text-accent transition hover:border-accent disabled:cursor-wait disabled:opacity-50"
             >
               {bootstrapping ? 'bootstrapping tmux...' : 'bootstrap tmux on worker'}
             </button>
           ) : null}
 
           {actionMessage && actionMessage !== run.statusMessage ? (
-            <div className="border border-[rgba(0,255,140,0.12)] bg-pit-3 px-2.5 py-2 font-mono text-xs text-fg-3">
+            <div className="border border-edge/12 bg-pit-3 px-2.5 py-2 font-mono text-xs text-fg-3">
               {actionMessage}
             </div>
           ) : null}
 
           {run.statusMessage ? (
-            <div className="border border-[rgba(0,255,140,0.12)] bg-pit-3 px-2.5 py-2 font-mono text-xs text-fg-3">
+            <div className="border border-edge/12 bg-pit-3 px-2.5 py-2 font-mono text-xs text-fg-3">
               {run.statusMessage}
             </div>
           ) : null}
@@ -1176,14 +1180,14 @@ function AgentRunPanel({
                 void prepareRepoWorktree()
               }}
               disabled={repoBusy || !run.workerId}
-              className="border border-[rgba(0,255,140,0.18)] bg-[rgba(0,255,136,0.04)] px-2.5 py-2 font-mono text-[10px] uppercase tracking-label text-accent transition hover:border-accent disabled:cursor-wait disabled:opacity-50"
+              className="border border-edge/18 bg-accent-fill/4 px-2.5 py-2 font-mono text-[10px] uppercase tracking-label text-accent transition hover:border-accent disabled:cursor-wait disabled:opacity-50"
             >
               {repoBusy ? 'preparing repo...' : 'prepare repo worktree'}
             </button>
             {repoMessage ? <span className="font-mono text-[10px] lowercase text-fg-4">{repoMessage}</span> : null}
           </div>
 
-          <div className="border border-[rgba(0,255,140,0.12)] bg-[rgba(0,255,136,0.025)] p-3">
+          <div className="border border-edge/12 bg-accent-fill/[0.025] p-3">
             <div className="mb-2 flex items-center justify-between gap-3">
               <div>
                 <div className="font-mono text-[10px] uppercase tracking-label text-fg-4">development goal</div>
@@ -1197,7 +1201,7 @@ function AgentRunPanel({
                     void planAgentWork()
                   }}
                   disabled={goalBusy || !agentGoal.trim()}
-                  className="border border-[rgba(0,255,140,0.24)] bg-[rgba(0,255,136,0.08)] px-2.5 py-1.5 font-mono text-[10px] uppercase tracking-label text-accent transition hover:border-accent disabled:cursor-not-allowed disabled:opacity-40"
+                  className="border border-edge/24 bg-accent-fill/8 px-2.5 py-1.5 font-mono text-[10px] uppercase tracking-label text-accent transition hover:border-accent disabled:cursor-not-allowed disabled:opacity-40"
                   title="prepare worker, prepare worktree, and start codex in planning mode"
                 >
                   {goalBusy ? 'working...' : 'plan agent work'}
@@ -1207,7 +1211,7 @@ function AgentRunPanel({
                     void approveAgentPlan()
                   }}
                   disabled={goalBusy || !run.workspacePath}
-                  className="border border-[rgba(0,255,140,0.18)] bg-pit-3 px-2.5 py-1.5 font-mono text-[10px] uppercase tracking-label text-fg-3 transition hover:border-accent hover:text-accent disabled:cursor-not-allowed disabled:opacity-40"
+                  className="border border-edge/18 bg-pit-3 px-2.5 py-1.5 font-mono text-[10px] uppercase tracking-label text-fg-3 transition hover:border-accent hover:text-accent disabled:cursor-not-allowed disabled:opacity-40"
                   title="send approval to codex so it can implement the plan"
                 >
                   approve + execute
@@ -1217,7 +1221,7 @@ function AgentRunPanel({
                     void createDraftPullRequest()
                   }}
                   disabled={prBusy || !run.workspacePath}
-                  className="border border-[rgba(0,255,140,0.18)] bg-pit-3 px-2.5 py-1.5 font-mono text-[10px] uppercase tracking-label text-fg-3 transition hover:border-accent hover:text-accent disabled:cursor-wait disabled:opacity-40"
+                  className="border border-edge/18 bg-pit-3 px-2.5 py-1.5 font-mono text-[10px] uppercase tracking-label text-fg-3 transition hover:border-accent hover:text-accent disabled:cursor-wait disabled:opacity-40"
                   title="commit, push, and create or sync a draft GitHub PR"
                 >
                   {prBusy ? 'creating...' : 'create draft pr'}
@@ -1228,7 +1232,7 @@ function AgentRunPanel({
               value={agentGoal}
               onChange={(event) => setAgentGoal(event.target.value)}
               rows={5}
-              className="w-full resize-y border border-[rgba(0,255,140,0.12)] bg-pit-3 px-2.5 py-2 font-mono text-xs leading-relaxed text-fg-2 outline-none placeholder:text-fg-4 focus:border-accent"
+              className="w-full resize-y border border-edge/12 bg-pit-3 px-2.5 py-2 font-mono text-xs leading-relaxed text-fg-2 outline-none placeholder:text-fg-4 focus:border-accent"
               placeholder="Describe what Codex should build, fix, or investigate for this issue..."
             />
             <div className="mt-2 flex flex-wrap items-center justify-between gap-2 font-mono text-[10px] lowercase text-fg-4">
@@ -1249,8 +1253,8 @@ function AgentRunPanel({
                   }}
                   className={`inline-flex items-center gap-1 border px-1.5 py-0.5 font-mono text-[10px] lowercase transition ${
                     selectedTerminal?.id === terminal.id
-                      ? 'border-accent bg-[rgba(0,255,136,0.08)] text-accent shadow-glow-xs'
-                      : 'border-[rgba(0,255,140,0.14)] bg-pit-3 text-fg-3 hover:border-[rgba(0,255,140,0.3)] hover:text-fg-1'
+                      ? 'border-accent bg-accent-fill/8 text-accent shadow-glow-xs'
+                      : 'border-edge/14 bg-pit-3 text-fg-3 hover:border-edge/30 hover:text-fg-1'
                   }`}
                 >
                   <span className="text-fg-4">▸</span>
@@ -1260,8 +1264,8 @@ function AgentRunPanel({
             </div>
           </div>
 
-          <div className="border border-[rgba(0,255,140,0.12)] bg-[rgba(0,0,0,0.18)]">
-            <div className="flex items-center justify-between gap-3 border-b border-[rgba(0,255,140,0.1)] px-3 py-2">
+          <div className="border border-edge/12 bg-overlay/18">
+            <div className="flex items-center justify-between gap-3 border-b border-edge/10 px-3 py-2">
               <div className="min-w-0 font-mono text-[10px] uppercase tracking-label text-fg-4">
                 tmux · {selectedTerminal?.name ?? 'no terminal'}
               </div>
@@ -1273,7 +1277,7 @@ function AgentRunPanel({
                       setLiveTerminalStatus('closed')
                     }}
                     disabled={!selectedTerminal}
-                    className="border border-[rgba(255,92,92,0.22)] bg-[rgba(255,92,92,0.04)] px-2 py-1 font-mono text-[10px] uppercase tracking-label text-fg-3 transition hover:border-fail hover:text-fail disabled:cursor-not-allowed disabled:opacity-40"
+                    className="border border-fail/22 bg-fail/4 px-2 py-1 font-mono text-[10px] uppercase tracking-label text-fg-3 transition hover:border-fail hover:text-fail disabled:cursor-not-allowed disabled:opacity-40"
                     title="close live websocket terminal"
                   >
                     disconnect
@@ -1284,7 +1288,7 @@ function AgentRunPanel({
                       setLiveTerminalOpen(true)
                     }}
                     disabled={!selectedTerminal || !authToken}
-                    className="border border-[rgba(0,255,140,0.24)] bg-[rgba(0,255,136,0.08)] px-2 py-1 font-mono text-[10px] uppercase tracking-label text-accent transition hover:border-accent disabled:cursor-not-allowed disabled:opacity-40"
+                    className="border border-edge/24 bg-accent-fill/8 px-2 py-1 font-mono text-[10px] uppercase tracking-label text-accent transition hover:border-accent disabled:cursor-not-allowed disabled:opacity-40"
                     title="open live terminal session"
                   >
                     connect live
@@ -1293,7 +1297,7 @@ function AgentRunPanel({
                 <button
                   onClick={() => void sendTerminalKey('CTRL_C', 'ctrl+c')}
                   disabled={!selectedTerminal || terminalBusy}
-                  className="border border-[rgba(255,92,92,0.22)] bg-[rgba(255,92,92,0.04)] px-2 py-1 font-mono text-[10px] uppercase tracking-label text-fg-3 transition hover:border-fail hover:text-fail disabled:cursor-wait disabled:opacity-40"
+                  className="border border-fail/22 bg-fail/4 px-2 py-1 font-mono text-[10px] uppercase tracking-label text-fg-3 transition hover:border-fail hover:text-fail disabled:cursor-wait disabled:opacity-40"
                   title="interrupt current process"
                 >
                   ctrl+c
@@ -1301,7 +1305,7 @@ function AgentRunPanel({
                 <button
                   onClick={() => void sendTerminalKey('ENTER', 'enter')}
                   disabled={!selectedTerminal || terminalBusy}
-                  className="border border-[rgba(0,255,140,0.18)] bg-pit-3 px-2 py-1 font-mono text-[10px] uppercase tracking-label text-fg-3 transition hover:border-accent hover:text-accent disabled:cursor-wait disabled:opacity-40"
+                  className="border border-edge/18 bg-pit-3 px-2 py-1 font-mono text-[10px] uppercase tracking-label text-fg-3 transition hover:border-accent hover:text-accent disabled:cursor-wait disabled:opacity-40"
                   title="send enter"
                 >
                   enter
@@ -1309,7 +1313,7 @@ function AgentRunPanel({
                 <button
                   onClick={() => void captureTerminal()}
                   disabled={!selectedTerminal || terminalBusy}
-                  className="border border-[rgba(0,255,140,0.18)] bg-pit-3 px-2 py-1 font-mono text-[10px] uppercase tracking-label text-fg-3 transition hover:border-accent hover:text-accent disabled:cursor-wait disabled:opacity-40"
+                  className="border border-edge/18 bg-pit-3 px-2 py-1 font-mono text-[10px] uppercase tracking-label text-fg-3 transition hover:border-accent hover:text-accent disabled:cursor-wait disabled:opacity-40"
                 >
                   {terminalBusy ? 'busy' : 'capture'}
                 </button>
@@ -1320,7 +1324,7 @@ function AgentRunPanel({
               <div className="relative">
                 <div
                   ref={liveTerminalElementRef}
-                  className="h-[360px] overflow-hidden bg-[#020602] px-2 py-2"
+                  className="h-[360px] overflow-hidden bg-bg-1 px-2 py-2"
                   onClick={() => liveXtermRef.current?.focus()}
                 />
                 <div className="pointer-events-none absolute right-3 top-2 font-mono text-[9px] uppercase tracking-label text-fg-4">
@@ -1334,7 +1338,7 @@ function AgentRunPanel({
             )}
 
             <form
-              className="border-t border-[rgba(0,255,140,0.1)] p-2"
+              className="border-t border-edge/10 p-2"
               onSubmit={(event) => {
                 event.preventDefault()
                 void sendTerminalInput()
@@ -1352,12 +1356,12 @@ function AgentRunPanel({
                   }}
                   disabled={!selectedTerminal || terminalBusy}
                   placeholder={selectedTerminal ? `send command to ${selectedTerminal.name}` : 'select a terminal'}
-                  className="min-w-0 flex-1 border border-[rgba(0,255,140,0.12)] bg-pit-3 px-2 py-1.5 font-mono text-xs text-fg-2 outline-none placeholder:text-fg-4 focus:border-accent"
+                  className="min-w-0 flex-1 border border-edge/12 bg-pit-3 px-2 py-1.5 font-mono text-xs text-fg-2 outline-none placeholder:text-fg-4 focus:border-accent"
                 />
                 <button
                   type="submit"
                   disabled={!selectedTerminal || terminalBusy || !terminalInput.trim()}
-                  className="shrink-0 border border-[rgba(0,255,140,0.18)] bg-[rgba(0,255,136,0.04)] px-3 py-1.5 font-mono text-[10px] uppercase tracking-label text-accent transition hover:border-accent disabled:cursor-not-allowed disabled:opacity-40"
+                  className="shrink-0 border border-edge/18 bg-accent-fill/4 px-3 py-1.5 font-mono text-[10px] uppercase tracking-label text-accent transition hover:border-accent disabled:cursor-not-allowed disabled:opacity-40"
                 >
                   send
                 </button>
@@ -1374,7 +1378,7 @@ function AgentRunPanel({
                 href={pullRequest.url}
                 target="_blank"
                 rel="noreferrer"
-                className="min-w-0 flex-1 truncate border border-[rgba(0,255,140,0.18)] bg-[rgba(0,255,136,0.04)] px-2.5 py-2 font-mono text-xs text-accent hover:border-accent"
+                className="min-w-0 flex-1 truncate border border-edge/18 bg-accent-fill/4 px-2.5 py-2 font-mono text-xs text-accent hover:border-accent"
               >
                 PR #{pullRequest.number} · {pullRequest.isDraft ? 'draft' : pullRequest.state}
               </a>
@@ -1386,7 +1390,7 @@ function AgentRunPanel({
                 void syncPullRequest()
               }}
               disabled={prBusy}
-              className="shrink-0 border border-[rgba(0,255,140,0.18)] bg-pit-3 px-2.5 py-2 font-mono text-[10px] uppercase tracking-label text-fg-3 transition hover:border-accent hover:text-accent disabled:cursor-wait disabled:opacity-40"
+              className="shrink-0 border border-edge/18 bg-pit-3 px-2.5 py-2 font-mono text-[10px] uppercase tracking-label text-fg-3 transition hover:border-accent hover:text-accent disabled:cursor-wait disabled:opacity-40"
               title="check GitHub for a PR matching this branch"
             >
               {prBusy ? 'syncing...' : 'sync pr'}
@@ -1412,14 +1416,14 @@ function AgentRunPanel({
                       href={artifact.url}
                       target="_blank"
                       rel="noreferrer"
-                      className="block border border-[rgba(0,255,140,0.14)] bg-pit-3 px-2 py-1.5 font-mono text-[11px] text-fg-3 transition hover:border-accent hover:text-accent"
+                      className="block border border-edge/14 bg-pit-3 px-2 py-1.5 font-mono text-[11px] text-fg-3 transition hover:border-accent hover:text-accent"
                     >
                       {body}
                     </a>
                   ) : (
                     <div
                       key={artifact.id}
-                      className="border border-[rgba(0,255,140,0.1)] bg-pit-3 px-2 py-1.5 font-mono text-[11px] text-fg-3"
+                      className="border border-edge/10 bg-pit-3 px-2 py-1.5 font-mono text-[11px] text-fg-3"
                       title={artifact.remotePath ?? undefined}
                     >
                       {body}
@@ -1561,15 +1565,15 @@ function LabelPicker({
     <div className="relative" ref={ref}>
       <button
         onClick={() => setOpen((v) => !v)}
-        className="inline-flex items-center gap-1 border border-[rgba(0,255,140,0.2)] bg-pit-3 px-2 py-0.5 font-mono text-[10px] uppercase tracking-label text-fg-3 hover:text-fg-1 hover:border-[rgba(0,255,140,0.3)] transition"
+        className="inline-flex items-center gap-1 border border-edge/20 bg-pit-3 px-2 py-0.5 font-mono text-[10px] uppercase tracking-label text-fg-3 hover:text-fg-1 hover:border-edge/30 transition"
         title="add label"
       >
         <Plus className="h-3 w-3" />
         add
       </button>
       {open && (
-        <div className="absolute right-0 top-full z-50 mt-1.5 w-[220px] border border-[rgba(0,255,140,0.25)] bg-pit shadow-[0_0_18px_rgba(0,255,136,0.18),0_18px_44px_rgba(0,0,0,0.6)]">
-          <div className="border-b border-[rgba(0,255,140,0.12)] px-3 py-2 font-mono text-[10px] uppercase tracking-label text-fg-3">
+        <div className="absolute right-0 top-full z-50 mt-1.5 w-[220px] border border-edge/25 bg-pit shadow-terminal-popover">
+          <div className="border-b border-edge/12 px-3 py-2 font-mono text-[10px] uppercase tracking-label text-fg-3">
             labels
           </div>
           <div className="max-h-60 overflow-auto py-1">
@@ -1578,17 +1582,17 @@ function LabelPicker({
             ) : (
               available.map((label) => {
                 const checked = selectedIds.has(label.id)
-                const color = label.color || '#5a8a72'
+                const color = label.color || 'var(--fg-3)'
                 return (
                   <button
                     key={label.id}
                     onClick={() => onToggle(label.id)}
-                    className="flex w-full items-center gap-2.5 px-3 py-1.5 text-left font-mono text-xs lowercase text-fg-2 hover:bg-[rgba(0,255,136,0.04)] hover:text-fg-1 transition"
+                    className="flex w-full items-center gap-2.5 px-3 py-1.5 text-left font-mono text-xs lowercase text-fg-2 hover:bg-accent-fill/4 hover:text-fg-1 transition"
                   >
                     <span
                       aria-hidden
                       className={`inline-flex h-3.5 w-3.5 shrink-0 items-center justify-center border transition ${
-                        checked ? 'border-accent bg-accent' : 'border-[rgba(0,255,140,0.2)] bg-transparent'
+                        checked ? 'border-accent bg-accent' : 'border-edge/20 bg-transparent'
                       }`}
                     >
                       {checked && <Check className="h-2.5 w-2.5 text-pit" strokeWidth={3} />}
@@ -1644,7 +1648,7 @@ function DateInput({ value, onChange }: { value?: number; onChange: (ms: number 
         const ms = new Date(`${v}T00:00:00`).getTime()
         onChange(Number.isNaN(ms) ? undefined : ms)
       }}
-      className="w-full border border-transparent bg-transparent px-2 py-1 font-mono text-xs text-fg-1 outline-none hover:border-[rgba(0,255,140,0.2)] hover:bg-[rgba(0,255,136,0.04)] focus:border-accent focus:bg-[rgba(0,255,136,0.06)] transition [color-scheme:dark]"
+      className="w-full border border-transparent bg-transparent px-2 py-1 font-mono text-xs text-fg-1 outline-none transition hover:border-edge/20 hover:bg-accent-fill/4 focus:border-accent focus:bg-accent-fill/6"
     />
   )
 }
@@ -1653,7 +1657,7 @@ function ActivityEntry({ entry }: { entry: Schema['tables']['pm_issue_activity']
   const isComment = entry.type === 'comment'
   if (isComment) {
     return (
-      <div className="border border-[rgba(0,255,140,0.1)] bg-[rgba(10,14,12,0.5)] px-4 py-3">
+      <div className="border border-edge/10 bg-pit-2/50 px-4 py-3">
         <div className="mb-1 flex items-center justify-between font-mono text-[10px] uppercase tracking-label">
           <span className="text-accent">{entry.actorName?.toLowerCase() ?? 'system'}</span>
           <span className="text-fg-4">{formatDateTime(entry.createdAt)}</span>

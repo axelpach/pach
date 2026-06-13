@@ -202,15 +202,15 @@ export function SearchPalette({ tabs }: { tabs: PaletteTab[] }) {
 
   return (
     <div
-      className="fixed inset-0 z-[100] flex items-start justify-center pt-[12vh] px-4 bg-[rgba(0,0,0,0.7)] backdrop-blur-sm"
+      className="fixed inset-0 z-[100] flex items-start justify-center pt-[12vh] px-4 bg-overlay/70 backdrop-blur-sm"
       onClick={() => setOpen(false)}
     >
       <div
-        className="w-full max-w-2xl border border-[rgba(0,255,140,0.25)] bg-pit shadow-[0_0_24px_rgba(0,255,136,0.18),0_30px_80px_rgba(0,0,0,0.6)]"
+        className="w-full max-w-2xl border border-edge/25 bg-pit shadow-terminal-popover"
         onClick={(event) => event.stopPropagation()}
       >
         {/* search input */}
-        <div className="flex items-center gap-2 border-b border-[rgba(0,255,140,0.12)] px-4 py-3">
+        <div className="flex items-center gap-2 border-b border-edge/12 px-4 py-3">
           <Search className="h-4 w-4 text-fg-4 shrink-0" />
           <input
             ref={inputRef}
@@ -221,7 +221,7 @@ export function SearchPalette({ tabs }: { tabs: PaletteTab[] }) {
             className="flex-1 bg-transparent font-mono text-sm text-fg-1 outline-none placeholder:text-fg-4"
           />
           <span className="hidden sm:inline-flex items-center gap-1 font-mono text-[10px] uppercase tracking-label text-fg-4">
-            <kbd className="border border-[rgba(0,255,140,0.15)] bg-pit-3 px-1.5 py-0.5 text-fg-3">esc</kbd>
+            <kbd className="border border-edge/15 bg-pit-3 px-1.5 py-0.5 text-fg-3">esc</kbd>
             to close
           </span>
         </div>
@@ -268,17 +268,17 @@ export function SearchPalette({ tabs }: { tabs: PaletteTab[] }) {
         </div>
 
         {/* footer hints */}
-        <div className="flex flex-wrap items-center gap-3 border-t border-[rgba(0,255,140,0.12)] px-4 py-2 font-mono text-[10px] uppercase tracking-label text-fg-4">
+        <div className="flex flex-wrap items-center gap-3 border-t border-edge/12 px-4 py-2 font-mono text-[10px] uppercase tracking-label text-fg-4">
           <span className="inline-flex items-center gap-1">
-            <kbd className="border border-[rgba(0,255,140,0.15)] bg-pit-3 px-1.5 py-0.5 text-fg-3">↑↓</kbd>
+            <kbd className="border border-edge/15 bg-pit-3 px-1.5 py-0.5 text-fg-3">↑↓</kbd>
             navigate
           </span>
           <span className="inline-flex items-center gap-1">
-            <kbd className="border border-[rgba(0,255,140,0.15)] bg-pit-3 px-1.5 py-0.5 text-fg-3">↵</kbd>
+            <kbd className="border border-edge/15 bg-pit-3 px-1.5 py-0.5 text-fg-3">↵</kbd>
             open
           </span>
           <span className="ml-auto inline-flex items-center gap-1 text-fg-4">
-            <kbd className="border border-[rgba(0,255,140,0.15)] bg-pit-3 px-1.5 py-0.5 text-fg-3">⌘K</kbd>
+            <kbd className="border border-edge/15 bg-pit-3 px-1.5 py-0.5 text-fg-3">⌘K</kbd>
             toggle
           </span>
         </div>
@@ -306,8 +306,8 @@ function PaletteResultButton({
 }) {
   const className = `flex w-full items-center gap-3 px-4 py-2 text-left transition ${
     isHighlighted
-      ? 'bg-[rgba(0,255,136,0.08)]'
-      : pointerMoved ? 'hover:bg-[rgba(0,255,136,0.04)]' : ''
+      ? 'bg-accent-fill/8'
+      : pointerMoved ? 'hover:bg-accent-fill/4' : ''
   }`
 
   if (result.kind === 'tab') {

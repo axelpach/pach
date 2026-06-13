@@ -22,7 +22,7 @@ export default function Campaigns() {
 
   return (
     <div className="flex-1 flex flex-col overflow-hidden">
-      <div className="px-8 py-3 border-b border-[rgba(0,255,140,0.15)] flex items-center justify-between">
+      <div className="px-8 py-3 border-b border-edge/15 flex items-center justify-between">
         <p className="text-xs text-fg-3 uppercase tracking-label">
           › {campaigns.length} {campaigns.length === 1 ? 'campaña' : 'campañas'}
         </p>
@@ -46,7 +46,7 @@ export default function Campaigns() {
                 <Link
                   key={c.id}
                   to={`/whatsapp/campaigns/${c.id}`}
-                  className="block px-8 py-3.5 border-b border-[rgba(0,255,140,0.08)] hover:bg-[rgba(0,255,136,0.03)] transition-colors"
+                  className="block px-8 py-3.5 border-b border-edge/8 hover:bg-accent-fill/3 transition-colors"
                 >
                   <div className="flex items-center gap-4">
                     <StatusPill kind={badge.kind} pulse={c.status === 'sending'}>{badge.label}</StatusPill>

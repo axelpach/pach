@@ -30,10 +30,10 @@ export default function Login() {
       <div className="relative z-10 flex flex-1 items-center justify-center">
         <form
           onSubmit={onSubmit}
-          className="w-[360px] border border-[rgba(0,255,140,0.15)] bg-void px-6 py-7"
+          className="w-[360px] border border-edge/15 bg-void px-6 py-7"
         >
           <div className="mb-5">
-            <div className="text-base font-bold text-accent [text-shadow:0_0_6px_rgba(0,255,136,0.5)] tracking-wide">
+            <div className="text-base font-bold text-accent glow tracking-wide">
               p@ch_
             </div>
             <div className="text-[9px] uppercase tracking-label text-fg-4 mt-1">
@@ -49,7 +49,7 @@ export default function Login() {
             autoComplete="email"
             value={email}
             onChange={(e) => setEmail(e.target.value)}
-            className="w-full bg-pit border border-[rgba(0,255,140,0.15)] px-3 py-2 text-sm text-fg-1 focus:outline-none focus:border-accent mb-4"
+            className="w-full bg-pit border border-edge/15 px-3 py-2 text-sm text-fg-1 focus:outline-none focus:border-accent mb-4"
             required
           />
 
@@ -61,7 +61,7 @@ export default function Login() {
             autoComplete="current-password"
             value={password}
             onChange={(e) => setPassword(e.target.value)}
-            className="w-full bg-pit border border-[rgba(0,255,140,0.15)] px-3 py-2 text-sm text-fg-1 focus:outline-none focus:border-accent mb-5"
+            className="w-full bg-pit border border-edge/15 px-3 py-2 text-sm text-fg-1 focus:outline-none focus:border-accent mb-5"
             required
           />
 
@@ -74,7 +74,7 @@ export default function Login() {
           <button
             type="submit"
             disabled={loading}
-            className="w-full border border-accent bg-[rgba(0,255,136,0.03)] text-accent py-2 text-xs uppercase tracking-wide-2 hover:bg-[rgba(0,255,136,0.08)] disabled:opacity-50"
+            className="w-full border border-accent bg-accent-fill/3 text-accent py-2 text-xs uppercase tracking-wide-2 hover:bg-accent-fill/8 disabled:opacity-50"
           >
             {loading ? '// authenticating...' : '> connect'}
           </button>

@@ -820,7 +820,7 @@ function SlashCommandMenu({
 
   return (
     <div
-      className="fixed z-40 w-full max-w-sm overflow-y-auto border border-[rgba(0,255,140,0.18)] bg-pit shadow-[0_0_18px_rgba(0,255,136,0.14),0_18px_44px_rgba(0,0,0,0.6)]"
+      className="fixed z-40 w-full max-w-sm overflow-y-auto border border-edge/18 bg-pit shadow-terminal-popover"
       style={{ height: position.height ?? 300, left: position.left, top: position.top }}
     >
       {commands.length === 0 ? (
@@ -840,8 +840,8 @@ function SlashCommandMenu({
             }}
             className={`flex w-full items-center gap-3 px-3 py-2 text-left transition ${
               index === activeIndex
-                ? 'bg-[rgba(0,255,136,0.1)] text-accent'
-                : `text-fg-2 ${pointerMoved ? 'hover:bg-[rgba(0,255,136,0.06)] hover:text-fg-1' : ''}`
+                ? 'bg-accent-fill/10 text-accent'
+                : `text-fg-2 ${pointerMoved ? 'hover:bg-accent-fill/6 hover:text-fg-1' : ''}`
             }`}
           >
             <span className="flex h-6 w-6 shrink-0 items-center justify-center text-fg-3">{command.icon}</span>
@@ -881,10 +881,10 @@ function DocumentLinkMenu({
 
   return (
     <div
-      className="fixed z-40 w-full max-w-sm overflow-hidden border border-[rgba(0,255,140,0.18)] bg-pit shadow-[0_0_18px_rgba(0,255,136,0.14),0_18px_44px_rgba(0,0,0,0.6)]"
+      className="fixed z-40 w-full max-w-sm overflow-hidden border border-edge/18 bg-pit shadow-terminal-popover"
       style={{ left: position.left, top: position.top }}
     >
-      <div className="border-b border-[rgba(0,255,140,0.12)] px-3 py-2">
+      <div className="border-b border-edge/12 px-3 py-2">
         <div className="mb-1 font-mono text-[10px] uppercase tracking-label text-fg-4">link document</div>
         <input
           ref={inputRef}
@@ -931,8 +931,8 @@ function DocumentLinkMenu({
             }}
             className={`flex w-full items-center gap-3 px-3 py-2.5 text-left transition ${
               index === boundedActiveIndex
-                ? 'bg-[rgba(0,255,136,0.1)] text-accent'
-                : `text-fg-2 ${pointerMoved ? 'hover:bg-[rgba(0,255,136,0.06)] hover:text-accent' : ''}`
+                ? 'bg-accent-fill/10 text-accent'
+                : `text-fg-2 ${pointerMoved ? 'hover:bg-accent-fill/6 hover:text-accent' : ''}`
             }`}
           >
             {target.type === 'document' ? (
@@ -968,10 +968,10 @@ function LinkUrlMenu({
 }) {
   return (
     <div
-      className="fixed z-40 w-full max-w-sm overflow-hidden border border-[rgba(0,255,140,0.18)] bg-pit shadow-[0_0_18px_rgba(0,255,136,0.14),0_18px_44px_rgba(0,0,0,0.6)]"
+      className="fixed z-40 w-full max-w-sm overflow-hidden border border-edge/18 bg-pit shadow-terminal-popover"
       style={{ left: position.left, top: position.top }}
     >
-      <div className="border-b border-[rgba(0,255,140,0.12)] px-3 py-2">
+      <div className="border-b border-edge/12 px-3 py-2">
         <div className="mb-1 font-mono text-[10px] uppercase tracking-label text-fg-4">link url</div>
         <input
           ref={inputRef}
@@ -1018,10 +1018,10 @@ function LinkLabelMenu({
 }) {
   return (
     <div
-      className="fixed z-40 w-full max-w-sm overflow-hidden border border-[rgba(0,255,140,0.18)] bg-pit shadow-[0_0_18px_rgba(0,255,136,0.14),0_18px_44px_rgba(0,0,0,0.6)]"
+      className="fixed z-40 w-full max-w-sm overflow-hidden border border-edge/18 bg-pit shadow-terminal-popover"
       style={{ left: position.left, top: position.top }}
     >
-      <div className="border-b border-[rgba(0,255,140,0.12)] px-3 py-2">
+      <div className="border-b border-edge/12 px-3 py-2">
         <div className="mb-1 font-mono text-[10px] uppercase tracking-label text-fg-4">link text</div>
         <input
           ref={inputRef}

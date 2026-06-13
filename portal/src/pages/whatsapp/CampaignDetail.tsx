@@ -106,7 +106,7 @@ export default function CampaignDetail() {
   return (
     <div className="flex-1 flex overflow-hidden">
       <div className="flex-1 flex flex-col overflow-hidden">
-        <div className="px-8 py-3 border-b border-[rgba(0,255,140,0.15)] flex items-center justify-between">
+        <div className="px-8 py-3 border-b border-edge/15 flex items-center justify-between">
           <div className="flex items-center gap-3">
             <Link to="/whatsapp/campaigns" className="text-fg-3 hover:text-accent transition-colors">
               <ArrowLeft className="w-4 h-4" />
@@ -132,7 +132,7 @@ export default function CampaignDetail() {
         </div>
 
         {fireError && (
-          <div className="px-8 py-2 text-xs font-mono text-fail bg-[rgba(255,77,109,0.05)] border-b border-[rgba(255,77,109,0.25)]">
+          <div className="px-8 py-2 text-xs font-mono text-fail bg-fail/5 border-b border-fail/25">
             ✕ {fireError}
           </div>
         )}
@@ -143,7 +143,7 @@ export default function CampaignDetail() {
             <div className="text-[10px] uppercase tracking-label text-fg-3 mb-2 flex items-center gap-2">
               <Eye className="w-3 h-3" /> ◊ vista previa
             </div>
-            <div className="bg-[#0B141A] p-3 max-w-sm border border-[rgba(0,255,140,0.10)]">
+            <div className="bg-[#0B141A] p-3 max-w-sm border border-edge/10">
               <div className="bg-[#1F2C33] overflow-hidden">
                 {template.headerSampleUrl && template.headerFormat === 'IMAGE' && (
                   <img src={template.headerSampleUrl} alt="" className="w-full h-48 object-cover" />
@@ -176,7 +176,7 @@ export default function CampaignDetail() {
                       onChange={e => updateVariable(v, e.target.value)}
                       disabled={!isDraft}
                       placeholder="valor…"
-                      className="flex-1 px-2 py-1 bg-rim border border-[rgba(0,255,140,0.15)] text-fg-1 text-sm placeholder:text-fg-4 outline-none focus:border-accent focus:shadow-glow-xs disabled:opacity-50"
+                      className="flex-1 px-2 py-1 bg-rim border border-edge/15 text-fg-1 text-sm placeholder:text-fg-4 outline-none focus:border-accent focus:shadow-glow-xs disabled:opacity-50"
                     />
                   </div>
                 ))}
@@ -197,10 +197,10 @@ export default function CampaignDetail() {
                 value={search}
                 onChange={e => setSearch(e.target.value)}
                 placeholder="$ search…"
-                className="w-full pl-8 pr-3 py-1.5 bg-rim border border-[rgba(0,255,140,0.15)] text-fg-1 text-sm placeholder:text-fg-4 outline-none focus:border-accent focus:shadow-glow-xs"
+                className="w-full pl-8 pr-3 py-1.5 bg-rim border border-edge/15 text-fg-1 text-sm placeholder:text-fg-4 outline-none focus:border-accent focus:shadow-glow-xs"
               />
             </div>
-            <div className="flex-1 overflow-auto border border-[rgba(0,255,140,0.15)] min-h-0">
+            <div className="flex-1 overflow-auto border border-edge/15 min-h-0">
               {filteredContacts.length === 0 && (
                 <div className="text-sm text-fg-3 px-3 py-6 text-center font-mono">
                   <span className="text-fg-4">// </span>sin contactos con teléfono
@@ -213,11 +213,11 @@ export default function CampaignDetail() {
                     key={c.id}
                     onClick={() => toggleContact(c.id)}
                     disabled={!isDraft}
-                    className={`w-full text-left px-3 py-2 flex items-center gap-3 border-b border-[rgba(0,255,140,0.08)] last:border-b-0 hover:bg-[rgba(0,255,136,0.04)] disabled:opacity-60 ${
-                      sel ? 'bg-[rgba(0,255,136,0.05)]' : ''
+                    className={`w-full text-left px-3 py-2 flex items-center gap-3 border-b border-edge/8 last:border-b-0 hover:bg-accent-fill/4 disabled:opacity-60 ${
+                      sel ? 'bg-accent-fill/5' : ''
                     }`}
                   >
-                    <div className={`w-3.5 h-3.5 border flex items-center justify-center shrink-0 ${sel ? 'bg-accent border-accent' : 'border-[rgba(0,255,140,0.35)]'}`}>
+                    <div className={`w-3.5 h-3.5 border flex items-center justify-center shrink-0 ${sel ? 'bg-accent border-accent' : 'border-edge/35'}`}>
                       {sel && <Check className="w-2.5 h-2.5 text-bg-0" strokeWidth={3} />}
                     </div>
                     <div className="flex-1 min-w-0">
@@ -234,7 +234,7 @@ export default function CampaignDetail() {
           {messages.length > 0 && (
             <section className="xl:col-span-2">
               <div className="text-[10px] uppercase tracking-label text-fg-3 mb-2">◊ logs · trace ({messages.length})</div>
-              <div className="border border-[rgba(0,255,140,0.15)] bg-void font-mono">
+              <div className="border border-edge/15 bg-void font-mono">
                 {messages.map(m => {
                   const status = m.status
                   const Icon =
@@ -249,7 +249,7 @@ export default function CampaignDetail() {
                     status === 'sent' ? 'text-fg-1' :
                     'text-fg-3'
                   return (
-                    <div key={m.id} className="px-3 py-2 flex items-center gap-3 text-xs border-b border-[rgba(0,255,140,0.08)] last:border-b-0">
+                    <div key={m.id} className="px-3 py-2 flex items-center gap-3 text-xs border-b border-edge/8 last:border-b-0">
                       <Icon className={`w-3.5 h-3.5 shrink-0 ${color}`} />
                       <div className="text-fg-2 w-36 truncate">{m.phone}</div>
                       <div className={`text-[10px] uppercase tracking-label ${color} w-24`}>{status}</div>

@@ -236,8 +236,8 @@ export default function Docs() {
 
   return (
     <div className="flex h-full min-h-0 bg-pit text-fg-1">
-      <aside className="hidden w-[300px] shrink-0 border-r border-[rgba(0,255,140,0.12)] bg-[rgba(5,6,5,0.72)] md:flex md:flex-col">
-        <div className="border-b border-[rgba(0,255,140,0.12)] px-4 py-3">
+      <aside className="hidden w-[300px] shrink-0 border-r border-edge/12 bg-void/72 md:flex md:flex-col">
+        <div className="border-b border-edge/12 px-4 py-3">
           <div className="mb-3 flex items-center justify-between">
             <div>
               <div className="font-mono text-[10px] uppercase tracking-label text-fg-4">docs</div>
@@ -245,7 +245,7 @@ export default function Docs() {
             </div>
             <button
               onClick={() => void createDocument()}
-              className="flex h-8 w-8 items-center justify-center border border-[rgba(0,255,140,0.24)] bg-[rgba(0,255,136,0.06)] text-accent transition hover:bg-[rgba(0,255,136,0.12)]"
+              className="flex h-8 w-8 items-center justify-center border border-edge/24 bg-accent-fill/6 text-accent transition hover:bg-accent-fill/12"
               title="new document"
             >
               <Plus className="h-4 w-4" />
@@ -261,11 +261,11 @@ export default function Docs() {
               options={organizationOptions}
               display={selectedOrganization?.name ?? (organizationFilter === NO_ORGANIZATION ? 'no organization' : 'organization')}
               popupWidth="200"
-              triggerClassName="flex h-8 w-full items-center justify-between border border-[rgba(0,255,140,0.18)] bg-rim pl-9 pr-2 text-left font-mono text-xs text-fg-1 outline-none transition hover:border-[rgba(0,255,140,0.32)] hover:bg-[rgba(0,255,136,0.04)] focus-visible:border-accent focus-visible:shadow-glow-xs"
+              triggerClassName="flex h-8 w-full items-center justify-between border border-edge/18 bg-rim pl-9 pr-2 text-left font-mono text-xs text-fg-1 outline-none transition hover:border-edge/32 hover:bg-accent-fill/4 focus-visible:border-accent focus-visible:shadow-glow-xs"
             />
           </div>
 
-          <div className="mt-3 flex items-center gap-2 border border-[rgba(0,255,140,0.12)] bg-pit-3 px-2 py-1.5">
+          <div className="mt-3 flex items-center gap-2 border border-edge/12 bg-pit-3 px-2 py-1.5">
             <Search className="h-3.5 w-3.5 text-fg-4" />
             <input
               value={search}
@@ -280,7 +280,7 @@ export default function Docs() {
           {documentTree.length === 0 ? (
             <button
               onClick={() => void createDocument()}
-              className="flex w-full items-center gap-2 border border-dashed border-[rgba(0,255,140,0.18)] px-3 py-3 text-left font-mono text-xs lowercase text-fg-4 transition hover:border-[rgba(0,255,140,0.34)] hover:text-accent"
+              className="flex w-full items-center gap-2 border border-dashed border-edge/18 px-3 py-3 text-left font-mono text-xs lowercase text-fg-4 transition hover:border-edge/35 hover:text-accent"
             >
               <Plus className="h-3.5 w-3.5" />
               create first doc
@@ -321,7 +321,7 @@ export default function Docs() {
               </div>
               <button
                 onClick={() => selectedDocument && setArchiveConfirmDocument(selectedDocument)}
-                className="ml-auto flex h-8 w-8 items-center justify-center border border-[rgba(0,255,140,0.15)] text-fg-3 transition hover:border-amber hover:text-amber"
+                className="ml-auto flex h-8 w-8 items-center justify-center border border-edge/15 text-fg-3 transition hover:border-amber hover:text-amber"
                 title="archive document"
               >
                 <Archive className="h-4 w-4" />
@@ -359,7 +359,7 @@ export default function Docs() {
               </p>
               <button
                 onClick={() => void createDocument()}
-                className="mt-5 inline-flex items-center gap-2 border border-[rgba(0,255,140,0.28)] bg-[rgba(0,255,136,0.08)] px-3 py-2 font-mono text-xs uppercase tracking-label text-accent transition hover:bg-[rgba(0,255,136,0.14)]"
+                className="mt-5 inline-flex items-center gap-2 border border-edge/28 bg-accent-fill/8 px-3 py-2 font-mono text-xs uppercase tracking-label text-accent transition hover:bg-accent-fill/14"
               >
                 <Plus className="h-3.5 w-3.5" />
                 new document
@@ -401,14 +401,14 @@ function ArchiveDocumentModal({
 
   return (
     <div
-      className="fixed inset-0 z-[90] flex items-center justify-center bg-[rgba(0,0,0,0.72)] px-4 backdrop-blur-sm"
+      className="fixed inset-0 z-[90] flex items-center justify-center bg-overlay/72 px-4 backdrop-blur-sm"
       onClick={onCancel}
     >
       <div
-        className="w-full max-w-md border border-[rgba(255,193,7,0.28)] bg-pit shadow-[0_0_24px_rgba(255,193,7,0.1),0_30px_80px_rgba(0,0,0,0.65)]"
+        className="w-full max-w-md border border-warn/28 bg-pit shadow-terminal-overlay"
         onClick={(event) => event.stopPropagation()}
       >
-        <div className="border-b border-[rgba(255,193,7,0.18)] px-5 py-4">
+        <div className="border-b border-warn/18 px-5 py-4">
           <div className="font-mono text-[10px] uppercase tracking-label text-amber">archive document</div>
           <h2 className="mt-2 font-mono text-lg font-bold lowercase text-fg-1">{document.title}</h2>
         </div>
@@ -417,18 +417,18 @@ function ArchiveDocumentModal({
             This will hide the document from the docs sidebar and search. You can restore it later from the database if needed.
           </p>
         </div>
-        <div className="flex items-center justify-end gap-2 border-t border-[rgba(0,255,140,0.12)] px-5 py-3">
+        <div className="flex items-center justify-end gap-2 border-t border-edge/12 px-5 py-3">
           <button
             type="button"
             onClick={onCancel}
-            className="border border-[rgba(0,255,140,0.16)] px-3 py-2 font-mono text-xs uppercase tracking-label text-fg-3 transition hover:border-[rgba(0,255,140,0.32)] hover:text-fg-1"
+            className="border border-edge/16 px-3 py-2 font-mono text-xs uppercase tracking-label text-fg-3 transition hover:border-edge/32 hover:text-fg-1"
           >
             cancel
           </button>
           <button
             type="button"
             onClick={onConfirm}
-            className="border border-[rgba(255,193,7,0.36)] bg-[rgba(255,193,7,0.08)] px-3 py-2 font-mono text-xs uppercase tracking-label text-amber transition hover:bg-[rgba(255,193,7,0.14)]"
+            className="border border-warn/36 bg-warn/8 px-3 py-2 font-mono text-xs uppercase tracking-label text-amber transition hover:bg-warn/14"
           >
             archive
           </button>
@@ -469,8 +469,8 @@ function DocumentTreeItem({
       <div
         className={`group flex items-center gap-1 px-1.5 py-1.5 transition ${
           selected
-            ? 'bg-[rgba(0,255,136,0.08)] text-accent shadow-[inset_0_0_0_1px_rgba(0,255,140,0.2)]'
-            : 'text-fg-2 hover:bg-[rgba(0,255,136,0.04)] hover:text-fg-1'
+            ? 'bg-accent-fill/8 text-accent ring-1 ring-inset ring-edge/20'
+            : 'text-fg-2 hover:bg-accent-fill/4 hover:text-fg-1'
         }`}
         style={{ paddingLeft: 6 + indent }}
       >

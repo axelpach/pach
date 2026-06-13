@@ -61,7 +61,7 @@ export default function CRM() {
   return (
     <div className="flex-1 flex flex-col h-full overflow-hidden min-h-0">
       {/* Header */}
-      <div className="px-8 py-5 border-b border-[rgba(0,255,140,0.15)] flex items-center justify-between shrink-0">
+      <div className="px-8 py-5 border-b border-edge/15 flex items-center justify-between shrink-0">
         <div>
           <div className="text-[10px] uppercase tracking-label text-fg-3 mb-1">◊ crm · pipeline</div>
           <h1 className="font-mono text-2xl font-bold text-fg-1 lowercase">crm</h1>
@@ -83,7 +83,7 @@ export default function CRM() {
               display={selectedOrganizationLabel}
               align="right"
               popupWidth="224"
-              triggerClassName="flex h-[38px] w-full items-center justify-between border border-[rgba(0,255,140,0.18)] bg-rim pl-9 pr-2 text-left font-mono text-sm text-fg-1 outline-none transition hover:border-[rgba(0,255,140,0.32)] hover:bg-[rgba(0,255,136,0.04)] focus-visible:border-accent focus-visible:shadow-glow-xs"
+              triggerClassName="flex h-[38px] w-full items-center justify-between border border-edge/18 bg-rim pl-9 pr-2 text-left font-mono text-sm text-fg-1 outline-none transition hover:border-edge/32 hover:bg-accent-fill/4 focus-visible:border-accent focus-visible:shadow-glow-xs"
               popupClassName="py-1"
             />
           </div>
@@ -93,7 +93,7 @@ export default function CRM() {
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               placeholder="$ search deals…"
-              className="w-full bg-rim border border-[rgba(0,255,140,0.15)] pl-9 pr-3 py-2 text-sm text-fg-1 outline-none focus:border-accent focus:shadow-glow-xs placeholder:text-fg-4"
+              className="w-full bg-rim border border-edge/15 pl-9 pr-3 py-2 text-sm text-fg-1 outline-none focus:border-accent focus:shadow-glow-xs placeholder:text-fg-4"
             />
           </div>
         </div>
@@ -109,7 +109,7 @@ export default function CRM() {
               onClick={() => setActiveBoardId(board.id)}
               className={`px-4 py-2 text-xs font-mono uppercase tracking-label border-b-2 -mb-px transition-colors ${
                 isActive
-                  ? 'border-accent text-accent [text-shadow:0_0_6px_rgba(0,255,136,0.4)]'
+                  ? 'border-accent text-accent glow'
                   : 'border-transparent text-fg-3 hover:text-fg-1'
               }`}
             >

@@ -168,7 +168,7 @@ export default function Labels() {
 
   return (
     <div className="flex h-full min-h-0 flex-col text-fg-1">
-      <div className="border-b border-[rgba(0,255,140,0.12)] px-6 py-4">
+      <div className="border-b border-edge/12 px-6 py-4">
         <div className="flex items-center justify-between gap-4">
           <div>
             <div className="text-[10px] uppercase tracking-label text-fg-3 mb-1">◊ labels</div>
@@ -179,7 +179,7 @@ export default function Labels() {
           </div>
           <button
             onClick={openCreate}
-            className="inline-flex items-center gap-1.5 border border-[rgba(0,255,140,0.3)] bg-[rgba(0,255,136,0.08)] px-3 py-1.5 font-mono text-[10px] uppercase tracking-label text-accent transition hover:bg-[rgba(0,255,136,0.16)] hover:shadow-glow-xs"
+            className="inline-flex items-center gap-1.5 border border-edge/30 bg-accent-fill/8 px-3 py-1.5 font-mono text-[10px] uppercase tracking-label text-accent transition hover:bg-accent-fill/16 hover:shadow-glow-xs"
           >
             <Plus className="h-3 w-3" />
             new label
@@ -193,8 +193,8 @@ export default function Labels() {
               onClick={() => setScopeFilter(scope)}
               className={`inline-flex items-center gap-1.5 border px-2.5 py-1 font-mono text-[10px] uppercase tracking-label transition ${
                 scopeFilter === scope
-                  ? 'border-[rgba(0,255,140,0.35)] bg-[rgba(0,255,136,0.06)] text-accent shadow-glow-xs'
-                  : 'border-[rgba(0,255,140,0.15)] bg-pit-3 text-fg-3 hover:text-fg-1 hover:border-[rgba(0,255,140,0.25)]'
+                  ? 'border-edge/35 bg-accent-fill/6 text-accent shadow-glow-xs'
+                  : 'border-edge/15 bg-pit-3 text-fg-3 hover:text-fg-1 hover:border-edge/25'
               }`}
             >
               {scope === 'company' ? 'organization' : scope}
@@ -220,7 +220,7 @@ export default function Labels() {
               </div>
               <button
                 onClick={openCreate}
-                className="mt-5 inline-flex items-center gap-2 border border-[rgba(0,255,140,0.3)] bg-[rgba(0,255,136,0.08)] px-3 py-1.5 font-mono text-[10px] uppercase tracking-label text-accent transition hover:bg-[rgba(0,255,136,0.16)] hover:shadow-glow-xs"
+                className="mt-5 inline-flex items-center gap-2 border border-edge/30 bg-accent-fill/8 px-3 py-1.5 font-mono text-[10px] uppercase tracking-label text-accent transition hover:bg-accent-fill/16 hover:shadow-glow-xs"
               >
                 <Plus className="h-3 w-3" />
                 new label
@@ -228,8 +228,8 @@ export default function Labels() {
             </div>
           </div>
         ) : (
-          <div className="border-y border-[rgba(0,255,140,0.12)] bg-[rgba(10,14,12,0.6)] backdrop-blur-sm">
-            <div className="flex items-center gap-4 border-b border-[rgba(0,255,140,0.08)] px-6 py-2 font-mono text-[10px] uppercase tracking-label text-fg-4">
+          <div className="border-y border-edge/12 bg-pit-2/60 backdrop-blur-sm">
+            <div className="flex items-center gap-4 border-b border-edge/8 px-6 py-2 font-mono text-[10px] uppercase tracking-label text-fg-4">
               <div className="w-[18px] shrink-0" />
               <div className="min-w-0 flex-1">name</div>
               <div className="hidden md:block w-[260px] shrink-0">description</div>
@@ -245,7 +245,7 @@ export default function Labels() {
                 <button
                   key={label.id}
                   onClick={() => openEdit(label)}
-                  className="flex w-full items-center gap-4 border-b border-[rgba(0,255,140,0.06)] px-6 py-2.5 text-left transition hover:bg-[rgba(0,255,136,0.04)] last:border-b-0"
+                  className="flex w-full items-center gap-4 border-b border-edge/6 px-6 py-2.5 text-left transition hover:bg-accent-fill/4 last:border-b-0"
                 >
                   <span
                     aria-hidden
@@ -338,14 +338,14 @@ function LabelModal({
 }) {
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-[rgba(0,0,0,0.7)] px-4 backdrop-blur-sm"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-overlay/70 px-4 backdrop-blur-sm"
       onClick={onClose}
     >
       <div
-        className="w-full max-w-lg border border-[rgba(0,255,140,0.2)] bg-pit-2 shadow-[0_30px_80px_rgba(0,0,0,0.5)]"
+        className="w-full max-w-lg border border-edge/20 bg-pit-2 shadow-terminal-overlay"
         onClick={(event) => event.stopPropagation()}
       >
-        <div className="border-b border-[rgba(0,255,140,0.12)] px-6 py-5">
+        <div className="border-b border-edge/12 px-6 py-5">
           <div className="text-[10px] uppercase tracking-label text-fg-3">
             {mode === 'create' ? '◊ labels · create' : '◊ labels · edit'}
           </div>
@@ -362,7 +362,7 @@ function LabelModal({
               value={name}
               onChange={(event) => onNameChange(event.target.value)}
               placeholder="$ bug, feature, urgent…"
-              className="w-full bg-rim border border-[rgba(0,255,140,0.15)] px-3 py-2 text-sm text-fg-1 outline-none focus:border-accent focus:shadow-glow-xs placeholder:text-fg-4"
+              className="w-full bg-rim border border-edge/15 px-3 py-2 text-sm text-fg-1 outline-none focus:border-accent focus:shadow-glow-xs placeholder:text-fg-4"
             />
           </label>
 
@@ -373,7 +373,7 @@ function LabelModal({
               onChange={(event) => onDescriptionChange(event.target.value)}
               placeholder="$ optional context for this label"
               rows={2}
-              className="w-full resize-none bg-rim border border-[rgba(0,255,140,0.15)] px-3 py-2 text-sm text-fg-1 outline-none focus:border-accent focus:shadow-glow-xs placeholder:text-fg-4"
+              className="w-full resize-none bg-rim border border-edge/15 px-3 py-2 text-sm text-fg-1 outline-none focus:border-accent focus:shadow-glow-xs placeholder:text-fg-4"
             />
           </label>
 
@@ -389,8 +389,8 @@ function LabelModal({
                     onClick={() => onColorChange(swatch)}
                     className={`flex h-6 w-6 items-center justify-center border transition ${
                       isActive
-                        ? 'border-[rgba(0,255,140,0.5)] shadow-glow-xs'
-                        : 'border-[rgba(0,255,140,0.15)] hover:border-[rgba(0,255,140,0.3)]'
+                        ? 'border-edge/50 shadow-glow-xs'
+                        : 'border-edge/15 hover:border-edge/30'
                     }`}
                     title={swatch}
                   >
@@ -432,7 +432,7 @@ function LabelModal({
                 <select
                   value={scope.companyId}
                   onChange={(event) => onScopeChange({ kind: 'company', companyId: event.target.value })}
-                  className="ml-6 w-[calc(100%-1.5rem)] bg-rim border border-[rgba(0,255,140,0.15)] px-3 py-1.5 text-sm text-fg-1 outline-none focus:border-accent focus:shadow-glow-xs"
+                  className="ml-6 w-[calc(100%-1.5rem)] bg-rim border border-edge/15 px-3 py-1.5 text-sm text-fg-1 outline-none focus:border-accent focus:shadow-glow-xs"
                 >
                   {companies.length === 0 && <option value="">no organizations</option>}
                   {companies.map((c) => (
@@ -459,7 +459,7 @@ function LabelModal({
                     <select
                       value={scope.teamId}
                       onChange={(event) => onScopeChange({ kind: 'team', teamId: event.target.value })}
-                      className="ml-6 w-[calc(100%-1.5rem)] bg-rim border border-[rgba(0,255,140,0.15)] px-3 py-1.5 text-sm text-fg-1 outline-none focus:border-accent focus:shadow-glow-xs"
+                      className="ml-6 w-[calc(100%-1.5rem)] bg-rim border border-edge/15 px-3 py-1.5 text-sm text-fg-1 outline-none focus:border-accent focus:shadow-glow-xs"
                     >
                       {teams.length === 0 && <option value="">no teams</option>}
                       {teams.map((t) => (
@@ -475,7 +475,7 @@ function LabelModal({
           </div>
         </div>
 
-        <div className="flex items-center justify-between border-t border-[rgba(0,255,140,0.12)] px-6 py-4">
+        <div className="flex items-center justify-between border-t border-edge/12 px-6 py-4">
           <div className="flex items-center gap-3">
             <button
               onClick={onClose}
@@ -495,7 +495,7 @@ function LabelModal({
           <button
             onClick={onSubmit}
             disabled={!name.trim() || (!allowGlobal && (scope.kind === 'global' || scope.kind === 'team')) || (scope.kind === 'company' && !scope.companyId) || saving}
-            className="inline-flex items-center gap-2 border border-[rgba(0,255,140,0.3)] bg-[rgba(0,255,136,0.08)] px-4 py-2 font-mono text-xs uppercase tracking-label text-accent transition hover:bg-[rgba(0,255,136,0.16)] hover:shadow-glow-xs disabled:opacity-40 disabled:hover:bg-[rgba(0,255,136,0.08)] disabled:hover:shadow-none"
+            className="inline-flex items-center gap-2 border border-edge/30 bg-accent-fill/8 px-4 py-2 font-mono text-xs uppercase tracking-label text-accent transition hover:bg-accent-fill/16 hover:shadow-glow-xs disabled:opacity-40 disabled:hover:bg-accent-fill/8 disabled:hover:shadow-none"
           >
             <Tag className="h-3.5 w-3.5" />
             {saving ? (mode === 'create' ? 'creating…' : 'saving…') : (mode === 'create' ? 'create label' : 'save label')}
@@ -523,14 +523,14 @@ function ScopeRadio({
       onClick={onClick}
       className={`flex w-full items-start gap-3 border px-3 py-2 text-left transition ${
         checked
-          ? 'border-[rgba(0,255,140,0.4)] bg-[rgba(0,255,136,0.05)]'
-          : 'border-[rgba(0,255,140,0.12)] hover:border-[rgba(0,255,140,0.25)] hover:bg-[rgba(0,255,136,0.03)]'
+          ? 'border-edge/40 bg-accent-fill/5'
+          : 'border-edge/12 hover:border-edge/25 hover:bg-accent-fill/3'
       }`}
     >
       <span
         aria-hidden
         className={`mt-0.5 inline-flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded-full border transition ${
-          checked ? 'border-accent' : 'border-[rgba(0,255,140,0.25)]'
+          checked ? 'border-accent' : 'border-edge/25'
         }`}
       >
         {checked && <span className="block h-1.5 w-1.5 rounded-full bg-accent" />}

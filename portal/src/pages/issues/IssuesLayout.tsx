@@ -307,7 +307,7 @@ export default function IssuesLayout() {
         {/* mobile drawer backdrop */}
         {mobileTrackerOpen && (
           <div
-            className="md:hidden absolute inset-0 z-30 bg-[rgba(0,0,0,0.7)] backdrop-blur-sm"
+            className="md:hidden absolute inset-0 z-30 bg-overlay/70 backdrop-blur-sm"
             onClick={() => setMobileTrackerOpen(false)}
           />
         )}
@@ -316,11 +316,11 @@ export default function IssuesLayout() {
             mobileTrackerOpen
               ? 'absolute inset-y-0 left-0 z-40 w-[80%] max-w-[280px] flex'
               : 'hidden md:flex md:relative md:z-auto md:w-[200px]'
-          } shrink-0 border-r border-[rgba(0,255,140,0.12)] bg-[rgba(5,6,5,0.85)] backdrop-blur-sm px-2 py-4 flex-col md:bg-[rgba(5,6,5,0.6)]`}
+          } shrink-0 border-r border-edge/12 bg-pit backdrop-blur-sm px-2 py-4 flex-col md:bg-pit/60`}
         >
           <div className="px-4 pb-3 mb-2 flex items-start justify-between gap-2">
             <div>
-              <div className="font-bold text-base text-accent [text-shadow:0_0_6px_rgba(0,255,136,0.5)] tracking-wide">
+              <div className="font-bold text-base text-accent glow tracking-wide">
                 p@ch_
               </div>
               <div className="text-[9px] uppercase tracking-label text-fg-4 mt-1">
@@ -339,7 +339,7 @@ export default function IssuesLayout() {
           <div className="mb-4 px-2">
             <button
               onClick={requestComposer}
-              className="flex w-full items-center justify-between gap-2 border border-[rgba(0,255,140,0.3)] bg-[rgba(0,255,136,0.08)] px-3 py-1.5 font-mono text-[10px] uppercase tracking-label text-accent transition hover:bg-[rgba(0,255,136,0.16)] hover:shadow-glow-xs"
+              className="flex w-full items-center justify-between gap-2 border border-edge/30 bg-accent-fill/8 px-3 py-1.5 font-mono text-[10px] uppercase tracking-label text-accent transition hover:bg-accent-fill/16 hover:shadow-glow-xs"
               title="create issue (c)"
             >
               <span className="inline-flex items-center gap-1.5">
@@ -431,8 +431,8 @@ export default function IssuesLayout() {
                         })}
                         className={`flex flex-1 items-center justify-between px-2 py-2 text-left font-mono text-xs lowercase transition ${
                           isActive
-                            ? 'bg-[rgba(0,255,136,0.08)] text-accent ring-1 ring-[rgba(0,255,136,0.2)]'
-                            : 'text-fg-2 hover:bg-[rgba(0,255,136,0.04)] hover:text-fg-1'
+                            ? 'bg-accent-fill/8 text-accent ring-1 ring-accent-fill/20'
+                            : 'text-fg-2 hover:bg-accent-fill/4 hover:text-fg-1'
                         }`}
                       >
                         <span className="truncate">{team.name.toLowerCase()}</span>
@@ -481,10 +481,10 @@ export default function IssuesLayout() {
 
         <main className="flex-1 min-w-0 flex flex-col">
           {/* mobile tracker toggle */}
-          <div className="md:hidden flex items-center gap-2 border-b border-[rgba(0,255,140,0.12)] bg-[rgba(5,6,5,0.6)] backdrop-blur-sm px-3 py-2">
+          <div className="md:hidden flex items-center gap-2 border-b border-edge/12 bg-pit/60 backdrop-blur-sm px-3 py-2">
             <button
               onClick={() => setMobileTrackerOpen(true)}
-              className="flex h-8 w-8 items-center justify-center border border-[rgba(0,255,140,0.2)] bg-pit-3 text-fg-2 transition hover:text-accent hover:border-[rgba(0,255,140,0.4)]"
+              className="flex h-8 w-8 items-center justify-center border border-edge/20 bg-pit-3 text-fg-2 transition hover:text-accent hover:border-edge/40"
               aria-label="open tracker menu"
             >
               <Menu className="h-4 w-4" />
@@ -529,8 +529,8 @@ function TrackerNavButton({
       onClick={onClick}
       className={`flex w-full items-center justify-between px-3 py-2 text-left font-mono text-xs lowercase transition ${
         active
-          ? 'bg-[rgba(0,255,136,0.08)] text-accent ring-1 ring-[rgba(0,255,136,0.2)]'
-          : 'text-fg-2 hover:bg-[rgba(0,255,136,0.04)] hover:text-fg-1'
+          ? 'bg-accent-fill/8 text-accent ring-1 ring-accent-fill/20'
+          : 'text-fg-2 hover:bg-accent-fill/4 hover:text-fg-1'
       }`}
     >
       <span className="truncate">{label}</span>
@@ -577,14 +577,14 @@ function TeamNameModal({
 }) {
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-[rgba(0,0,0,0.7)] px-4 backdrop-blur-sm"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-overlay/70 px-4 backdrop-blur-sm"
       onClick={onClose}
     >
       <div
-        className="w-full max-w-lg border border-[rgba(0,255,140,0.2)] bg-pit-2 shadow-[0_30px_80px_rgba(0,0,0,0.5)]"
+        className="w-full max-w-lg border border-edge/20 bg-pit-2 shadow-terminal-overlay"
         onClick={(event) => event.stopPropagation()}
       >
-        <div className="border-b border-[rgba(0,255,140,0.12)] px-6 py-5">
+        <div className="border-b border-edge/12 px-6 py-5">
           <div className="text-[10px] uppercase tracking-label text-fg-3">
             {mode === 'create' ? '◊ teams · create' : '◊ teams · edit'}
           </div>
@@ -601,12 +601,12 @@ function TeamNameModal({
               value={name}
               onChange={(event) => onNameChange(event.target.value)}
               placeholder="$ product"
-              className="w-full bg-rim border border-[rgba(0,255,140,0.15)] px-3 py-2 text-sm text-fg-1 outline-none focus:border-accent focus:shadow-glow-xs placeholder:text-fg-4"
+              className="w-full bg-rim border border-edge/15 px-3 py-2 text-sm text-fg-1 outline-none focus:border-accent focus:shadow-glow-xs placeholder:text-fg-4"
             />
           </label>
         </div>
 
-        <div className="flex items-center justify-between border-t border-[rgba(0,255,140,0.12)] px-6 py-4">
+        <div className="flex items-center justify-between border-t border-edge/12 px-6 py-4">
           <button
             onClick={onClose}
             className="px-3 py-2 font-mono text-xs uppercase tracking-label text-fg-3 transition hover:text-fg-1"
@@ -616,7 +616,7 @@ function TeamNameModal({
           <button
             onClick={onSubmit}
             disabled={!name.trim() || saving}
-            className="inline-flex items-center gap-2 border border-[rgba(0,255,140,0.3)] bg-[rgba(0,255,136,0.08)] px-4 py-2 font-mono text-xs uppercase tracking-label text-accent transition hover:bg-[rgba(0,255,136,0.16)] hover:shadow-glow-xs disabled:opacity-40 disabled:hover:bg-[rgba(0,255,136,0.08)] disabled:hover:shadow-none"
+            className="inline-flex items-center gap-2 border border-edge/30 bg-accent-fill/8 px-4 py-2 font-mono text-xs uppercase tracking-label text-accent transition hover:bg-accent-fill/16 hover:shadow-glow-xs disabled:opacity-40 disabled:hover:bg-accent-fill/8 disabled:hover:shadow-none"
           >
             <Plus className="h-3.5 w-3.5" />
             {saving ? (mode === 'create' ? 'creating…' : 'saving…') : (mode === 'create' ? 'create team' : 'save team')}

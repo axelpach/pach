@@ -72,10 +72,10 @@ export function FilterButton({
           }}
           className={`inline-flex items-center gap-1.5 border px-2.5 py-1 font-mono text-[10px] uppercase tracking-label transition ${
             isOpen
-              ? 'border-[rgba(0,255,140,0.35)] bg-[rgba(0,255,136,0.06)] text-accent shadow-glow-xs'
+              ? 'border-edge/35 bg-accent-fill/6 text-accent shadow-glow-xs'
               : hasActive
-                ? 'border-[rgba(0,255,140,0.25)] bg-pit-3 text-accent'
-                : 'border-[rgba(0,255,140,0.15)] bg-pit-3 text-fg-3 hover:text-fg-1 hover:border-[rgba(0,255,140,0.25)]'
+                ? 'border-edge/25 bg-pit-3 text-accent'
+                : 'border-edge/15 bg-pit-3 text-fg-3 hover:text-fg-1 hover:border-edge/25'
           }`}
         >
           filter
@@ -106,7 +106,7 @@ export function FilterButton({
         return (
           <span
             key={field}
-            className="group inline-flex items-center gap-1.5 border border-[rgba(0,255,140,0.2)] bg-pit-3 pl-2.5 pr-1 py-0.5 font-mono text-[10px] uppercase tracking-label text-fg-2"
+            className="group inline-flex items-center gap-1.5 border border-edge/20 bg-pit-3 pl-2.5 pr-1 py-0.5 font-mono text-[10px] uppercase tracking-label text-fg-2"
           >
             <button
               onClick={() => openOnField(field)}
@@ -185,9 +185,9 @@ function FilterDropdown({
   }
 
   return (
-    <div className="flex w-[480px] max-h-[340px] overflow-hidden border border-[rgba(0,255,140,0.25)] bg-pit shadow-[0_0_18px_rgba(0,255,136,0.18),0_18px_44px_rgba(0,0,0,0.6)]">
+    <div className="flex w-[480px] max-h-[340px] overflow-hidden border border-edge/25 bg-pit shadow-terminal-popover">
       {/* left: field list */}
-      <div className="w-[160px] shrink-0 overflow-y-auto border-r border-[rgba(0,255,140,0.12)] py-1">
+      <div className="w-[160px] shrink-0 overflow-y-auto border-r border-edge/12 py-1">
         {filterConfigs.map((config) => {
           const isSelected = config.field === selectedField
           const isActive = (activeFilters[config.field]?.length ?? 0) > 0
@@ -201,14 +201,14 @@ function FilterDropdown({
               }}
               className={`flex w-full items-center gap-2 px-3 py-1.5 text-left font-mono text-xs lowercase transition ${
                 isSelected
-                  ? 'bg-[rgba(0,255,136,0.08)] text-accent'
-                  : 'text-fg-2 hover:bg-[rgba(0,255,136,0.04)] hover:text-fg-1'
+                  ? 'bg-accent-fill/8 text-accent'
+                  : 'text-fg-2 hover:bg-accent-fill/4 hover:text-fg-1'
               }`}
             >
               <span
                 aria-hidden
                 className="block h-1.5 w-1.5 shrink-0 rounded-full"
-                style={{ background: isActive ? 'var(--phosphor, #00ff88)' : 'transparent' }}
+                style={{ background: isActive ? 'var(--accent)' : 'transparent' }}
               />
               <Icon className="h-3.5 w-3.5 shrink-0 text-fg-4" />
               <span className="truncate">{config.label}</span>
@@ -219,7 +219,7 @@ function FilterDropdown({
 
       {/* right: options */}
       <div className="flex flex-1 min-w-0 flex-col">
-        <div className="flex items-center justify-between border-b border-[rgba(0,255,140,0.12)] px-3 py-2">
+        <div className="flex items-center justify-between border-b border-edge/12 px-3 py-2">
           <span className="font-mono text-[10px] uppercase tracking-label text-fg-3">
             {selectedConfig?.label}
           </span>
@@ -237,14 +237,14 @@ function FilterDropdown({
         </div>
 
         {showSearch && (
-          <div className="border-b border-[rgba(0,255,140,0.08)] px-3 py-2">
+          <div className="border-b border-edge/8 px-3 py-2">
             <div className="relative">
               <Search className="absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-fg-4" strokeWidth={1.5} />
               <input
                 value={searchQuery}
                 onChange={(event) => setSearchQuery(event.target.value)}
                 placeholder="$ search…"
-                className="w-full bg-rim border border-[rgba(0,255,140,0.15)] pl-7 pr-2 py-1.5 font-mono text-xs text-fg-1 outline-none focus:border-accent focus:shadow-glow-xs placeholder:text-fg-4"
+                className="w-full bg-rim border border-edge/15 pl-7 pr-2 py-1.5 font-mono text-xs text-fg-1 outline-none focus:border-accent focus:shadow-glow-xs placeholder:text-fg-4"
               />
             </div>
           </div>
@@ -260,14 +260,14 @@ function FilterDropdown({
                 <button
                   key={option.value}
                   onClick={() => toggleValue(option.value)}
-                  className="flex w-full items-center gap-2.5 px-3 py-1.5 text-left font-mono text-xs lowercase text-fg-2 hover:bg-[rgba(0,255,136,0.04)] hover:text-fg-1 transition"
+                  className="flex w-full items-center gap-2.5 px-3 py-1.5 text-left font-mono text-xs lowercase text-fg-2 hover:bg-accent-fill/4 hover:text-fg-1 transition"
                 >
                   <span
                     aria-hidden
                     className={`inline-flex h-3.5 w-3.5 shrink-0 items-center justify-center border transition ${
                       isChecked
                         ? 'border-accent bg-accent'
-                        : 'border-[rgba(0,255,140,0.2)] bg-transparent'
+                        : 'border-edge/20 bg-transparent'
                     }`}
                   >
                     {isChecked && <Check className="h-2.5 w-2.5 text-pit" strokeWidth={3} />}

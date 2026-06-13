@@ -238,7 +238,7 @@ export default function TaskTriggers() {
 
   return (
     <div className="flex h-full min-h-0 flex-col text-fg-1">
-      <div className="border-b border-[rgba(0,255,140,0.12)] px-6 py-4">
+      <div className="border-b border-edge/12 px-6 py-4">
         <div className="flex items-center justify-between gap-4">
           <div>
             <div className="mb-1 text-[10px] uppercase tracking-label text-fg-3">// triggers</div>
@@ -252,7 +252,7 @@ export default function TaskTriggers() {
               <button
                 onClick={runDueNow}
                 disabled={running}
-                className="inline-flex items-center gap-1.5 border border-[rgba(0,255,140,0.2)] bg-pit-3 px-3 py-1.5 font-mono text-[10px] uppercase tracking-label text-fg-2 transition hover:border-[rgba(0,255,140,0.35)] hover:text-accent disabled:opacity-40"
+                className="inline-flex items-center gap-1.5 border border-edge/20 bg-pit-3 px-3 py-1.5 font-mono text-[10px] uppercase tracking-label text-fg-2 transition hover:border-edge/35 hover:text-accent disabled:opacity-40"
                 title="run due triggers now"
               >
                 <RefreshCw className={`h-3 w-3 ${running ? 'animate-spin' : ''}`} />
@@ -262,7 +262,7 @@ export default function TaskTriggers() {
             <button
               onClick={openCreate}
               disabled={teams.length === 0 || (!canAccessUnscoped && scopedCompanies.length === 0)}
-              className="inline-flex items-center gap-1.5 border border-[rgba(0,255,140,0.3)] bg-[rgba(0,255,136,0.08)] px-3 py-1.5 font-mono text-[10px] uppercase tracking-label text-accent transition hover:bg-[rgba(0,255,136,0.16)] hover:shadow-glow-xs disabled:opacity-40"
+              className="inline-flex items-center gap-1.5 border border-edge/30 bg-accent-fill/8 px-3 py-1.5 font-mono text-[10px] uppercase tracking-label text-accent transition hover:bg-accent-fill/16 hover:shadow-glow-xs disabled:opacity-40"
             >
               <Plus className="h-3 w-3" />
               new trigger
@@ -271,10 +271,10 @@ export default function TaskTriggers() {
         </div>
 
         <div className="mt-4 flex flex-wrap items-center gap-2 font-mono text-[10px] uppercase tracking-label">
-          <span className="border border-[rgba(0,255,140,0.15)] bg-pit-3 px-2.5 py-1 text-fg-3">
+          <span className="border border-edge/15 bg-pit-3 px-2.5 py-1 text-fg-3">
             active <span className="text-accent">· {activeCount}</span>
           </span>
-          <span className="border border-[rgba(0,255,140,0.15)] bg-pit-3 px-2.5 py-1 text-fg-3">
+          <span className="border border-edge/15 bg-pit-3 px-2.5 py-1 text-fg-3">
             total <span className="text-fg-2">· {scopedTriggers.length}</span>
           </span>
           {runMessage && <span className="text-fg-4">{runMessage}</span>}
@@ -292,7 +292,7 @@ export default function TaskTriggers() {
               <button
                 onClick={openCreate}
                 disabled={teams.length === 0 || (!canAccessUnscoped && scopedCompanies.length === 0)}
-                className="mt-5 inline-flex items-center gap-2 border border-[rgba(0,255,140,0.3)] bg-[rgba(0,255,136,0.08)] px-3 py-1.5 font-mono text-[10px] uppercase tracking-label text-accent transition hover:bg-[rgba(0,255,136,0.16)] hover:shadow-glow-xs disabled:opacity-40"
+                className="mt-5 inline-flex items-center gap-2 border border-edge/30 bg-accent-fill/8 px-3 py-1.5 font-mono text-[10px] uppercase tracking-label text-accent transition hover:bg-accent-fill/16 hover:shadow-glow-xs disabled:opacity-40"
               >
                 <Plus className="h-3 w-3" />
                 new trigger
@@ -300,8 +300,8 @@ export default function TaskTriggers() {
             </div>
           </div>
         ) : (
-          <div className="border-y border-[rgba(0,255,140,0.12)] bg-[rgba(10,14,12,0.6)] backdrop-blur-sm">
-            <div className="grid grid-cols-[28px_minmax(220px,1fr)_180px_170px_140px_82px] items-center gap-4 border-b border-[rgba(0,255,140,0.08)] px-6 py-2 font-mono text-[10px] uppercase tracking-label text-fg-4">
+          <div className="border-y border-edge/12 bg-pit-2/60 backdrop-blur-sm">
+            <div className="grid grid-cols-[28px_minmax(220px,1fr)_180px_170px_140px_82px] items-center gap-4 border-b border-edge/8 px-6 py-2 font-mono text-[10px] uppercase tracking-label text-fg-4">
               <div />
               <div>trigger</div>
               <div>schedule</div>
@@ -314,7 +314,7 @@ export default function TaskTriggers() {
               return (
                 <div
                   key={trigger.id}
-                  className="grid grid-cols-[28px_minmax(220px,1fr)_180px_170px_140px_82px] items-center gap-4 border-b border-[rgba(0,255,140,0.06)] px-6 py-2.5 transition hover:bg-[rgba(0,255,136,0.04)] last:border-b-0"
+                  className="grid grid-cols-[28px_minmax(220px,1fr)_180px_170px_140px_82px] items-center gap-4 border-b border-edge/6 px-6 py-2.5 transition hover:bg-accent-fill/4 last:border-b-0"
                 >
                   <button
                     onClick={() => toggleEnabled(trigger)}
@@ -442,15 +442,15 @@ function TriggerModal({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-start justify-center bg-[rgba(0,0,0,0.7)] px-4 pt-[7vh] backdrop-blur-sm"
+      className="fixed inset-0 z-50 flex items-start justify-center bg-overlay/70 px-4 pt-[7vh] backdrop-blur-sm"
       onClick={onClose}
     >
       <div
-        className="max-h-[88vh] w-full max-w-2xl overflow-auto border border-[rgba(0,255,140,0.2)] bg-pit-2 shadow-[0_30px_80px_rgba(0,0,0,0.5)]"
+        className="max-h-[88vh] w-full max-w-2xl overflow-auto border border-edge/20 bg-pit-2 shadow-terminal-overlay"
         onClick={(event) => event.stopPropagation()}
         onKeyDown={handleKeyDown}
       >
-        <div className="flex items-center justify-between border-b border-[rgba(0,255,140,0.12)] px-5 py-3">
+        <div className="flex items-center justify-between border-b border-edge/12 px-5 py-3">
           <div className="flex items-center gap-2 font-mono text-xs">
             <PachSelect
               variant="button"
@@ -458,7 +458,7 @@ function TriggerModal({
               onChange={changeTeam}
               options={teams.map((team) => ({ value: team.id, label: team.name.toLowerCase() }))}
               trigger={
-                <span className="inline-flex items-center gap-1.5 border border-[rgba(0,255,140,0.25)] bg-[rgba(0,255,136,0.05)] px-2 py-0.5 font-mono text-[10px] uppercase tracking-label text-accent">
+                <span className="inline-flex items-center gap-1.5 border border-edge/25 bg-accent-fill/5 px-2 py-0.5 font-mono text-[10px] uppercase tracking-label text-accent">
                   {currentTeam?.key ?? 'team'}
                 </span>
               }
@@ -623,7 +623,7 @@ function TriggerModal({
           />
         </div>
 
-        <div className="border-t border-[rgba(0,255,140,0.08)] px-5 py-4">
+        <div className="border-t border-edge/8 px-5 py-4">
           <div className="mb-3 flex items-center justify-between gap-3">
             <div className="font-mono text-[10px] uppercase tracking-label text-fg-3">schedule</div>
             <button
@@ -731,12 +731,12 @@ function TriggerModal({
             </Field>
           </div>
 
-          <div className="mt-3 border border-[rgba(0,255,140,0.12)] bg-rim px-3 py-2 font-mono text-[10px] uppercase tracking-label text-fg-3">
+          <div className="mt-3 border border-edge/12 bg-rim px-3 py-2 font-mono text-[10px] uppercase tracking-label text-fg-3">
             next <span className="text-accent">· {formatDateTime(computeNextRunAt(scheduleFromDraft(draft)).getTime(), draft.timezone)}</span>
           </div>
         </div>
 
-        <div className="flex items-center justify-between border-t border-[rgba(0,255,140,0.12)] px-6 py-4">
+        <div className="flex items-center justify-between border-t border-edge/12 px-6 py-4">
           <div className="flex items-center gap-3">
             <button
               onClick={onClose}
@@ -757,7 +757,7 @@ function TriggerModal({
           <button
             onClick={onSubmit}
             disabled={!draft.name.trim() || !draft.title.trim() || !draft.teamId || !draft.statusId || (!allowNoOrganization && !draft.companyId) || saving}
-            className="inline-flex items-center gap-2 border border-[rgba(0,255,140,0.3)] bg-[rgba(0,255,136,0.08)] px-4 py-2 font-mono text-xs uppercase tracking-label text-accent transition hover:bg-[rgba(0,255,136,0.16)] hover:shadow-glow-xs disabled:opacity-40 disabled:hover:bg-[rgba(0,255,136,0.08)] disabled:hover:shadow-none"
+            className="inline-flex items-center gap-2 border border-edge/30 bg-accent-fill/8 px-4 py-2 font-mono text-xs uppercase tracking-label text-accent transition hover:bg-accent-fill/16 hover:shadow-glow-xs disabled:opacity-40 disabled:hover:bg-accent-fill/8 disabled:hover:shadow-none"
           >
             {mode === 'create' ? <CalendarClock className="h-3.5 w-3.5" /> : <Save className="h-3.5 w-3.5" />}
             {saving ? 'saving...' : mode === 'create' ? 'create trigger' : 'save trigger'}
@@ -768,7 +768,7 @@ function TriggerModal({
   )
 }
 
-const inputClass = 'w-full bg-rim border border-[rgba(0,255,140,0.15)] px-3 py-2 text-sm text-fg-1 outline-none focus:border-accent focus:shadow-glow-xs placeholder:text-fg-4'
+const inputClass = 'w-full bg-rim border border-edge/15 px-3 py-2 text-sm text-fg-1 outline-none focus:border-accent focus:shadow-glow-xs placeholder:text-fg-4'
 
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
@@ -781,7 +781,7 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
 
 function ComposerPill({ icon, label }: { icon: React.ReactNode; label: string }) {
   return (
-    <span className="inline-flex items-center gap-1.5 border border-[rgba(0,255,140,0.2)] bg-pit-3 px-2.5 py-1 font-mono text-[11px] lowercase text-fg-2 transition hover:border-[rgba(0,255,140,0.4)] hover:bg-[rgba(0,255,136,0.04)] hover:text-fg-1">
+    <span className="inline-flex items-center gap-1.5 border border-edge/20 bg-pit-3 px-2.5 py-1 font-mono text-[11px] lowercase text-fg-2 transition hover:border-edge/40 hover:bg-accent-fill/4 hover:text-fg-1">
       <span className="flex h-3.5 w-3.5 items-center justify-center">{icon}</span>
       <span className="max-w-[160px] truncate">{label}</span>
     </span>
@@ -794,14 +794,14 @@ function ToggleSwitch({ enabled }: { enabled: boolean }) {
       aria-hidden
       className={`relative inline-flex h-3.5 w-7 items-center border transition ${
         enabled
-          ? 'border-[rgba(0,255,140,0.45)] bg-[rgba(0,255,136,0.14)] shadow-glow-xs'
-          : 'border-[rgba(0,255,140,0.18)] bg-pit-3'
+          ? 'border-edge/45 bg-accent-fill/14 shadow-glow-xs'
+          : 'border-edge/18 bg-pit-3'
       }`}
     >
       <span
         className={`absolute top-1/2 h-2 w-2 -translate-y-1/2 transition ${
           enabled
-            ? 'left-[15px] bg-accent shadow-[0_0_8px_rgba(0,255,136,0.65)]'
+            ? 'left-[15px] bg-accent shadow-glow-xs'
             : 'left-1 bg-fg-4'
         }`}
       />
@@ -816,8 +816,8 @@ function SegmentButton({ active, label, onClick }: { active: boolean; label: str
       onClick={onClick}
       className={`border px-3 py-2 font-mono text-xs lowercase transition ${
         active
-          ? 'border-[rgba(0,255,140,0.4)] bg-[rgba(0,255,136,0.06)] text-accent shadow-glow-xs'
-          : 'border-[rgba(0,255,140,0.15)] bg-pit-3 text-fg-3 hover:border-[rgba(0,255,140,0.25)] hover:text-fg-1'
+          ? 'border-edge/40 bg-accent-fill/6 text-accent shadow-glow-xs'
+          : 'border-edge/15 bg-pit-3 text-fg-3 hover:border-edge/25 hover:text-fg-1'
       }`}
     >
       {label}

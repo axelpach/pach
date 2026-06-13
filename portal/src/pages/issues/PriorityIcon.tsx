@@ -27,8 +27,8 @@ function UrgentIcon({ className }: { className: string }) {
   return (
     <svg viewBox="0 0 16 16" className={`${className} text-amber`} aria-hidden="true">
       <rect x="1.5" y="1.5" width="13" height="13" rx="2" fill="currentColor" />
-      <rect x="7" y="4" width="2" height="5.5" rx="0.5" fill="#0a0e0c" />
-      <rect x="7" y="10.5" width="2" height="2" rx="0.5" fill="#0a0e0c" />
+      <rect x="7" y="4" width="2" height="5.5" rx="0.5" fill="var(--bg-1)" />
+      <rect x="7" y="10.5" width="2" height="2" rx="0.5" fill="var(--bg-1)" />
     </svg>
   )
 }
@@ -51,7 +51,7 @@ function SignalBars({ active, className }: { active: 1 | 2 | 3; className: strin
             width="2.5"
             height={bar.height}
             rx="0.5"
-            fill={isLit ? 'currentColor' : 'rgba(255,255,255,0.15)'}
+            fill={isLit ? 'currentColor' : 'rgb(var(--edge-rgb) / 0.15)'}
           />
         )
       })}

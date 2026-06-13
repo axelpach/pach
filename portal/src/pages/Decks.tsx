@@ -24,18 +24,18 @@ export default function Decks() {
           </p>
         </div>
 
-        <div className="border-t border-[rgba(0,255,140,0.10)]">
+        <div className="border-t border-edge/10">
           {decks.map((deck) => (
             <Link
               key={deck.slug}
               to={`/decks/${deck.slug}`}
-              className="group flex items-center gap-4 px-3 py-3.5 border-b border-[rgba(0,255,140,0.10)] hover:bg-[rgba(0,255,136,0.03)] hover:border-strong transition-colors"
+              className="group flex items-center gap-4 px-3 py-3.5 border-b border-edge/10 hover:bg-accent-fill/3 hover:border-edge/35 transition-colors"
             >
               <span className="text-fg-4 group-hover:text-accent transition-colors text-sm">▸</span>
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-3 flex-wrap">
                   <span className="font-mono font-semibold text-fg-1 lowercase">{deck.title}</span>
-                  <span className="px-1.5 py-0 border border-[rgba(0,255,140,0.15)] text-[9px] uppercase tracking-label text-fg-3">
+                  <span className="px-1.5 py-0 border border-edge/15 text-[9px] uppercase tracking-label text-fg-3">
                     {deck.project}
                   </span>
                 </div>
