@@ -313,11 +313,6 @@ export default function Issues() {
     })
   }
 
-  const workspaceCompany =
-    scopedCompanies.find((company) => company.project === 'pach') ??
-    scopedCompanies.find((company) => company.name.trim().toLowerCase() === 'pach') ??
-    null
-
   const companyMap = new Map(scopedCompanies.map((company) => [company.id, company]))
   const teamMap = new Map(teams.map((team) => [team.id, team]))
   const statusMap = new Map(statuses.map((status) => [status.id, status]))
@@ -346,7 +341,7 @@ export default function Issues() {
   }
   const workspaceStatuses = getWorkspaceStatuses(statuses)
 
-  const contextCompanies = scopedCompanies.filter((company) => company.id !== workspaceCompany?.id)
+  const contextCompanies = scopedCompanies
   const selectedTeam = section.kind === 'team' ? teams.find((team) => team.id === section.teamId) ?? null : null
   const selectedTeamIssues = selectedTeam ? scopedIssues.filter((issue) => issue.teamId === selectedTeam.id) : []
   const selectedTeamProjects = selectedTeam ? projects.filter((project) => project.teamId === selectedTeam.id) : []
@@ -1288,7 +1283,6 @@ export default function Issues() {
                                         key={issue.id}
                                         issue={issue}
                                         company={issue.contextCompanyId ? companyMap.get(issue.contextCompanyId) ?? null : null}
-                                        workspaceCompanyId={workspaceCompany?.id ?? null}
                                         team={teamMap.get(issue.teamId) ?? null}
                                         project={issue.projectId ? projectMap.get(issue.projectId) : null}
                                         assignee={issue.assigneeId ? userMap.get(issue.assigneeId) : null}
@@ -1339,7 +1333,6 @@ export default function Issues() {
                       <IssueRow
                         issue={activeDragIssue}
                         company={activeDragIssue.contextCompanyId ? companyMap.get(activeDragIssue.contextCompanyId) ?? null : null}
-                        workspaceCompanyId={workspaceCompany?.id ?? null}
                         team={teamMap.get(activeDragIssue.teamId) ?? null}
                         project={activeDragIssue.projectId ? projectMap.get(activeDragIssue.projectId) : null}
                         assignee={activeDragIssue.assigneeId ? userMap.get(activeDragIssue.assigneeId) : null}
@@ -2133,7 +2126,6 @@ function AgentRunDot() {
 function IssueRow({
   issue,
   company,
-  workspaceCompanyId,
   team,
   project,
   assignee,
@@ -2159,7 +2151,6 @@ function IssueRow({
 }: {
   issue: Schema['tables']['pm_issues']['row']
   company: Schema['tables']['organizations']['row'] | null
-  workspaceCompanyId: string | null
   team: Schema['tables']['pm_teams']['row'] | null
   project: Schema['tables']['pm_projects']['row'] | null | undefined
   assignee: Schema['tables']['users']['row'] | null | undefined
@@ -2185,7 +2176,7 @@ function IssueRow({
   onHoverChange?: (hovered: boolean) => void
 }) {
   const navigate = useNavigate()
-  const showCompany = company && company.id !== workspaceCompanyId
+  const showCompany = Boolean(company)
   const shows = (field: RowField) => visibleFields.has(field)
   const currentShortcut = shortcutRequest?.issueId === issue.id ? shortcutRequest : null
   const statusOpenSignal =
