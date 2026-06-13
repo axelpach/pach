@@ -70,7 +70,7 @@ const WEEKDAYS = [
 ] as const
 
 const ESTIMATES = [1, 2, 4, 8, 16]
-const TRIGGER_STATUS_KEYS = ['todo', 'backlog', 'blocked', 'in_progress', 'done'] as const
+const TRIGGER_STATUS_KEYS = ['todo', 'backlog', 'blocked', 'in_review', 'in_progress', 'done'] as const
 
 export default function TaskTriggers() {
   const z = useZero<Schema, Mutators>()

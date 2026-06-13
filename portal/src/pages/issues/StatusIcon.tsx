@@ -10,6 +10,7 @@ export function StatusIcon({
   if (statusType === 'completed') return <CheckCircle2 className={`${className} text-accent`} />
   if (statusType === 'canceled') return <XCircle className={`${className} text-fg-4`} />
   if (statusType === 'started') return <HalfFilledCircle className={`${className} text-amber`} />
+  if (statusType === 'review') return <HalfFilledCircle className={`${className} text-accent`} />
   if (statusType === 'blocked') return <HalfFilledCircle className={`${className} text-fail`} />
   return <Circle className={`${className} text-fg-4`} />
 }

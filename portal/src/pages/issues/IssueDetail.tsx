@@ -516,7 +516,7 @@ export default function IssueDetail() {
                     const newStatus = workspaceStatuses.find((s) => s.id === next)
                     const patch: Record<string, unknown> = { statusId: next }
                     const now = Date.now()
-                    if (newStatus?.type === 'started' && !issue.startedAt) patch.startedAt = now
+                    if ((newStatus?.type === 'started' || newStatus?.type === 'review') && !issue.startedAt) patch.startedAt = now
                     if (newStatus?.type === 'completed') patch.completedAt = now
                     if (newStatus?.type === 'canceled') patch.canceledAt = now
                     await patchIssue(
@@ -1498,7 +1498,22 @@ function getWorkspaceStatuses(statuses: Schema['tables']['pm_statuses']['row'][]
     if (!uniqueStatuses.has(status.key)) uniqueStatuses.set(status.key, status)
   }
 
-  return Array.from(uniqueStatuses.values()).sort((a, b) => a.position - b.position)
+  return Array.from(uniqueStatuses.values()).sort((a, b) => {
+    const rankDiff = statusRank(a.type) - statusRank(b.type)
+    if (rankDiff !== 0) return rankDiff
+    return a.position - b.position
+  })
+}
+
+function statusRank(statusType: string) {
+  if (statusType === 'backlog') return 0
+  if (statusType === 'unstarted') return 1
+  if (statusType === 'started') return 2
+  if (statusType === 'review') return 3
+  if (statusType === 'blocked') return 4
+  if (statusType === 'completed') return 5
+  if (statusType === 'canceled') return 6
+  return 99
 }
 
 function slugify(value: string) {

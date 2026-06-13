@@ -187,6 +187,7 @@ export default function IssuesLayout() {
         const statusDefs = [
           { id: crypto.randomUUID(), name: 'Todo', key: 'todo', type: 'unstarted', color: '#94a3b8' },
           { id: crypto.randomUUID(), name: 'In Progress', key: 'in_progress', type: 'started', color: '#fbbf24' },
+          { id: crypto.randomUUID(), name: 'In Review', key: 'in_review', type: 'review', color: '#38bdf8' },
           { id: crypto.randomUUID(), name: 'Blocked', key: 'blocked', type: 'blocked', color: '#f87171' },
           { id: crypto.randomUUID(), name: 'Done', key: 'done', type: 'completed', color: '#4ade80' },
         ] as const
@@ -289,10 +290,9 @@ export default function IssuesLayout() {
     }
   }
 
-  // ensure the 6 standard workspace-scoped status rows exist (backlog, todo, in
-  // progress, blocked, done, canceled). New teams may seed their own copies,
-  // but the row's status dropdown reads from workspace scope, so they need to
-  // be present here as well.
+  // ensure the 7 standard workspace-scoped status rows exist. New teams may
+  // seed their own copies, but the row's status dropdown reads from workspace
+  // scope, so they need to be present here as well.
   const seededWorkspaceStatusesRef = useRef(false)
   useEffect(() => {
     if (seededWorkspaceStatusesRef.current) return
@@ -301,6 +301,7 @@ export default function IssuesLayout() {
       { key: 'backlog', name: 'Backlog', type: 'backlog', color: '#6b7280' },
       { key: 'todo', name: 'Todo', type: 'unstarted', color: '#94a3b8' },
       { key: 'in_progress', name: 'In Progress', type: 'started', color: '#fbbf24' },
+      { key: 'in_review', name: 'In Review', type: 'review', color: '#38bdf8' },
       { key: 'blocked', name: 'Blocked', type: 'blocked', color: '#f87171' },
       { key: 'done', name: 'Done', type: 'completed', color: '#4ade80' },
       { key: 'canceled', name: 'Canceled', type: 'canceled', color: '#9ca3af' },

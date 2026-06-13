@@ -48,8 +48,9 @@ const ACTIVE_AGENT_RUN_STATUSES = new Set<string>(['queued', 'reserved', 'bootst
 const STATUS_BUCKETS = [
   { key: 'backlog', label: 'backlog', type: 'backlog' },
   { key: 'todo', label: 'todo', type: 'unstarted' },
-  { key: 'in_progress', label: 'in progress', type: 'started' },
   { key: 'blocked', label: 'blocked', type: 'blocked' },
+  { key: 'in_review', label: 'in review', type: 'review' },
+  { key: 'in_progress', label: 'in progress', type: 'started' },
   { key: 'done', label: 'done', type: 'completed' },
   { key: 'canceled', label: 'canceled', type: 'canceled' },
 ] as const
@@ -906,7 +907,7 @@ export default function Issues() {
     if (activeIssue.statusId !== targetStatus.id) {
       patch.statusId = targetStatus.id
       const now = Date.now()
-      if (targetStatus.type === 'started' && !activeIssue.startedAt) patch.startedAt = now
+      if ((targetStatus.type === 'started' || targetStatus.type === 'review') && !activeIssue.startedAt) patch.startedAt = now
       if (targetStatus.type === 'completed') patch.completedAt = now
       if (targetStatus.type === 'canceled') patch.canceledAt = now
       const fromStatus = statusMap.get(activeIssue.statusId)
@@ -1032,7 +1033,7 @@ export default function Issues() {
       sortOrder: getNextSortOrder(issue.priority, nextStatusId, issue.id),
     }
     const now = Date.now()
-    if (next.type === 'started' && !issue.startedAt) patch.startedAt = now
+    if ((next.type === 'started' || next.type === 'review') && !issue.startedAt) patch.startedAt = now
     if (next.type === 'completed') patch.completedAt = now
     if (next.type === 'canceled') patch.canceledAt = now
     await z.mutate.pm_issues.update({ id: issueId, ...patch })
@@ -1061,6 +1062,7 @@ export default function Issues() {
     const statusDefs = [
       { id: crypto.randomUUID(), name: 'Todo', key: 'todo', type: 'unstarted', color: '#94a3b8' },
       { id: crypto.randomUUID(), name: 'In Progress', key: 'in_progress', type: 'started', color: '#fbbf24' },
+      { id: crypto.randomUUID(), name: 'In Review', key: 'in_review', type: 'review', color: '#38bdf8' },
       { id: crypto.randomUUID(), name: 'Blocked', key: 'blocked', type: 'blocked', color: '#f87171' },
       { id: crypto.randomUUID(), name: 'Canceled', key: 'canceled', type: 'canceled', color: '#6b7280' },
       { id: crypto.randomUUID(), name: 'Done', key: 'done', type: 'completed', color: '#4ade80' },
@@ -2829,6 +2831,9 @@ function makeIssueComparator(
 
 function getStatusBucket(status?: Schema['tables']['pm_statuses']['row'] | null) {
   if (!status) return null
+  if (status.key === 'in_review' || status.type === 'review') {
+    return { key: 'in_review', name: 'in review', type: 'review', position: 3 }
+  }
   if (status.type === 'backlog') {
     return { key: 'backlog', name: 'backlog', type: 'backlog', position: 0 }
   }
@@ -2839,13 +2844,13 @@ function getStatusBucket(status?: Schema['tables']['pm_statuses']['row'] | null)
     return { key: 'in_progress', name: 'in progress', type: 'started', position: 2 }
   }
   if (status.type === 'blocked') {
-    return { key: 'blocked', name: 'blocked', type: 'blocked', position: 3 }
+    return { key: 'blocked', name: 'blocked', type: 'blocked', position: 4 }
   }
   if (status.type === 'completed') {
-    return { key: 'done', name: 'done', type: 'completed', position: 4 }
+    return { key: 'done', name: 'done', type: 'completed', position: 5 }
   }
   if (status.type === 'canceled') {
-    return { key: 'canceled', name: 'canceled', type: 'canceled', position: 5 }
+    return { key: 'canceled', name: 'canceled', type: 'canceled', position: 6 }
   }
   return {
     key: status.key,
@@ -2859,19 +2864,21 @@ function statusRank(statusType: string) {
   if (statusType === 'backlog') return 0
   if (statusType === 'unstarted') return 1
   if (statusType === 'started') return 2
-  if (statusType === 'blocked') return 3
-  if (statusType === 'completed') return 4
-  if (statusType === 'canceled') return 5
+  if (statusType === 'review') return 3
+  if (statusType === 'blocked') return 4
+  if (statusType === 'completed') return 5
+  if (statusType === 'canceled') return 6
   return 99
 }
 
 function issueSectionStatusRank(statusType: string) {
   if (statusType === 'blocked') return 0
-  if (statusType === 'started') return 1
-  if (statusType === 'unstarted') return 2
-  if (statusType === 'backlog') return 3
-  if (statusType === 'completed') return 4
-  if (statusType === 'canceled') return 5
+  if (statusType === 'review') return 1
+  if (statusType === 'started') return 2
+  if (statusType === 'unstarted') return 3
+  if (statusType === 'backlog') return 4
+  if (statusType === 'completed') return 5
+  if (statusType === 'canceled') return 6
   return 99
 }
 

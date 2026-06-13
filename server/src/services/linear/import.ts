@@ -122,9 +122,10 @@ type UserRow = InferSelectModel<typeof users>
 const CANONICAL_STATUSES = [
   { key: 'todo', name: 'Todo', type: 'unstarted', color: '#94a3b8', position: 0 },
   { key: 'in_progress', name: 'In Progress', type: 'started', color: '#fbbf24', position: 1 },
-  { key: 'blocked', name: 'Blocked', type: 'blocked', color: '#f87171', position: 2 },
-  { key: 'canceled', name: 'Canceled', type: 'canceled', color: '#6b7280', position: 3 },
-  { key: 'done', name: 'Done', type: 'completed', color: '#4ade80', position: 4 },
+  { key: 'in_review', name: 'In Review', type: 'review', color: '#38bdf8', position: 2 },
+  { key: 'blocked', name: 'Blocked', type: 'blocked', color: '#f87171', position: 3 },
+  { key: 'canceled', name: 'Canceled', type: 'canceled', color: '#6b7280', position: 4 },
+  { key: 'done', name: 'Done', type: 'completed', color: '#4ade80', position: 5 },
 ] as const
 
 const LINEAR_API_URL = process.env.LINEAR_API_URL || 'https://api.linear.app/graphql'
@@ -349,9 +350,11 @@ function normalizeStateType(state: Pick<LinearState, 'name' | 'type'>) {
   const rawType = state.type?.toLowerCase() ?? ''
   const name = state.name.toLowerCase()
   if (name.includes('block')) return 'blocked'
+  if (name.includes('review')) return 'review'
   if (rawType === 'backlog') return 'backlog'
   if (rawType === 'unstarted') return 'unstarted'
   if (rawType === 'started') return 'started'
+  if (rawType === 'review') return 'review'
   if (rawType === 'completed') return 'completed'
   if (rawType === 'canceled') return 'canceled'
   if (rawType === 'duplicate') return 'canceled'
@@ -361,6 +364,7 @@ function normalizeStateType(state: Pick<LinearState, 'name' | 'type'>) {
 function normalizeLinearStatusKey(state: Pick<LinearState, 'name' | 'type'>) {
   const stateType = normalizeStateType(state)
   if (stateType === 'blocked') return 'blocked'
+  if (stateType === 'review') return 'in_review'
   if (stateType === 'started') return 'in_progress'
   if (stateType === 'completed') return 'done'
   if (stateType === 'canceled') return 'canceled'

@@ -416,7 +416,7 @@ export const pmStatuses = pgTable('pm_statuses', {
   name: text('name').notNull(),
   /** Stable programmatic key, e.g. todo, in_progress, blocked */
   key: text('key').notNull(),
-  /** backlog | unstarted | started | blocked | completed | canceled */
+  /** backlog | unstarted | started | review | blocked | completed | canceled */
   type: text('type').notNull().default('unstarted'),
   description: text('description'),
   color: text('color'),
