@@ -382,12 +382,21 @@ export default function Finance() {
   const dashboardNonTransferMovements = dashboardAccountMovements.filter((movement) => !isTransferLikeMovement(movement, scopedCategories))
   const dashboardAccountBalances = buildAccountBalanceBreakdown(dashboardAccountMovements, scopedAccounts, selectedDashboardCurrencyFilterIds)
   const dashboardBalanceTotals = summarizeAccountBalances(dashboardAccountBalances)
+  const dashboardKpis = summarizeDashboardKpis(dashboardAccountBalances, dashboardNonTransferMovements)
   const monthlyBalance = buildMonthlyBalance(dashboardAccountMovements, scopedAccounts, selectedDashboardCurrencyFilterIds)
   const dashboardFxReady = dashboardFx.status === 'ready' && dashboardFx.baseCurrencyCode === dashboardReportingCurrencyCode
   const dashboardFxFailed = dashboardFx.status === 'failed' && dashboardFx.baseCurrencyCode === dashboardReportingCurrencyCode
   const dashboardConversionRates = dashboardFxReady ? dashboardFx.rates : dashboardFxFailed ? {} : null
   const convertedDashboardBalance = dashboardConversionRates
     ? convertMoneyAmounts(dashboardBalanceTotals.netAmounts, dashboardReportingCurrencyCode, dashboardConversionRates)
+    : null
+  const convertedDashboardKpis = dashboardConversionRates
+    ? {
+        cash: convertMoneyAmounts(dashboardKpis.cashAmounts, dashboardReportingCurrencyCode, dashboardConversionRates),
+        debt: convertMoneyAmounts(dashboardKpis.debtAmounts, dashboardReportingCurrencyCode, dashboardConversionRates),
+        income: convertMoneyAmounts(dashboardKpis.incomeAmounts, dashboardReportingCurrencyCode, dashboardConversionRates),
+        expense: convertMoneyAmounts(dashboardKpis.expenseAmounts, dashboardReportingCurrencyCode, dashboardConversionRates),
+      }
     : null
   const displayedDashboardBalance = convertedDashboardBalance ?? dashboardBalanceSnapshot
   const dashboardBalanceIsLoading = !convertedDashboardBalance && Boolean(dashboardBalanceSnapshot)
@@ -1842,6 +1851,29 @@ export default function Finance() {
               </div>
             ) : null}
           </section>
+
+          <div className="mt-4 grid border-l border-t border-edge/12 font-mono md:grid-cols-4">
+            <CategoryKpi
+              label="cash"
+              value={formatConvertedKpiValue(convertedDashboardKpis?.cash ?? null)}
+              sub={dashboardKpiSub(convertedDashboardKpis?.cash ?? null, countLabel(dashboardKpis.cashAccountCount, 'positive balance'))}
+            />
+            <CategoryKpi
+              label="debt"
+              value={formatConvertedKpiValue(convertedDashboardKpis?.debt ?? null)}
+              sub={dashboardKpiSub(convertedDashboardKpis?.debt ?? null, countLabel(dashboardKpis.debtAccountCount, 'negative balance'))}
+            />
+            <CategoryKpi
+              label="income"
+              value={formatConvertedKpiValue(convertedDashboardKpis?.income ?? null)}
+              sub={dashboardKpiSub(convertedDashboardKpis?.income ?? null, countLabel(dashboardKpis.incomeMovementCount, 'non-transfer movement'))}
+            />
+            <CategoryKpi
+              label="expense"
+              value={formatConvertedKpiValue(convertedDashboardKpis?.expense ?? null)}
+              sub={dashboardKpiSub(convertedDashboardKpis?.expense ?? null, countLabel(dashboardKpis.expenseMovementCount, 'non-transfer movement'))}
+            />
+          </div>
 
           <div className="mt-4 grid gap-4">
             <section className="border border-edge/12 bg-pit-2">
@@ -4222,6 +4254,19 @@ function formatMoney(amountMinor: number, currencyCode: string) {
   }).format(amountMinor / 100)
 }
 
+function formatConvertedKpiValue(value: ConvertedMoney | null) {
+  return value ? formatMoney(value.amountMinor, value.currencyCode) : '...'
+}
+
+function dashboardKpiSub(value: ConvertedMoney | null, fallback: string) {
+  if (!value) return 'loading fx rates'
+  return value.missingCurrencies.length > 0 ? `missing ${value.missingCurrencies.join(', ')}` : fallback
+}
+
+function countLabel(count: number, singular: string) {
+  return `${count} ${singular}${count === 1 ? '' : 's'}`
+}
+
 function formatMoneyParts(amountMinor: number, currencyCode: string) {
   const parts = new Intl.NumberFormat('en-US', {
     style: 'currency',
@@ -4438,6 +4483,48 @@ function summarizeAccountBalances(entries: AccountBalanceEntry[]): MovementSumma
   }
 }
 
+function summarizeDashboardKpis(accountBalances: AccountBalanceEntry[], movements: FinanceMovement[]) {
+  const cashTotals = new Map<string, number>()
+  const debtTotals = new Map<string, number>()
+  const incomeTotals = new Map<string, number>()
+  const expenseTotals = new Map<string, number>()
+  let cashAccountCount = 0
+  let debtAccountCount = 0
+  let incomeMovementCount = 0
+  let expenseMovementCount = 0
+
+  for (const entry of accountBalances) {
+    if (entry.endingAmountMinor > 0) {
+      addSimpleMoneyAmount(cashTotals, entry.currencyCode, entry.endingAmountMinor)
+      cashAccountCount += 1
+    } else if (entry.endingAmountMinor < 0) {
+      addSimpleMoneyAmount(debtTotals, entry.currencyCode, Math.abs(entry.endingAmountMinor))
+      debtAccountCount += 1
+    }
+  }
+
+  for (const movement of movements) {
+    if (movement.amountMinor > 0) {
+      addSimpleMoneyAmount(incomeTotals, movement.currencyCode, movement.amountMinor)
+      incomeMovementCount += 1
+    } else if (movement.amountMinor < 0) {
+      addSimpleMoneyAmount(expenseTotals, movement.currencyCode, Math.abs(movement.amountMinor))
+      expenseMovementCount += 1
+    }
+  }
+
+  return {
+    cashAmounts: moneyAmountsFromSimpleMap(cashTotals),
+    debtAmounts: moneyAmountsFromSimpleMap(debtTotals),
+    incomeAmounts: moneyAmountsFromSimpleMap(incomeTotals),
+    expenseAmounts: moneyAmountsFromSimpleMap(expenseTotals),
+    cashAccountCount,
+    debtAccountCount,
+    incomeMovementCount,
+    expenseMovementCount,
+  }
+}
+
 function buildAccountBalanceBreakdown(
   movements: FinanceMovement[],
   accounts: FinanceAccount[],
@@ -4495,6 +4582,10 @@ function addMovementToCurrencyTotals(
   current.negativeMinor += movement.amountMinor < 0 ? movement.amountMinor : 0
   current.netMinor += movement.amountMinor
   totals.set(movement.currencyCode, current)
+}
+
+function addSimpleMoneyAmount(totals: Map<string, number>, currencyCode: string, amountMinor: number) {
+  totals.set(currencyCode, (totals.get(currencyCode) ?? 0) + amountMinor)
 }
 
 function moneyAmountsFromMap(
