@@ -35,7 +35,7 @@ const ScaledSlide = forwardRef<
   return (
     <div ref={containerRef} className="w-full">
       <div
-        className="border border-white/[0.08] rounded-xl overflow-hidden origin-top-left"
+        className="border border-edge/12 rounded-xl overflow-hidden origin-top-left bg-pit-2"
         style={{
           width: width * scale,
           height: height * scale,
@@ -102,15 +102,15 @@ export function SlideRenderer({
   }, [filename, width, height, theme.bg])
 
   return (
-    <div className="flex-1 min-h-0 bg-[#050505] text-white overflow-y-auto overflow-x-hidden">
+    <div className="flex-1 min-h-0 bg-pit text-fg-1 overflow-y-auto overflow-x-hidden">
       {/* Header — Pach aesthetic */}
-      <div className="sticky top-0 z-20 bg-[rgba(5,5,5,0.9)] backdrop-blur-sm border-b border-[rgba(0,255,140,0.15)] px-4 py-3 md:px-8 md:py-4">
+      <div className="sticky top-0 z-20 bg-pit/90 backdrop-blur-sm border-b border-edge/15 px-4 py-3 md:px-8 md:py-4">
         <div className="flex flex-wrap items-center justify-between gap-3 max-w-[1200px] mx-auto">
           <div className="flex items-center gap-3 min-w-0">
             {onBack && (
               <button
                 onClick={onBack}
-                className="inline-flex h-8 w-8 shrink-0 items-center justify-center border border-[rgba(0,255,140,0.2)] bg-pit-3 text-fg-3 transition hover:text-accent hover:border-[rgba(0,255,140,0.4)]"
+                className="inline-flex h-8 w-8 shrink-0 items-center justify-center border border-edge/20 bg-pit-3 text-fg-3 transition hover:text-accent hover:border-edge/40"
                 title="back to decks"
                 aria-label="back to decks"
               >
@@ -128,7 +128,7 @@ export function SlideRenderer({
           <div className="flex items-center gap-2">
             <button
               onClick={handleDownloadPng}
-              className="inline-flex items-center gap-1.5 border border-[rgba(0,255,140,0.2)] bg-pit-3 px-2.5 py-1.5 font-mono text-[10px] uppercase tracking-label text-fg-2 transition hover:text-fg-1 hover:border-[rgba(0,255,140,0.35)]"
+              className="inline-flex items-center gap-1.5 border border-edge/20 bg-pit-3 px-2.5 py-1.5 font-mono text-[10px] uppercase tracking-label text-fg-2 transition hover:text-fg-1 hover:border-edge/35"
               title="export each slide as PNG"
             >
               <FileText className="h-3 w-3" />
@@ -137,7 +137,7 @@ export function SlideRenderer({
             </button>
             <button
               onClick={handleDownloadPdf}
-              className="inline-flex items-center gap-1.5 border border-[rgba(0,255,140,0.3)] bg-[rgba(0,255,136,0.08)] px-3 py-1.5 font-mono text-[10px] uppercase tracking-label text-accent transition hover:bg-[rgba(0,255,136,0.16)] hover:shadow-glow-xs"
+              className="inline-flex items-center gap-1.5 border border-edge/30 bg-accent-fill/8 px-3 py-1.5 font-mono text-[10px] uppercase tracking-label text-accent transition hover:bg-accent-fill/16 hover:shadow-glow-xs"
               title="download the deck as PDF"
             >
               <Download className="h-3 w-3" />
