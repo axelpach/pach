@@ -919,6 +919,12 @@ export default function Finance() {
     })
   }
 
+  function openAccountMovements(accountId: string) {
+    setActiveFilters({ accounts: [accountId] })
+    setSearch('')
+    navigate(pathForTab('movements'))
+  }
+
   function toggleMovementDateSort() {
     setMovementSortDirection((current) => current === 'asc' ? 'desc' : 'asc')
   }
@@ -2299,7 +2305,14 @@ export default function Finance() {
                   <article key={account.id} className="border border-edge/12 bg-pit-2 px-3 py-3 font-mono text-xs">
                     <div className="mb-3 flex items-start justify-between gap-3">
                       <div className="min-w-0">
-                        <div className="truncate text-sm text-fg-1" title={account.name}>{account.name}</div>
+                        <button
+                          type="button"
+                          onClick={() => openAccountMovements(account.id)}
+                          className="block max-w-full truncate text-left text-sm text-fg-1 underline-offset-2 transition hover:underline focus-visible:underline focus-visible:outline-none"
+                          title={account.name}
+                        >
+                          {account.name}
+                        </button>
                         <div className="mt-1 truncate text-[10px] uppercase tracking-label text-fg-4">
                           {account.institutionName || 'no institution'} · {typeLabel(account.type)}
                         </div>
@@ -2349,7 +2362,14 @@ export default function Finance() {
                     return (
                       <tr key={account.id} className="border-b border-edge/8 text-fg-2 hover:bg-accent-fill/4">
                         <td className="px-3 py-2">
-                          <div className="text-fg-1">{account.name}</div>
+                          <button
+                            type="button"
+                            onClick={() => openAccountMovements(account.id)}
+                            className="block max-w-full truncate text-left text-fg-1 underline-offset-2 transition hover:underline focus-visible:underline focus-visible:outline-none"
+                            title={account.name}
+                          >
+                            {account.name}
+                          </button>
                           <div className="mt-0.5 text-[10px] uppercase tracking-label text-fg-4">{account.status}</div>
                         </td>
                         <td className="px-3 py-2 text-fg-3">{account.institutionName || 'no institution'}</td>
