@@ -300,6 +300,24 @@ const finBalanceSnapshots = table('fin_balance_snapshots')
     createdAt: number().from('created_at'),
 })
     .primaryKey('id');
+const documents = table('documents')
+    .columns({
+    id: string(),
+    organizationId: string().optional().from('organization_id'),
+    parentId: string().optional().from('parent_id'),
+    ownerId: string().optional().from('owner_id'),
+    title: string(),
+    slug: string(),
+    body: string(),
+    format: string(),
+    status: string(),
+    icon: string().optional(),
+    sortOrder: number().from('sort_order'),
+    metadata: json(),
+    createdAt: number().from('created_at'),
+    updatedAt: number().from('updated_at'),
+})
+    .primaryKey('id');
 const pmTeams = table('pm_teams')
     .columns({
     id: string(),
@@ -673,6 +691,7 @@ export const schema = createSchema({
         finMovements,
         finCategorizationRules,
         finBalanceSnapshots,
+        documents,
         pmTeams,
         pmProjects,
         pmStatuses,
@@ -735,6 +754,7 @@ export const permissions = definePermissions(schema, () => {
         fin_movements: organizationScoped(),
         fin_categorization_rules: organizationScoped(),
         fin_balance_snapshots: organizationScoped(),
+        documents: organizationScoped(),
         pm_teams: authenticatedReadOnly,
         pm_projects: organizationScoped('companyId'),
         pm_statuses: authenticatedReadOnly,

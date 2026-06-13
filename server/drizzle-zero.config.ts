@@ -21,6 +21,7 @@ export default {
     fin_movements: { row: { select: ['true'], insert: ['true'], update: ['true'], delete: ['true'] } },
     fin_categorization_rules: { row: { select: ['true'], insert: ['true'], update: ['true'], delete: ['true'] } },
     fin_balance_snapshots: { row: { select: ['true'], insert: ['true'], update: ['true'], delete: ['true'] } },
+    documents: { row: { select: ['true'], insert: ['true'], update: ['true'], delete: ['true'] } },
     decks: { row: { select: ['true'], insert: ['true'], update: ['true'], delete: ['true'] } },
     pm_teams: { row: { select: ['true'], insert: ['true'], update: ['true'], delete: ['true'] } },
     pm_projects: { row: { select: ['true'], insert: ['true'], update: ['true'], delete: ['true'] } },

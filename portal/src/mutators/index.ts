@@ -242,6 +242,29 @@ export const mutators = {
     },
   },
 
+  documents: {
+    async create(tx: Tx, args: { id: string; organizationId?: string; parentId?: string; ownerId?: string; title: string; slug: string; body?: string; format?: string; status?: string; icon?: string; sortOrder?: number; metadata?: Record<string, unknown> }) {
+      const now = Date.now()
+      await tx.mutate.documents.insert({
+        body: '',
+        format: 'markdown',
+        status: 'active',
+        sortOrder: 0,
+        metadata: {},
+        ...args,
+        createdAt: now,
+        updatedAt: now,
+      })
+    },
+    async update(tx: Tx, args: { id: string; organizationId?: string | null; parentId?: string | null; ownerId?: string | null; title?: string; slug?: string; body?: string; format?: string; status?: string; icon?: string | null; sortOrder?: number; metadata?: Record<string, unknown> }) {
+      const { id, ...updates } = args
+      await tx.mutate.documents.update({ id, ...updates, updatedAt: Date.now() })
+    },
+    async delete(tx: Tx, args: { id: string }) {
+      await tx.mutate.documents.delete({ id: args.id })
+    },
+  },
+
   pm_teams: {
     async create(tx: Tx, args: { id: string; companyId?: string; key: string; name: string; description?: string; color?: string; icon?: string; position?: number }) {
       const now = Date.now()

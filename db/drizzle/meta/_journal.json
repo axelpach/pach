@@ -155,6 +155,20 @@
       "when": 1780800300000,
       "tag": "0021_fin_transaction_time",
       "breakpoints": true
+    },
+    {
+      "idx": 22,
+      "version": "7",
+      "when": 1781276400000,
+      "tag": "0022_documents",
+      "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "7",
+      "when": 1781287800000,
+      "tag": "0023_drop_document_graph",
+      "breakpoints": true
     }
   ]
 }

@@ -1,0 +1,658 @@
+import { useQuery, useZero } from '@rocicorp/zero/react'
+import {
+  Archive,
+  ArrowLeft,
+  Building2,
+  ChevronDown,
+  ChevronRight,
+  FileText,
+  List,
+  ListTree,
+  Plus,
+  Search,
+} from 'lucide-react'
+import { useEffect, useMemo, useState } from 'react'
+import { useNavigate, useParams } from 'react-router-dom'
+import { PachSelect, type PachSelectOption } from '../../components/PachSelect'
+import { RichEditor } from '../../components/rich-editor/RichEditor'
+import { useAuth } from '../../lib/auth'
+import type { Mutators } from '../../mutators'
+import type { Schema } from '../../zero-schema'
+
+type DocumentRow = Schema['tables']['documents']['row']
+type OrganizationRow = Schema['tables']['organizations']['row']
+type DocumentTreeNode = {
+  document: DocumentRow
+  children: DocumentTreeNode[]
+}
+
+const NO_ORGANIZATION = '__none__'
+const DOCS_ORGANIZATION_STORAGE_KEY = 'pach.docs.organizationFilter'
+
+export default function Docs() {
+  const z = useZero<Schema, Mutators>()
+  const navigate = useNavigate()
+  const { documentId } = useParams<{ documentId?: string }>()
+  const { user } = useAuth()
+  const [search, setSearch] = useState('')
+  const [organizationFilter, setOrganizationFilter] = useState<string>(() => readStoredDocsOrganizationFilter())
+  const [titleDraft, setTitleDraft] = useState('')
+  const [bodyDraft, setBodyDraft] = useState('')
+  const [expandedDocumentIds, setExpandedDocumentIds] = useState<Set<string>>(() => new Set())
+  const [archiveConfirmDocument, setArchiveConfirmDocument] = useState<DocumentRow | null>(null)
+
+  const [documents] = useQuery(z.query.documents.orderBy('updatedAt', 'desc'))
+  const [issues] = useQuery(z.query.pm_issues.orderBy('updatedAt', 'desc'))
+  const [organizations] = useQuery(z.query.organizations.orderBy('name', 'asc'))
+
+  const accessibleOrganizationIds = useMemo(() => new Set(user?.organizationIds ?? []), [user?.organizationIds])
+  const canAccessOrganization = (organizationId: string | null | undefined) =>
+    organizationId ? accessibleOrganizationIds.has(organizationId) : user?.canAccessUnscoped ?? false
+
+  const accessibleOrganizations = useMemo(
+    () => organizations.filter((organization) => accessibleOrganizationIds.has(organization.id)),
+    [accessibleOrganizationIds, organizations],
+  )
+  const organizationOptions = useMemo<PachSelectOption[]>(() => {
+    const options = accessibleOrganizations.map((organization) => ({
+      value: organization.id,
+      label: organization.name,
+    }))
+    if (user?.canAccessUnscoped) options.push({ value: NO_ORGANIZATION, label: 'no organization' })
+    return options
+  }, [accessibleOrganizations, user?.canAccessUnscoped])
+
+  const documentsInSelectedOrganization = useMemo(
+    () =>
+      documents
+        .filter((entry) => entry.status !== 'archived')
+        .filter((entry) => canAccessOrganization(entry.organizationId))
+        .filter((entry) => documentMatchesOrganizationFilter(entry, organizationFilter))
+        .sort(compareDocumentsForTree),
+    [documents, organizationFilter, user?.canAccessUnscoped, accessibleOrganizationIds],
+  )
+
+  const documentTree = useMemo(() => {
+    const q = search.trim().toLowerCase()
+    return buildDocumentTree(documentsInSelectedOrganization, q)
+  }, [documentsInSelectedOrganization, search])
+
+  const visibleDocuments = documentsInSelectedOrganization
+
+  const selectedDocument = useMemo(
+    () =>
+      documents.find((entry) =>
+        entry.id === documentId &&
+        entry.status !== 'archived' &&
+        canAccessOrganization(entry.organizationId) &&
+        documentMatchesOrganizationFilter(entry, organizationFilter)
+      ) ?? null,
+    [documents, documentId, organizationFilter, user?.canAccessUnscoped, accessibleOrganizationIds],
+  )
+
+  const selectedOrganization = organizationFilter && organizationFilter !== NO_ORGANIZATION
+    ? organizationFor(organizationFilter, organizations)
+    : selectedDocument
+      ? organizationFor(selectedDocument.organizationId, organizations)
+      : null
+
+  useEffect(() => {
+    if (organizationOptions.length === 0) return
+    if (organizationFilter && organizationOptions.some((option) => option.value === organizationFilter)) return
+    const ardia = accessibleOrganizations.find((organization) => organization.project === 'ardia')
+    setOrganizationFilter(ardia?.id ?? organizationOptions[0]?.value ?? '')
+  }, [accessibleOrganizations, organizationFilter, organizationOptions])
+
+  useEffect(() => {
+    if (!organizationFilter) return
+    if (!organizationOptions.some((option) => option.value === organizationFilter)) return
+    writeStoredDocsOrganizationFilter(organizationFilter)
+  }, [organizationFilter, organizationOptions])
+
+  useEffect(() => {
+    if (!organizationFilter) return
+    if (documentId && selectedDocument) return
+    const next = documentsInSelectedOrganization[0]
+    const nextPath = next ? `/docs/${next.id}` : '/docs'
+    if (documentId || next) navigate(nextPath, { replace: true })
+  }, [documentId, documentsInSelectedOrganization, navigate, organizationFilter, selectedDocument])
+
+  useEffect(() => {
+    if (!selectedDocument) {
+      setTitleDraft('')
+      setBodyDraft('')
+      return
+    }
+    setTitleDraft(selectedDocument.title)
+    setBodyDraft(selectedDocument.body)
+    if (selectedDocument.organizationId) setOrganizationFilter(selectedDocument.organizationId)
+    else if (user?.canAccessUnscoped) setOrganizationFilter(NO_ORGANIZATION)
+  }, [selectedDocument?.id])
+
+  useEffect(() => {
+    if (!selectedDocument) return
+    const ancestors = ancestorDocumentIds(selectedDocument.id, documentsInSelectedOrganization)
+    if (ancestors.length === 0) return
+    setExpandedDocumentIds((current) => {
+      const next = new Set(current)
+      let changed = false
+      ancestors.forEach((id) => {
+        if (next.has(id)) return
+        next.add(id)
+        changed = true
+      })
+      return changed ? next : current
+    })
+  }, [documentsInSelectedOrganization, selectedDocument?.id])
+
+  useEffect(() => {
+    if (!selectedDocument) return
+    if (titleDraft === selectedDocument.title && bodyDraft === selectedDocument.body) return
+    const timer = window.setTimeout(() => {
+      void saveDraft(selectedDocument, titleDraft, bodyDraft)
+    }, 700)
+    return () => window.clearTimeout(timer)
+  }, [bodyDraft, selectedDocument, titleDraft])
+
+  async function saveDraft(entry: DocumentRow, nextTitle: string, nextBody: string) {
+    const cleanTitle = nextTitle.trim() || 'Untitled'
+    await z.mutate.documents.update({
+      id: entry.id,
+      title: cleanTitle,
+      slug: uniqueSlug(cleanTitle, documents, entry.organizationId, entry.id),
+      body: nextBody,
+      format: 'markdown',
+    })
+  }
+
+  async function createDocument(title = 'Untitled', parent?: DocumentRow) {
+    const organizationId = parent
+      ? parent.organizationId ?? undefined
+      : organizationFilter === NO_ORGANIZATION
+        ? undefined
+        : organizationFilter || accessibleOrganizations[0]?.id
+    if (!organizationId && !user?.canAccessUnscoped) return
+    const id = crypto.randomUUID()
+    await z.mutate.documents.create({
+      id,
+      organizationId,
+      parentId: parent?.id,
+      ownerId: user?.id,
+      title,
+      slug: uniqueSlug(title, documents, organizationId ?? null),
+      body: '',
+      format: 'markdown',
+    })
+    if (parent) setExpandedDocumentIds((current) => new Set([...current, parent.id]))
+    navigate(`/docs/${id}`)
+  }
+
+  async function createLinkedChildDocument(parentId: string) {
+    const parent = documents.find((entry) => entry.id === parentId)
+    if (!parent) return null
+    const title = 'Untitled'
+    const organizationId = parent.organizationId ?? undefined
+    if (!organizationId && !user?.canAccessUnscoped) return null
+    const id = crypto.randomUUID()
+    await z.mutate.documents.create({
+      id,
+      organizationId,
+      parentId: parent.id,
+      ownerId: user?.id,
+      title,
+      slug: uniqueSlug(title, documents, organizationId ?? null),
+      body: '',
+      format: 'markdown',
+    })
+    setExpandedDocumentIds((current) => new Set([...current, parent.id]))
+    return { id, title }
+  }
+
+  function toggleDocumentExpanded(id: string) {
+    setExpandedDocumentIds((current) => {
+      const next = new Set(current)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }
+
+  function handleOrganizationChange(nextOrganizationId: string) {
+    setOrganizationFilter(nextOrganizationId)
+    const next = documents
+      .filter((entry) => entry.status !== 'archived')
+      .filter((entry) => canAccessOrganization(entry.organizationId))
+      .filter((entry) => documentMatchesOrganizationFilter(entry, nextOrganizationId))
+      .sort((a, b) => b.updatedAt - a.updatedAt)[0]
+    navigate(next ? `/docs/${next.id}` : '/docs')
+  }
+
+  async function archiveDocument(entry: DocumentRow) {
+    await z.mutate.documents.update({ id: entry.id, status: 'archived' })
+    setArchiveConfirmDocument(null)
+    const next = visibleDocuments.find((document) => document.id !== entry.id)
+    navigate(next ? `/docs/${next.id}` : '/docs')
+  }
+
+  return (
+    <div className="flex h-full min-h-0 bg-pit text-fg-1">
+      <aside className="hidden w-[300px] shrink-0 border-r border-[rgba(0,255,140,0.12)] bg-[rgba(5,6,5,0.72)] md:flex md:flex-col">
+        <div className="border-b border-[rgba(0,255,140,0.12)] px-4 py-3">
+          <div className="mb-3 flex items-center justify-between">
+            <div>
+              <div className="font-mono text-[10px] uppercase tracking-label text-fg-4">docs</div>
+              <div className="font-mono text-lg font-bold lowercase text-fg-1">documents</div>
+            </div>
+            <button
+              onClick={() => void createDocument()}
+              className="flex h-8 w-8 items-center justify-center border border-[rgba(0,255,140,0.24)] bg-[rgba(0,255,136,0.06)] text-accent transition hover:bg-[rgba(0,255,136,0.12)]"
+              title="new document"
+            >
+              <Plus className="h-4 w-4" />
+            </button>
+          </div>
+
+          <div className="mb-2 font-mono text-[10px] uppercase tracking-label text-fg-4">organization</div>
+          <div className="relative">
+            <Building2 className="pointer-events-none absolute left-3 top-1/2 z-10 h-3.5 w-3.5 -translate-y-1/2 text-fg-4" />
+            <PachSelect
+              value={organizationFilter}
+              onChange={handleOrganizationChange}
+              options={organizationOptions}
+              display={selectedOrganization?.name ?? (organizationFilter === NO_ORGANIZATION ? 'no organization' : 'organization')}
+              popupWidth="200"
+              triggerClassName="flex h-8 w-full items-center justify-between border border-[rgba(0,255,140,0.18)] bg-rim pl-9 pr-2 text-left font-mono text-xs text-fg-1 outline-none transition hover:border-[rgba(0,255,140,0.32)] hover:bg-[rgba(0,255,136,0.04)] focus-visible:border-accent focus-visible:shadow-glow-xs"
+            />
+          </div>
+
+          <div className="mt-3 flex items-center gap-2 border border-[rgba(0,255,140,0.12)] bg-pit-3 px-2 py-1.5">
+            <Search className="h-3.5 w-3.5 text-fg-4" />
+            <input
+              value={search}
+              onChange={(event) => setSearch(event.target.value)}
+              placeholder="search docs"
+              className="min-w-0 flex-1 bg-transparent font-mono text-xs text-fg-1 outline-none placeholder:text-fg-4"
+            />
+          </div>
+        </div>
+
+        <div className="min-h-0 flex-1 overflow-auto px-2 py-2">
+          {documentTree.length === 0 ? (
+            <button
+              onClick={() => void createDocument()}
+              className="flex w-full items-center gap-2 border border-dashed border-[rgba(0,255,140,0.18)] px-3 py-3 text-left font-mono text-xs lowercase text-fg-4 transition hover:border-[rgba(0,255,140,0.34)] hover:text-accent"
+            >
+              <Plus className="h-3.5 w-3.5" />
+              create first doc
+            </button>
+          ) : (
+            documentTree.map((node) => (
+              <DocumentTreeItem
+                key={node.document.id}
+                node={node}
+                depth={0}
+                expandedIds={expandedDocumentIds}
+                selectedDocumentId={selectedDocument?.id ?? null}
+                organizations={organizations}
+                onToggle={toggleDocumentExpanded}
+                onOpen={(id) => navigate(`/docs/${id}`)}
+                onCreateChild={(parent) => void createDocument('Untitled', parent)}
+                forceExpanded={Boolean(search.trim())}
+              />
+            ))
+          )}
+        </div>
+      </aside>
+
+      <main className="min-w-0 flex-1 overflow-auto">
+        {selectedDocument ? (
+          <div className="mx-auto min-h-full max-w-3xl px-5 py-5 md:px-10 md:py-8">
+            <div className="mb-5 flex items-center justify-between gap-3">
+              <button
+                onClick={() => navigate('/docs')}
+                className="inline-flex items-center gap-2 font-mono text-xs lowercase text-fg-4 transition hover:text-accent md:hidden"
+              >
+                <ArrowLeft className="h-3.5 w-3.5" />
+                docs
+              </button>
+              <div className="hidden min-w-0 items-center gap-2 font-mono text-[10px] uppercase tracking-label text-fg-4 md:flex">
+                <ListTree className="h-3.5 w-3.5" />
+                <span className="truncate">{organizationLabel(selectedDocument.organizationId, organizations)}</span>
+              </div>
+              <button
+                onClick={() => selectedDocument && setArchiveConfirmDocument(selectedDocument)}
+                className="ml-auto flex h-8 w-8 items-center justify-center border border-[rgba(0,255,140,0.15)] text-fg-3 transition hover:border-amber hover:text-amber"
+                title="archive document"
+              >
+                <Archive className="h-4 w-4" />
+              </button>
+            </div>
+
+            <input
+              value={titleDraft}
+              onChange={(event) => setTitleDraft(event.target.value)}
+              onBlur={() => selectedDocument && void saveDraft(selectedDocument, titleDraft, bodyDraft)}
+              placeholder="Untitled"
+              className="w-full bg-transparent font-mono text-3xl font-bold leading-tight text-fg-1 outline-none placeholder:text-fg-4 md:text-4xl"
+            />
+
+            <RichEditor
+              key={selectedDocument.id}
+              owner={{ type: 'document', id: selectedDocument.id }}
+              value={bodyDraft}
+              documents={documents}
+              issues={issues}
+              organizationId={selectedDocument.organizationId}
+              onChange={setBodyDraft}
+              onOpenDocument={(id) => navigate(`/docs/${id}`)}
+              onOpenIssue={(id) => navigate(`/issues/${id}`)}
+              onCreateChildDocument={createLinkedChildDocument}
+            />
+          </div>
+        ) : (
+          <div className="flex h-full items-center justify-center px-5">
+            <div className="max-w-sm text-center">
+              <FileText className="mx-auto h-10 w-10 text-fg-4" />
+              <h1 className="mt-4 font-mono text-2xl font-bold lowercase text-fg-1">documents</h1>
+              <p className="mt-2 font-mono text-sm leading-relaxed text-fg-3">
+                Create focused documents with slash commands and plain URL links.
+              </p>
+              <button
+                onClick={() => void createDocument()}
+                className="mt-5 inline-flex items-center gap-2 border border-[rgba(0,255,140,0.28)] bg-[rgba(0,255,136,0.08)] px-3 py-2 font-mono text-xs uppercase tracking-label text-accent transition hover:bg-[rgba(0,255,136,0.14)]"
+              >
+                <Plus className="h-3.5 w-3.5" />
+                new document
+              </button>
+            </div>
+          </div>
+        )}
+      </main>
+
+      {archiveConfirmDocument ? (
+        <ArchiveDocumentModal
+          document={archiveConfirmDocument}
+          onCancel={() => setArchiveConfirmDocument(null)}
+          onConfirm={() => void archiveDocument(archiveConfirmDocument)}
+        />
+      ) : null}
+    </div>
+  )
+}
+
+function ArchiveDocumentModal({
+  document,
+  onCancel,
+  onConfirm,
+}: {
+  document: DocumentRow
+  onCancel: () => void
+  onConfirm: () => void
+}) {
+  useEffect(() => {
+    function handleKey(event: KeyboardEvent) {
+      if (event.key !== 'Escape') return
+      event.preventDefault()
+      onCancel()
+    }
+    window.addEventListener('keydown', handleKey)
+    return () => window.removeEventListener('keydown', handleKey)
+  }, [onCancel])
+
+  return (
+    <div
+      className="fixed inset-0 z-[90] flex items-center justify-center bg-[rgba(0,0,0,0.72)] px-4 backdrop-blur-sm"
+      onClick={onCancel}
+    >
+      <div
+        className="w-full max-w-md border border-[rgba(255,193,7,0.28)] bg-pit shadow-[0_0_24px_rgba(255,193,7,0.1),0_30px_80px_rgba(0,0,0,0.65)]"
+        onClick={(event) => event.stopPropagation()}
+      >
+        <div className="border-b border-[rgba(255,193,7,0.18)] px-5 py-4">
+          <div className="font-mono text-[10px] uppercase tracking-label text-amber">archive document</div>
+          <h2 className="mt-2 font-mono text-lg font-bold lowercase text-fg-1">{document.title}</h2>
+        </div>
+        <div className="px-5 py-4">
+          <p className="font-mono text-sm leading-relaxed text-fg-3">
+            This will hide the document from the docs sidebar and search. You can restore it later from the database if needed.
+          </p>
+        </div>
+        <div className="flex items-center justify-end gap-2 border-t border-[rgba(0,255,140,0.12)] px-5 py-3">
+          <button
+            type="button"
+            onClick={onCancel}
+            className="border border-[rgba(0,255,140,0.16)] px-3 py-2 font-mono text-xs uppercase tracking-label text-fg-3 transition hover:border-[rgba(0,255,140,0.32)] hover:text-fg-1"
+          >
+            cancel
+          </button>
+          <button
+            type="button"
+            onClick={onConfirm}
+            className="border border-[rgba(255,193,7,0.36)] bg-[rgba(255,193,7,0.08)] px-3 py-2 font-mono text-xs uppercase tracking-label text-amber transition hover:bg-[rgba(255,193,7,0.14)]"
+          >
+            archive
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function DocumentTreeItem({
+  node,
+  depth,
+  expandedIds,
+  selectedDocumentId,
+  organizations,
+  forceExpanded,
+  onToggle,
+  onOpen,
+  onCreateChild,
+}: {
+  node: DocumentTreeNode
+  depth: number
+  expandedIds: Set<string>
+  selectedDocumentId: string | null
+  organizations: OrganizationRow[]
+  forceExpanded: boolean
+  onToggle: (id: string) => void
+  onOpen: (id: string) => void
+  onCreateChild: (parent: DocumentRow) => void
+}) {
+  const hasChildren = node.children.length > 0
+  const expanded = forceExpanded || expandedIds.has(node.document.id)
+  const selected = selectedDocumentId === node.document.id
+  const indent = Math.min(depth, 8) * 14
+
+  return (
+    <div className="mb-0.5">
+      <div
+        className={`group flex items-center gap-1 px-1.5 py-1.5 transition ${
+          selected
+            ? 'bg-[rgba(0,255,136,0.08)] text-accent shadow-[inset_0_0_0_1px_rgba(0,255,140,0.2)]'
+            : 'text-fg-2 hover:bg-[rgba(0,255,136,0.04)] hover:text-fg-1'
+        }`}
+        style={{ paddingLeft: 6 + indent }}
+      >
+        <button
+          type="button"
+          onClick={() => hasChildren ? onToggle(node.document.id) : onOpen(node.document.id)}
+          className={`flex h-5 w-5 shrink-0 items-center justify-center transition ${
+            hasChildren ? 'text-fg-4 hover:text-accent' : 'text-fg-4'
+          }`}
+          title={hasChildren ? (expanded ? 'collapse document' : 'expand document') : 'open document'}
+        >
+          {hasChildren ? (
+            expanded ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />
+          ) : (
+            <FileText className="h-3.5 w-3.5" />
+          )}
+        </button>
+        <button
+          type="button"
+          onClick={() => onOpen(node.document.id)}
+          className="min-w-0 flex-1 text-left"
+        >
+          <span className="block truncate font-mono text-xs lowercase">{node.document.title}</span>
+          {depth === 0 ? (
+            <span className="mt-0.5 block truncate font-mono text-[10px] uppercase tracking-label text-fg-4">
+              {organizationLabel(node.document.organizationId, organizations)}
+            </span>
+          ) : null}
+        </button>
+        <button
+          type="button"
+          onClick={(event) => {
+            event.stopPropagation()
+            onCreateChild(node.document)
+          }}
+          className="flex h-5 w-5 shrink-0 items-center justify-center text-fg-4 opacity-0 transition hover:text-accent group-hover:opacity-100"
+          title="new child document"
+        >
+          <Plus className="h-3 w-3" />
+        </button>
+      </div>
+
+      {expanded && hasChildren ? (
+        <div>
+          {node.children.map((child) => (
+            <DocumentTreeItem
+              key={child.document.id}
+              node={child}
+              depth={depth + 1}
+              expandedIds={expandedIds}
+              selectedDocumentId={selectedDocumentId}
+              organizations={organizations}
+              forceExpanded={forceExpanded}
+              onToggle={onToggle}
+              onOpen={onOpen}
+              onCreateChild={onCreateChild}
+            />
+          ))}
+        </div>
+      ) : null}
+    </div>
+  )
+}
+
+function organizationFor(id: string | null | undefined, organizations: OrganizationRow[]) {
+  return id ? organizations.find((organization) => organization.id === id) ?? null : null
+}
+
+function organizationLabel(id: string | null | undefined, organizations: OrganizationRow[]) {
+  if (!id) return 'no organization'
+  return organizations.find((organization) => organization.id === id)?.name ?? 'organization'
+}
+
+function documentMatchesOrganizationFilter(entry: DocumentRow, organizationFilter: string) {
+  if (!organizationFilter) return true
+  if (organizationFilter === NO_ORGANIZATION) return !entry.organizationId
+  return entry.organizationId === organizationFilter
+}
+
+function buildDocumentTree(documents: DocumentRow[], query: string) {
+  const sorted = [...documents].sort(compareDocumentsForTree)
+  const nodes = new Map<string, DocumentTreeNode>()
+  sorted.forEach((document) => nodes.set(document.id, { document, children: [] }))
+
+  const roots: DocumentTreeNode[] = []
+  sorted.forEach((document) => {
+    const node = nodes.get(document.id)
+    if (!node) return
+    const parent = document.parentId ? nodes.get(document.parentId) : null
+    if (parent && !createsDocumentCycle(document.id, document.parentId, nodes)) parent.children.push(node)
+    else roots.push(node)
+  })
+
+  if (!query) return roots
+  return roots
+    .map((node) => filterDocumentTree(node, query))
+    .filter((node): node is DocumentTreeNode => Boolean(node))
+}
+
+function filterDocumentTree(node: DocumentTreeNode, query: string): DocumentTreeNode | null {
+  const ownMatch =
+    node.document.title.toLowerCase().includes(query) ||
+    node.document.body.toLowerCase().includes(query)
+  const children = node.children
+    .map((child) => filterDocumentTree(child, query))
+    .filter((child): child is DocumentTreeNode => Boolean(child))
+  return ownMatch || children.length > 0 ? { document: node.document, children } : null
+}
+
+function createsDocumentCycle(documentId: string, parentId: string, nodes: Map<string, DocumentTreeNode>) {
+  let currentId: string | undefined = parentId
+  const seen = new Set<string>()
+  while (currentId) {
+    if (currentId === documentId) return true
+    if (seen.has(currentId)) return true
+    seen.add(currentId)
+    currentId = nodes.get(currentId)?.document.parentId
+  }
+  return false
+}
+
+function ancestorDocumentIds(documentId: string, documents: DocumentRow[]) {
+  const byId = new Map(documents.map((document) => [document.id, document]))
+  const ancestors: string[] = []
+  const seen = new Set<string>()
+  let current = byId.get(documentId)
+  while (current?.parentId && !seen.has(current.parentId)) {
+    seen.add(current.parentId)
+    const parent = byId.get(current.parentId)
+    if (!parent) break
+    ancestors.push(parent.id)
+    current = parent
+  }
+  return ancestors
+}
+
+function compareDocumentsForTree(a: DocumentRow, b: DocumentRow) {
+  if ((a.sortOrder ?? 0) !== (b.sortOrder ?? 0)) return (a.sortOrder ?? 0) - (b.sortOrder ?? 0)
+  if (a.title !== b.title) return a.title.localeCompare(b.title)
+  return b.updatedAt - a.updatedAt
+}
+
+function readStoredDocsOrganizationFilter() {
+  if (typeof window === 'undefined') return ''
+  try {
+    return window.localStorage.getItem(DOCS_ORGANIZATION_STORAGE_KEY) ?? ''
+  } catch {
+    return ''
+  }
+}
+
+function writeStoredDocsOrganizationFilter(value: string) {
+  if (typeof window === 'undefined') return
+  try {
+    window.localStorage.setItem(DOCS_ORGANIZATION_STORAGE_KEY, value)
+  } catch {
+    // Storage can be unavailable in private or restricted contexts.
+  }
+}
+
+function slugify(value: string) {
+  const slug = value
+    .toLowerCase()
+    .normalize('NFKD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 48)
+
+  return slug || 'document'
+}
+
+function uniqueSlug(title: string, documents: DocumentRow[], organizationId?: string | null, ignoreId?: string) {
+  const base = slugify(title)
+  const taken = new Set(
+    documents
+      .filter((entry) => entry.id !== ignoreId)
+      .filter((entry) => (entry.organizationId ?? null) === (organizationId ?? null))
+      .map((entry) => entry.slug),
+  )
+  if (!taken.has(base)) return base
+  let counter = 2
+  while (taken.has(`${base}-${counter}`)) counter += 1
+  return `${base}-${counter}`
+}

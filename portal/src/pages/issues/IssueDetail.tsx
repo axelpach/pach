@@ -1,8 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { useQuery, useZero } from '@rocicorp/zero/react'
-import ReactMarkdown from 'react-markdown'
-import remarkGfm from 'remark-gfm'
 import { Terminal as XTerm } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import '@xterm/xterm/css/xterm.css'
@@ -25,6 +23,7 @@ import type { Mutators } from '../../mutators'
 import { authFetch, useAuth } from '../../lib/auth'
 import { config } from '../../config'
 import { PachSelect } from '../../components/PachSelect'
+import { RichEditor } from '../../components/rich-editor/RichEditor'
 import { StatusIcon } from './StatusIcon'
 import { PriorityIcon } from './PriorityIcon'
 import { closePopupFromOutsideClick } from './popupEvents'
@@ -62,6 +61,7 @@ export default function IssueDetail() {
   const [mainTab, setMainTab] = useState<'activity' | 'agent'>('activity')
 
   const [allIssues] = useQuery(z.query.pm_issues.orderBy('updatedAt', 'desc'))
+  const [documents] = useQuery(z.query.documents.orderBy('updatedAt', 'desc'))
   const [companies] = useQuery(z.query.organizations.orderBy('name', 'asc'))
   const [users] = useQuery(z.query.users.orderBy('email', 'asc'))
   const [teams] = useQuery(z.query.pm_teams.orderBy('position', 'asc'))
@@ -141,7 +141,6 @@ export default function IssueDetail() {
   const [titleFocused, setTitleFocused] = useState(false)
   const [descFocused, setDescFocused] = useState(false)
   const titleRef = useRef<HTMLTextAreaElement | null>(null)
-  const descRef = useRef<HTMLTextAreaElement | null>(null)
   const descSaveTimerRef = useRef<number | null>(null)
 
   useEffect(() => {
@@ -431,44 +430,29 @@ export default function IssueDetail() {
                 className="block w-full resize-none overflow-hidden bg-transparent font-mono text-2xl font-bold leading-tight text-fg-1 outline-none placeholder:text-fg-4 focus:bg-[rgba(0,255,136,0.03)] px-2 py-1 -ml-2"
               />
 
-              {descFocused || !descDraft.trim() ? (
-                <AutoGrowTextarea
-                  textareaRef={descRef}
-                  value={descDraft}
-                  onChange={setDescDraft}
-                  onFocus={() => setDescFocused(true)}
-                  onBlur={async () => {
-                    if (descSaveTimerRef.current != null) {
-                      window.clearTimeout(descSaveTimerRef.current)
-                      descSaveTimerRef.current = null
-                    }
-                    await commitDescription()
-                    setDescFocused(false)
-                  }}
-                  placeholder="add description…"
-                  className="mt-2 w-full resize-none bg-transparent font-mono text-sm leading-relaxed text-fg-2 outline-none placeholder:text-fg-4 focus:bg-[rgba(0,255,136,0.03)] px-2 py-2 -ml-2"
-                />
-              ) : (
-                <div
-                  role="button"
-                  tabIndex={0}
-                  onClick={() => {
-                    setDescFocused(true)
-                    requestAnimationFrame(() => descRef.current?.focus())
-                  }}
-                  onKeyDown={(event) => {
-                    if (event.key === 'Enter' || event.key === ' ') {
-                      event.preventDefault()
-                      setDescFocused(true)
-                      requestAnimationFrame(() => descRef.current?.focus())
-                    }
-                  }}
-                  className="mt-2 cursor-text px-2 py-2 -ml-2 hover:bg-[rgba(0,255,136,0.02)] transition"
-                  title="click to edit"
-                >
-                  <DescriptionView source={descDraft} />
-                </div>
-              )}
+              <RichEditor
+                key={issue.id}
+                owner={{ type: 'issue', id: issue.id }}
+                value={descDraft}
+                documents={documents}
+                issues={allIssues}
+                organizationId={issue.contextCompanyId}
+                onChange={setDescDraft}
+                onOpenDocument={(id) => navigate(`/docs/${id}`)}
+                onOpenIssue={(id) => navigate(`/issues/${id}`)}
+                placeholder="add description..."
+                className="min-h-[12rem]"
+                wrapperClassName="relative mt-2"
+                onFocus={() => setDescFocused(true)}
+                onBlur={async () => {
+                  if (descSaveTimerRef.current != null) {
+                    window.clearTimeout(descSaveTimerRef.current)
+                    descSaveTimerRef.current = null
+                  }
+                  await commitDescription()
+                  setDescFocused(false)
+                }}
+              />
 
               <div className="mt-10 border-t border-[rgba(0,255,140,0.12)] pt-6">
                 <div className="mb-5 flex items-center gap-2 border border-[rgba(0,255,140,0.12)] bg-[rgba(0,255,136,0.025)] p-1">
@@ -1523,158 +1507,6 @@ function slugify(value: string) {
     .slice(0, 42)
 
   return slug || 'issue'
-}
-
-function DescriptionView({ source }: { source: string }) {
-  return (
-    <div className="font-mono text-sm leading-relaxed text-fg-2 markdown-body">
-      <ReactMarkdown
-        remarkPlugins={[remarkGfm]}
-        components={{
-          h1: ({ children }) => (
-            <h1 className="mt-4 mb-2 font-mono text-xl font-bold text-fg-1 first:mt-0">{children}</h1>
-          ),
-          h2: ({ children }) => (
-            <h2 className="mt-4 mb-2 font-mono text-lg font-bold text-fg-1 first:mt-0">{children}</h2>
-          ),
-          h3: ({ children }) => (
-            <h3 className="mt-3 mb-2 font-mono text-base font-bold text-fg-1 first:mt-0">{children}</h3>
-          ),
-          h4: ({ children }) => (
-            <h4 className="mt-3 mb-1.5 font-mono text-sm font-bold uppercase tracking-label text-fg-2 first:mt-0">{children}</h4>
-          ),
-          p: ({ children }) => <p className="my-2 first:mt-0 last:mb-0 text-fg-2">{children}</p>,
-          a: ({ href, children }) => (
-            <a
-              href={href}
-              target="_blank"
-              rel="noreferrer"
-              className="text-accent underline decoration-[rgba(0,255,140,0.4)] underline-offset-2 hover:text-accent hover:decoration-accent"
-            >
-              {children}
-            </a>
-          ),
-          strong: ({ children }) => <strong className="font-bold text-fg-1">{children}</strong>,
-          em: ({ children }) => <em className="italic text-fg-1">{children}</em>,
-          ul: ({ children }) => <ul className="my-2 ml-5 list-disc space-y-1 marker:text-fg-4">{children}</ul>,
-          ol: ({ children }) => <ol className="my-2 ml-5 list-decimal space-y-1 marker:text-fg-4">{children}</ol>,
-          li: ({ children }) => <li className="text-fg-2">{children}</li>,
-          blockquote: ({ children }) => (
-            <blockquote className="my-2 border-l-2 border-[rgba(0,255,140,0.25)] pl-3 text-fg-3 italic">
-              {children}
-            </blockquote>
-          ),
-          hr: () => <hr className="my-4 border-0 border-t border-[rgba(0,255,140,0.15)]" />,
-          code: ({ inline, children, ...props }: { inline?: boolean; children?: React.ReactNode }) => {
-            if (inline) {
-              return (
-                <code
-                  className="border border-[rgba(0,255,140,0.15)] bg-pit-3 px-1.5 py-0.5 font-mono text-[0.85em] text-accent"
-                  {...props}
-                >
-                  {children}
-                </code>
-              )
-            }
-            return (
-              <code className="font-mono text-[0.85em] text-fg-1" {...props}>
-                {children}
-              </code>
-            )
-          },
-          pre: ({ children }) => (
-            <pre className="my-3 overflow-auto border border-[rgba(0,255,140,0.15)] bg-pit-3 p-3 font-mono text-[0.85em] leading-relaxed text-fg-1">
-              {children}
-            </pre>
-          ),
-          table: ({ children }) => (
-            <div className="my-3 overflow-auto">
-              <table className="w-full border-collapse border border-[rgba(0,255,140,0.15)] font-mono text-xs">
-                {children}
-              </table>
-            </div>
-          ),
-          thead: ({ children }) => <thead className="bg-pit-3">{children}</thead>,
-          th: ({ children }) => (
-            <th className="border border-[rgba(0,255,140,0.15)] px-3 py-1.5 text-left font-mono text-[10px] uppercase tracking-label text-fg-3">
-              {children}
-            </th>
-          ),
-          td: ({ children }) => (
-            <td className="border border-[rgba(0,255,140,0.1)] px-3 py-1.5 text-fg-2">{children}</td>
-          ),
-          input: ({ type, checked, disabled, ...props }) => {
-            if (type === 'checkbox') {
-              return (
-                <span
-                  aria-hidden
-                  className={`mr-1.5 inline-flex h-3.5 w-3.5 -translate-y-[1px] items-center justify-center border align-middle ${
-                    checked
-                      ? 'border-accent bg-accent'
-                      : 'border-[rgba(0,255,140,0.25)] bg-transparent'
-                  }`}
-                >
-                  {checked && (
-                    <svg viewBox="0 0 16 16" className="h-2.5 w-2.5 text-pit" fill="none">
-                      <path d="M3 8l3 3 7-7" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" />
-                    </svg>
-                  )}
-                </span>
-              )
-            }
-            return <input type={type} checked={checked} disabled={disabled} {...props} />
-          },
-        }}
-      >
-        {source}
-      </ReactMarkdown>
-    </div>
-  )
-}
-
-function AutoGrowTextarea({
-  value,
-  onChange,
-  onFocus,
-  onBlur,
-  placeholder,
-  className,
-  textareaRef,
-}: {
-  value: string
-  onChange: (value: string) => void
-  onFocus: () => void
-  onBlur: () => void | Promise<void>
-  placeholder: string
-  className: string
-  textareaRef?: React.MutableRefObject<HTMLTextAreaElement | null>
-}) {
-  const innerRef = useRef<HTMLTextAreaElement | null>(null)
-
-  useEffect(() => {
-    const el = innerRef.current
-    if (!el) return
-    el.style.height = 'auto'
-    el.style.height = `${el.scrollHeight}px`
-  }, [value])
-
-  return (
-    <textarea
-      ref={(el) => {
-        innerRef.current = el
-        if (textareaRef) textareaRef.current = el
-      }}
-      value={value}
-      onChange={(event) => onChange(event.target.value)}
-      onFocus={onFocus}
-      onBlur={() => {
-        void onBlur()
-      }}
-      placeholder={placeholder}
-      className={className}
-      style={{ minHeight: '6rem' }}
-    />
-  )
 }
 
 function PropertyRow({

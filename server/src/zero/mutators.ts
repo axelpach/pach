@@ -23,6 +23,7 @@ type ScopedTable =
   | 'fin_movements'
   | 'fin_categorization_rules'
   | 'fin_balance_snapshots'
+  | 'documents'
   | 'pm_teams'
   | 'pm_projects'
   | 'pm_statuses'
@@ -51,6 +52,7 @@ const ORG_COLUMN_BY_TABLE: Record<ScopedTable, string> = {
   fin_movements: 'organization_id',
   fin_categorization_rules: 'organization_id',
   fin_balance_snapshots: 'organization_id',
+  documents: 'organization_id',
   pm_teams: 'company_id',
   pm_projects: 'company_id',
   pm_statuses: 'company_id',
@@ -420,6 +422,36 @@ export function createServerMutators(authData?: JWTPayload) {
       async create(tx: Tx, args: { id: string; organizationId: string; accountId: string; asOfDate: number; balanceMinor: number; currencyCode: string; source?: string; importId?: string }) {
         requireOrganizationAccess(args.organizationId)
         await tx.mutate.fin_balance_snapshots.insert({ source: 'manual', ...args, createdAt: Date.now() })
+      },
+    },
+
+    documents: {
+      async create(tx: Tx, args: { id: string; organizationId?: string; parentId?: string; ownerId?: string; title: string; slug: string; body?: string; format?: string; status?: string; icon?: string; sortOrder?: number; metadata?: any }) {
+        requireOrganizationAccess(args.organizationId)
+        if (args.parentId) await requireExistingOrganizationAccess(tx, 'documents', args.parentId)
+        const now = Date.now()
+        await tx.mutate.documents.insert({
+          body: '',
+          format: 'markdown',
+          status: 'active',
+          sortOrder: 0,
+          metadata: {},
+          ...args,
+          ownerId: args.ownerId ?? authData?.sub,
+          createdAt: now,
+          updatedAt: now,
+        })
+      },
+      async update(tx: Tx, args: { id: string; organizationId?: string | null; parentId?: string | null; ownerId?: string | null; title?: string; slug?: string; body?: string; format?: string; status?: string; icon?: string | null; sortOrder?: number; metadata?: any }) {
+        await requireExistingOrganizationAccess(tx, 'documents', args.id)
+        if ('organizationId' in args) requireOrganizationAccess(args.organizationId)
+        if (args.parentId) await requireExistingOrganizationAccess(tx, 'documents', args.parentId)
+        const { id, ...updates } = args
+        await tx.mutate.documents.update({ id, ...updates, updatedAt: Date.now() })
+      },
+      async delete(tx: Tx, args: { id: string }) {
+        await requireExistingOrganizationAccess(tx, 'documents', args.id)
+        await tx.mutate.documents.delete({ id: args.id })
       },
     },
 

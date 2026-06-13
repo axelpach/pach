@@ -10,6 +10,7 @@ import linearRoute from './routes/linear.js'
 import taskTriggersRoute from './routes/task-triggers.js'
 import agentRoute, { attachAgentTerminalWebSocket } from './routes/agent.js'
 import financeRoute from './routes/finance.js'
+import mediaRoute from './routes/media.js'
 import { requireAuth, requireUnscopedAccess } from './middleware/auth.js'
 import { startTaskTriggerRunner } from './services/task-triggers/runner.js'
 
@@ -31,6 +32,7 @@ app.use('/linear', requireAuth, requireUnscopedAccess, linearRoute)
 app.use('/task-triggers', requireAuth, requireUnscopedAccess, taskTriggersRoute)
 app.use('/agent', requireAuth, requireUnscopedAccess, agentRoute)
 app.use('/finance', requireAuth, financeRoute)
+app.use('/media', requireAuth, mediaRoute)
 
 app.use((err: unknown, _req: express.Request, res: express.Response, next: express.NextFunction) => {
   if (isPayloadTooLargeError(err)) {

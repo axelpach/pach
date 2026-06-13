@@ -322,6 +322,30 @@ export const finBalanceSnapshots = pgTable('fin_balance_snapshots', {
     accountDateIdx: uniqueIndex('fin_balance_snapshots_account_date_idx').on(table.accountId, table.asOfDate, table.source),
     organizationIdIdx: index('fin_balance_snapshots_organization_idx').on(table.organizationId),
 }));
+/* ─────────────────────────── DOCUMENTS ─────────────────────────── */
+export const documents = pgTable('documents', {
+    id: uuid('id').primaryKey().defaultRandom(),
+    organizationId: uuid('organization_id').references(() => organizations.id),
+    parentId: uuid('parent_id'),
+    ownerId: uuid('owner_id').references(() => users.id),
+    title: text('title').notNull(),
+    slug: text('slug').notNull(),
+    body: text('body').notNull().default(''),
+    /** markdown for now; leaves room for future block/json formats. */
+    format: text('format').notNull().default('markdown'),
+    /** active | archived */
+    status: text('status').notNull().default('active'),
+    icon: text('icon'),
+    sortOrder: integer('sort_order').notNull().default(0),
+    metadata: jsonb('metadata').$type().notNull().default({}),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+}, (table) => ({
+    organizationStatusIdx: index('documents_organization_status_idx').on(table.organizationId, table.status),
+    parentIdx: index('documents_parent_idx').on(table.parentId),
+    ownerIdx: index('documents_owner_idx').on(table.ownerId),
+    organizationSlugIdx: uniqueIndex('documents_organization_slug_idx').on(table.organizationId, table.slug),
+}));
 /* ─────────────────────── PROJECT MANAGEMENT ─────────────────────── */
 export const pmTeams = pgTable('pm_teams', {
     id: uuid('id').primaryKey().defaultRandom(),

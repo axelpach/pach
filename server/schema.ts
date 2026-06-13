@@ -164,7 +164,7 @@ const finAccounts = table('fin_accounts')
     status: string(),
     lastBalanceMinor: number().optional().from('last_balance_minor'),
     lastBalanceAt: number().optional().from('last_balance_at'),
-    metadata: json<Record<string, unknown>>(),
+    metadata: json(),
     createdAt: number().from('created_at'),
     updatedAt: number().from('updated_at'),
   })
@@ -318,6 +318,25 @@ const finBalanceSnapshots = table('fin_balance_snapshots')
     source: string(),
     importId: string().optional().from('import_id'),
     createdAt: number().from('created_at'),
+  })
+  .primaryKey('id')
+
+const documents = table('documents')
+  .columns({
+    id: string(),
+    organizationId: string().optional().from('organization_id'),
+    parentId: string().optional().from('parent_id'),
+    ownerId: string().optional().from('owner_id'),
+    title: string(),
+    slug: string(),
+    body: string(),
+    format: string(),
+    status: string(),
+    icon: string().optional(),
+    sortOrder: number().from('sort_order'),
+    metadata: json(),
+    createdAt: number().from('created_at'),
+    updatedAt: number().from('updated_at'),
   })
   .primaryKey('id')
 
@@ -715,6 +734,7 @@ export const schema = createSchema({
     finMovements,
     finCategorizationRules,
     finBalanceSnapshots,
+    documents,
     pmTeams,
     pmProjects,
     pmStatuses,
@@ -817,6 +837,7 @@ export const permissions = definePermissions<AuthData, Schema>(schema, () => {
     fin_movements: organizationScoped<'fin_movements'>(),
     fin_categorization_rules: organizationScoped<'fin_categorization_rules'>(),
     fin_balance_snapshots: organizationScoped<'fin_balance_snapshots'>(),
+    documents: organizationScoped<'documents'>(),
     pm_teams: authenticatedReadOnly,
     pm_projects: organizationScoped<'pm_projects'>('companyId'),
     pm_statuses: authenticatedReadOnly,
