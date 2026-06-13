@@ -349,6 +349,7 @@ export default function Finance() {
   const scopedTransfers = transfers.filter((transfer) => transfer.organizationId === selectedOrganizationId)
   const selectedAccountFilterIds = activeFilters.accounts ?? []
   const selectedStatusFilterIds = activeFilters.statuses ?? []
+  const selectedTypeFilterIds = activeFilters.types ?? []
   const selectedCategoryFilterIds = activeFilters.categories ?? []
   const selectedMonthFilterIds = activeFilters.months ?? []
   const selectedQuarterFilterIds = activeFilters.quarters ?? []
@@ -427,6 +428,7 @@ export default function Finance() {
       if (selectedStatusFilterIds.length > 0) return selectedStatusFilterIds.includes(movement.status)
       return movement.status !== 'ignored'
     })
+    .filter((movement) => selectedTypeFilterIds.length === 0 || selectedTypeFilterIds.includes(movement.type))
     .filter((movement) => selectedCategoryFilterIds.length === 0 || selectedCategoryFilterIds.includes(movement.categoryId ?? UNCATEGORIZED_VALUE))
     .filter((movement) => selectedMonthFilterIds.length === 0 || selectedMonthFilterIds.includes(monthKey(movement.transactionDate)))
     .filter((movement) => selectedQuarterFilterIds.length === 0 || selectedQuarterFilterIds.includes(quarterKey(movement.transactionDate)))
@@ -663,6 +665,12 @@ export default function Finance() {
         value: entry.value,
         label: entry.value === 'pending_review' ? 'needs review' : entry.label,
       })),
+    },
+    {
+      field: 'types',
+      label: 'types',
+      icon: ArrowRightLeft,
+      options: movementTypeOptions,
     },
     {
       field: 'categories',
