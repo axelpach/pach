@@ -1,5 +1,5 @@
 import { useQuery, useZero } from '@rocicorp/zero/react'
-import { AlertTriangle, ArrowDown, ArrowLeft, ArrowRightLeft, ArrowUp, Building2, CalendarDays, ChartPie, CheckCircle, ChevronDown, ChevronRight, CircleDollarSign, CreditCard, FileText, FileUp, Landmark, Layers2, Loader2, Plus, Search, Tag, Trash2, UploadCloud, UserRound, WalletCards, X } from 'lucide-react'
+import { AlertTriangle, ArrowDown, ArrowLeft, ArrowRightLeft, ArrowUp, Building2, CalendarDays, ChartPie, CheckCircle, ChevronDown, ChevronRight, CircleDollarSign, CreditCard, FileText, FileUp, Info, Landmark, Layers2, Loader2, Plus, Search, Tag, Trash2, UploadCloud, UserRound, WalletCards, X } from 'lucide-react'
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type MouseEvent, type ReactNode } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { config } from '../../config'
@@ -374,16 +374,28 @@ export default function Finance() {
     })
   const visibleMovements = sortMovementsByDate(filteredMovements, movementSortDirection)
   const visibleTotals = summarizeMovements(filteredMovements)
+  const dashboardBalanceCutoffMs = dashboardPeriodEndExclusiveMs(selectedDashboardMonthFilterIds, selectedDashboardQuarterFilterIds)
+  const dashboardHasDatePeriodFilter = selectedDashboardMonthFilterIds.length > 0 || selectedDashboardQuarterFilterIds.length > 0
+  const dashboardBalanceKpiScope = dashboardHasDatePeriodFilter
+    ? 'from the beginning of movements through the selected period end'
+    : 'across all available movements'
+  const dashboardFlowKpiScope = dashboardHasDatePeriodFilter
+    ? 'inside the selected dashboard period'
+    : 'across all dashboard movements'
   const dashboardPeriodMovements = scopedMovements
     .filter((movement) => selectedDashboardMonthFilterIds.length === 0 || selectedDashboardMonthFilterIds.includes(monthKey(movement.transactionDate)))
     .filter((movement) => selectedDashboardQuarterFilterIds.length === 0 || selectedDashboardQuarterFilterIds.includes(quarterKey(movement.transactionDate)))
     .filter((movement) => selectedDashboardCurrencyFilterIds.length === 0 || selectedDashboardCurrencyFilterIds.includes(movement.currencyCode))
-  const dashboardAccountMovements = dashboardPeriodMovements.filter((movement) => movement.status !== 'ignored')
-  const dashboardNonTransferMovements = dashboardAccountMovements.filter((movement) => !isTransferLikeMovement(movement, scopedCategories))
-  const dashboardAccountBalances = buildAccountBalanceBreakdown(dashboardAccountMovements, scopedAccounts, selectedDashboardCurrencyFilterIds)
+  const dashboardBalanceMovements = scopedMovements
+    .filter((movement) => dashboardBalanceCutoffMs == null || movement.transactionDate < dashboardBalanceCutoffMs)
+    .filter((movement) => selectedDashboardCurrencyFilterIds.length === 0 || selectedDashboardCurrencyFilterIds.includes(movement.currencyCode))
+  const dashboardPeriodAccountMovements = dashboardPeriodMovements.filter((movement) => movement.status !== 'ignored')
+  const dashboardBalanceAccountMovements = dashboardBalanceMovements.filter((movement) => movement.status !== 'ignored')
+  const dashboardNonTransferMovements = dashboardPeriodAccountMovements.filter((movement) => !isTransferLikeMovement(movement, scopedCategories))
+  const dashboardAccountBalances = buildAccountBalanceBreakdown(dashboardBalanceAccountMovements, scopedAccounts, selectedDashboardCurrencyFilterIds)
   const dashboardBalanceTotals = summarizeAccountBalances(dashboardAccountBalances)
   const dashboardKpis = summarizeDashboardKpis(dashboardAccountBalances, dashboardNonTransferMovements)
-  const monthlyBalance = buildMonthlyBalance(dashboardAccountMovements, scopedAccounts, selectedDashboardCurrencyFilterIds)
+  const monthlyBalance = buildMonthlyBalance(dashboardPeriodAccountMovements, scopedAccounts, selectedDashboardCurrencyFilterIds)
   const dashboardFxReady = dashboardFx.status === 'ready' && dashboardFx.baseCurrencyCode === dashboardReportingCurrencyCode
   const dashboardFxFailed = dashboardFx.status === 'failed' && dashboardFx.baseCurrencyCode === dashboardReportingCurrencyCode
   const dashboardConversionRates = dashboardFxReady ? dashboardFx.rates : dashboardFxFailed ? {} : null
@@ -1767,7 +1779,7 @@ export default function Finance() {
           </div>
         </div>
       ) : tab === 'dashboard' ? (
-        <div ref={dashboardScrollRef} className="min-h-0 flex-1 overflow-auto px-3 py-3 md:px-8 md:py-4">
+        <div ref={dashboardScrollRef} className="flex min-h-0 flex-1 flex-col overflow-auto px-3 py-3 md:px-8 md:py-4">
           <div className="mb-3 flex items-center justify-between gap-3">
             <div className="[&>div>div>button]:h-8 [&>div>div>button]:px-3">
               <FilterButton
@@ -1839,7 +1851,7 @@ export default function Finance() {
                   ))}
                 </div>
                 <div className="grid gap-1 text-xs">
-                  <span className="text-fg-3">{dashboardAccountMovements.length} counted movements</span>
+                  <span className="text-fg-3">{dashboardBalanceAccountMovements.length} counted movements</span>
                   <span className="text-fg-4">native balances</span>
                 </div>
                 <MoneyStack amounts={dashboardBalanceTotals.netAmounts} tone="byAmount" align="right" />
@@ -1857,40 +1869,44 @@ export default function Finance() {
               label="cash"
               value={formatConvertedKpiValue(convertedDashboardKpis?.cash ?? null)}
               sub={dashboardKpiSub(convertedDashboardKpis?.cash ?? null, countLabel(dashboardKpis.cashAccountCount, 'positive balance'))}
+              tooltip={`Sum of positive account balances ${dashboardBalanceKpiScope}, converted to ${dashboardReportingCurrencyCode}.`}
             />
             <CategoryKpi
               label="debt"
               value={formatConvertedKpiValue(convertedDashboardKpis?.debt ?? null)}
               sub={dashboardKpiSub(convertedDashboardKpis?.debt ?? null, countLabel(dashboardKpis.debtAccountCount, 'negative balance'))}
+              tooltip={`Absolute sum of negative account balances ${dashboardBalanceKpiScope}, converted to ${dashboardReportingCurrencyCode}.`}
             />
             <CategoryKpi
               label="income"
               value={formatConvertedKpiValue(convertedDashboardKpis?.income ?? null)}
               sub={dashboardKpiSub(convertedDashboardKpis?.income ?? null, countLabel(dashboardKpis.incomeMovementCount, 'non-transfer movement'))}
+              tooltip={`Sum of positive non-transfer movements ${dashboardFlowKpiScope}, converted to ${dashboardReportingCurrencyCode}.`}
             />
             <CategoryKpi
               label="expense"
               value={formatConvertedKpiValue(convertedDashboardKpis?.expense ?? null)}
               sub={dashboardKpiSub(convertedDashboardKpis?.expense ?? null, countLabel(dashboardKpis.expenseMovementCount, 'non-transfer movement'))}
+              tooltip={`Absolute sum of negative non-transfer movements ${dashboardFlowKpiScope}, converted to ${dashboardReportingCurrencyCode}.`}
             />
           </div>
 
-          <div className="mt-4 grid gap-4">
-            <section className="border border-edge/12 bg-pit-2">
+          <div className="mt-4 grid gap-4 xl:min-h-0 xl:flex-1 xl:grid-cols-[minmax(0,1.25fr)_minmax(360px,0.75fr)]">
+            <section className="flex min-h-0 flex-col border border-edge/12 bg-pit-2">
               <div className="flex items-center justify-between border-b border-edge/12 px-4 py-3 font-mono">
                 <div>
                   <div className="text-[10px] uppercase tracking-label text-fg-4">balance by month</div>
                 </div>
                 <CalendarDays className="h-4 w-4 text-accent" />
               </div>
-              <div className="p-4">
+              <div className="flex min-h-0 flex-1 flex-col p-4">
                 {monthlyBalanceChartPoints.length === 0 ? (
-                  <div className="flex min-h-56 items-center justify-center border border-dashed border-edge/12 font-mono text-sm text-fg-4">
+                  <div className="flex min-h-56 flex-1 items-center justify-center border border-dashed border-edge/12 font-mono text-sm text-fg-4">
                     // no movements in this period
                   </div>
                 ) : (
                   <>
-                    <div className="h-64">
+                    <div className="min-h-64 flex-1">
                       <MonthlyBalanceAreaChart points={monthlyBalanceChartPoints} currencyCode={monthlyBalanceChartCurrencyCode} />
                     </div>
                     <div className="mt-3 flex justify-between gap-3 overflow-hidden font-mono text-[10px] uppercase tracking-label text-fg-4">
@@ -1903,7 +1919,7 @@ export default function Finance() {
               </div>
             </section>
 
-            <section className="border border-edge/12 bg-pit-2">
+            <section className="flex min-h-0 flex-col overflow-hidden border border-edge/12 bg-pit-2">
               <div className="flex items-center justify-between border-b border-edge/12 px-4 py-3 font-mono">
                 <div>
                   <div className="text-[10px] uppercase tracking-label text-fg-4">where money goes</div>
@@ -1911,9 +1927,9 @@ export default function Finance() {
                 </div>
                 <ChartPie className="h-4 w-4 text-accent" />
               </div>
-              <div className="grid gap-6 p-4 lg:grid-cols-[320px_1fr]">
+              <div className="grid min-h-0 flex-1 gap-5 overflow-y-auto p-4">
                 {!categoryBreakdown || categoryBreakdown.entries.length === 0 ? (
-                  <div className="flex min-h-52 items-center justify-center border border-dashed border-edge/12 font-mono text-sm text-fg-4 lg:col-span-2">
+                  <div className="flex min-h-52 items-center justify-center border border-dashed border-edge/12 font-mono text-sm text-fg-4">
                     {categoryBreakdownEmptyMessage}
                   </div>
                 ) : (
@@ -3513,10 +3529,20 @@ function FinanceMetric({ label, value, tone = 'default' }: { label: string; valu
   )
 }
 
-function CategoryKpi({ label, value, sub }: { label: string; value: string; sub: string }) {
+function CategoryKpi({ label, value, sub, tooltip }: { label: string; value: string; sub: string; tooltip?: string }) {
   return (
     <div className="min-w-0 border-b border-r border-edge/12 bg-pit-2 px-4 py-3">
-      <div className="text-[10px] uppercase tracking-label text-fg-4">{label}</div>
+      <div className="flex items-center gap-1.5 text-[10px] uppercase tracking-label text-fg-4">
+        <span>{label}</span>
+        {tooltip ? (
+          <span className="group/info relative inline-flex" tabIndex={0} aria-label={tooltip}>
+            <Info className="h-3 w-3 text-fg-4 transition group-hover/info:text-accent group-focus/info:text-accent" />
+            <span className="pointer-events-none absolute left-0 top-[calc(100%+8px)] z-40 w-72 max-w-[calc(100vw-2rem)] border border-edge/20 bg-pit px-3 py-2 font-mono text-[10px] uppercase tracking-label text-fg-2 opacity-0 shadow-terminal-popover transition group-hover/info:opacity-100 group-focus/info:opacity-100">
+              {tooltip}
+            </span>
+          </span>
+        ) : null}
+      </div>
       <div className="mt-2 truncate text-lg text-fg-1 tabular-nums">{value}</div>
       <div className="mt-1 truncate text-[10px] uppercase tracking-label text-fg-4">{sub}</div>
     </div>
@@ -4352,6 +4378,29 @@ function quarterKey(value: number) {
   const year = date.getUTCFullYear()
   const quarter = Math.floor(date.getUTCMonth() / 3) + 1
   return `${year}-Q${quarter}`
+}
+
+function dashboardPeriodEndExclusiveMs(monthIds: string[], quarterIds: string[]) {
+  const periodEnds = monthIds.length > 0
+    ? monthIds.map(monthEndExclusiveMs)
+    : quarterIds.map(quarterEndExclusiveMs)
+  const ends = periodEnds.filter((value): value is number => value != null)
+  return ends.length > 0 ? Math.max(...ends) : null
+}
+
+function monthEndExclusiveMs(monthId: string) {
+  const year = Number(monthId.slice(0, 4))
+  const month = Number(monthId.slice(5, 7))
+  if (!year || !month || month < 1 || month > 12) return null
+  return Date.UTC(year, month, 1)
+}
+
+function quarterEndExclusiveMs(quarterId: string) {
+  const match = /^(\d{4})-Q([1-4])$/.exec(quarterId)
+  if (!match) return null
+  const year = Number(match[1])
+  const quarter = Number(match[2])
+  return Date.UTC(year, quarter * 3, 1)
 }
 
 function formatMonthLabel(value: number) {
