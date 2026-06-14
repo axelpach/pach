@@ -38,6 +38,28 @@ export const organizationMemberships = pgTable('organization_memberships', {
     organizationIdIdx: index('organization_memberships_organization_idx').on(table.organizationId),
     userIdIdx: index('organization_memberships_user_idx').on(table.userId),
 }));
+export const mcpTokens = pgTable('mcp_tokens', {
+    id: uuid('id').primaryKey().defaultRandom(),
+    name: text('name').notNull(),
+    tokenPrefix: text('token_prefix').notNull().unique(),
+    tokenHash: text('token_hash').notNull().unique(),
+    ownerUserId: uuid('owner_user_id').references(() => users.id),
+    allOrganizations: boolean('all_organizations').notNull().default(false),
+    canAccessUnscoped: boolean('can_access_unscoped').notNull().default(false),
+    organizationIds: jsonb('organization_ids').$type().notNull().default([]),
+    capabilities: jsonb('capabilities').$type().notNull().default([]),
+    expiresAt: timestamp('expires_at', { withTimezone: true }),
+    revokedAt: timestamp('revoked_at', { withTimezone: true }),
+    lastUsedAt: timestamp('last_used_at', { withTimezone: true }),
+    metadata: jsonb('metadata').$type().notNull().default({}),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+}, (table) => ({
+    tokenHashIdx: index('mcp_tokens_token_hash_idx').on(table.tokenHash),
+    ownerUserIdIdx: index('mcp_tokens_owner_user_id_idx').on(table.ownerUserId),
+    revokedAtIdx: index('mcp_tokens_revoked_at_idx').on(table.revokedAt),
+    expiresAtIdx: index('mcp_tokens_expires_at_idx').on(table.expiresAt),
+}));
 /* ─────────────────────────── DECKS ─────────────────────────── */
 export const decks = pgTable('decks', {
     id: uuid('id').primaryKey().defaultRandom(),
