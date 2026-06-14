@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto'
 import { Router } from 'express'
 import { execFile, spawn } from 'node:child_process'
 import { mkdtemp, rm, writeFile } from 'node:fs/promises'
@@ -10,18 +11,21 @@ import { and, eq, inArray } from 'drizzle-orm'
 import { getDb } from '../db.js'
 import { verifyToken } from '../lib/auth.js'
 import {
+  agentRunProgressReports,
   agentRunArtifacts,
   agentRuns,
   agentTerminals,
   agentWorkers,
   githubBranches,
   githubPullRequests,
+  pmIssueActivity,
   pmIssues,
 } from '../../../db/schema.js'
 
 const router = Router()
 const execFileAsync = promisify(execFile)
 const ACTIVE_RUN_STATUSES = ['queued', 'reserved', 'bootstrapping', 'running', 'needs_human', 'pr_ready'] as const
+const FINAL_RUN_STATUSES = new Set(['completed', 'failed', 'canceled'])
 
 type WorkerConfig = {
   name: string
@@ -191,6 +195,79 @@ router.post('/workers/:id/health-check', async (req, res) => {
       workerId: id,
       error: message,
     })
+  }
+})
+
+router.post('/runs/:id/cancel', async (req, res) => {
+  const { id } = req.params
+
+  try {
+    const db = getDb()
+    const [run] = await db.select().from(agentRuns).where(eq(agentRuns.id, id)).limit(1)
+
+    if (!run) {
+      res.status(404).json({ ok: false, error: 'Agent run not found' })
+      return
+    }
+
+    if (FINAL_RUN_STATUSES.has(run.status)) {
+      res.json({ ok: true, run, alreadyFinal: true })
+      return
+    }
+
+    const now = new Date()
+    const reason = readOptionalString(req.body?.reason) ?? 'canceled by user'
+    const nextMetadata = {
+      ...(run.metadata ?? {}),
+      cancelRequested: true,
+      cancelRequestedAt: now.toISOString(),
+      cancelRequestedBy: req.user?.sub,
+      cancelReason: reason,
+    }
+    const cancelsImmediately = run.status === 'queued' || run.status === 'reserved' || !run.workerId
+    const [updated] = await db
+      .update(agentRuns)
+      .set({
+        status: cancelsImmediately ? 'canceled' : run.status,
+        statusMessage: cancelsImmediately ? reason : 'cancel requested',
+        completedAt: cancelsImmediately ? now : run.completedAt,
+        metadata: nextMetadata,
+        updatedAt: now,
+      })
+      .where(eq(agentRuns.id, run.id))
+      .returning()
+
+    await appendRunProgressReport(updated, {
+      workerId: updated.workerId ?? undefined,
+      phase: cancelsImmediately ? 'canceled' : 'cancel_requested',
+      level: 'warn',
+      message: cancelsImmediately ? reason : 'Cancel requested. Waiting for the agent worker to stop the run.',
+      metadata: {
+        reason,
+        requestedBy: req.user?.sub,
+      },
+    })
+
+    await appendRunActivity(updated, cancelsImmediately ? reason : 'requested agent run cancellation', 'agent_run_canceled', {
+      workerId: updated.workerId,
+      reason,
+    })
+
+    if (cancelsImmediately && run.workerId) {
+      await db
+        .update(agentWorkers)
+        .set({
+          status: 'idle',
+          statusMessage: 'last run canceled',
+          lastSeenAt: now,
+          updatedAt: now,
+        })
+        .where(eq(agentWorkers.id, run.workerId))
+    }
+
+    res.json({ ok: true, run: updated, cancelRequested: !cancelsImmediately })
+  } catch (error) {
+    res.status(500).json({ ok: false, error: error instanceof Error ? error.message : 'Run cancellation failed' })
   }
 })
 
@@ -1098,6 +1175,57 @@ async function readRunWorker(runId: string) {
   if (!worker) throw new Error('Assigned worker not found')
 
   return { run, worker }
+}
+
+async function appendRunActivity(
+  run: typeof agentRuns.$inferSelect,
+  summary: string,
+  type: string,
+  metadata: Record<string, unknown>,
+) {
+  await getDb().insert(pmIssueActivity).values({
+    id: randomUUID(),
+    issueId: run.issueId,
+    actorName: 'Pach agent',
+    type,
+    summary,
+    metadata: {
+      source: 'agent-route',
+      runId: run.id,
+      ...metadata,
+    },
+    createdAt: new Date(),
+  })
+
+  await getDb()
+    .update(pmIssues)
+    .set({ lastActivityAt: new Date(), updatedAt: new Date() })
+    .where(eq(pmIssues.id, run.issueId))
+}
+
+async function appendRunProgressReport(
+  run: typeof agentRuns.$inferSelect,
+  report: {
+    workerId?: string
+    phase?: string
+    level?: string
+    message: string
+    percent?: number
+    metadata?: Record<string, unknown>
+  },
+) {
+  await getDb().insert(agentRunProgressReports).values({
+    id: randomUUID(),
+    runId: run.id,
+    issueId: run.issueId,
+    workerId: report.workerId,
+    phase: report.phase,
+    level: report.level ?? 'info',
+    message: report.message,
+    percent: report.percent,
+    metadata: report.metadata ?? {},
+    createdAt: new Date(),
+  })
 }
 
 function findAgentTerminal(terminals: (typeof agentTerminals.$inferSelect)[]) {

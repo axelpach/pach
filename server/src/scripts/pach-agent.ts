@@ -20,6 +20,11 @@ type AgentRunRecord = {
   metadata?: Record<string, unknown>
 }
 
+type CancelState = {
+  cancelRequested: boolean
+  reason?: string
+}
+
 const apiUrl = readEnv('PACH_API_URL', 'http://localhost:3002').replace(/\/$/, '')
 const agentToken = process.env.PACH_AGENT_TOKEN || process.env.PACH_MCP_TOKEN
 const workerName = readEnv('PACH_AGENT_WORKER_NAME', hostname())
@@ -151,7 +156,7 @@ async function executeGeneralMcpRun(worker: WorkerRecord, run: AgentRunRecord) {
   try {
     const prompt = buildGeneralMcpPrompt(run)
     const startedAt = Date.now()
-    const { stdout, stderr } = await runCodexExec(prompt, run.metadata)
+    const { stdout, stderr } = await runCodexExec(prompt, run.metadata, worker, run)
     const durationMs = Date.now() - startedAt
     const finalMessage = summarizeCodexOutput(stdout) || `Codex completed general MCP run ${run.id}`
     const codexSessionId = readCodexSessionId(stdout, stderr) ?? readMetadataString(run.metadata, 'codexSessionId')
@@ -183,40 +188,52 @@ async function executeGeneralMcpRun(worker: WorkerRecord, run: AgentRunRecord) {
 
     console.log(`[${new Date().toISOString()}] completed general MCP run ${run.id}`)
   } catch (error) {
-    const message = error instanceof Error ? error.message : 'Codex general MCP run failed'
+    const canceled = readExecCanceled(error)
+    const message = canceled
+      ? 'Codex run canceled by user request'
+      : error instanceof Error ? error.message : 'Codex general MCP run failed'
     const output = readExecErrorOutput(error)
 
     await reportRunProgress(worker, run, {
-      phase: 'codex_failed',
+      phase: canceled ? 'canceled' : 'codex_failed',
       message,
+      percent: canceled ? 100 : undefined,
       metadata: output,
     }).catch((progressError) => {
       console.error(
-        `[${new Date().toISOString()}] failed to report Codex error:`,
+        `[${new Date().toISOString()}] failed to report Codex ${canceled ? 'cancellation' : 'error'}:`,
         progressError instanceof Error ? progressError.message : progressError,
       )
     })
 
     await postJson(`/agent-worker/runs/${run.id}/complete`, {
       workerId: worker.id,
-      status: 'failed',
+      status: canceled ? 'canceled' : 'failed',
       message,
       metadata: {
         handler: 'general-mcp',
+        canceled,
         ...output,
       },
     })
 
-    console.error(`[${new Date().toISOString()}] failed general MCP run ${run.id}: ${message}`)
+    console.error(`[${new Date().toISOString()}] ${canceled ? 'canceled' : 'failed'} general MCP run ${run.id}: ${message}`)
   }
 }
 
-async function runCodexExec(prompt: string, metadata?: Record<string, unknown>): Promise<CommandResult> {
+async function runCodexExec(
+  prompt: string,
+  metadata: Record<string, unknown> | undefined,
+  worker: WorkerRecord,
+  run: AgentRunRecord,
+): Promise<CommandResult> {
   return new Promise((resolve, reject) => {
     let stdout = ''
     let stderr = ''
     let timedOut = false
     let interrupted: string | null = null
+    let cancelPollBusy = false
+    let cancellationStarted = false
 
     const args = buildCodexExecArgs(prompt, metadata)
     console.log(`[${new Date().toISOString()}] starting: ${codexCommand} ${args.slice(0, -1).join(' ')} <prompt>`)
@@ -229,20 +246,54 @@ async function runCodexExec(prompt: string, metadata?: Record<string, unknown>):
       stdio: ['ignore', 'pipe', 'pipe'],
     })
 
-    const timeout = setTimeout(() => {
-      timedOut = true
+    const requestChildStop = (reason: string) => {
+      if (cancellationStarted) return
+      cancellationStarted = true
+      interrupted = reason
       child.kill('SIGTERM')
       setTimeout(() => child.kill('SIGKILL'), 5_000).unref()
+    }
+
+    const timeout = setTimeout(() => {
+      timedOut = true
+      requestChildStop('timeout')
     }, codexTimeoutMs)
     timeout.unref()
 
+    const cancelPoll = setInterval(() => {
+      if (cancelPollBusy || cancellationStarted) return
+      cancelPollBusy = true
+      checkCancelState(worker, run)
+        .then((state) => {
+          if (!state.cancelRequested) return
+          console.log(`[${new Date().toISOString()}] cancel requested for run ${run.id}: ${state.reason ?? 'no reason'}`)
+          requestChildStop('cancel_requested')
+        })
+        .catch((error) => {
+          console.error(
+            `[${new Date().toISOString()}] failed to check cancel state for ${run.id}:`,
+            error instanceof Error ? error.message : error,
+          )
+        })
+        .finally(() => {
+          cancelPollBusy = false
+        })
+    }, 2_000)
+    cancelPoll.unref()
+
     const handleSignal = (signal: NodeJS.Signals) => {
-      interrupted = signal
-      child.kill('SIGTERM')
+      requestChildStop(signal)
     }
 
     process.once('SIGINT', handleSignal)
     process.once('SIGTERM', handleSignal)
+
+    const cleanup = () => {
+      clearTimeout(timeout)
+      clearInterval(cancelPoll)
+      process.off('SIGINT', handleSignal)
+      process.off('SIGTERM', handleSignal)
+    }
 
     child.stdout?.on('data', (chunk: Buffer) => {
       const text = chunk.toString()
@@ -257,24 +308,25 @@ async function runCodexExec(prompt: string, metadata?: Record<string, unknown>):
     })
 
     child.on('error', (error) => {
-      clearTimeout(timeout)
-      process.off('SIGINT', handleSignal)
-      process.off('SIGTERM', handleSignal)
+      cleanup()
       reject(Object.assign(error, { stdout, stderr }))
     })
 
     child.on('close', (code, signal) => {
-      clearTimeout(timeout)
-      process.off('SIGINT', handleSignal)
-      process.off('SIGTERM', handleSignal)
-
-      if (interrupted) {
-        reject(Object.assign(new Error(`Codex interrupted by ${interrupted}`), { stdout, stderr, signal: interrupted }))
-        return
-      }
+      cleanup()
 
       if (timedOut) {
         reject(Object.assign(new Error(`Codex timed out after ${codexTimeoutMs}ms`), { stdout, stderr, signal }))
+        return
+      }
+
+      if (interrupted) {
+        reject(Object.assign(new Error(`Codex interrupted by ${interrupted}`), {
+          stdout,
+          stderr,
+          signal: interrupted,
+          canceled: interrupted === 'cancel_requested',
+        }))
         return
       }
 
@@ -285,6 +337,12 @@ async function runCodexExec(prompt: string, metadata?: Record<string, unknown>):
 
       resolve({ stdout, stderr })
     })
+  })
+}
+
+async function checkCancelState(worker: WorkerRecord, run: AgentRunRecord) {
+  return postJson<CancelState>(`/agent-worker/runs/${run.id}/cancel-state`, {
+    workerId: worker.id,
   })
 }
 
@@ -419,4 +477,8 @@ function readExecErrorOutput(error: unknown) {
     code: details.code,
     signal: details.signal,
   }
+}
+
+function readExecCanceled(error: unknown) {
+  return Boolean(error && typeof error === 'object' && (error as { canceled?: unknown }).canceled === true)
 }

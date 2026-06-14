@@ -247,6 +247,27 @@ router.post('/runs/:id/progress', async (req: AgentWorkerRequest, res) => {
   }
 })
 
+router.post('/runs/:id/cancel-state', async (req: AgentWorkerRequest, res) => {
+  try {
+    requireCapability(req, 'agent.run.progress')
+
+    const body = ensureObject(req.body ?? {})
+    const workerId = readRequiredString(body.workerId, 'workerId')
+    const { run } = await readOwnedRun(readRouteParam(req.params.id, 'id'), workerId)
+    const metadata = readObject(run.metadata)
+
+    res.json({
+      ok: true,
+      cancelRequested: metadata.cancelRequested === true || run.status === 'canceled',
+      reason: readOptionalString(metadata.cancelReason),
+      runStatus: run.status,
+      statusMessage: run.statusMessage,
+    })
+  } catch (error) {
+    res.status(500).json({ ok: false, error: error instanceof Error ? error.message : 'Cancel state check failed' })
+  }
+})
+
 router.post('/runs/:id/complete', async (req: AgentWorkerRequest, res) => {
   try {
     requireCapability(req, 'agent.run.complete')
@@ -280,7 +301,7 @@ router.post('/runs/:id/complete', async (req: AgentWorkerRequest, res) => {
       .where(eq(agentRuns.id, run.id))
       .returning()
 
-    await appendRunActivity(updated, message, finalStatus === 'completed' ? 'agent_run_completed' : 'agent_run_failed', {
+    await appendRunActivity(updated, message, finalStatus === 'completed' ? 'agent_run_completed' : finalStatus === 'canceled' ? 'agent_run_canceled' : 'agent_run_failed', {
       workerId,
       finalStatus,
       ...metadata,
@@ -288,7 +309,7 @@ router.post('/runs/:id/complete', async (req: AgentWorkerRequest, res) => {
     await appendRunProgressReport(updated, {
       workerId,
       phase: finalStatus,
-      level: finalStatus === 'completed' ? 'info' : 'error',
+      level: finalStatus === 'completed' ? 'info' : finalStatus === 'canceled' ? 'warn' : 'error',
       message,
       metadata: {
         finalStatus,

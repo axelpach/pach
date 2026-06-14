@@ -13,6 +13,8 @@ type AgentConversationViewProps = {
   onCreateRun: () => void | Promise<void>
   onSeedRepositories: () => void | Promise<void>
   onSendFeedback: (feedback: string) => void | Promise<void>
+  onCancelRun: () => void | Promise<void>
+  canceling: boolean
   onClose: () => void
 }
 
@@ -37,6 +39,8 @@ export function AgentConversationView({
   onCreateRun,
   onSeedRepositories,
   onSendFeedback,
+  onCancelRun,
+  canceling,
   onClose,
 }: AgentConversationViewProps) {
   const [feedbackDraft, setFeedbackDraft] = useState('')
@@ -45,6 +49,7 @@ export function AgentConversationView({
   const conversationEndRef = useRef<HTMLDivElement | null>(null)
   const onlineWorkers = workers.filter((worker) => worker.status !== 'offline')
   const canCreateRun = repositories.length > 0 && !run
+  const canCancelRun = Boolean(run && !['completed', 'failed', 'canceled'].includes(run.status))
   const streamItems = buildAgentConversationStream({ progressReports, legacyProgressActivity, messages })
 
   useEffect(() => {
@@ -99,6 +104,18 @@ export function AgentConversationView({
                 >
                   <TerminalSquare className="h-3.5 w-3.5" />
                   do task
+                </button>
+              ) : null}
+              {canCancelRun ? (
+                <button
+                  type="button"
+                  onClick={() => {
+                    void onCancelRun()
+                  }}
+                  disabled={canceling}
+                  className="h-8 border border-fail/25 bg-fail/5 px-3 font-mono text-[10px] uppercase tracking-label text-fail transition hover:border-fail disabled:cursor-wait disabled:opacity-50"
+                >
+                  {canceling ? 'canceling' : 'cancel run'}
                 </button>
               ) : null}
               <button
@@ -287,6 +304,7 @@ function legacyProgressPhase(type: string) {
   if (type === 'agent_run_claimed') return 'claimed'
   if (type === 'agent_run_completed') return 'completed'
   if (type === 'agent_run_failed') return 'failed'
+  if (type === 'agent_run_canceled') return 'canceled'
   return 'progress'
 }
 

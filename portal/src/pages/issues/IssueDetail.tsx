@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { Link, useNavigate, useParams } from 'react-router-dom'
+import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { useQuery, useZero } from '@rocicorp/zero/react'
 import { Terminal as XTerm } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
@@ -56,11 +56,13 @@ const DEFAULT_TERMINALS = [
 export default function IssueDetail() {
   const { issueId } = useParams<{ issueId: string }>()
   const navigate = useNavigate()
+  const [searchParams, setSearchParams] = useSearchParams()
   const z = useZero<Schema, Mutators>()
   const { user, token } = useAuth()
   const [bootstrappingRunId, setBootstrappingRunId] = useState<string | null>(null)
   const [agentActionMessage, setAgentActionMessage] = useState<string | null>(null)
-  const [agentFullViewOpen, setAgentFullViewOpen] = useState(false)
+  const [cancelingRunId, setCancelingRunId] = useState<string | null>(null)
+  const agentFullViewOpen = searchParams.get('agent') === 'full'
 
   const [allIssues] = useQuery(z.query.pm_issues.orderBy('updatedAt', 'desc'))
   const [documents] = useQuery(z.query.documents.orderBy('updatedAt', 'desc'))
@@ -120,8 +122,32 @@ export default function IssueDetail() {
     : []
 
   useEffect(() => {
-    setAgentFullViewOpen(false)
-  }, [issueId])
+    function handleKeyDown(event: KeyboardEvent) {
+      if (!issue) return
+      if (!event.shiftKey || event.key.toLowerCase() !== 'f') return
+      if (isTextEntryTarget(event.target)) return
+
+      event.preventDefault()
+      const next = new URLSearchParams(searchParams)
+      next.set('agent', 'full')
+      setSearchParams(next)
+    }
+
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [issue, searchParams, setSearchParams])
+
+  function openAgentFullView() {
+    const next = new URLSearchParams(searchParams)
+    next.set('agent', 'full')
+    setSearchParams(next)
+  }
+
+  function closeAgentFullView() {
+    const next = new URLSearchParams(searchParams)
+    next.delete('agent')
+    setSearchParams(next)
+  }
 
   const team = issue ? teams.find((t) => t.id === issue.teamId) ?? null : null
   const project = issue?.projectId ? projects.find((p) => p.id === issue.projectId) ?? null : null
@@ -401,6 +427,31 @@ export default function IssueDetail() {
     })
   }
 
+  async function cancelAgentRun() {
+    if (!activeRun) return
+    setCancelingRunId(activeRun.id)
+    setAgentActionMessage(null)
+
+    try {
+      const res = await authFetch(`${config.apiUrl}/agent/runs/${activeRun.id}/cancel`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ reason: 'canceled by user' }),
+      })
+      const payload = await res.json().catch(() => ({}))
+
+      if (!res.ok) {
+        throw new Error(payload.error ?? 'Failed to cancel agent run')
+      }
+
+      setAgentActionMessage(payload.cancelRequested ? 'cancel requested' : 'run canceled')
+    } catch (error) {
+      setAgentActionMessage(error instanceof Error ? error.message : 'Failed to cancel agent run')
+    } finally {
+      setCancelingRunId(null)
+    }
+  }
+
   async function bootstrapAgentRun() {
     if (!activeRun) return
 
@@ -520,7 +571,9 @@ export default function IssueDetail() {
             onCreateRun={createAgentRun}
             onSeedRepositories={seedDefaultRepositories}
             onSendFeedback={sendAgentFeedback}
-            onClose={() => setAgentFullViewOpen(false)}
+            onCancelRun={cancelAgentRun}
+            canceling={cancelingRunId === activeRun?.id}
+            onClose={closeAgentFullView}
           />
         ) : (
         <div className="flex-1 min-h-0 overflow-y-auto md:overflow-hidden flex flex-col md:flex-row">
@@ -601,7 +654,9 @@ export default function IssueDetail() {
               repositories={repositories}
               onCreateRun={createAgentRun}
               onSeedRepositories={seedDefaultRepositories}
-              onOpenFullView={() => setAgentFullViewOpen(true)}
+              onCancelRun={cancelAgentRun}
+              canceling={cancelingRunId === activeRun?.id}
+              onOpenFullView={openAgentFullView}
             />
 
             <div className="border-b border-edge/10 px-5 py-4">
@@ -813,6 +868,8 @@ function AgentSidebarCard({
   repositories,
   onCreateRun,
   onSeedRepositories,
+  onCancelRun,
+  canceling,
   onOpenFullView,
 }: {
   run: Schema['tables']['agent_runs']['row'] | null
@@ -823,12 +880,15 @@ function AgentSidebarCard({
   repositories: Schema['tables']['github_repositories']['row'][]
   onCreateRun: () => void | Promise<void>
   onSeedRepositories: () => void | Promise<void>
+  onCancelRun: () => void | Promise<void>
+  canceling: boolean
   onOpenFullView: () => void
 }) {
   const onlineWorkers = workers.filter((worker) => worker.status !== 'offline')
   const canCreateRun = repositories.length > 0 && !run
   const runIsActive = Boolean(run && !['completed', 'failed', 'canceled'].includes(run.status))
   const runIsFinal = Boolean(run && ['completed', 'failed', 'canceled'].includes(run.status))
+  const canCancelRun = Boolean(run && !runIsFinal)
   const finalProgressReport = progressReports.find((report) => report.phase === 'final_result')
   const finalLegacyProgress = legacyProgressActivity.find((entry) => readMetadataString(entry.metadata, 'phase') === 'final_result')
   const latestProgress = finalProgressReport ?? progressReports[0] ?? finalLegacyProgress ?? legacyProgressActivity[0] ?? null
@@ -875,6 +935,19 @@ function AgentSidebarCard({
             >
               <TerminalSquare className="h-3 w-3" />
               do task
+            </button>
+          ) : null}
+          {canCancelRun ? (
+            <button
+              type="button"
+              onClick={() => {
+                void onCancelRun()
+              }}
+              disabled={canceling}
+              className="inline-flex h-7 items-center border border-fail/25 bg-fail/5 px-2 font-mono text-[10px] uppercase tracking-label text-fail transition hover:border-fail disabled:cursor-wait disabled:opacity-50"
+              title={run.status === 'queued' ? 'cancel queued run' : 'request worker cancellation'}
+            >
+              {canceling ? 'canceling' : 'cancel'}
             </button>
           ) : null}
         </div>
@@ -1895,15 +1968,22 @@ function readRunCodexSessionId(metadata: unknown) {
   return readMetadataString(completion, 'codexSessionId')
 }
 
+function isTextEntryTarget(target: EventTarget | null) {
+  if (!(target instanceof HTMLElement)) return false
+  if (target.isContentEditable) return true
+  return ['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName)
+}
+
 function isRunScopedAgentActivity(entry: Schema['tables']['pm_issue_activity']['row']) {
   if (!readMetadataString(entry.metadata, 'runId')) return false
-  return ['agent_progress', 'agent_run_claimed', 'agent_run_completed', 'agent_run_failed'].includes(entry.type)
+  return ['agent_progress', 'agent_run_claimed', 'agent_run_completed', 'agent_run_failed', 'agent_run_canceled'].includes(entry.type)
 }
 
 function legacyProgressPhase(type: string) {
   if (type === 'agent_run_claimed') return 'claimed'
   if (type === 'agent_run_completed') return 'completed'
   if (type === 'agent_run_failed') return 'failed'
+  if (type === 'agent_run_canceled') return 'canceled'
   return 'progress'
 }
 
