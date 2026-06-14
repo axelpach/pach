@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import { Router } from 'express'
 import type { Request } from 'express'
-import { desc, eq, inArray } from 'drizzle-orm'
+import { desc, eq, ilike, inArray } from 'drizzle-orm'
 import {
   agentRuns,
   mcpTokens,
@@ -127,14 +127,14 @@ const tools: ToolDefinition[] = [
       properties: {
         issueId: {
           type: 'string',
-          description: 'UUID of the Pach issue to read.',
+          description: 'UUID or human-readable identifier of the Pach issue to read, e.g. PAC-11.',
         },
       },
     },
   },
   {
     name: 'pach.issue.list',
-    description: 'List recent Pach issues the caller can access, ordered by creation time descending.',
+    description: 'List recent Pach issues the caller can access, ordered by creation time descending, with compact triage metadata.',
     inputSchema: {
       type: 'object',
       additionalProperties: false,
@@ -142,6 +142,19 @@ const tools: ToolDefinition[] = [
         limit: {
           type: 'number',
           description: 'Maximum number of issues to return. Defaults to 10, maximum 50.',
+        },
+        statusTypes: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'Optional status type filter, e.g. ["backlog", "unstarted", "started", "blocked", "review"].',
+        },
+        activityLimit: {
+          type: 'number',
+          description: 'Recent activity entries per issue. Defaults to 3, maximum 10.',
+        },
+        runLimit: {
+          type: 'number',
+          description: 'Recent agent runs per issue. Defaults to 2, maximum 5.',
         },
       },
     },
@@ -404,32 +417,88 @@ async function callTool(req: AuthenticatedRequest, params: unknown) {
 async function listIssues(req: AuthenticatedRequest, args: unknown) {
   const body = isObject(args) ? args : {}
   const limit = readPositiveInteger(body.limit, 10, 1, 50)
+  const activityLimit = readPositiveInteger(body.activityLimit, 3, 0, 10)
+  const runLimit = readPositiveInteger(body.runLimit, 2, 0, 5)
+  const statusTypes = readStringArray(body.statusTypes)
   const db = getDb()
   const rows = await db
     .select()
     .from(pmIssues)
     .orderBy(desc(pmIssues.createdAt))
-    .limit(limit * 4)
-  const issues = rows
+    .limit(limit * 8)
+
+  const accessibleRows = rows
     .filter((issue) => canAccessIssue(req, issue))
+
+  const candidateStatusIds = uniqueStrings(accessibleRows.map((issue) => issue.statusId))
+  const candidateStatuses = candidateStatusIds.length > 0
+    ? await db.select().from(pmStatuses).where(inArray(pmStatuses.id, candidateStatusIds))
+    : []
+  const statusById = new Map(candidateStatuses.map((status) => [status.id, status]))
+  const issues = accessibleRows
+    .filter((issue) => statusTypes.length === 0 || statusTypes.includes(statusById.get(issue.statusId)?.type ?? ''))
     .slice(0, limit)
 
+  const issueIds = uniqueStrings(issues.map((issue) => issue.id))
   const teamIds = uniqueStrings(issues.map((issue) => issue.teamId))
   const projectIds = uniqueStrings(issues.map((issue) => issue.projectId))
   const statusIds = uniqueStrings(issues.map((issue) => issue.statusId))
   const teams = teamIds.length > 0 ? await db.select().from(pmTeams).where(inArray(pmTeams.id, teamIds)) : []
   const projects = projectIds.length > 0 ? await db.select().from(pmProjects).where(inArray(pmProjects.id, projectIds)) : []
-  const statuses = statusIds.length > 0 ? await db.select().from(pmStatuses).where(inArray(pmStatuses.id, statusIds)) : []
+  const statuses = statusIds.length > 0
+    ? candidateStatuses.filter((status) => statusIds.includes(status.id))
+    : []
+  const labelLinks = issueIds.length > 0 ? await db.select().from(pmIssueLabels).where(inArray(pmIssueLabels.issueId, issueIds)) : []
+  const labelIds = uniqueStrings(labelLinks.map((link) => link.labelId))
+  const labels = labelIds.length > 0 ? await db.select().from(pmLabels).where(inArray(pmLabels.id, labelIds)) : []
+  const activity = issueIds.length > 0 && activityLimit > 0
+    ? await db
+      .select()
+      .from(pmIssueActivity)
+      .where(inArray(pmIssueActivity.issueId, issueIds))
+      .orderBy(desc(pmIssueActivity.createdAt))
+      .limit(issueIds.length * activityLimit)
+    : []
+  const runs = issueIds.length > 0 && runLimit > 0
+    ? await db
+      .select()
+      .from(agentRuns)
+      .where(inArray(agentRuns.issueId, issueIds))
+      .orderBy(desc(agentRuns.createdAt))
+      .limit(issueIds.length * runLimit)
+    : []
   const teamById = new Map(teams.map((team) => [team.id, team]))
   const projectById = new Map(projects.map((project) => [project.id, project]))
-  const statusById = new Map(statuses.map((status) => [status.id, status]))
+  const selectedStatusById = new Map(statuses.map((status) => [status.id, status]))
+  const labelById = new Map(labels.map((label) => [label.id, label]))
+  const labelsByIssueId = groupBy(labelLinks, (link) => link.issueId)
+  const activityByIssueId = groupLimitedBy(activity, (entry) => entry.issueId, activityLimit)
+  const runsByIssueId = groupLimitedBy(runs, (run) => run.issueId, runLimit)
 
   return {
     issues: issues.map((issue) => ({
       issue: serializeIssue(issue),
       team: serializeNullableRow(teamById.get(issue.teamId)),
       project: issue.projectId ? serializeNullableRow(projectById.get(issue.projectId)) : null,
-      status: serializeNullableRow(statusById.get(issue.statusId)),
+      status: serializeNullableRow(selectedStatusById.get(issue.statusId)),
+      labels: (labelsByIssueId.get(issue.id) ?? [])
+        .map((link) => labelById.get(link.labelId))
+        .filter((label): label is typeof pmLabels.$inferSelect => Boolean(label))
+        .map(serializeRow),
+      recentActivity: (activityByIssueId.get(issue.id) ?? []).map(serializeRow),
+      recentAgentRuns: (runsByIssueId.get(issue.id) ?? []).map(serializeRow),
+      triage: {
+        statusType: selectedStatusById.get(issue.statusId)?.type ?? null,
+        priority: issue.priority,
+        estimate: issue.estimate,
+        dueDate: issue.dueDate ? issue.dueDate.getTime() : null,
+        lastActivityAt: issue.lastActivityAt.getTime(),
+        labelNames: (labelsByIssueId.get(issue.id) ?? [])
+          .map((link) => labelById.get(link.labelId)?.name)
+          .filter((name): name is string => Boolean(name)),
+        latestActivitySummary: activityByIssueId.get(issue.id)?.[0]?.summary ?? null,
+        latestAgentRunStatus: runsByIssueId.get(issue.id)?.[0]?.status ?? null,
+      },
     })),
   }
 }
@@ -578,9 +647,14 @@ async function reportProgress(req: AuthenticatedRequest, args: unknown) {
 }
 
 async function readAccessibleIssue(req: AuthenticatedRequest, issueId: string) {
-  if (!isUuid(issueId)) throw new Error(`Invalid issueId UUID: ${issueId}`)
+  const normalizedIssueId = issueId.trim()
+  if (!normalizedIssueId) throw new Error('Missing issueId')
 
-  const [issue] = await getDb().select().from(pmIssues).where(eq(pmIssues.id, issueId)).limit(1)
+  const [issue] = await getDb()
+    .select()
+    .from(pmIssues)
+    .where(isUuid(normalizedIssueId) ? eq(pmIssues.id, normalizedIssueId) : ilike(pmIssues.identifier, normalizedIssueId))
+    .limit(1)
   if (!issue) throw new Error('Issue not found')
 
   if (!canAccessIssue(req, issue)) throw new Error('Not authorized for this issue')
@@ -784,6 +858,25 @@ function serializeNullableRow<T extends Record<string, unknown>>(row: T | undefi
 
 function uniqueStrings(values: Array<string | null | undefined>) {
   return Array.from(new Set(values.filter((value): value is string => typeof value === 'string' && value.length > 0)))
+}
+
+function groupBy<T>(values: T[], keyFor: (value: T) => string) {
+  const grouped = new Map<string, T[]>()
+  for (const value of values) {
+    const key = keyFor(value)
+    grouped.set(key, [...(grouped.get(key) ?? []), value])
+  }
+  return grouped
+}
+
+function groupLimitedBy<T>(values: T[], keyFor: (value: T) => string, limit: number) {
+  const grouped = new Map<string, T[]>()
+  for (const value of values) {
+    const key = keyFor(value)
+    const group = grouped.get(key) ?? []
+    if (group.length < limit) grouped.set(key, [...group, value])
+  }
+  return grouped
 }
 
 export default router
