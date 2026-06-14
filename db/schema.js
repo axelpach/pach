@@ -602,6 +602,18 @@ export const agentTerminals = pgTable('agent_terminals', {
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
 });
+export const agentRunProgressReports = pgTable('agent_run_progress_reports', {
+    id: uuid('id').primaryKey().defaultRandom(),
+    runId: uuid('run_id').notNull().references(() => agentRuns.id),
+    issueId: uuid('issue_id').references(() => pmIssues.id),
+    workerId: uuid('worker_id').references(() => agentWorkers.id),
+    phase: text('phase'),
+    level: text('level').notNull().default('info'),
+    message: text('message').notNull(),
+    percent: integer('percent'),
+    metadata: jsonb('metadata').$type().notNull().default({}),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+});
 export const agentRunArtifacts = pgTable('agent_run_artifacts', {
     id: uuid('id').primaryKey().defaultRandom(),
     runId: uuid('run_id').notNull().references(() => agentRuns.id),

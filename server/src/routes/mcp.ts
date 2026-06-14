@@ -3,6 +3,7 @@ import { Router } from 'express'
 import type { Request } from 'express'
 import { desc, eq, ilike, inArray } from 'drizzle-orm'
 import {
+  agentRunProgressReports,
   agentRuns,
   mcpTokens,
   pmIssueActivity,
@@ -183,7 +184,7 @@ const tools: ToolDefinition[] = [
   },
   {
     name: 'pach.progress.report',
-    description: 'Report structured agent progress for an issue/run. Pach stores it as issue activity and updates run metadata.',
+    description: 'Report structured agent progress for an issue/run. With runId, Pach stores it as run-scoped progress and updates run metadata.',
     inputSchema: {
       type: 'object',
       additionalProperties: false,
@@ -202,6 +203,10 @@ const tools: ToolDefinition[] = [
         percent: {
           type: 'number',
           description: 'Optional progress percentage from 0 to 100.',
+        },
+        level: {
+          type: 'string',
+          description: 'Optional severity level: debug, info, warn, or error.',
         },
         metadata: {
           type: 'object',
@@ -596,27 +601,31 @@ async function reportProgress(req: AuthenticatedRequest, args: unknown) {
   const { issue } = await readAccessibleIssue(req, issueId)
   const runId = typeof body.runId === 'string' ? body.runId : null
   const message = typeof body.message === 'string' ? body.message : phase
-  const percent = typeof body.percent === 'number' ? Math.max(0, Math.min(100, body.percent)) : null
+  const percent = typeof body.percent === 'number' ? Math.floor(Math.max(0, Math.min(100, body.percent))) : null
   const metadata = isObject(body.metadata) ? body.metadata : {}
+  const level = readProgressLevel({ ...metadata, level: body.level })
   const now = new Date()
-
-  await appendIssueActivity(req, {
-    issueId: issue.id,
-    type: 'agent_progress',
-    summary: message,
-    metadata: {
-      source: 'pach-mcp',
-      phase,
-      percent,
-      runId,
-      ...metadata,
-    },
-  })
 
   if (runId) {
     const [run] = await getDb().select().from(agentRuns).where(eq(agentRuns.id, runId)).limit(1)
     if (!run) throw new Error('Agent run not found')
     if (run.issueId !== issue.id) throw new Error('Agent run does not belong to this issue')
+
+    await getDb().insert(agentRunProgressReports).values({
+      id: randomUUID(),
+      runId: run.id,
+      issueId: issue.id,
+      workerId: run.workerId ?? undefined,
+      phase,
+      level,
+      message,
+      percent: percent ?? undefined,
+      metadata: {
+        source: 'pach-mcp',
+        ...metadata,
+      },
+      createdAt: now,
+    })
 
     await getDb()
       .update(agentRuns)
@@ -634,6 +643,19 @@ async function reportProgress(req: AuthenticatedRequest, args: unknown) {
         updatedAt: now,
       })
       .where(eq(agentRuns.id, run.id))
+  } else {
+    await appendIssueActivity(req, {
+      issueId: issue.id,
+      type: 'agent_progress',
+      summary: message,
+      metadata: {
+        source: 'pach-mcp',
+        phase,
+        level,
+        percent,
+        ...metadata,
+      },
+    })
   }
 
   return {
@@ -757,6 +779,11 @@ function readRequiredString(args: unknown, key: string) {
 function readPositiveInteger(value: unknown, fallback: number, min: number, max: number) {
   if (typeof value !== 'number' || !Number.isFinite(value)) return fallback
   return Math.max(min, Math.min(max, Math.floor(value)))
+}
+
+function readProgressLevel(metadata: Record<string, unknown>) {
+  const level = metadata.level
+  return level === 'debug' || level === 'info' || level === 'warn' || level === 'error' ? level : 'info'
 }
 
 function ensureObject(value: unknown): Record<string, unknown> {

@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto'
 import { Router } from 'express'
 import type { Request } from 'express'
 import { and, desc, eq, inArray, isNull, or } from 'drizzle-orm'
-import { agentRuns, agentWorkers, mcpTokens, pmIssueActivity, pmIssues } from '../../../db/schema.js'
+import { agentRunProgressReports, agentRuns, agentWorkers, mcpTokens, pmIssueActivity, pmIssues } from '../../../db/schema.js'
 import { getDb } from '../db.js'
 import { hashMcpToken, hasMcpCapability, type McpAuthContext, type McpCapability } from '../lib/mcp-token.js'
 
@@ -169,6 +169,15 @@ router.post('/runs/claim', async (req: AgentWorkerRequest, res) => {
         executionClass,
         requiredCapabilities,
       })
+      await appendRunProgressReport(claimed, {
+        workerId: worker.id,
+        phase: 'claimed',
+        message: `Agent worker ${worker.name} claimed run`,
+        metadata: {
+          executionClass,
+          requiredCapabilities,
+        },
+      })
 
       res.json({ ok: true, run: claimed, worker })
       return
@@ -199,6 +208,7 @@ router.post('/runs/:id/progress', async (req: AgentWorkerRequest, res) => {
     const message = readOptionalString(body.message) ?? 'agent worker progress'
     const status = readOptionalString(body.status)
     const phase = readOptionalString(body.phase)
+    const percent = readOptionalPercent(body.percent)
     const metadata = isObject(body.metadata) ? body.metadata : {}
     const { run } = await readOwnedRun(readRouteParam(req.params.id, 'id'), workerId)
     const now = new Date()
@@ -223,10 +233,12 @@ router.post('/runs/:id/progress', async (req: AgentWorkerRequest, res) => {
       .where(eq(agentRuns.id, run.id))
       .returning()
 
-    await appendRunActivity(updated, message, 'agent_progress', {
-      phase,
+    await appendRunProgressReport(updated, {
       workerId,
-      ...metadata,
+      phase,
+      message,
+      percent,
+      metadata,
     })
 
     res.json({ ok: true, run: updated })
@@ -272,6 +284,16 @@ router.post('/runs/:id/complete', async (req: AgentWorkerRequest, res) => {
       workerId,
       finalStatus,
       ...metadata,
+    })
+    await appendRunProgressReport(updated, {
+      workerId,
+      phase: finalStatus,
+      level: finalStatus === 'completed' ? 'info' : 'error',
+      message,
+      metadata: {
+        finalStatus,
+        ...metadata,
+      },
     })
 
     const activeRuns = await getDb()
@@ -330,6 +352,31 @@ async function appendRunActivity(
     .update(pmIssues)
     .set({ lastActivityAt: new Date(), updatedAt: new Date() })
     .where(eq(pmIssues.id, run.issueId))
+}
+
+async function appendRunProgressReport(
+  run: typeof agentRuns.$inferSelect,
+  report: {
+    workerId?: string
+    phase?: string
+    level?: string
+    message: string
+    percent?: number
+    metadata?: Record<string, unknown>
+  },
+) {
+  await getDb().insert(agentRunProgressReports).values({
+    id: randomUUID(),
+    runId: run.id,
+    issueId: run.issueId,
+    workerId: report.workerId,
+    phase: report.phase,
+    level: report.level ?? 'info',
+    message: report.message,
+    percent: report.percent,
+    metadata: report.metadata ?? {},
+    createdAt: new Date(),
+  })
 }
 
 async function findExistingWorker({
@@ -478,6 +525,11 @@ function readPositiveInteger(value: unknown, fallback: number, min: number, max:
   const parsed = Number(value)
   if (!Number.isInteger(parsed) || parsed < min || parsed > max) return fallback
   return parsed
+}
+
+function readOptionalPercent(value: unknown) {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return undefined
+  return Math.max(0, Math.min(100, Math.floor(value)))
 }
 
 export default router

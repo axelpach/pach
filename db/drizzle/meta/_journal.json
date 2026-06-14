@@ -183,6 +183,13 @@
       "when": 1781288000000,
       "tag": "0025_mcp_tokens",
       "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "7",
+      "when": 1781288100000,
+      "tag": "0026_agent_run_progress_reports",
+      "breakpoints": true
     }
   ]
 }

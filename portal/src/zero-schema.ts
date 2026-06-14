@@ -582,6 +582,21 @@ const agentTerminals = table('agent_terminals')
   })
   .primaryKey('id')
 
+const agentRunProgressReports = table('agent_run_progress_reports')
+  .columns({
+    id: string(),
+    runId: string().from('run_id'),
+    issueId: string().optional().from('issue_id'),
+    workerId: string().optional().from('worker_id'),
+    phase: string().optional(),
+    level: string(),
+    message: string(),
+    percent: number().optional(),
+    metadata: json<Record<string, unknown>>(),
+    createdAt: number().from('created_at'),
+  })
+  .primaryKey('id')
+
 const agentRunArtifacts = table('agent_run_artifacts')
   .columns({
     id: string(),
@@ -748,6 +763,7 @@ export const schema = createSchema({
     githubRepositories,
     agentRuns,
     agentTerminals,
+    agentRunProgressReports,
     agentRunArtifacts,
     githubBranches,
     githubPullRequests,

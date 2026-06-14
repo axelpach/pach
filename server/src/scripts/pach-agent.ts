@@ -310,7 +310,7 @@ function buildGeneralMcpPrompt(run: AgentRunRecord) {
     '4. Put the final result in pach.progress.report with phase "final_result".',
     '5. If you update issue fields, use pach.issue.update and explain the change in activitySummary.',
     '',
-    'Keep the final result concise and useful inside the Pach activity feed.',
+    'Keep the final result concise and useful inside the Pach run progress stream.',
   ].join('\n')
 }
 

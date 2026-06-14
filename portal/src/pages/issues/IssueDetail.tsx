@@ -97,6 +97,13 @@ export default function IssueDetail() {
   const [activeArtifacts] = useQuery(
     z.query.agent_run_artifacts.where('runId', activeRun?.id ?? '').orderBy('createdAt', 'desc'),
   )
+  const [activeProgressReports] = useQuery(
+    z.query.agent_run_progress_reports.where('runId', activeRun?.id ?? '').orderBy('createdAt', 'asc'),
+  )
+  const visibleActivity = activity.filter((entry) => !isRunScopedAgentActivity(entry))
+  const legacyRunProgressActivity = activeRun
+    ? activity.filter((entry) => readMetadataString(entry.metadata, 'runId') === activeRun.id && isRunScopedAgentActivity(entry))
+    : []
 
   useEffect(() => {
     setMainTab(activeRun ? 'agent' : 'activity')
@@ -433,7 +440,7 @@ export default function IssueDetail() {
                   <IssueDetailTab
                     active={mainTab === 'activity'}
                     label="activity"
-                    meta={activity.length}
+                    meta={visibleActivity.length}
                     onClick={() => setMainTab('activity')}
                   />
                   <IssueDetailTab
@@ -447,10 +454,10 @@ export default function IssueDetail() {
 
                 {mainTab === 'activity' ? (
                   <div className="space-y-3">
-                    {activity.length === 0 ? (
+                    {visibleActivity.length === 0 ? (
                       <div className="font-mono text-xs text-fg-4">// no activity yet</div>
                     ) : (
-                      activity.map((entry) => <ActivityEntry key={entry.id} entry={entry} />)
+                      visibleActivity.map((entry) => <ActivityEntry key={entry.id} entry={entry} />)
                     )}
                   </div>
                 ) : (
@@ -461,6 +468,8 @@ export default function IssueDetail() {
                       pullRequest={activePullRequests[0] ?? null}
                       terminals={activeTerminals}
                       artifacts={activeArtifacts}
+                      progressReports={activeProgressReports}
+                      legacyProgressActivity={legacyRunProgressActivity}
                       workers={workers}
                       repositories={repositories}
                       authToken={token}
@@ -722,6 +731,8 @@ function AgentRunPanel({
   pullRequest,
   terminals,
   artifacts,
+  progressReports,
+  legacyProgressActivity,
   workers,
   repositories,
   authToken,
@@ -737,6 +748,8 @@ function AgentRunPanel({
   pullRequest: Schema['tables']['github_pull_requests']['row'] | null
   terminals: Schema['tables']['agent_terminals']['row'][]
   artifacts: Schema['tables']['agent_run_artifacts']['row'][]
+  progressReports: Schema['tables']['agent_run_progress_reports']['row'][]
+  legacyProgressActivity: Schema['tables']['pm_issue_activity']['row'][]
   workers: Schema['tables']['agent_workers']['row'][]
   repositories: Schema['tables']['github_repositories']['row'][]
   authToken: string | null
@@ -754,6 +767,8 @@ function AgentRunPanel({
   const isGeneralRun = executionClass === 'general'
   const showLegacyAgentControls = Boolean(run && !isGeneralRun)
   const canBootstrapRun = Boolean(showLegacyAgentControls && run?.workerId && ['reserved', 'failed'].includes(run.status))
+  const progressItemCount = progressReports.length + legacyProgressActivity.length
+  const showStatusMessageAsProgress = Boolean(run?.statusMessage && progressItemCount === 0)
   const [selectedTerminalId, setSelectedTerminalId] = useState<string | null>(null)
   const [terminalOutput, setTerminalOutput] = useState('')
   const [terminalInput, setTerminalInput] = useState('')
@@ -1159,7 +1174,7 @@ function AgentRunPanel({
             </div>
           ) : null}
 
-          {run.statusMessage ? (
+          {run.statusMessage && !showStatusMessageAsProgress ? (
             <div className="border border-edge/12 bg-pit-3 px-2.5 py-2 font-mono text-xs text-fg-3">
               {run.statusMessage}
             </div>
@@ -1169,11 +1184,37 @@ function AgentRunPanel({
             <div className="border border-edge/12 bg-accent-fill/[0.025] p-3 font-mono text-xs leading-relaxed text-fg-3">
               <div className="mb-1 text-[10px] uppercase tracking-label text-fg-4">general MCP handler</div>
               <div>
-                The agent worker will claim this run, read the issue through Pach MCP, report progress into
-                activity, and complete the run when Codex returns.
+                The agent worker will claim this run, read the issue through Pach MCP, write progress reports,
+                and complete the run when Codex returns.
               </div>
             </div>
           ) : null}
+
+          <div className="border border-edge/12 bg-overlay/12 p-3">
+            <div className="mb-2 flex items-center justify-between gap-3 font-mono text-[10px] uppercase tracking-label text-fg-4">
+              <span>progress reports</span>
+              <span>{progressItemCount + (showStatusMessageAsProgress ? 1 : 0)}</span>
+            </div>
+            {progressReports.length > 0 || legacyProgressActivity.length > 0 || showStatusMessageAsProgress ? (
+              <div className="space-y-2">
+                {progressReports.map((report) => (
+                  <AgentRunProgressReport key={report.id} report={report} />
+                ))}
+                {legacyProgressActivity.map((entry) => (
+                  <LegacyAgentRunProgressReport key={entry.id} entry={entry} />
+                ))}
+                {showStatusMessageAsProgress && run.statusMessage ? (
+                  <AgentRunStatusMessageProgressReport
+                    message={run.statusMessage}
+                    status={run.status}
+                    createdAt={run.updatedAt}
+                  />
+                ) : null}
+              </div>
+            ) : (
+              <div className="font-mono text-xs text-fg-4">// no progress reports yet</div>
+            )}
+          </div>
 
           {showLegacyAgentControls ? (
           <div className="flex flex-wrap items-center gap-2">
@@ -1504,6 +1545,18 @@ function readMetadataString(metadata: unknown, key: string) {
   return typeof value === 'string' && value.trim() ? value : null
 }
 
+function isRunScopedAgentActivity(entry: Schema['tables']['pm_issue_activity']['row']) {
+  if (!readMetadataString(entry.metadata, 'runId')) return false
+  return ['agent_progress', 'agent_run_claimed', 'agent_run_completed', 'agent_run_failed'].includes(entry.type)
+}
+
+function legacyProgressPhase(type: string) {
+  if (type === 'agent_run_claimed') return 'claimed'
+  if (type === 'agent_run_completed') return 'completed'
+  if (type === 'agent_run_failed') return 'failed'
+  return 'progress'
+}
+
 function getWorkspaceStatuses(statuses: Schema['tables']['pm_statuses']['row'][]) {
   const uniqueStatuses = new Map<string, Schema['tables']['pm_statuses']['row']>()
   for (const status of statuses) {
@@ -1700,6 +1753,85 @@ function ActivityEntry({ entry }: { entry: Schema['tables']['pm_issue_activity']
       <span className="text-fg-2">{entry.actorName?.toLowerCase() ?? 'system'}</span>
       <span className="flex-1 truncate text-fg-3">{entry.summary}</span>
       <span className="text-fg-4 text-[10px] uppercase tracking-label">{formatRelative(entry.createdAt)}</span>
+    </div>
+  )
+}
+
+function AgentRunProgressReport({ report }: { report: Schema['tables']['agent_run_progress_reports']['row'] }) {
+  return (
+    <AgentRunProgressShell
+      phase={report.phase ?? report.level}
+      level={report.level}
+      message={report.message}
+      createdAt={report.createdAt}
+      percent={report.percent}
+    />
+  )
+}
+
+function LegacyAgentRunProgressReport({ entry }: { entry: Schema['tables']['pm_issue_activity']['row'] }) {
+  const phase = readMetadataString(entry.metadata, 'phase') ?? legacyProgressPhase(entry.type)
+  const level = entry.type === 'agent_run_failed' || readMetadataString(entry.metadata, 'level') === 'error' ? 'error' : 'info'
+
+  return (
+    <AgentRunProgressShell
+      phase={phase}
+      level={level}
+      message={entry.summary}
+      createdAt={entry.createdAt}
+    />
+  )
+}
+
+function AgentRunStatusMessageProgressReport({
+  message,
+  status,
+  createdAt,
+}: {
+  message: string
+  status: string
+  createdAt: number
+}) {
+  return (
+    <AgentRunProgressShell
+      phase={status}
+      level={status === 'failed' ? 'error' : 'info'}
+      message={message}
+      createdAt={createdAt}
+    />
+  )
+}
+
+function AgentRunProgressShell({
+  phase,
+  level,
+  message,
+  createdAt,
+  percent,
+}: {
+  phase: string
+  level: string
+  message: string
+  createdAt: number
+  percent?: number
+}) {
+  const levelClass = level === 'error' ? 'text-fail' : level === 'warn' ? 'text-warn' : 'text-accent'
+
+  return (
+    <div className="border border-edge/10 bg-pit-3 px-2.5 py-2 font-mono text-xs">
+      <div className="mb-1 flex items-center justify-between gap-3 text-[10px] uppercase tracking-label">
+        <div className="min-w-0 flex items-center gap-2">
+          <span className={levelClass}>●</span>
+          <span className="truncate text-fg-4">{phase}</span>
+        </div>
+        <span className="shrink-0 text-fg-4">{formatRelative(createdAt)}</span>
+      </div>
+      <div className="max-h-52 overflow-auto whitespace-pre-wrap leading-relaxed text-fg-2">{message}</div>
+      {typeof percent === 'number' ? (
+        <div className="mt-2 h-1 border border-edge/12 bg-pit-2">
+          <div className="h-full bg-accent" style={{ width: `${Math.max(0, Math.min(100, percent))}%` }} />
+        </div>
+      ) : null}
     </div>
   )
 }
