@@ -133,6 +133,20 @@ const tools: ToolDefinition[] = [
     },
   },
   {
+    name: 'pach.issue.list',
+    description: 'List recent Pach issues the caller can access, ordered by creation time descending.',
+    inputSchema: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        limit: {
+          type: 'number',
+          description: 'Maximum number of issues to return. Defaults to 10, maximum 50.',
+        },
+      },
+    },
+  },
+  {
     name: 'pach.issue.update',
     description: 'Update editable fields on a Pach issue and append an activity entry for the agent action.',
     inputSchema: {
@@ -370,6 +384,9 @@ async function callTool(req: AuthenticatedRequest, params: unknown) {
       case 'pach.issue.get':
         requireMcpCapability(req, 'pach.issue.read')
         return toolResult(await getIssue(req, args))
+      case 'pach.issue.list':
+        requireMcpCapability(req, 'pach.issue.read')
+        return toolResult(await listIssues(req, args))
       case 'pach.issue.update':
         requireMcpCapability(req, 'pach.issue.write')
         return toolResult(await updateIssue(req, args))
@@ -381,6 +398,39 @@ async function callTool(req: AuthenticatedRequest, params: unknown) {
     }
   } catch (error) {
     return toolError(error instanceof Error ? error.message : 'Unknown tool error')
+  }
+}
+
+async function listIssues(req: AuthenticatedRequest, args: unknown) {
+  const body = isObject(args) ? args : {}
+  const limit = readPositiveInteger(body.limit, 10, 1, 50)
+  const db = getDb()
+  const rows = await db
+    .select()
+    .from(pmIssues)
+    .orderBy(desc(pmIssues.createdAt))
+    .limit(limit * 4)
+  const issues = rows
+    .filter((issue) => canAccessIssue(req, issue))
+    .slice(0, limit)
+
+  const teamIds = uniqueStrings(issues.map((issue) => issue.teamId))
+  const projectIds = uniqueStrings(issues.map((issue) => issue.projectId))
+  const statusIds = uniqueStrings(issues.map((issue) => issue.statusId))
+  const teams = teamIds.length > 0 ? await db.select().from(pmTeams).where(inArray(pmTeams.id, teamIds)) : []
+  const projects = projectIds.length > 0 ? await db.select().from(pmProjects).where(inArray(pmProjects.id, projectIds)) : []
+  const statuses = statusIds.length > 0 ? await db.select().from(pmStatuses).where(inArray(pmStatuses.id, statusIds)) : []
+  const teamById = new Map(teams.map((team) => [team.id, team]))
+  const projectById = new Map(projects.map((project) => [project.id, project]))
+  const statusById = new Map(statuses.map((status) => [status.id, status]))
+
+  return {
+    issues: issues.map((issue) => ({
+      issue: serializeIssue(issue),
+      team: serializeNullableRow(teamById.get(issue.teamId)),
+      project: issue.projectId ? serializeNullableRow(projectById.get(issue.projectId)) : null,
+      status: serializeNullableRow(statusById.get(issue.statusId)),
+    })),
   }
 }
 
@@ -533,21 +583,20 @@ async function readAccessibleIssue(req: AuthenticatedRequest, issueId: string) {
   const [issue] = await getDb().select().from(pmIssues).where(eq(pmIssues.id, issueId)).limit(1)
   if (!issue) throw new Error('Issue not found')
 
-  const user = req.user
-  const auth = req.mcpAuth
-  if (!auth && !user) throw new Error('Not authenticated')
-
-  if (auth?.allOrganizations || user?.sub === LOCAL_MCP_USER.sub) {
-    return { issue }
-  }
-
-  const canRead = issue.contextCompanyId
-    ? Boolean(auth?.organizationIds.includes(issue.contextCompanyId) || user?.organizationIds.includes(issue.contextCompanyId))
-    : Boolean(auth?.canAccessUnscoped || user?.canAccessUnscoped)
-
-  if (!canRead) throw new Error('Not authorized for this issue')
+  if (!canAccessIssue(req, issue)) throw new Error('Not authorized for this issue')
 
   return { issue }
+}
+
+function canAccessIssue(req: AuthenticatedRequest, issue: typeof pmIssues.$inferSelect) {
+  const user = req.user
+  const auth = req.mcpAuth
+  if (!auth && !user) return false
+  if (auth?.allOrganizations || user?.sub === LOCAL_MCP_USER.sub) return true
+
+  return issue.contextCompanyId
+    ? Boolean(auth?.organizationIds.includes(issue.contextCompanyId) || user?.organizationIds.includes(issue.contextCompanyId))
+    : Boolean(auth?.canAccessUnscoped || user?.canAccessUnscoped)
 }
 
 async function appendIssueActivity(
@@ -629,6 +678,11 @@ function readRequiredString(args: unknown, key: string) {
     throw new Error(`Missing required string argument: ${key}`)
   }
   return value
+}
+
+function readPositiveInteger(value: unknown, fallback: number, min: number, max: number) {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return fallback
+  return Math.max(min, Math.min(max, Math.floor(value)))
 }
 
 function ensureObject(value: unknown): Record<string, unknown> {
@@ -722,6 +776,14 @@ function serializeRow<T extends Record<string, unknown>>(row: T) {
       value instanceof Date ? value.getTime() : value,
     ]),
   )
+}
+
+function serializeNullableRow<T extends Record<string, unknown>>(row: T | undefined) {
+  return row ? serializeRow(row) : null
+}
+
+function uniqueStrings(values: Array<string | null | undefined>) {
+  return Array.from(new Set(values.filter((value): value is string => typeof value === 'string' && value.length > 0)))
 }
 
 export default router
