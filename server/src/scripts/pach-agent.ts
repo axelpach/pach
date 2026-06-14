@@ -1,14 +1,16 @@
 import 'dotenv/config'
-import { execFile } from 'node:child_process'
+import { spawn } from 'node:child_process'
 import { hostname } from 'node:os'
 import { setTimeout as sleep } from 'node:timers/promises'
-import { promisify } from 'node:util'
-
-const execFileAsync = promisify(execFile)
 
 type WorkerRecord = {
   id: string
   name: string
+}
+
+type CommandResult = {
+  stdout: string
+  stderr: string
 }
 
 type AgentRunRecord = {
@@ -146,14 +148,7 @@ async function executeGeneralMcpRun(worker: WorkerRecord, run: AgentRunRecord) {
   try {
     const prompt = buildGeneralMcpPrompt(run)
     const startedAt = Date.now()
-    const { stdout, stderr } = await execFileAsync(codexCommand, ['exec', prompt], {
-      env: {
-        ...process.env,
-        PACH_MCP_TOKEN: agentToken,
-      },
-      maxBuffer: 2_000_000,
-      timeout: codexTimeoutMs,
-    })
+    const { stdout, stderr } = await runCodexExec(prompt)
     const durationMs = Date.now() - startedAt
     const finalMessage = summarizeCodexOutput(stdout) || `Codex completed general MCP run ${run.id}`
 
@@ -207,6 +202,82 @@ async function executeGeneralMcpRun(worker: WorkerRecord, run: AgentRunRecord) {
 
     console.error(`[${new Date().toISOString()}] failed general MCP run ${run.id}: ${message}`)
   }
+}
+
+async function runCodexExec(prompt: string): Promise<CommandResult> {
+  return new Promise((resolve, reject) => {
+    let stdout = ''
+    let stderr = ''
+    let timedOut = false
+    let interrupted: string | null = null
+
+    console.log(`[${new Date().toISOString()}] starting: ${codexCommand} exec <prompt>`)
+
+    const child = spawn(codexCommand, ['exec', prompt], {
+      env: {
+        ...process.env,
+        PACH_MCP_TOKEN: agentToken,
+      },
+      stdio: ['ignore', 'pipe', 'pipe'],
+    })
+
+    const timeout = setTimeout(() => {
+      timedOut = true
+      child.kill('SIGTERM')
+      setTimeout(() => child.kill('SIGKILL'), 5_000).unref()
+    }, codexTimeoutMs)
+    timeout.unref()
+
+    const handleSignal = (signal: NodeJS.Signals) => {
+      interrupted = signal
+      child.kill('SIGTERM')
+    }
+
+    process.once('SIGINT', handleSignal)
+    process.once('SIGTERM', handleSignal)
+
+    child.stdout?.on('data', (chunk: Buffer) => {
+      const text = chunk.toString()
+      stdout += text
+      process.stdout.write(text)
+    })
+
+    child.stderr?.on('data', (chunk: Buffer) => {
+      const text = chunk.toString()
+      stderr += text
+      process.stderr.write(text)
+    })
+
+    child.on('error', (error) => {
+      clearTimeout(timeout)
+      process.off('SIGINT', handleSignal)
+      process.off('SIGTERM', handleSignal)
+      reject(Object.assign(error, { stdout, stderr }))
+    })
+
+    child.on('close', (code, signal) => {
+      clearTimeout(timeout)
+      process.off('SIGINT', handleSignal)
+      process.off('SIGTERM', handleSignal)
+
+      if (interrupted) {
+        reject(Object.assign(new Error(`Codex interrupted by ${interrupted}`), { stdout, stderr, signal: interrupted }))
+        return
+      }
+
+      if (timedOut) {
+        reject(Object.assign(new Error(`Codex timed out after ${codexTimeoutMs}ms`), { stdout, stderr, signal }))
+        return
+      }
+
+      if (code && code !== 0) {
+        reject(Object.assign(new Error(`Codex exited with code ${code}`), { stdout, stderr, code, signal }))
+        return
+      }
+
+      resolve({ stdout, stderr })
+    })
+  })
 }
 
 async function reportRunProgress(
