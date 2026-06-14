@@ -54,6 +54,11 @@ pnpm db:studio        # Open Drizzle Studio UI
 pnpm docker:down      # Stop Postgres
 ```
 
+## Agent Worker Operations
+
+- Hetzner/general MCP worker replication runbook: `docs/agents/hetzner-worker-runbook.md`
+- Use that runbook when setting up another VPS worker over SSH or debugging the existing `pach-worker-01` systemd service.
+
 ## Database
 
 - **Postgres 16** on `localhost:5435` (different from Ardia on 5433)

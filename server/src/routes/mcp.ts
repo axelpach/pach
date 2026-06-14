@@ -137,19 +137,80 @@ const tools: ToolDefinition[] = [
   },
   {
     name: 'pach.issue.list',
-    description: 'List recent Pach issues the caller can access, ordered by creation time descending, with compact triage metadata.',
+    description: 'List Pach issues the caller can access, with readable filters for organization, team, project, status, assignee, labels, priority, and search.',
     inputSchema: {
       type: 'object',
       additionalProperties: false,
       properties: {
         limit: {
           type: 'number',
-          description: 'Maximum number of issues to return. Defaults to 10, maximum 50.',
+          description: 'Maximum number of issues to return. Defaults to 25, maximum 100.',
+        },
+        search: {
+          type: 'string',
+          description: 'Optional case-insensitive search across identifier, title, and description.',
+        },
+        organizationId: {
+          type: 'string',
+          description: 'Optional organization UUID filter.',
+        },
+        organizationName: {
+          type: 'string',
+          description: 'Optional organization display name filter, e.g. "Pach".',
+        },
+        organizationProject: {
+          type: 'string',
+          description: 'Optional organization project key filter, e.g. "pach" or "ardia".',
+        },
+        teamKey: {
+          type: 'string',
+          description: 'Optional team key filter, e.g. "PRD" or "OPS".',
+        },
+        teamName: {
+          type: 'string',
+          description: 'Optional team name filter, e.g. "product".',
+        },
+        projectSlug: {
+          type: 'string',
+          description: 'Optional project slug filter.',
+        },
+        projectName: {
+          type: 'string',
+          description: 'Optional project name filter.',
+        },
+        statusIds: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'Optional status UUID filters.',
+        },
+        statusKeys: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'Optional status key filters, e.g. ["todo", "blocked", "done"].',
+        },
+        statusNames: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'Optional status display name filters, e.g. ["Todo", "Done"].',
         },
         statusTypes: {
           type: 'array',
           items: { type: 'string' },
           description: 'Optional status type filter, e.g. ["backlog", "unstarted", "started", "blocked", "review"].',
+        },
+        assigneeName: {
+          type: 'string',
+          description: 'Optional assignee name or email filter.',
+        },
+        labelNames: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'Optional label name filters. An issue must have at least one listed label.',
+        },
+        priorities: {
+          type: 'array',
+          items: { type: 'number' },
+          description: 'Optional numeric priority filters: 1 urgent, 2 high, 3 medium, 4 low, 0 none.',
         },
         activityLimit: {
           type: 'number',
@@ -423,41 +484,96 @@ async function callTool(req: AuthenticatedRequest, params: unknown) {
 
 async function listIssues(req: AuthenticatedRequest, args: unknown) {
   const body = isObject(args) ? args : {}
-  const limit = readPositiveInteger(body.limit, 10, 1, 50)
+  const limit = readPositiveInteger(body.limit, 25, 1, 100)
   const activityLimit = readPositiveInteger(body.activityLimit, 3, 0, 10)
   const runLimit = readPositiveInteger(body.runLimit, 2, 0, 5)
+  const search = readOptionalString(body.search)
+  const organizationIds = readStringFilters(body.organizationId, body.organizationIds)
+  const organizationNames = readStringFilters(body.organizationName, body.organizationNames)
+  const organizationProjects = readStringFilters(body.organizationProject, body.organizationProjects)
+  const teamKeys = readStringFilters(body.teamKey, body.teamKeys)
+  const teamNames = readStringFilters(body.teamName, body.teamNames)
+  const projectSlugs = readStringFilters(body.projectSlug, body.projectSlugs)
+  const projectNames = readStringFilters(body.projectName, body.projectNames)
+  const statusIdsFilter = readStringFilters(body.statusId, body.statusIds)
+  const statusKeys = readStringFilters(body.statusKey, body.statusKeys)
+  const statusNames = readStringFilters(body.statusName, body.statusNames)
   const statusTypes = readStringArray(body.statusTypes)
+  const assigneeFilters = readStringFilters(body.assigneeName, body.assigneeEmail, body.assignee)
+  const labelNameFilters = readStringFilters(body.labelName, body.labelNames)
+  const priorities = readNumberArray(body.priorities)
   const db = getDb()
+  const scanLimit = Math.max(200, Math.min(1000, limit * 20))
   const rows = await db
     .select()
     .from(pmIssues)
     .orderBy(desc(pmIssues.createdAt))
-    .limit(limit * 8)
+    .limit(scanLimit)
 
   const accessibleRows = rows
     .filter((issue) => canAccessIssue(req, issue))
 
-  const candidateStatusIds = uniqueStrings(accessibleRows.map((issue) => issue.statusId))
-  const candidateStatuses = candidateStatusIds.length > 0
-    ? await db.select().from(pmStatuses).where(inArray(pmStatuses.id, candidateStatusIds))
+  const accessibleIssueIds = uniqueStrings(accessibleRows.map((issue) => issue.id))
+  const accessibleTeamIds = uniqueStrings(accessibleRows.map((issue) => issue.teamId))
+  const accessibleProjectIds = uniqueStrings(accessibleRows.map((issue) => issue.projectId))
+  const accessibleStatusIds = uniqueStrings(accessibleRows.map((issue) => issue.statusId))
+  const accessibleOrganizationIds = uniqueStrings(accessibleRows.map((issue) => issue.contextCompanyId))
+  const accessibleUserIds = uniqueStrings([
+    ...accessibleRows.map((issue) => issue.assigneeId),
+    ...accessibleRows.map((issue) => issue.creatorId),
+  ])
+  const accessibleLabelLinks = accessibleIssueIds.length > 0
+    ? await db.select().from(pmIssueLabels).where(inArray(pmIssueLabels.issueId, accessibleIssueIds))
     : []
-  const statusById = new Map(candidateStatuses.map((status) => [status.id, status]))
-  const issues = accessibleRows
-    .filter((issue) => statusTypes.length === 0 || statusTypes.includes(statusById.get(issue.statusId)?.type ?? ''))
-    .slice(0, limit)
+  const accessibleLabelIds = uniqueStrings(accessibleLabelLinks.map((link) => link.labelId))
+  const [allTeams, allProjects, allStatuses, allOrganizations, allUsers, allLabels] = await Promise.all([
+    accessibleTeamIds.length > 0 ? db.select().from(pmTeams).where(inArray(pmTeams.id, accessibleTeamIds)) : Promise.resolve([]),
+    accessibleProjectIds.length > 0 ? db.select().from(pmProjects).where(inArray(pmProjects.id, accessibleProjectIds)) : Promise.resolve([]),
+    accessibleStatusIds.length > 0 ? db.select().from(pmStatuses).where(inArray(pmStatuses.id, accessibleStatusIds)) : Promise.resolve([]),
+    accessibleOrganizationIds.length > 0 ? db.select().from(organizations).where(inArray(organizations.id, accessibleOrganizationIds)) : Promise.resolve([]),
+    accessibleUserIds.length > 0 ? db.select().from(users).where(inArray(users.id, accessibleUserIds)) : Promise.resolve([]),
+    accessibleLabelIds.length > 0 ? db.select().from(pmLabels).where(inArray(pmLabels.id, accessibleLabelIds)) : Promise.resolve([]),
+  ])
+  const teamById = new Map(allTeams.map((team) => [team.id, team]))
+  const projectById = new Map(allProjects.map((project) => [project.id, project]))
+  const statusById = new Map(allStatuses.map((status) => [status.id, status]))
+  const organizationById = new Map(allOrganizations.map((organization) => [organization.id, organization]))
+  const userById = new Map(allUsers.map((user) => [user.id, user]))
+  const labelById = new Map(allLabels.map((label) => [label.id, label]))
+  const labelsByIssueId = groupBy(accessibleLabelLinks, (link) => link.issueId)
+
+  const matchedIssues = accessibleRows
+    .filter((issue) => {
+      const team = teamById.get(issue.teamId)
+      const project = issue.projectId ? projectById.get(issue.projectId) : undefined
+      const status = statusById.get(issue.statusId)
+      const organization = issue.contextCompanyId ? organizationById.get(issue.contextCompanyId) : undefined
+      const assignee = issue.assigneeId ? userById.get(issue.assigneeId) : undefined
+      const labelNames = (labelsByIssueId.get(issue.id) ?? [])
+        .map((link) => labelById.get(link.labelId)?.name)
+        .filter((name): name is string => Boolean(name))
+
+      if (search && !matchesAny(search, [issue.identifier, issue.title, issue.description])) return false
+      if (organizationIds.length > 0 && !matchesStringFilter(issue.contextCompanyId, organizationIds, 'exact')) return false
+      if (organizationNames.length > 0 && !matchesStringFilter(organization?.name, organizationNames)) return false
+      if (organizationProjects.length > 0 && !matchesStringFilter(organization?.project, organizationProjects, 'exact')) return false
+      if (teamKeys.length > 0 && !matchesStringFilter(team?.key, teamKeys, 'exact')) return false
+      if (teamNames.length > 0 && !matchesStringFilter(team?.name, teamNames)) return false
+      if (projectSlugs.length > 0 && !matchesStringFilter(project?.slug, projectSlugs, 'exact')) return false
+      if (projectNames.length > 0 && !matchesStringFilter(project?.name, projectNames)) return false
+      if (statusIdsFilter.length > 0 && !matchesStringFilter(issue.statusId, statusIdsFilter, 'exact')) return false
+      if (statusKeys.length > 0 && !matchesStringFilter(status?.key, statusKeys, 'exact')) return false
+      if (statusNames.length > 0 && !matchesStringFilter(status?.name, statusNames)) return false
+      if (statusTypes.length > 0 && !matchesStringFilter(status?.type, statusTypes, 'exact')) return false
+      if (assigneeFilters.length > 0 && !matchesAnyFilter(assigneeFilters, [assignee?.name, assignee?.email])) return false
+      if (labelNameFilters.length > 0 && !labelNames.some((labelName) => matchesStringFilter(labelName, labelNameFilters))) return false
+      if (priorities.length > 0 && !priorities.includes(issue.priority)) return false
+      return true
+    })
+  const issues = matchedIssues.slice(0, limit)
 
   const issueIds = uniqueStrings(issues.map((issue) => issue.id))
-  const teamIds = uniqueStrings(issues.map((issue) => issue.teamId))
-  const projectIds = uniqueStrings(issues.map((issue) => issue.projectId))
-  const statusIds = uniqueStrings(issues.map((issue) => issue.statusId))
-  const teams = teamIds.length > 0 ? await db.select().from(pmTeams).where(inArray(pmTeams.id, teamIds)) : []
-  const projects = projectIds.length > 0 ? await db.select().from(pmProjects).where(inArray(pmProjects.id, projectIds)) : []
-  const statuses = statusIds.length > 0
-    ? candidateStatuses.filter((status) => statusIds.includes(status.id))
-    : []
-  const labelLinks = issueIds.length > 0 ? await db.select().from(pmIssueLabels).where(inArray(pmIssueLabels.issueId, issueIds)) : []
-  const labelIds = uniqueStrings(labelLinks.map((link) => link.labelId))
-  const labels = labelIds.length > 0 ? await db.select().from(pmLabels).where(inArray(pmLabels.id, labelIds)) : []
+  const selectedLabelLinks = accessibleLabelLinks.filter((link) => issueIds.includes(link.issueId))
   const activity = issueIds.length > 0 && activityLimit > 0
     ? await db
       .select()
@@ -474,33 +590,60 @@ async function listIssues(req: AuthenticatedRequest, args: unknown) {
       .orderBy(desc(agentRuns.createdAt))
       .limit(issueIds.length * runLimit)
     : []
-  const teamById = new Map(teams.map((team) => [team.id, team]))
-  const projectById = new Map(projects.map((project) => [project.id, project]))
-  const selectedStatusById = new Map(statuses.map((status) => [status.id, status]))
-  const labelById = new Map(labels.map((label) => [label.id, label]))
-  const labelsByIssueId = groupBy(labelLinks, (link) => link.issueId)
+  const selectedLabelsByIssueId = groupBy(selectedLabelLinks, (link) => link.issueId)
   const activityByIssueId = groupLimitedBy(activity, (entry) => entry.issueId, activityLimit)
   const runsByIssueId = groupLimitedBy(runs, (run) => run.issueId, runLimit)
 
   return {
+    filters: {
+      limit,
+      scanLimit,
+      search,
+      organizationIds,
+      organizationNames,
+      organizationProjects,
+      teamKeys,
+      teamNames,
+      projectSlugs,
+      projectNames,
+      statusIds: statusIdsFilter,
+      statusKeys,
+      statusNames,
+      statusTypes,
+      assigneeFilters,
+      labelNames: labelNameFilters,
+      priorities,
+    },
+    totalMatched: matchedIssues.length,
     issues: issues.map((issue) => ({
       issue: serializeIssue(issue),
       team: serializeNullableRow(teamById.get(issue.teamId)),
+      organization: issue.contextCompanyId ? serializeNullableRow(organizationById.get(issue.contextCompanyId)) : null,
       project: issue.projectId ? serializeNullableRow(projectById.get(issue.projectId)) : null,
-      status: serializeNullableRow(selectedStatusById.get(issue.statusId)),
-      labels: (labelsByIssueId.get(issue.id) ?? [])
+      status: serializeNullableRow(statusById.get(issue.statusId)),
+      assignee: issue.assigneeId && userById.get(issue.assigneeId) ? serializePublicUser(userById.get(issue.assigneeId)!) : null,
+      creator: issue.creatorId && userById.get(issue.creatorId) ? serializePublicUser(userById.get(issue.creatorId)!) : null,
+      labels: (selectedLabelsByIssueId.get(issue.id) ?? [])
         .map((link) => labelById.get(link.labelId))
         .filter((label): label is typeof pmLabels.$inferSelect => Boolean(label))
         .map(serializeRow),
       recentActivity: (activityByIssueId.get(issue.id) ?? []).map(serializeRow),
       recentAgentRuns: (runsByIssueId.get(issue.id) ?? []).map(serializeRow),
       triage: {
-        statusType: selectedStatusById.get(issue.statusId)?.type ?? null,
+        statusName: statusById.get(issue.statusId)?.name ?? null,
+        statusKey: statusById.get(issue.statusId)?.key ?? null,
+        statusType: statusById.get(issue.statusId)?.type ?? null,
         priority: issue.priority,
+        priorityLabel: priorityLabel(issue.priority),
         estimate: issue.estimate,
         dueDate: issue.dueDate ? issue.dueDate.getTime() : null,
         lastActivityAt: issue.lastActivityAt.getTime(),
-        labelNames: (labelsByIssueId.get(issue.id) ?? [])
+        organizationName: issue.contextCompanyId ? organizationById.get(issue.contextCompanyId)?.name ?? null : null,
+        teamName: teamById.get(issue.teamId)?.name ?? null,
+        teamKey: teamById.get(issue.teamId)?.key ?? null,
+        projectName: issue.projectId ? projectById.get(issue.projectId)?.name ?? null : null,
+        assigneeName: issue.assigneeId ? displayUserName(userById.get(issue.assigneeId)) : null,
+        labelNames: (selectedLabelsByIssueId.get(issue.id) ?? [])
           .map((link) => labelById.get(link.labelId)?.name)
           .filter((name): name is string => Boolean(name)),
         latestActivitySummary: activityByIssueId.get(issue.id)?.[0]?.summary ?? null,
@@ -813,6 +956,44 @@ function readRequiredString(args: unknown, key: string) {
 function readPositiveInteger(value: unknown, fallback: number, min: number, max: number) {
   if (typeof value !== 'number' || !Number.isFinite(value)) return fallback
   return Math.max(min, Math.min(max, Math.floor(value)))
+}
+
+function readOptionalString(value: unknown) {
+  return typeof value === 'string' && value.trim() ? value.trim() : null
+}
+
+function readStringFilters(...values: unknown[]) {
+  return values.flatMap((value) => {
+    if (typeof value === 'string' && value.trim()) return [value.trim()]
+    return readStringArray(value).map((item) => item.trim()).filter(Boolean)
+  })
+}
+
+function readNumberArray(value: unknown) {
+  return Array.isArray(value)
+    ? value.filter((item): item is number => typeof item === 'number' && Number.isFinite(item)).map((item) => Math.floor(item))
+    : []
+}
+
+function matchesAny(needle: string, values: Array<string | null | undefined>) {
+  return values.some((value) => matchesStringFilter(value, [needle]))
+}
+
+function matchesAnyFilter(filters: string[], values: Array<string | null | undefined>) {
+  return values.some((value) => matchesStringFilter(value, filters))
+}
+
+function matchesStringFilter(value: string | null | undefined, filters: string[], mode: 'contains' | 'exact' = 'contains') {
+  if (!value) return false
+  const normalizedValue = normalizeForFilter(value)
+  return filters.some((filter) => {
+    const normalizedFilter = normalizeForFilter(filter)
+    return mode === 'exact' ? normalizedValue === normalizedFilter : normalizedValue.includes(normalizedFilter)
+  })
+}
+
+function normalizeForFilter(value: string) {
+  return value.trim().toLowerCase()
 }
 
 function readProgressLevel(metadata: Record<string, unknown>) {
