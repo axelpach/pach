@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { MessageSquare, Send, TerminalSquare } from 'lucide-react'
 import type { Schema } from '../../zero-schema'
 
@@ -42,9 +42,18 @@ export function AgentConversationView({
   const [feedbackDraft, setFeedbackDraft] = useState('')
   const [feedbackBusy, setFeedbackBusy] = useState(false)
   const [feedbackMessage, setFeedbackMessage] = useState<string | null>(null)
+  const conversationEndRef = useRef<HTMLDivElement | null>(null)
   const onlineWorkers = workers.filter((worker) => worker.status !== 'offline')
   const canCreateRun = repositories.length > 0 && !run
   const streamItems = buildAgentConversationStream({ progressReports, legacyProgressActivity, messages })
+
+  useEffect(() => {
+    const frame = window.requestAnimationFrame(() => {
+      conversationEndRef.current?.scrollIntoView({ block: 'end' })
+    })
+
+    return () => window.cancelAnimationFrame(frame)
+  }, [run?.id, streamItems.length])
 
   async function submitFeedback() {
     const feedback = feedbackDraft.trim()
@@ -135,6 +144,7 @@ export function AgentConversationView({
               {streamItems.map((item) => (
                 <AgentConversationStreamItem key={item.id} item={item} />
               ))}
+              <div ref={conversationEndRef} aria-hidden />
             </div>
           </div>
         </div>
