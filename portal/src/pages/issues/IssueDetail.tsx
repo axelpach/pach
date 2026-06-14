@@ -240,9 +240,8 @@ export default function IssueDetail() {
     if (!repo) return
 
     const runId = crypto.randomUUID()
-    const branchId = crypto.randomUUID()
     const issueKey = issue.identifier.toLowerCase()
-    const branchName = `ap/${repo.projectKey}-${issueKey}-${slugify(issue.title)}`
+    const branchName = `agent/${repo.projectKey}-${issueKey}-${slugify(issue.title)}`
 
     await z.mutate.agent_runs.create({
       id: runId,
@@ -255,37 +254,19 @@ export default function IssueDetail() {
       status: 'queued',
       statusMessage: 'queued for agent worker',
       metadata: {
-        executionClass: 'coding',
-        requiredCapabilities: ['codex.local', 'git', 'pach-mcp'],
+        executionClass: 'general',
+        handler: 'general-mcp',
+        requiredCapabilities: ['codex.local', 'pach-mcp'],
         queuedVia: 'issue_detail',
       },
     })
 
-    await z.mutate.github_branches.create({
-      id: branchId,
-      repositoryId: repo.id,
-      agentRunId: runId,
-      issueId: issue.id,
-      name: branchName,
-      baseBranch: repo.defaultBranch,
-      status: 'planned',
-    })
-
-    for (const terminal of DEFAULT_TERMINALS) {
-      await z.mutate.agent_terminals.create({
-        id: crypto.randomUUID(),
-        runId,
-        ...terminal,
-      })
-    }
-
-    await logActivity(`queued agent run on ${branchName}`, 'agent_run_created', {
+    await logActivity('queued general MCP agent run', 'agent_run_created', {
       runId,
-      branchId,
-      branchName,
       repository: repo.fullName,
-      executionClass: 'coding',
-      requiredCapabilities: ['codex.local', 'git', 'pach-mcp'],
+      executionClass: 'general',
+      handler: 'general-mcp',
+      requiredCapabilities: ['codex.local', 'pach-mcp'],
     })
   }
 
@@ -768,7 +749,11 @@ function AgentRunPanel({
 }) {
   const onlineWorkers = workers.filter((worker) => worker.status !== 'offline')
   const canCreateRun = repositories.length > 0 && !run
-  const canBootstrapRun = Boolean(run?.workerId && ['reserved', 'failed'].includes(run.status))
+  const executionClass = readMetadataString(run?.metadata, 'executionClass')
+  const handler = readMetadataString(run?.metadata, 'handler')
+  const isGeneralRun = executionClass === 'general'
+  const showLegacyAgentControls = Boolean(run && !isGeneralRun)
+  const canBootstrapRun = Boolean(showLegacyAgentControls && run?.workerId && ['reserved', 'failed'].includes(run.status))
   const [selectedTerminalId, setSelectedTerminalId] = useState<string | null>(null)
   const [terminalOutput, setTerminalOutput] = useState('')
   const [terminalInput, setTerminalInput] = useState('')
@@ -1129,18 +1114,27 @@ function AgentRunPanel({
               <span className="uppercase tracking-label text-fg-4">status</span>
               <span className="text-accent">{run.status}</span>
             </div>
-            <div className="flex items-center justify-between gap-3">
-              <span className="uppercase tracking-label text-fg-4">repo</span>
-              <span className="truncate text-fg-2">{run.repoFullName}</span>
-            </div>
-            <div className="flex items-center justify-between gap-3">
-              <span className="uppercase tracking-label text-fg-4">branch</span>
-              <span className="truncate text-fg-2">{branch?.name ?? run.branchName}</span>
-            </div>
-            <div className="flex items-center justify-between gap-3">
-              <span className="uppercase tracking-label text-fg-4">tmux</span>
-              <span className="truncate text-fg-2">{run.tmuxSession ?? 'pending'}</span>
-            </div>
+            {isGeneralRun ? (
+              <div className="flex items-center justify-between gap-3">
+                <span className="uppercase tracking-label text-fg-4">handler</span>
+                <span className="truncate text-fg-2">{handler ?? 'general-mcp'}</span>
+              </div>
+            ) : (
+              <>
+                <div className="flex items-center justify-between gap-3">
+                  <span className="uppercase tracking-label text-fg-4">repo</span>
+                  <span className="truncate text-fg-2">{run.repoFullName}</span>
+                </div>
+                <div className="flex items-center justify-between gap-3">
+                  <span className="uppercase tracking-label text-fg-4">branch</span>
+                  <span className="truncate text-fg-2">{branch?.name ?? run.branchName}</span>
+                </div>
+                <div className="flex items-center justify-between gap-3">
+                  <span className="uppercase tracking-label text-fg-4">tmux</span>
+                  <span className="truncate text-fg-2">{run.tmuxSession ?? 'pending'}</span>
+                </div>
+              </>
+            )}
             <div className="flex items-center justify-between gap-3">
               <span className="uppercase tracking-label text-fg-4">worker</span>
               <span className="truncate text-fg-2">{run.workerId ?? 'waiting for claim'}</span>
@@ -1171,6 +1165,17 @@ function AgentRunPanel({
             </div>
           ) : null}
 
+          {isGeneralRun ? (
+            <div className="border border-edge/12 bg-accent-fill/[0.025] p-3 font-mono text-xs leading-relaxed text-fg-3">
+              <div className="mb-1 text-[10px] uppercase tracking-label text-fg-4">general MCP handler</div>
+              <div>
+                The agent worker will claim this run, read the issue through Pach MCP, report progress into
+                activity, and complete the run when Codex returns.
+              </div>
+            </div>
+          ) : null}
+
+          {showLegacyAgentControls ? (
           <div className="flex flex-wrap items-center gap-2">
             <button
               onClick={() => {
@@ -1183,7 +1188,9 @@ function AgentRunPanel({
             </button>
             {repoMessage ? <span className="font-mono text-[10px] lowercase text-fg-4">{repoMessage}</span> : null}
           </div>
+          ) : null}
 
+          {showLegacyAgentControls ? (
           <div className="border border-edge/12 bg-accent-fill/[0.025] p-3">
             <div className="mb-2 flex items-center justify-between gap-3">
               <div>
@@ -1237,7 +1244,9 @@ function AgentRunPanel({
               {goalMessage ? <span>{goalMessage}</span> : null}
             </div>
           </div>
+          ) : null}
 
+          {showLegacyAgentControls ? (
           <div>
             <div className="mb-1.5 font-mono text-[10px] uppercase tracking-label text-fg-4">terminals</div>
             <div className="flex flex-wrap gap-1.5">
@@ -1260,7 +1269,9 @@ function AgentRunPanel({
               ))}
             </div>
           </div>
+          ) : null}
 
+          {showLegacyAgentControls ? (
           <div className="border border-edge/12 bg-overlay/18">
             <div className="flex items-center justify-between gap-3 border-b border-edge/10 px-3 py-2">
               <div className="min-w-0 font-mono text-[10px] uppercase tracking-label text-fg-4">
@@ -1368,7 +1379,9 @@ function AgentRunPanel({
               ) : null}
             </form>
           </div>
+          ) : null}
 
+          {showLegacyAgentControls ? (
           <div className="flex items-center gap-2">
             {pullRequest ? (
               <a
@@ -1393,7 +1406,9 @@ function AgentRunPanel({
               {prBusy ? 'syncing...' : 'sync pr'}
             </button>
           </div>
+          ) : null}
 
+          {showLegacyAgentControls ? (
           <div>
             <div className="mb-1.5 font-mono text-[10px] uppercase tracking-label text-fg-4">artifacts</div>
             {artifacts.length > 0 ? (
@@ -1432,6 +1447,7 @@ function AgentRunPanel({
               <div className="font-mono text-xs text-fg-4">// no screenshots or videos yet</div>
             )}
           </div>
+          ) : null}
         </div>
       )}
     </div>
