@@ -35,6 +35,7 @@ const limits = {
 }
 const codexCommand = readEnv('PACH_AGENT_CODEX_COMMAND', 'codex')
 const codexTimeoutMs = readPositiveInteger(process.env.PACH_AGENT_CODEX_TIMEOUT_MS, 10 * 60 * 1_000)
+const codexFullTrust = readBooleanEnv('PACH_AGENT_CODEX_FULL_TRUST', true)
 
 if (!agentToken) {
   console.error('Missing PACH_AGENT_TOKEN or PACH_MCP_TOKEN.')
@@ -48,6 +49,7 @@ console.log(`api: ${apiUrl}`)
 console.log(`capabilities: ${capabilities.join(', ')}`)
 console.log(`limits: coding=${limits.coding}, general=${limits.general}`)
 console.log(`mode: ${smokeOnly ? 'smoke' : 'general handler'}`)
+console.log(`codex trust: ${codexFullTrust ? 'full' : 'configured'}`)
 
 while (true) {
   try {
@@ -142,6 +144,7 @@ async function executeGeneralMcpRun(worker: WorkerRecord, run: AgentRunRecord) {
     metadata: {
       handler: 'general-mcp',
       codexCommand,
+      codexFullTrust,
     },
   })
 
@@ -153,8 +156,9 @@ async function executeGeneralMcpRun(worker: WorkerRecord, run: AgentRunRecord) {
     const finalMessage = summarizeCodexOutput(stdout) || `Codex completed general MCP run ${run.id}`
 
     await reportRunProgress(worker, run, {
-      phase: 'codex_complete',
+      phase: 'final_result',
       message: finalMessage,
+      percent: 100,
       metadata: {
         durationMs,
         stdout: truncateText(stdout, 20_000),
@@ -211,9 +215,10 @@ async function runCodexExec(prompt: string): Promise<CommandResult> {
     let timedOut = false
     let interrupted: string | null = null
 
-    console.log(`[${new Date().toISOString()}] starting: ${codexCommand} exec <prompt>`)
+    const args = buildCodexExecArgs(prompt)
+    console.log(`[${new Date().toISOString()}] starting: ${codexCommand} ${args.slice(0, -1).join(' ')} <prompt>`)
 
-    const child = spawn(codexCommand, ['exec', prompt], {
+    const child = spawn(codexCommand, args, {
       env: {
         ...process.env,
         PACH_MCP_TOKEN: agentToken,
@@ -280,12 +285,20 @@ async function runCodexExec(prompt: string): Promise<CommandResult> {
   })
 }
 
+function buildCodexExecArgs(prompt: string) {
+  const args = ['exec']
+  if (codexFullTrust) args.push('--dangerously-bypass-approvals-and-sandbox')
+  args.push(prompt)
+  return args
+}
+
 async function reportRunProgress(
   worker: WorkerRecord,
   run: AgentRunRecord,
   progress: {
     phase: string
     message: string
+    percent?: number
     metadata?: Record<string, unknown>
   },
 ) {
@@ -299,7 +312,8 @@ function buildGeneralMcpPrompt(run: AgentRunRecord) {
   return [
     'You are Pach general MCP issue worker.',
     '',
-    'Use Pach MCP tools for Pach state. Do not edit local files, use git, open pull requests, send external messages, publish content, or perform irreversible external actions in this general handler.',
+    'Use Pach MCP tools for Pach state. You may call Pach MCP tools directly and repeatedly as needed.',
+    'For this worker, Codex is running with full local trust. Still act conservatively: do not send external messages, publish content, push code, open pull requests, or perform irreversible external actions unless the issue explicitly asks for it.',
     `Issue id: ${run.issueId}`,
     `Agent run id: ${run.id}`,
     '',
@@ -350,6 +364,14 @@ function readPositiveInteger(value: string | undefined, fallback: number) {
   if (!value) return fallback
   const parsed = Number(value)
   return Number.isInteger(parsed) && parsed > 0 ? parsed : fallback
+}
+
+function readBooleanEnv(name: string, fallback: boolean) {
+  const value = process.env[name]
+  if (!value) return fallback
+  if (['1', 'true', 'yes', 'on'].includes(value.toLowerCase())) return true
+  if (['0', 'false', 'no', 'off'].includes(value.toLowerCase())) return false
+  return fallback
 }
 
 function readMetadataString(metadata: unknown, key: string) {
