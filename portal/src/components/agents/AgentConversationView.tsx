@@ -20,6 +20,7 @@ type AgentConversationViewProps = {
 
 type AgentConversationStreamItemModel = {
   id: string
+  runId?: string
   role: 'user' | 'agent'
   phase: string
   body: string
@@ -243,33 +244,83 @@ function buildAgentConversationStream({
   legacyProgressActivity: Schema['tables']['pm_issue_activity']['row'][]
   messages: Schema['tables']['agent_messages']['row'][]
 }): AgentConversationStreamItemModel[] {
+  const latestFinalResultByRun = new Map<string, Schema['tables']['agent_run_progress_reports']['row']>()
+  const progressPhasesByRun = new Map<string, Set<string>>()
+
+  for (const report of progressReports) {
+    const phases = progressPhasesByRun.get(report.runId) ?? new Set<string>()
+    phases.add(report.phase ?? report.level)
+    progressPhasesByRun.set(report.runId, phases)
+
+    if (report.phase !== 'final_result') continue
+    const current = latestFinalResultByRun.get(report.runId)
+    if (!current || report.createdAt > current.createdAt) latestFinalResultByRun.set(report.runId, report)
+  }
+
   return [
     ...messages.map((message): AgentConversationStreamItemModel => ({
       id: `message-${message.id}`,
+      runId: message.runId,
       role: message.role === 'user' ? 'user' : 'agent',
       phase: message.role,
       body: message.body,
       level: 'info',
       createdAt: message.createdAt,
     })),
-    ...progressReports.map((report): AgentConversationStreamItemModel => ({
-      id: `progress-${report.id}`,
-      role: 'agent',
-      phase: report.phase ?? report.level,
-      body: report.message,
-      level: report.level,
-      createdAt: report.createdAt,
-      percent: report.percent,
-    })),
-    ...legacyProgressActivity.map((entry): AgentConversationStreamItemModel => ({
-      id: `legacy-${entry.id}`,
-      role: 'agent',
-      phase: readMetadataString(entry.metadata, 'phase') ?? legacyProgressPhase(entry.type),
-      body: entry.summary,
-      level: entry.type === 'agent_run_failed' || readMetadataString(entry.metadata, 'level') === 'error' ? 'error' : 'info',
-      createdAt: entry.createdAt,
-    })),
+    ...progressReports
+      .filter((report) => shouldShowProgressReport(report, latestFinalResultByRun))
+      .map((report): AgentConversationStreamItemModel => ({
+        id: `progress-${report.id}`,
+        runId: report.runId,
+        role: 'agent',
+        phase: report.phase ?? report.level,
+        body: report.message,
+        level: report.level,
+        createdAt: report.createdAt,
+        percent: report.percent,
+      })),
+    ...legacyProgressActivity
+      .filter((entry) => shouldShowLegacyProgress(entry, progressPhasesByRun, latestFinalResultByRun))
+      .map((entry): AgentConversationStreamItemModel => ({
+        id: `legacy-${entry.id}`,
+        runId: readMetadataString(entry.metadata, 'runId') ?? undefined,
+        role: 'agent',
+        phase: readMetadataString(entry.metadata, 'phase') ?? legacyProgressPhase(entry.type),
+        body: entry.summary,
+        level: entry.type === 'agent_run_failed' || readMetadataString(entry.metadata, 'level') === 'error' ? 'error' : 'info',
+        createdAt: entry.createdAt,
+      })),
   ].sort((a, b) => a.createdAt - b.createdAt)
+}
+
+function shouldShowProgressReport(
+  report: Schema['tables']['agent_run_progress_reports']['row'],
+  latestFinalResultByRun: Map<string, Schema['tables']['agent_run_progress_reports']['row']>,
+) {
+  if (report.phase === 'final_result') {
+    return latestFinalResultByRun.get(report.runId)?.id === report.id
+  }
+
+  if (report.phase === 'completed' && latestFinalResultByRun.has(report.runId)) {
+    return false
+  }
+
+  return true
+}
+
+function shouldShowLegacyProgress(
+  entry: Schema['tables']['pm_issue_activity']['row'],
+  progressPhasesByRun: Map<string, Set<string>>,
+  latestFinalResultByRun: Map<string, Schema['tables']['agent_run_progress_reports']['row']>,
+) {
+  const runId = readMetadataString(entry.metadata, 'runId')
+  if (!runId) return true
+
+  const phase = readMetadataString(entry.metadata, 'phase') ?? legacyProgressPhase(entry.type)
+  const progressPhases = progressPhasesByRun.get(runId)
+  if (!progressPhases) return true
+  if (phase === 'completed' && latestFinalResultByRun.has(runId)) return false
+  return !progressPhases.has(phase)
 }
 
 function AgentConversationStreamItem({ item }: { item: AgentConversationStreamItemModel }) {
