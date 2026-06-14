@@ -104,6 +104,9 @@ export default function IssueDetail() {
   const [activeProgressReports] = useQuery(
     z.query.agent_run_progress_reports.where('runId', activeRun?.id ?? '').orderBy('createdAt', 'desc'),
   )
+  const [issueProgressReports] = useQuery(
+    z.query.agent_run_progress_reports.where('issueId', issueId ?? '').orderBy('createdAt', 'desc'),
+  )
   const [agentConversations] = useQuery(
     z.query.agent_conversations.where('issueId', issueId ?? '').orderBy('updatedAt', 'desc'),
   )
@@ -114,6 +117,13 @@ export default function IssueDetail() {
   const [activeMessages] = useQuery(
     z.query.agent_messages.where('conversationId', activeConversation?.id ?? '').orderBy('createdAt', 'asc'),
   )
+  const conversationRunIds = new Set(agentRuns
+    .filter((run) => run.conversationId && run.conversationId === activeConversation?.id)
+    .map((run) => run.id))
+  const conversationProgressReports = issueProgressReports.filter((report) => {
+    if (!activeConversation) return report.runId === activeRun?.id
+    return conversationRunIds.has(report.runId)
+  })
   const visibleActivity = activity.filter((entry) => !isRunScopedAgentActivity(entry))
   const legacyRunProgressActivity = activeRun
     ? activity
@@ -563,7 +573,7 @@ export default function IssueDetail() {
           <AgentConversationView
             issue={issue}
             run={activeRun}
-            progressReports={activeProgressReports}
+            progressReports={conversationProgressReports}
             legacyProgressActivity={legacyRunProgressActivity}
             messages={activeMessages}
             workers={workers}

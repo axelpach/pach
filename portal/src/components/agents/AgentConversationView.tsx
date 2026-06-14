@@ -50,6 +50,7 @@ export function AgentConversationView({
   const onlineWorkers = workers.filter((worker) => worker.status !== 'offline')
   const canCreateRun = repositories.length > 0 && !run
   const canCancelRun = Boolean(run && !['completed', 'failed', 'canceled'].includes(run.status))
+  const runIsWorking = isRunWorking(run)
   const streamItems = buildAgentConversationStream({ progressReports, legacyProgressActivity, messages })
 
   useEffect(() => {
@@ -58,7 +59,7 @@ export function AgentConversationView({
     })
 
     return () => window.cancelAnimationFrame(frame)
-  }, [run?.id, streamItems.length])
+  }, [run?.id, run?.status, streamItems.length])
 
   async function submitFeedback() {
     const feedback = feedbackDraft.trim()
@@ -161,6 +162,9 @@ export function AgentConversationView({
               {streamItems.map((item) => (
                 <AgentConversationStreamItem key={item.id} item={item} />
               ))}
+              {runIsWorking ? (
+                <AgentWorkingIndicator status={run?.status ?? 'queued'} />
+              ) : null}
               <div ref={conversationEndRef} aria-hidden />
             </div>
           </div>
@@ -178,6 +182,11 @@ export function AgentConversationView({
               <textarea
                 value={feedbackDraft}
                 onChange={(event) => setFeedbackDraft(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key !== 'Enter' || event.shiftKey || event.nativeEvent.isComposing) return
+                  event.preventDefault()
+                  void submitFeedback()
+                }}
                 rows={3}
                 disabled={!run || feedbackBusy}
                 placeholder={run ? 'send feedback or ask the agent to continue...' : 'start a run before sending feedback...'}
@@ -292,6 +301,37 @@ function AgentConversationStreamItem({ item }: { item: AgentConversationStreamIt
       </div>
     </div>
   )
+}
+
+function AgentWorkingIndicator({ status }: { status: string }) {
+  return (
+    <div className="flex justify-start">
+      <div className="w-full max-w-[760px] border border-accent/20 bg-accent-fill/[0.045] px-3 py-2.5 font-mono text-xs text-fg-2 shadow-glow-xs">
+        <div className="mb-1.5 flex items-center justify-between gap-3 text-[10px] uppercase tracking-label">
+          <div className="flex items-center gap-2 text-accent">
+            <span className="relative flex h-2 w-2">
+              <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-accent opacity-50" />
+              <span className="relative inline-flex h-2 w-2 rounded-full bg-accent" />
+            </span>
+            working
+          </div>
+          <span className="text-fg-4">{status}</span>
+        </div>
+        <div className="flex items-center gap-2 text-sm">
+          <span>loading</span>
+          <span className="flex items-center gap-1" aria-hidden>
+            <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-accent" />
+            <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-accent [animation-delay:120ms]" />
+            <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-accent [animation-delay:240ms]" />
+          </span>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function isRunWorking(run: Schema['tables']['agent_runs']['row'] | null) {
+  return Boolean(run && ['queued', 'reserved', 'bootstrapping', 'running'].includes(run.status))
 }
 
 function readMetadataString(metadata: unknown, key: string) {
