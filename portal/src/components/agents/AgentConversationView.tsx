@@ -244,7 +244,7 @@ function buildAgentConversationStream({
   legacyProgressActivity: Schema['tables']['pm_issue_activity']['row'][]
   messages: Schema['tables']['agent_messages']['row'][]
 }): AgentConversationStreamItemModel[] {
-  const latestFinalResultByRun = new Map<string, Schema['tables']['agent_run_progress_reports']['row']>()
+  const preferredFinalResultByRun = new Map<string, Schema['tables']['agent_run_progress_reports']['row']>()
   const progressPhasesByRun = new Map<string, Set<string>>()
 
   for (const report of progressReports) {
@@ -253,11 +253,11 @@ function buildAgentConversationStream({
     progressPhasesByRun.set(report.runId, phases)
 
     if (report.phase !== 'final_result') continue
-    const current = latestFinalResultByRun.get(report.runId)
-    if (!current || report.createdAt > current.createdAt) latestFinalResultByRun.set(report.runId, report)
+    const current = preferredFinalResultByRun.get(report.runId)
+    if (!current || isBetterFinalResult(report, current)) preferredFinalResultByRun.set(report.runId, report)
   }
 
-  return [
+  const items = [
     ...messages.map((message): AgentConversationStreamItemModel => ({
       id: `message-${message.id}`,
       runId: message.runId,
@@ -268,7 +268,7 @@ function buildAgentConversationStream({
       createdAt: message.createdAt,
     })),
     ...progressReports
-      .filter((report) => shouldShowProgressReport(report, latestFinalResultByRun))
+      .filter((report) => shouldShowProgressReport(report, preferredFinalResultByRun))
       .map((report): AgentConversationStreamItemModel => ({
         id: `progress-${report.id}`,
         runId: report.runId,
@@ -280,7 +280,7 @@ function buildAgentConversationStream({
         percent: report.percent,
       })),
     ...legacyProgressActivity
-      .filter((entry) => shouldShowLegacyProgress(entry, progressPhasesByRun, latestFinalResultByRun))
+      .filter((entry) => shouldShowLegacyProgress(entry, progressPhasesByRun, preferredFinalResultByRun))
       .map((entry): AgentConversationStreamItemModel => ({
         id: `legacy-${entry.id}`,
         runId: readMetadataString(entry.metadata, 'runId') ?? undefined,
@@ -291,27 +291,53 @@ function buildAgentConversationStream({
         createdAt: entry.createdAt,
       })),
   ].sort((a, b) => a.createdAt - b.createdAt)
+
+  return dedupeConversationItems(items)
+}
+
+function isBetterFinalResult(
+  candidate: Schema['tables']['agent_run_progress_reports']['row'],
+  current: Schema['tables']['agent_run_progress_reports']['row'],
+) {
+  const candidateIsMcp = readMetadataString(candidate.metadata, 'source') === 'pach-mcp'
+  const currentIsMcp = readMetadataString(current.metadata, 'source') === 'pach-mcp'
+  if (candidateIsMcp !== currentIsMcp) return candidateIsMcp
+  return candidate.createdAt > current.createdAt
 }
 
 function shouldShowProgressReport(
   report: Schema['tables']['agent_run_progress_reports']['row'],
-  latestFinalResultByRun: Map<string, Schema['tables']['agent_run_progress_reports']['row']>,
+  preferredFinalResultByRun: Map<string, Schema['tables']['agent_run_progress_reports']['row']>,
 ) {
   if (report.phase === 'final_result') {
-    return latestFinalResultByRun.get(report.runId)?.id === report.id
+    return preferredFinalResultByRun.get(report.runId)?.id === report.id
   }
 
-  if (report.phase === 'completed' && latestFinalResultByRun.has(report.runId)) {
+  if (report.phase === 'completed' && preferredFinalResultByRun.has(report.runId)) {
     return false
   }
 
   return true
 }
 
+function dedupeConversationItems(items: AgentConversationStreamItemModel[]) {
+  const seen = new Set<string>()
+  return items.filter((item) => {
+    const key = [item.runId ?? 'no-run', item.role, item.phase, normalizeMessageForDedupe(item.body)].join('|')
+    if (seen.has(key)) return false
+    seen.add(key)
+    return true
+  })
+}
+
+function normalizeMessageForDedupe(value: string) {
+  return value.trim().replace(/\s+/g, ' ')
+}
+
 function shouldShowLegacyProgress(
   entry: Schema['tables']['pm_issue_activity']['row'],
   progressPhasesByRun: Map<string, Set<string>>,
-  latestFinalResultByRun: Map<string, Schema['tables']['agent_run_progress_reports']['row']>,
+  preferredFinalResultByRun: Map<string, Schema['tables']['agent_run_progress_reports']['row']>,
 ) {
   const runId = readMetadataString(entry.metadata, 'runId')
   if (!runId) return true
@@ -319,7 +345,7 @@ function shouldShowLegacyProgress(
   const phase = readMetadataString(entry.metadata, 'phase') ?? legacyProgressPhase(entry.type)
   const progressPhases = progressPhasesByRun.get(runId)
   if (!progressPhases) return true
-  if (phase === 'completed' && latestFinalResultByRun.has(runId)) return false
+  if (phase === 'completed' && preferredFinalResultByRun.has(runId)) return false
   return !progressPhases.has(phase)
 }
 

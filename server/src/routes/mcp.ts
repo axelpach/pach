@@ -6,6 +6,7 @@ import {
   agentRunProgressReports,
   agentRuns,
   mcpTokens,
+  organizations,
   pmIssueActivity,
   pmIssueLabels,
   pmIssues,
@@ -13,6 +14,7 @@ import {
   pmProjects,
   pmStatuses,
   pmTeams,
+  users,
 } from '../../../db/schema.js'
 import { getDb } from '../db.js'
 import { verifyToken, type JWTPayload } from '../lib/auth.js'
@@ -120,7 +122,7 @@ router.use(async (req: AuthenticatedRequest, res, next) => {
 const tools: ToolDefinition[] = [
   {
     name: 'pach.issue.get',
-    description: 'Read a Pach issue with its team, project, status, labels, recent activity, and recent agent runs.',
+    description: 'Read a Pach issue with human-readable context, team, organization, project, status, assignee, labels, recent activity, and recent agent runs.',
     inputSchema: {
       type: 'object',
       additionalProperties: false,
@@ -518,6 +520,15 @@ async function getIssue(req: AuthenticatedRequest, args: unknown) {
     ? await db.select().from(pmProjects).where(eq(pmProjects.id, issue.projectId)).limit(1)
     : []
   const [status] = await db.select().from(pmStatuses).where(eq(pmStatuses.id, issue.statusId)).limit(1)
+  const [organization] = issue.contextCompanyId
+    ? await db.select().from(organizations).where(eq(organizations.id, issue.contextCompanyId)).limit(1)
+    : []
+  const [assignee] = issue.assigneeId
+    ? await db.select().from(users).where(eq(users.id, issue.assigneeId)).limit(1)
+    : []
+  const [creator] = issue.creatorId
+    ? await db.select().from(users).where(eq(users.id, issue.creatorId)).limit(1)
+    : []
   const labelLinks = await db.select().from(pmIssueLabels).where(eq(pmIssueLabels.issueId, issue.id))
   const labels = labelLinks.length > 0
     ? await db
@@ -541,11 +552,34 @@ async function getIssue(req: AuthenticatedRequest, args: unknown) {
   return {
     issue: serializeIssue(issue),
     team: team ? serializeRow(team) : null,
+    organization: organization ? serializeRow(organization) : null,
     project: project ? serializeRow(project) : null,
     status: status ? serializeRow(status) : null,
+    assignee: assignee ? serializePublicUser(assignee) : null,
+    creator: creator ? serializePublicUser(creator) : null,
     labels: labels.map(serializeRow),
     recentActivity: activity.map(serializeRow),
     recentAgentRuns: runs.map(serializeRow),
+    context: {
+      issueIdentifier: issue.identifier,
+      teamKey: team?.key ?? null,
+      teamName: team?.name ?? null,
+      organizationName: organization?.name ?? null,
+      organizationProject: organization?.project ?? null,
+      projectName: project?.name ?? null,
+      projectSlug: project?.slug ?? null,
+      statusName: status?.name ?? null,
+      statusKey: status?.key ?? null,
+      statusType: status?.type ?? null,
+      assigneeName: displayUserName(assignee),
+      creatorName: displayUserName(creator),
+      priority: issue.priority,
+      priorityLabel: priorityLabel(issue.priority),
+      estimate: issue.estimate,
+      dueDate: issue.dueDate ? issue.dueDate.getTime() : null,
+      blockedReason: issue.blockedReason,
+      labelNames: labels.map((label) => label.name),
+    },
   }
 }
 
@@ -881,6 +915,31 @@ function serializeRow<T extends Record<string, unknown>>(row: T) {
 
 function serializeNullableRow<T extends Record<string, unknown>>(row: T | undefined) {
   return row ? serializeRow(row) : null
+}
+
+function serializePublicUser(user: typeof users.$inferSelect) {
+  const { passwordHash: _passwordHash, ...publicUser } = user
+  return serializeRow(publicUser)
+}
+
+function displayUserName(user: typeof users.$inferSelect | undefined) {
+  if (!user) return null
+  return user.name ?? user.email
+}
+
+function priorityLabel(priority: number) {
+  switch (priority) {
+    case 1:
+      return 'urgent'
+    case 2:
+      return 'high'
+    case 3:
+      return 'medium'
+    case 4:
+      return 'low'
+    default:
+      return 'none'
+  }
 }
 
 function uniqueStrings(values: Array<string | null | undefined>) {
