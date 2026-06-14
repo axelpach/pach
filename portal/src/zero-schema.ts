@@ -546,6 +546,8 @@ const githubRepositories = table('github_repositories')
 const agentRuns = table('agent_runs')
   .columns({
     id: string(),
+    conversationId: string().optional().from('conversation_id'),
+    parentRunId: string().optional().from('parent_run_id'),
     issueId: string().from('issue_id'),
     workerId: string().optional().from('worker_id'),
     repositoryId: string().optional().from('repository_id'),
@@ -563,6 +565,30 @@ const agentRuns = table('agent_runs')
     metadata: json<Record<string, unknown>>(),
     createdAt: number().from('created_at'),
     updatedAt: number().from('updated_at'),
+  })
+  .primaryKey('id')
+
+const agentConversations = table('agent_conversations')
+  .columns({
+    id: string(),
+    issueId: string().optional().from('issue_id'),
+    title: string(),
+    status: string(),
+    metadata: json<Record<string, unknown>>(),
+    createdAt: number().from('created_at'),
+    updatedAt: number().from('updated_at'),
+  })
+  .primaryKey('id')
+
+const agentMessages = table('agent_messages')
+  .columns({
+    id: string(),
+    conversationId: string().from('conversation_id'),
+    runId: string().optional().from('run_id'),
+    role: string(),
+    body: string(),
+    metadata: json<Record<string, unknown>>(),
+    createdAt: number().from('created_at'),
   })
   .primaryKey('id')
 
@@ -761,7 +787,9 @@ export const schema = createSchema({
     pmTaskTriggerRuns,
     agentWorkers,
     githubRepositories,
+    agentConversations,
     agentRuns,
+    agentMessages,
     agentTerminals,
     agentRunProgressReports,
     agentRunArtifacts,

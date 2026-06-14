@@ -566,8 +566,19 @@ export const githubRepositories = pgTable('github_repositories', {
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
 });
+export const agentConversations = pgTable('agent_conversations', {
+    id: uuid('id').primaryKey().defaultRandom(),
+    issueId: uuid('issue_id').references(() => pmIssues.id),
+    title: text('title').notNull(),
+    status: text('status').notNull().default('open'),
+    metadata: jsonb('metadata').$type().notNull().default({}),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+});
 export const agentRuns = pgTable('agent_runs', {
     id: uuid('id').primaryKey().defaultRandom(),
+    conversationId: uuid('conversation_id').references(() => agentConversations.id),
+    parentRunId: uuid('parent_run_id'),
     issueId: uuid('issue_id').notNull().references(() => pmIssues.id),
     workerId: uuid('worker_id').references(() => agentWorkers.id),
     repositoryId: uuid('repository_id').references(() => githubRepositories.id),
@@ -587,6 +598,15 @@ export const agentRuns = pgTable('agent_runs', {
     metadata: jsonb('metadata').$type().notNull().default({}),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+});
+export const agentMessages = pgTable('agent_messages', {
+    id: uuid('id').primaryKey().defaultRandom(),
+    conversationId: uuid('conversation_id').notNull().references(() => agentConversations.id),
+    runId: uuid('run_id').references(() => agentRuns.id),
+    role: text('role').notNull(),
+    body: text('body').notNull(),
+    metadata: jsonb('metadata').$type().notNull().default({}),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
 });
 export const agentTerminals = pgTable('agent_terminals', {
     id: uuid('id').primaryKey().defaultRandom(),

@@ -500,8 +500,28 @@ export const mutators = {
     },
   },
 
+  agent_conversations: {
+    async create(tx: Tx, args: { id: string; issueId?: string; title: string; status?: string; metadata?: Record<string, unknown> }) {
+      const now = Date.now()
+      await tx.mutate.agent_conversations.insert({
+        status: 'open',
+        metadata: {},
+        ...args,
+        createdAt: now,
+        updatedAt: now,
+      })
+    },
+    async update(tx: Tx, args: { id: string; issueId?: string | null; title?: string; status?: string; metadata?: Record<string, unknown> }) {
+      const { id, ...updates } = args
+      await tx.mutate.agent_conversations.update({ id, ...updates, updatedAt: Date.now() })
+    },
+    async delete(tx: Tx, args: { id: string }) {
+      await tx.mutate.agent_conversations.delete({ id: args.id })
+    },
+  },
+
   agent_runs: {
-    async create(tx: Tx, args: { id: string; issueId: string; workerId?: string; repositoryId?: string; projectKey: string; repoFullName: string; baseBranch?: string; branchName: string; workspacePath?: string; tmuxSession?: string; agentKind?: string; status?: string; statusMessage?: string; startedAt?: number; completedAt?: number; metadata?: Record<string, unknown> }) {
+    async create(tx: Tx, args: { id: string; conversationId?: string; parentRunId?: string; issueId: string; workerId?: string; repositoryId?: string; projectKey: string; repoFullName: string; baseBranch?: string; branchName: string; workspacePath?: string; tmuxSession?: string; agentKind?: string; status?: string; statusMessage?: string; startedAt?: number; completedAt?: number; metadata?: Record<string, unknown> }) {
       const now = Date.now()
       await tx.mutate.agent_runs.insert({
         baseBranch: 'main',
@@ -514,12 +534,29 @@ export const mutators = {
       })
       await tx.mutate.pm_issues.update({ id: args.issueId, lastActivityAt: now, updatedAt: now })
     },
-    async update(tx: Tx, args: { id: string; workerId?: string | null; repositoryId?: string | null; projectKey?: string; repoFullName?: string; baseBranch?: string; branchName?: string; workspacePath?: string | null; tmuxSession?: string | null; agentKind?: string; status?: string; statusMessage?: string | null; startedAt?: number | null; completedAt?: number | null; metadata?: Record<string, unknown> }) {
+    async update(tx: Tx, args: { id: string; conversationId?: string | null; parentRunId?: string | null; workerId?: string | null; repositoryId?: string | null; projectKey?: string; repoFullName?: string; baseBranch?: string; branchName?: string; workspacePath?: string | null; tmuxSession?: string | null; agentKind?: string; status?: string; statusMessage?: string | null; startedAt?: number | null; completedAt?: number | null; metadata?: Record<string, unknown> }) {
       const { id, ...updates } = args
       await tx.mutate.agent_runs.update({ id, ...updates, updatedAt: Date.now() })
     },
     async delete(tx: Tx, args: { id: string }) {
       await tx.mutate.agent_runs.delete({ id: args.id })
+    },
+  },
+
+  agent_messages: {
+    async create(tx: Tx, args: { id: string; conversationId: string; runId?: string; role: string; body: string; metadata?: Record<string, unknown> }) {
+      await tx.mutate.agent_messages.insert({
+        metadata: {},
+        ...args,
+        createdAt: Date.now(),
+      })
+    },
+    async update(tx: Tx, args: { id: string; runId?: string | null; role?: string; body?: string; metadata?: Record<string, unknown> }) {
+      const { id, ...updates } = args
+      await tx.mutate.agent_messages.update({ id, ...updates })
+    },
+    async delete(tx: Tx, args: { id: string }) {
+      await tx.mutate.agent_messages.delete({ id: args.id })
     },
   },
 

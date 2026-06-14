@@ -151,9 +151,10 @@ async function executeGeneralMcpRun(worker: WorkerRecord, run: AgentRunRecord) {
   try {
     const prompt = buildGeneralMcpPrompt(run)
     const startedAt = Date.now()
-    const { stdout, stderr } = await runCodexExec(prompt)
+    const { stdout, stderr } = await runCodexExec(prompt, run.metadata)
     const durationMs = Date.now() - startedAt
     const finalMessage = summarizeCodexOutput(stdout) || `Codex completed general MCP run ${run.id}`
+    const codexSessionId = readCodexSessionId(stdout, stderr) ?? readMetadataString(run.metadata, 'codexSessionId')
 
     await reportRunProgress(worker, run, {
       phase: 'final_result',
@@ -161,6 +162,7 @@ async function executeGeneralMcpRun(worker: WorkerRecord, run: AgentRunRecord) {
       percent: 100,
       metadata: {
         durationMs,
+        codexSessionId,
         stdout: truncateText(stdout, 20_000),
         stderr: truncateText(stderr, 10_000),
       },
@@ -173,6 +175,7 @@ async function executeGeneralMcpRun(worker: WorkerRecord, run: AgentRunRecord) {
       metadata: {
         handler: 'general-mcp',
         durationMs,
+        codexSessionId,
         stdout: truncateText(stdout, 20_000),
         stderr: truncateText(stderr, 10_000),
       },
@@ -208,14 +211,14 @@ async function executeGeneralMcpRun(worker: WorkerRecord, run: AgentRunRecord) {
   }
 }
 
-async function runCodexExec(prompt: string): Promise<CommandResult> {
+async function runCodexExec(prompt: string, metadata?: Record<string, unknown>): Promise<CommandResult> {
   return new Promise((resolve, reject) => {
     let stdout = ''
     let stderr = ''
     let timedOut = false
     let interrupted: string | null = null
 
-    const args = buildCodexExecArgs(prompt)
+    const args = buildCodexExecArgs(prompt, metadata)
     console.log(`[${new Date().toISOString()}] starting: ${codexCommand} ${args.slice(0, -1).join(' ')} <prompt>`)
 
     const child = spawn(codexCommand, args, {
@@ -285,9 +288,11 @@ async function runCodexExec(prompt: string): Promise<CommandResult> {
   })
 }
 
-function buildCodexExecArgs(prompt: string) {
-  const args = ['exec']
+function buildCodexExecArgs(prompt: string, metadata?: Record<string, unknown>) {
+  const sessionId = readMetadataString(metadata, 'codexSessionId')
+  const args = sessionId ? ['exec', 'resume'] : ['exec']
   if (codexFullTrust) args.push('--dangerously-bypass-approvals-and-sandbox')
+  if (sessionId) args.push(sessionId)
   args.push(prompt)
   return args
 }
@@ -309,6 +314,8 @@ async function reportRunProgress(
 }
 
 function buildGeneralMcpPrompt(run: AgentRunRecord) {
+  const feedback = readMetadataString(run.metadata, 'feedback')
+  const parentRunId = readMetadataString(run.metadata, 'parentRunId')
   return [
     'You are Pach general MCP issue worker.',
     '',
@@ -316,16 +323,20 @@ function buildGeneralMcpPrompt(run: AgentRunRecord) {
     'For this worker, Codex is running with full local trust. Still act conservatively: do not send external messages, publish content, push code, open pull requests, or perform irreversible external actions unless the issue explicitly asks for it.',
     `Issue id: ${run.issueId}`,
     `Agent run id: ${run.id}`,
+    parentRunId ? `Parent run id: ${parentRunId}` : null,
+    feedback ? `User feedback: ${feedback}` : null,
     '',
     'Workflow:',
-    '1. Read the issue with pach.issue.get using the issue id above.',
+    feedback
+      ? '1. Continue from the previous session if available, and use the user feedback above as the latest instruction.'
+      : '1. Read the issue with pach.issue.get using the issue id above.',
     '2. Report progress with pach.progress.report and include the agent run id.',
     '3. Do the requested analysis or light Pach-state work that can be done through MCP.',
     '4. Put the final result in pach.progress.report with phase "final_result".',
     '5. If you update issue fields, use pach.issue.update and explain the change in activitySummary.',
     '',
     'Keep the final result concise and useful inside the Pach run progress stream.',
-  ].join('\n')
+  ].filter((line): line is string => Boolean(line)).join('\n')
 }
 
 async function postJson<T = unknown>(path: string, body: Record<string, unknown>) {
@@ -387,6 +398,11 @@ function summarizeCodexOutput(output: string) {
     .filter(Boolean)
 
   return truncateText(lines.at(-1) ?? '', 320)
+}
+
+function readCodexSessionId(stdout: string, stderr: string) {
+  const match = `${stdout}\n${stderr}`.match(/session id:\s*([0-9a-f-]{20,})/i)
+  return match?.[1] ?? null
 }
 
 function truncateText(value: unknown, maxLength: number) {

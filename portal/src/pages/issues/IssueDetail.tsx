@@ -15,6 +15,7 @@ import {
   ChevronUp,
   Circle,
   FolderKanban,
+  Maximize2,
   Plus,
   TerminalSquare,
 } from 'lucide-react'
@@ -24,6 +25,7 @@ import { authFetch, useAuth } from '../../lib/auth'
 import { config } from '../../config'
 import { PachSelect } from '../../components/PachSelect'
 import { RichEditor } from '../../components/rich-editor/RichEditor'
+import { AgentConversationView } from '../../components/agents/AgentConversationView'
 import { StatusIcon } from './StatusIcon'
 import { PriorityIcon } from './PriorityIcon'
 import { closePopupFromOutsideClick } from './popupEvents'
@@ -58,7 +60,7 @@ export default function IssueDetail() {
   const { user, token } = useAuth()
   const [bootstrappingRunId, setBootstrappingRunId] = useState<string | null>(null)
   const [agentActionMessage, setAgentActionMessage] = useState<string | null>(null)
-  const [mainTab, setMainTab] = useState<'activity' | 'agent'>('activity')
+  const [agentFullViewOpen, setAgentFullViewOpen] = useState(false)
 
   const [allIssues] = useQuery(z.query.pm_issues.orderBy('updatedAt', 'desc'))
   const [documents] = useQuery(z.query.documents.orderBy('updatedAt', 'desc'))
@@ -98,16 +100,28 @@ export default function IssueDetail() {
     z.query.agent_run_artifacts.where('runId', activeRun?.id ?? '').orderBy('createdAt', 'desc'),
   )
   const [activeProgressReports] = useQuery(
-    z.query.agent_run_progress_reports.where('runId', activeRun?.id ?? '').orderBy('createdAt', 'asc'),
+    z.query.agent_run_progress_reports.where('runId', activeRun?.id ?? '').orderBy('createdAt', 'desc'),
+  )
+  const [agentConversations] = useQuery(
+    z.query.agent_conversations.where('issueId', issueId ?? '').orderBy('updatedAt', 'desc'),
+  )
+  const activeConversation =
+    agentConversations.find((conversation) => conversation.id === activeRun?.conversationId) ??
+    agentConversations[0] ??
+    null
+  const [activeMessages] = useQuery(
+    z.query.agent_messages.where('conversationId', activeConversation?.id ?? '').orderBy('createdAt', 'asc'),
   )
   const visibleActivity = activity.filter((entry) => !isRunScopedAgentActivity(entry))
   const legacyRunProgressActivity = activeRun
-    ? activity.filter((entry) => readMetadataString(entry.metadata, 'runId') === activeRun.id && isRunScopedAgentActivity(entry))
+    ? activity
+        .filter((entry) => readMetadataString(entry.metadata, 'runId') === activeRun.id && isRunScopedAgentActivity(entry))
+        .toSorted((a, b) => b.createdAt - a.createdAt)
     : []
 
   useEffect(() => {
-    setMainTab(activeRun ? 'agent' : 'activity')
-  }, [issueId, activeRun?.id])
+    setAgentFullViewOpen(false)
+  }, [issueId])
 
   const team = issue ? teams.find((t) => t.id === issue.teamId) ?? null : null
   const project = issue?.projectId ? projects.find((p) => p.id === issue.projectId) ?? null : null
@@ -247,11 +261,23 @@ export default function IssueDetail() {
     if (!repo) return
 
     const runId = crypto.randomUUID()
+    const conversationId = crypto.randomUUID()
+    const messageId = crypto.randomUUID()
     const issueKey = issue.identifier.toLowerCase()
     const branchName = `agent/${repo.projectKey}-${issueKey}-${slugify(issue.title)}`
 
+    await z.mutate.agent_conversations.create({
+      id: conversationId,
+      issueId: issue.id,
+      title: issue.title,
+      metadata: {
+        source: 'issue_detail',
+      },
+    })
+
     await z.mutate.agent_runs.create({
       id: runId,
+      conversationId,
       issueId: issue.id,
       repositoryId: repo.id,
       projectKey: repo.projectKey,
@@ -265,15 +291,113 @@ export default function IssueDetail() {
         handler: 'general-mcp',
         requiredCapabilities: ['codex.local', 'pach-mcp'],
         queuedVia: 'issue_detail',
+        conversationId,
+      },
+    })
+
+    await z.mutate.agent_messages.create({
+      id: messageId,
+      conversationId,
+      runId,
+      role: 'user',
+      body: `Go solve ${issue.identifier}: ${issue.title}`,
+      metadata: {
+        source: 'go_solve',
       },
     })
 
     await logActivity('queued general MCP agent run', 'agent_run_created', {
       runId,
+      conversationId,
       repository: repo.fullName,
       executionClass: 'general',
       handler: 'general-mcp',
       requiredCapabilities: ['codex.local', 'pach-mcp'],
+    })
+  }
+
+  async function sendAgentFeedback(feedback: string) {
+    if (!issue || !activeRun) return
+    const trimmed = feedback.trim()
+    if (!trimmed) return
+
+    const projectKey = company?.project ?? activeRun.projectKey ?? 'pach'
+    const repo =
+      repositories.find((entry) => entry.id === activeRun.repositoryId) ??
+      repositories.find((entry) => entry.projectKey === projectKey && entry.active) ??
+      repositories.find((entry) => entry.projectKey === 'pach' && entry.active) ??
+      repositories.find((entry) => entry.active)
+    if (!repo) return
+
+    const conversationId = activeRun.conversationId ?? activeConversation?.id ?? crypto.randomUUID()
+    const conversationExists = agentConversations.some((conversation) => conversation.id === conversationId)
+    const runId = crypto.randomUUID()
+    const messageId = crypto.randomUUID()
+    const issueKey = issue.identifier.toLowerCase()
+    const branchName = `agent/${repo.projectKey}-${issueKey}-feedback-${Date.now()}`
+    const codexSessionId = readRunCodexSessionId(activeRun.metadata)
+
+    if (!conversationExists) {
+      await z.mutate.agent_conversations.create({
+        id: conversationId,
+        issueId: issue.id,
+        title: issue.title,
+        metadata: {
+          source: 'feedback_fallback',
+        },
+      })
+    } else {
+      await z.mutate.agent_conversations.update({
+        id: conversationId,
+        status: 'open',
+      })
+    }
+
+    await z.mutate.agent_runs.create({
+      id: runId,
+      conversationId,
+      parentRunId: activeRun.id,
+      issueId: issue.id,
+      workerId: activeRun.workerId ?? undefined,
+      repositoryId: repo.id,
+      projectKey: repo.projectKey,
+      repoFullName: repo.fullName,
+      baseBranch: repo.defaultBranch,
+      branchName,
+      status: 'queued',
+      statusMessage: activeRun.workerId ? 'queued for same agent worker' : 'queued for agent worker',
+      metadata: {
+        executionClass: 'general',
+        handler: 'general-mcp',
+        requiredCapabilities: ['codex.local', 'pach-mcp'],
+        queuedVia: 'agent_feedback',
+        conversationId,
+        parentRunId: activeRun.id,
+        feedbackMessageId: messageId,
+        feedback: trimmed,
+        codexSessionId,
+        preferredWorkerId: activeRun.workerId,
+      },
+    })
+
+    await z.mutate.agent_messages.create({
+      id: messageId,
+      conversationId,
+      runId,
+      role: 'user',
+      body: trimmed,
+      metadata: {
+        source: 'agent_feedback',
+        parentRunId: activeRun.id,
+      },
+    })
+
+    await logActivity('queued agent follow-up from feedback', 'agent_run_created', {
+      runId,
+      conversationId,
+      parentRunId: activeRun.id,
+      workerId: activeRun.workerId,
+      codexSessionId,
     })
   }
 
@@ -384,6 +508,21 @@ export default function IssueDetail() {
         </div>
 
         {/* body */}
+        {agentFullViewOpen ? (
+          <AgentConversationView
+            issue={issue}
+            run={activeRun}
+            progressReports={activeProgressReports}
+            legacyProgressActivity={legacyRunProgressActivity}
+            messages={activeMessages}
+            workers={workers}
+            repositories={repositories}
+            onCreateRun={createAgentRun}
+            onSeedRepositories={seedDefaultRepositories}
+            onSendFeedback={sendAgentFeedback}
+            onClose={() => setAgentFullViewOpen(false)}
+          />
+        ) : (
         <div className="flex-1 min-h-0 overflow-y-auto md:overflow-hidden flex flex-col md:flex-row">
           {/* main column */}
           <div
@@ -436,58 +575,35 @@ export default function IssueDetail() {
               />
 
               <div className="mt-10 border-t border-edge/12 pt-6">
-                <div className="mb-5 flex items-center gap-2 border border-edge/12 bg-accent-fill/[0.025] p-1">
-                  <IssueDetailTab
-                    active={mainTab === 'activity'}
-                    label="activity"
-                    meta={visibleActivity.length}
-                    onClick={() => setMainTab('activity')}
-                  />
-                  <IssueDetailTab
-                    active={mainTab === 'agent'}
-                    label="agent run"
-                    tone={activeRun ? 'online' : 'muted'}
-                    meta={activeRun ? activeRun.status : undefined}
-                    onClick={() => setMainTab('agent')}
-                  />
+                <div className="mb-5 flex items-center justify-between gap-3 font-mono text-[10px] uppercase tracking-label text-fg-4">
+                  <span>◊ activity</span>
+                  <span>{visibleActivity.length}</span>
                 </div>
-
-                {mainTab === 'activity' ? (
-                  <div className="space-y-3">
-                    {visibleActivity.length === 0 ? (
-                      <div className="font-mono text-xs text-fg-4">// no activity yet</div>
-                    ) : (
-                      visibleActivity.map((entry) => <ActivityEntry key={entry.id} entry={entry} />)
-                    )}
-                  </div>
-                ) : (
-                  <div className="border border-edge/12 bg-accent-fill/[0.025] p-4">
-                    <AgentRunPanel
-                      run={activeRun}
-                      branch={activeBranches[0] ?? null}
-                      pullRequest={activePullRequests[0] ?? null}
-                      terminals={activeTerminals}
-                      artifacts={activeArtifacts}
-                      progressReports={activeProgressReports}
-                      legacyProgressActivity={legacyRunProgressActivity}
-                      workers={workers}
-                      repositories={repositories}
-                      authToken={token}
-                      defaultGoal={buildDefaultAgentGoal({ issue, team, project, company })}
-                      onSeedRepositories={seedDefaultRepositories}
-                      onCreateRun={createAgentRun}
-                      onBootstrapRun={bootstrapAgentRun}
-                      bootstrapping={bootstrappingRunId === activeRun?.id}
-                      actionMessage={agentActionMessage}
-                    />
-                  </div>
-                )}
+                <div className="space-y-3">
+                  {visibleActivity.length === 0 ? (
+                    <div className="font-mono text-xs text-fg-4">// no activity yet</div>
+                  ) : (
+                    visibleActivity.map((entry) => <ActivityEntry key={entry.id} entry={entry} />)
+                  )}
+                </div>
               </div>
             </div>
           </div>
 
           {/* properties sidebar */}
           <aside className="w-full md:w-[300px] shrink-0 border-t md:border-t-0 md:border-l border-edge/12 bg-pit/60 backdrop-blur-sm md:overflow-auto">
+            <AgentSidebarCard
+              run={activeRun}
+              progressReports={activeProgressReports}
+              legacyProgressActivity={legacyRunProgressActivity}
+              messages={activeMessages}
+              workers={workers}
+              repositories={repositories}
+              onCreateRun={createAgentRun}
+              onSeedRepositories={seedDefaultRepositories}
+              onOpenFullView={() => setAgentFullViewOpen(true)}
+            />
+
             <div className="border-b border-edge/10 px-5 py-4">
               <div className="mb-3 font-mono text-[10px] uppercase tracking-label text-fg-4">◊ properties</div>
 
@@ -663,6 +779,7 @@ export default function IssueDetail() {
             </div>
           </aside>
         </div>
+        )}
       </div>
     </div>
   )
@@ -683,6 +800,141 @@ function NotFound({ onBack }: { onBack: () => void }) {
           </button>
         </div>
       </div>
+    </div>
+  )
+}
+
+function AgentSidebarCard({
+  run,
+  progressReports,
+  legacyProgressActivity,
+  messages,
+  workers,
+  repositories,
+  onCreateRun,
+  onSeedRepositories,
+  onOpenFullView,
+}: {
+  run: Schema['tables']['agent_runs']['row'] | null
+  progressReports: Schema['tables']['agent_run_progress_reports']['row'][]
+  legacyProgressActivity: Schema['tables']['pm_issue_activity']['row'][]
+  messages: Schema['tables']['agent_messages']['row'][]
+  workers: Schema['tables']['agent_workers']['row'][]
+  repositories: Schema['tables']['github_repositories']['row'][]
+  onCreateRun: () => void | Promise<void>
+  onSeedRepositories: () => void | Promise<void>
+  onOpenFullView: () => void
+}) {
+  const onlineWorkers = workers.filter((worker) => worker.status !== 'offline')
+  const canCreateRun = repositories.length > 0 && !run
+  const runIsActive = Boolean(run && !['completed', 'failed', 'canceled'].includes(run.status))
+  const runIsFinal = Boolean(run && ['completed', 'failed', 'canceled'].includes(run.status))
+  const finalProgressReport = progressReports.find((report) => report.phase === 'final_result')
+  const finalLegacyProgress = legacyProgressActivity.find((entry) => readMetadataString(entry.metadata, 'phase') === 'final_result')
+  const latestProgress = finalProgressReport ?? progressReports[0] ?? finalLegacyProgress ?? legacyProgressActivity[0] ?? null
+  const latestMessage =
+    latestProgress && 'message' in latestProgress
+      ? latestProgress.message
+      : latestProgress && 'summary' in latestProgress
+        ? latestProgress.summary
+        : run?.statusMessage ?? null
+  const handler = readMetadataString(run?.metadata, 'handler') ?? 'general-mcp'
+
+  return (
+    <div className="border-b border-edge/10 px-5 py-4">
+      <div className="mb-3 flex items-center justify-between gap-3">
+        <div className="inline-flex min-w-0 items-center gap-2 font-mono text-[10px] uppercase tracking-label text-fg-4">
+          <span className="relative flex h-4 w-4 shrink-0 items-center justify-center">
+            {runIsActive ? (
+              <span className="absolute h-2 w-2 animate-ping rounded-full bg-accent opacity-50" />
+            ) : null}
+            <Bot className={`h-3.5 w-3.5 ${run ? 'text-accent' : 'text-fg-4'}`} />
+          </span>
+          agent
+        </div>
+        <div className="flex items-center gap-1.5">
+          {run || messages.length > 0 ? (
+            <button
+              type="button"
+              onClick={onOpenFullView}
+              className="flex h-7 w-7 items-center justify-center border border-edge/18 bg-pit-3 text-fg-3 transition hover:border-accent hover:text-accent"
+              title="open agent conversation"
+            >
+              <Maximize2 className="h-3.5 w-3.5" />
+            </button>
+          ) : null}
+          {!run ? (
+            <button
+              type="button"
+              onClick={() => {
+                void onCreateRun()
+              }}
+              disabled={!canCreateRun}
+              className="inline-flex h-7 items-center gap-1.5 border border-edge/20 bg-accent-fill/8 px-2 font-mono text-[10px] uppercase tracking-label text-accent transition hover:border-accent disabled:cursor-not-allowed disabled:opacity-40"
+              title={canCreateRun ? 'queue agent run' : 'needs a repository'}
+            >
+              <TerminalSquare className="h-3 w-3" />
+              do task
+            </button>
+          ) : null}
+        </div>
+      </div>
+
+      {repositories.length === 0 ? (
+        <button
+          type="button"
+          onClick={() => {
+            void onSeedRepositories()
+          }}
+          className="mb-3 w-full border border-edge/18 bg-accent-fill/4 px-3 py-2 text-left font-mono text-xs text-fg-2 transition hover:border-accent hover:text-accent"
+        >
+          seed default GitHub repos
+        </button>
+      ) : null}
+
+      {!run ? (
+        <div className="space-y-1.5 font-mono text-xs text-fg-4">
+          <div>// no active agent run</div>
+          <div>
+            {onlineWorkers.length} online worker{onlineWorkers.length === 1 ? '' : 's'} · {repositories.length} repo
+            {repositories.length === 1 ? '' : 's'}
+          </div>
+        </div>
+      ) : (
+        <div className="space-y-3">
+          <div className="space-y-1 font-mono text-xs">
+            <div className="flex items-center justify-between gap-3">
+              <span className="uppercase tracking-label text-fg-4">status</span>
+              <span className={run.status === 'failed' ? 'text-fail' : 'text-accent'}>{run.status}</span>
+            </div>
+            <div className="flex items-center justify-between gap-3">
+              <span className="uppercase tracking-label text-fg-4">handler</span>
+              <span className="truncate text-fg-2">{handler}</span>
+            </div>
+            <div className="flex items-center justify-between gap-3">
+              <span className="uppercase tracking-label text-fg-4">worker</span>
+              <span className="truncate text-fg-2">{run.workerId ?? 'waiting for claim'}</span>
+            </div>
+          </div>
+
+          {latestMessage ? (
+            <button
+              type="button"
+              onClick={onOpenFullView}
+              className="block w-full border border-edge/12 bg-pit-3 px-2.5 py-2 text-left font-mono text-xs leading-relaxed text-fg-3 transition hover:border-accent/60 hover:text-fg-1"
+            >
+              <div className="mb-1 text-[10px] uppercase tracking-label text-fg-4">
+                {runIsFinal ? 'latest result' : 'latest progress'}
+              </div>
+              <div className="line-clamp-4 whitespace-pre-wrap">{latestMessage}</div>
+            </button>
+          ) : (
+            <div className="border border-edge/12 bg-pit-3 px-2.5 py-2 font-mono text-xs text-fg-4">
+              // waiting for progress
+            </div>
+          )}
+        </div>
+      )}
     </div>
   )
 }
@@ -733,12 +985,14 @@ function AgentRunPanel({
   artifacts,
   progressReports,
   legacyProgressActivity,
+  messages,
   workers,
   repositories,
   authToken,
   defaultGoal,
   onSeedRepositories,
   onCreateRun,
+  onSendFeedback,
   onBootstrapRun,
   bootstrapping,
   actionMessage,
@@ -750,12 +1004,14 @@ function AgentRunPanel({
   artifacts: Schema['tables']['agent_run_artifacts']['row'][]
   progressReports: Schema['tables']['agent_run_progress_reports']['row'][]
   legacyProgressActivity: Schema['tables']['pm_issue_activity']['row'][]
+  messages: Schema['tables']['agent_messages']['row'][]
   workers: Schema['tables']['agent_workers']['row'][]
   repositories: Schema['tables']['github_repositories']['row'][]
   authToken: string | null
   defaultGoal: string
   onSeedRepositories: () => void | Promise<void>
   onCreateRun: () => void | Promise<void>
+  onSendFeedback: (feedback: string) => void | Promise<void>
   onBootstrapRun: () => void | Promise<void>
   bootstrapping: boolean
   actionMessage: string | null
@@ -782,6 +1038,10 @@ function AgentRunPanel({
   const [prBusy, setPrBusy] = useState(false)
   const [repoBusy, setRepoBusy] = useState(false)
   const [repoMessage, setRepoMessage] = useState<string | null>(null)
+  const [feedbackDraft, setFeedbackDraft] = useState('')
+  const [feedbackBusy, setFeedbackBusy] = useState(false)
+  const [feedbackMessage, setFeedbackMessage] = useState<string | null>(null)
+  const [showFullProgressLog, setShowFullProgressLog] = useState(false)
   const liveTerminalElementRef = useRef<HTMLDivElement | null>(null)
   const liveSocketRef = useRef<WebSocket | null>(null)
   const liveXtermRef = useRef<XTerm | null>(null)
@@ -792,10 +1052,21 @@ function AgentRunPanel({
     null
   const agentTerminal = terminals.find((terminal) => terminal.role === 'agent') ?? terminals[0] ?? null
   const workflowPhase = readMetadataString(run?.metadata, 'workflowPhase')
+  const runIsFinal = Boolean(run && ['completed', 'failed', 'canceled'].includes(run.status))
+  const finalProgressReports = progressReports.filter((report) => report.phase === 'final_result')
+  const finalLegacyProgressActivity = legacyProgressActivity.filter((entry) => readMetadataString(entry.metadata, 'phase') === 'final_result')
+  const visibleProgressReports = runIsFinal && !showFullProgressLog && finalProgressReports.length > 0
+    ? finalProgressReports
+    : progressReports
+  const visibleLegacyProgressActivity = runIsFinal && !showFullProgressLog && finalLegacyProgressActivity.length > 0
+    ? finalLegacyProgressActivity
+    : legacyProgressActivity
+  const visibleProgressItemCount = visibleProgressReports.length + visibleLegacyProgressActivity.length
 
   useEffect(() => {
     const latestGoal = readMetadataString(run?.metadata, 'latestGoal')
     setAgentGoal(latestGoal ?? defaultGoal)
+    setShowFullProgressLog(false)
   }, [defaultGoal, run?.id])
 
   useEffect(() => {
@@ -1081,6 +1352,23 @@ function AgentRunPanel({
     }
   }
 
+  async function submitFeedback() {
+    const feedback = feedbackDraft.trim()
+    if (!feedback) return
+    setFeedbackBusy(true)
+    setFeedbackMessage(null)
+
+    try {
+      await onSendFeedback(feedback)
+      setFeedbackDraft('')
+      setFeedbackMessage('follow-up queued')
+    } catch (error) {
+      setFeedbackMessage(error instanceof Error ? error.message : 'Failed to queue follow-up')
+    } finally {
+      setFeedbackBusy(false)
+    }
+  }
+
   return (
     <div>
       <div className="mb-3 flex items-center justify-between gap-3">
@@ -1192,15 +1480,26 @@ function AgentRunPanel({
 
           <div className="border border-edge/12 bg-overlay/12 p-3">
             <div className="mb-2 flex items-center justify-between gap-3 font-mono text-[10px] uppercase tracking-label text-fg-4">
-              <span>progress reports</span>
-              <span>{progressItemCount + (showStatusMessageAsProgress ? 1 : 0)}</span>
+              <span>{runIsFinal && !showFullProgressLog ? 'final result' : 'progress reports'}</span>
+              <div className="flex items-center gap-2">
+                {runIsFinal && progressItemCount > visibleProgressItemCount ? (
+                  <button
+                    type="button"
+                    onClick={() => setShowFullProgressLog((current) => !current)}
+                    className="text-fg-4 transition hover:text-accent"
+                  >
+                    {showFullProgressLog ? 'hide log' : 'show log'}
+                  </button>
+                ) : null}
+                <span>{visibleProgressItemCount + (showStatusMessageAsProgress ? 1 : 0)}</span>
+              </div>
             </div>
-            {progressReports.length > 0 || legacyProgressActivity.length > 0 || showStatusMessageAsProgress ? (
+            {visibleProgressReports.length > 0 || visibleLegacyProgressActivity.length > 0 || showStatusMessageAsProgress ? (
               <div className="space-y-2">
-                {progressReports.map((report) => (
+                {visibleProgressReports.map((report) => (
                   <AgentRunProgressReport key={report.id} report={report} />
                 ))}
-                {legacyProgressActivity.map((entry) => (
+                {visibleLegacyProgressActivity.map((entry) => (
                   <LegacyAgentRunProgressReport key={entry.id} entry={entry} />
                 ))}
                 {showStatusMessageAsProgress && run.statusMessage ? (
@@ -1214,6 +1513,49 @@ function AgentRunPanel({
             ) : (
               <div className="font-mono text-xs text-fg-4">// no progress reports yet</div>
             )}
+          </div>
+
+          <div className="border border-edge/12 bg-accent-fill/[0.025] p-3">
+            <div className="mb-2 flex items-center justify-between gap-3 font-mono text-[10px] uppercase tracking-label text-fg-4">
+              <span>conversation</span>
+              <span>{messages.length}</span>
+            </div>
+            {messages.length > 0 ? (
+              <div className="mb-3 max-h-44 space-y-2 overflow-auto">
+                {messages.map((message) => (
+                  <AgentMessageEntry key={message.id} message={message} />
+                ))}
+              </div>
+            ) : null}
+            <form
+              className="space-y-2"
+              onSubmit={(event) => {
+                event.preventDefault()
+                void submitFeedback()
+              }}
+            >
+              <textarea
+                value={feedbackDraft}
+                onChange={(event) => setFeedbackDraft(event.target.value)}
+                rows={3}
+                disabled={!run || feedbackBusy}
+                placeholder="send feedback or ask the agent to continue..."
+                className="w-full resize-y border border-edge/12 bg-pit-3 px-2.5 py-2 font-mono text-xs leading-relaxed text-fg-2 outline-none placeholder:text-fg-4 focus:border-accent disabled:opacity-50"
+              />
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <span className="font-mono text-[10px] lowercase text-fg-4">
+                  {run?.workerId ? 'will try the same worker/session first' : 'will start from run context'}
+                </span>
+                <button
+                  type="submit"
+                  disabled={!feedbackDraft.trim() || feedbackBusy || !run}
+                  className="border border-edge/24 bg-accent-fill/8 px-2.5 py-1.5 font-mono text-[10px] uppercase tracking-label text-accent transition hover:border-accent disabled:cursor-not-allowed disabled:opacity-40"
+                >
+                  {feedbackBusy ? 'queuing...' : 'send feedback'}
+                </button>
+              </div>
+              {feedbackMessage ? <div className="font-mono text-[10px] lowercase text-fg-4">{feedbackMessage}</div> : null}
+            </form>
           </div>
 
           {showLegacyAgentControls ? (
@@ -1545,6 +1887,14 @@ function readMetadataString(metadata: unknown, key: string) {
   return typeof value === 'string' && value.trim() ? value : null
 }
 
+function readRunCodexSessionId(metadata: unknown) {
+  const topLevel = readMetadataString(metadata, 'codexSessionId')
+  if (topLevel) return topLevel
+  if (!metadata || typeof metadata !== 'object') return null
+  const completion = (metadata as Record<string, unknown>).completion
+  return readMetadataString(completion, 'codexSessionId')
+}
+
 function isRunScopedAgentActivity(entry: Schema['tables']['pm_issue_activity']['row']) {
   if (!readMetadataString(entry.metadata, 'runId')) return false
   return ['agent_progress', 'agent_run_claimed', 'agent_run_completed', 'agent_run_failed'].includes(entry.type)
@@ -1766,6 +2116,18 @@ function AgentRunProgressReport({ report }: { report: Schema['tables']['agent_ru
       createdAt={report.createdAt}
       percent={report.percent}
     />
+  )
+}
+
+function AgentMessageEntry({ message }: { message: Schema['tables']['agent_messages']['row'] }) {
+  return (
+    <div className="border border-edge/10 bg-pit-3 px-2.5 py-2 font-mono text-xs">
+      <div className="mb-1 flex items-center justify-between gap-3 text-[10px] uppercase tracking-label">
+        <span className={message.role === 'user' ? 'text-accent' : 'text-fg-4'}>{message.role}</span>
+        <span className="shrink-0 text-fg-4">{formatRelative(message.createdAt)}</span>
+      </div>
+      <div className="whitespace-pre-wrap leading-relaxed text-fg-2">{message.body}</div>
+    </div>
   )
 }
 
