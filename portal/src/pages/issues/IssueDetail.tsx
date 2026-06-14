@@ -237,36 +237,28 @@ export default function IssueDetail() {
       repositories.find((entry) => entry.projectKey === projectKey && entry.active) ??
       repositories.find((entry) => entry.projectKey === 'pach' && entry.active) ??
       repositories.find((entry) => entry.active)
-    const worker = workers.find((entry) => entry.status === 'idle')
-
-    if (!repo || !worker) return
+    if (!repo) return
 
     const runId = crypto.randomUUID()
     const branchId = crypto.randomUUID()
     const issueKey = issue.identifier.toLowerCase()
     const branchName = `ap/${repo.projectKey}-${issueKey}-${slugify(issue.title)}`
-    const tmuxSession = `pach-${issueKey}`
-    const workspacePath = `/home/${worker.sshUser}/workspaces/issues/${issueKey}/${repo.projectKey}`
-
-    await z.mutate.agent_workers.update({
-      id: worker.id,
-      status: 'reserved',
-      statusMessage: `reserved for ${issue.identifier}`,
-    })
 
     await z.mutate.agent_runs.create({
       id: runId,
       issueId: issue.id,
-      workerId: worker.id,
       repositoryId: repo.id,
       projectKey: repo.projectKey,
       repoFullName: repo.fullName,
       baseBranch: repo.defaultBranch,
       branchName,
-      workspacePath,
-      tmuxSession,
-      status: 'reserved',
-      statusMessage: 'worker reserved; tmux bootstrap pending',
+      status: 'queued',
+      statusMessage: 'queued for agent worker',
+      metadata: {
+        executionClass: 'coding',
+        requiredCapabilities: ['codex.local', 'git', 'pach-mcp'],
+        queuedVia: 'issue_detail',
+      },
     })
 
     await z.mutate.github_branches.create({
@@ -287,12 +279,13 @@ export default function IssueDetail() {
       })
     }
 
-    await logActivity(`reserved ${worker.name} for agent run on ${branchName}`, 'agent_run_created', {
+    await logActivity(`queued agent run on ${branchName}`, 'agent_run_created', {
       runId,
-      workerId: worker.id,
       branchId,
       branchName,
       repository: repo.fullName,
+      executionClass: 'coding',
+      requiredCapabilities: ['codex.local', 'git', 'pach-mcp'],
     })
   }
 
@@ -773,9 +766,9 @@ function AgentRunPanel({
   bootstrapping: boolean
   actionMessage: string | null
 }) {
-  const idleWorkers = workers.filter((worker) => worker.status === 'idle')
-  const canCreateRun = repositories.length > 0 && idleWorkers.length > 0 && !run
-  const canBootstrapRun = Boolean(run && ['reserved', 'failed'].includes(run.status))
+  const onlineWorkers = workers.filter((worker) => worker.status !== 'offline')
+  const canCreateRun = repositories.length > 0 && !run
+  const canBootstrapRun = Boolean(run?.workerId && ['reserved', 'failed'].includes(run.status))
   const [selectedTerminalId, setSelectedTerminalId] = useState<string | null>(null)
   const [terminalOutput, setTerminalOutput] = useState('')
   const [terminalInput, setTerminalInput] = useState('')
@@ -1102,10 +1095,10 @@ function AgentRunPanel({
             }}
             disabled={!canCreateRun}
             className="inline-flex h-7 items-center gap-1.5 border border-edge/20 bg-pit-3 px-2 font-mono text-[10px] uppercase tracking-label text-fg-3 transition hover:border-accent hover:text-accent disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:border-edge/20 disabled:hover:text-fg-3"
-            title={canCreateRun ? 'reserve idle worker' : 'needs a repository and idle worker'}
+            title={canCreateRun ? 'queue agent run' : 'needs a repository'}
           >
             <TerminalSquare className="h-3 w-3" />
-            assign
+            go solve
           </button>
         ) : null}
       </div>
@@ -1125,7 +1118,7 @@ function AgentRunPanel({
         <div className="space-y-1.5 font-mono text-xs text-fg-4">
           <div>// no active agent run</div>
           <div>
-            {idleWorkers.length} idle worker{idleWorkers.length === 1 ? '' : 's'} · {repositories.length} repo
+            {onlineWorkers.length} online worker{onlineWorkers.length === 1 ? '' : 's'} · {repositories.length} repo
             {repositories.length === 1 ? '' : 's'}
           </div>
         </div>
@@ -1147,6 +1140,10 @@ function AgentRunPanel({
             <div className="flex items-center justify-between gap-3">
               <span className="uppercase tracking-label text-fg-4">tmux</span>
               <span className="truncate text-fg-2">{run.tmuxSession ?? 'pending'}</span>
+            </div>
+            <div className="flex items-center justify-between gap-3">
+              <span className="uppercase tracking-label text-fg-4">worker</span>
+              <span className="truncate text-fg-2">{run.workerId ?? 'waiting for claim'}</span>
             </div>
           </div>
 
@@ -1200,9 +1197,9 @@ function AgentRunPanel({
                   onClick={() => {
                     void planAgentWork()
                   }}
-                  disabled={goalBusy || !agentGoal.trim()}
+                  disabled={goalBusy || !agentGoal.trim() || !run.workerId}
                   className="border border-edge/24 bg-accent-fill/8 px-2.5 py-1.5 font-mono text-[10px] uppercase tracking-label text-accent transition hover:border-accent disabled:cursor-not-allowed disabled:opacity-40"
-                  title="prepare worker, prepare worktree, and start codex in planning mode"
+                  title={run.workerId ? 'prepare worker, prepare worktree, and start codex in planning mode' : 'waiting for an agent worker to claim this run'}
                 >
                   {goalBusy ? 'working...' : 'plan agent work'}
                 </button>
