@@ -6,6 +6,10 @@ export const MCP_CAPABILITIES = [
   'pach.issue.read',
   'pach.issue.write',
   'pach.progress.report',
+  'agent.worker.heartbeat',
+  'agent.run.claim',
+  'agent.run.progress',
+  'agent.run.complete',
 ] as const
 
 export type McpCapability = typeof MCP_CAPABILITIES[number] | '*'

@@ -9,6 +9,7 @@ import inboundRoute from './routes/inbound.js'
 import linearRoute from './routes/linear.js'
 import taskTriggersRoute from './routes/task-triggers.js'
 import agentRoute, { attachAgentTerminalWebSocket } from './routes/agent.js'
+import agentWorkerRoute from './routes/agent-worker.js'
 import financeRoute from './routes/finance.js'
 import mediaRoute from './routes/media.js'
 import mcpRoute from './routes/mcp.js'
@@ -32,6 +33,7 @@ app.use('/whatsapp', requireAuth, whatsappRoute)
 app.use('/linear', requireAuth, requireUnscopedAccess, linearRoute)
 app.use('/task-triggers', requireAuth, requireUnscopedAccess, taskTriggersRoute)
 app.use('/agent', requireAuth, requireUnscopedAccess, agentRoute)
+app.use('/agent-worker', agentWorkerRoute)
 app.use('/mcp', mcpRoute)
 app.use('/finance', requireAuth, financeRoute)
 app.use('/media', requireAuth, mediaRoute)
