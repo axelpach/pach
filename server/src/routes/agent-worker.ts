@@ -355,6 +355,8 @@ async function appendRunActivity(
   type: string,
   metadata: Record<string, unknown>,
 ) {
+  if (!run.issueId) return
+
   await getDb().insert(pmIssueActivity).values({
     id: randomUUID(),
     issueId: run.issueId,
@@ -389,7 +391,7 @@ async function appendRunProgressReport(
   await getDb().insert(agentRunProgressReports).values({
     id: randomUUID(),
     runId: run.id,
-    issueId: run.issueId,
+    issueId: run.issueId ?? undefined,
     workerId: report.workerId,
     phase: report.phase,
     level: report.level ?? 'info',

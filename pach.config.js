@@ -4,7 +4,7 @@ export const projects = {
         github: 'axelpach/ardia',
         branch: 'main',
         contextDir: './projects/ardia',
-        tools: ['decks', 'crm'],
+        tools: ['design', 'crm'],
         whatsapp: {
             kapsoApiKeyEnv: 'ARDIA_KAPSO_API_KEY',
             phoneNumberIdEnv: 'ARDIA_WHATSAPP_PHONE_NUMBER_ID',

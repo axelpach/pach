@@ -1,10 +1,14 @@
 import { randomUUID } from 'node:crypto'
 import { Router } from 'express'
 import type { Request } from 'express'
-import { desc, eq, ilike, inArray } from 'drizzle-orm'
+import { desc, eq, ilike, inArray, or } from 'drizzle-orm'
 import {
   agentRunProgressReports,
   agentRuns,
+  designSystems,
+  designTemplateRuns,
+  designTemplateVersions,
+  designTemplates,
   mcpTokens,
   organizations,
   pmIssueActivity,
@@ -246,15 +250,69 @@ const tools: ToolDefinition[] = [
     },
   },
   {
-    name: 'pach.progress.report',
-    description: 'Report structured agent progress for an issue/run. With runId, Pach stores it as run-scoped progress and updates run metadata.',
+    name: 'pach.design.template.list',
+    description: 'List design templates the caller can access, including code-bundle metadata and current version ids.',
     inputSchema: {
       type: 'object',
       additionalProperties: false,
-      required: ['issueId', 'phase'],
       properties: {
-        issueId: { type: 'string' },
-        runId: { type: 'string' },
+        organizationId: { type: 'string' },
+        organizationProject: { type: 'string' },
+        type: { type: 'string', description: 'Template type, e.g. deck.' },
+        limit: { type: 'number', description: 'Maximum number of templates. Defaults to 25, maximum 100.' },
+      },
+    },
+  },
+  {
+    name: 'pach.design.template.get',
+    description: 'Read one design template with its recent versions and queued edit runs.',
+    inputSchema: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        templateId: { type: 'string' },
+        slug: { type: 'string' },
+      },
+    },
+  },
+  {
+    name: 'pach.design.template.version.create',
+    description: 'Create a new code-bundle version for a design template and make it the current version.',
+    inputSchema: {
+      type: 'object',
+      additionalProperties: false,
+      required: ['templateId', 'files'],
+      properties: {
+        templateId: { type: 'string' },
+        files: {
+          type: 'object',
+          additionalProperties: { type: 'string' },
+          description: 'Virtual source files keyed by path, e.g. src/Template.tsx.',
+        },
+        manifest: { type: 'object', additionalProperties: true },
+        dependencies: {
+          type: 'object',
+          additionalProperties: { type: 'string' },
+        },
+        sourceKind: { type: 'string', description: 'react, html, or structured. Defaults to react.' },
+        compiledArtifactUrl: { type: 'string' },
+        previewImageUrl: { type: 'string' },
+        validationStatus: { type: 'string', description: 'draft, valid, invalid, or compiled.' },
+        validationErrors: { type: 'array', items: { type: 'object', additionalProperties: true } },
+        runId: { type: 'string', description: 'Optional design template run id that produced this version.' },
+      },
+    },
+  },
+  {
+    name: 'pach.progress.report',
+    description: 'Report structured agent progress for any agent run. With runId, Pach stores run-scoped progress and updates run metadata. Without runId, issueId is required and Pach records issue activity.',
+    inputSchema: {
+      type: 'object',
+      additionalProperties: false,
+      required: ['phase'],
+      properties: {
+        issueId: { type: 'string', description: 'Optional issue id for legacy issue activity or issue-scoped progress.' },
+        runId: { type: 'string', description: 'Agent run id. Preferred for all workers, including design runs.' },
         phase: {
           type: 'string',
           description: 'Short machine-friendly phase, such as reading_issue, drafting, testing, blocked, review_ready.',
@@ -471,6 +529,15 @@ async function callTool(req: AuthenticatedRequest, params: unknown) {
       case 'pach.issue.update':
         requireMcpCapability(req, 'pach.issue.write')
         return toolResult(await updateIssue(req, args))
+      case 'pach.design.template.list':
+        requireMcpCapability(req, 'pach.design.read')
+        return toolResult(await listDesignTemplates(req, args))
+      case 'pach.design.template.get':
+        requireMcpCapability(req, 'pach.design.read')
+        return toolResult(await getDesignTemplate(req, args))
+      case 'pach.design.template.version.create':
+        requireMcpCapability(req, 'pach.design.write')
+        return toolResult(await createDesignTemplateVersion(req, args))
       case 'pach.progress.report':
         requireMcpCapability(req, 'pach.progress.report')
         return toolResult(await reportProgress(req, args))
@@ -771,12 +838,179 @@ async function updateIssue(req: AuthenticatedRequest, args: unknown) {
   }
 }
 
-async function reportProgress(req: AuthenticatedRequest, args: unknown) {
-  const issueId = readRequiredString(args, 'issueId')
-  const phase = readRequiredString(args, 'phase')
+async function listDesignTemplates(req: AuthenticatedRequest, args: unknown) {
+  const body = isObject(args) ? args : {}
+  const limit = readPositiveInteger(body.limit, 25, 1, 100)
+  const organizationId = readOptionalString(body.organizationId)
+  const organizationProject = readOptionalString(body.organizationProject)
+  const type = readOptionalString(body.type)
+  const db = getDb()
+  const [templates, orgs] = await Promise.all([
+    db.select().from(designTemplates).orderBy(desc(designTemplates.updatedAt)).limit(Math.max(limit * 4, 100)),
+    db.select().from(organizations),
+  ])
+  const organizationById = new Map(orgs.map((organization) => [organization.id, organization]))
+
+  const rows = templates
+    .filter((template) => canAccessOrganization(req, template.organizationId))
+    .filter((template) => !organizationId || template.organizationId === organizationId)
+    .filter((template) => !type || template.type === type)
+    .filter((template) => {
+      if (!organizationProject) return true
+      return organizationById.get(template.organizationId)?.project === organizationProject
+    })
+    .slice(0, limit)
+
+  return {
+    ok: true,
+    templates: rows.map((template) => serializeDesignTemplate(template, organizationById.get(template.organizationId))),
+  }
+}
+
+async function getDesignTemplate(req: AuthenticatedRequest, args: unknown) {
   const body = ensureObject(args)
-  const { issue } = await readAccessibleIssue(req, issueId)
-  const runId = typeof body.runId === 'string' ? body.runId : null
+  const templateId = readOptionalString(body.templateId)
+  const slug = readOptionalString(body.slug)
+  if (!templateId && !slug) throw new Error('Provide templateId or slug')
+
+  const db = getDb()
+  const candidates = await db
+    .select()
+    .from(designTemplates)
+    .where(templateId ? eq(designTemplates.id, templateId) : eq(designTemplates.slug, slug!))
+    .limit(20)
+  const template = candidates.find((row) => canAccessOrganization(req, row.organizationId))
+  if (!template) throw new Error('Design template not found')
+
+  const [organization] = await db.select().from(organizations).where(eq(organizations.id, template.organizationId)).limit(1)
+  const [versions, runs, organizationDesignSystems] = await Promise.all([
+    db
+      .select()
+      .from(designTemplateVersions)
+      .where(eq(designTemplateVersions.templateId, template.id))
+      .orderBy(desc(designTemplateVersions.createdAt))
+      .limit(20),
+    db
+      .select()
+      .from(designTemplateRuns)
+      .where(or(eq(designTemplateRuns.templateId, template.id), eq(designTemplateRuns.templateSlug, template.slug)))
+      .orderBy(desc(designTemplateRuns.createdAt))
+      .limit(20),
+    db
+      .select()
+      .from(designSystems)
+      .where(eq(designSystems.organizationId, template.organizationId))
+      .orderBy(desc(designSystems.updatedAt))
+      .limit(1),
+  ])
+  const designSystem = organizationDesignSystems[0]
+
+  return {
+    ok: true,
+    template: serializeDesignTemplate(template, organization),
+    organizationDesignSystem: designSystem ? serializeDesignSystem(designSystem) : null,
+    agentInstructions: {
+      mustUseOrganizationDesignSystem: true,
+      designSystemId: designSystem?.id ?? null,
+      instruction: [
+        `Use ${organization?.name ?? 'the organization'}'s design system as a hard constraint for all template edits.`,
+        'Do not introduce a competing visual direction unless the user explicitly asks to change the organization design system.',
+        'When changing layout, copy, colors, typography, components, or imagery, preserve the organization design system tokens and principles.',
+      ].join(' '),
+    },
+    versions: versions.map(serializeDesignTemplateVersion),
+    runs: runs.map(serializeDesignTemplateRun),
+  }
+}
+
+async function createDesignTemplateVersion(req: AuthenticatedRequest, args: unknown) {
+  const templateId = readRequiredString(args, 'templateId')
+  const body = ensureObject(args)
+  const db = getDb()
+  const [template] = await db.select().from(designTemplates).where(eq(designTemplates.id, templateId)).limit(1)
+  if (!template) throw new Error('Design template not found')
+  if (!canAccessOrganization(req, template.organizationId)) throw new Error('Not authorized for this design template')
+
+  const files = readStringRecord(body.files, 'files')
+  const manifest = isObject(body.manifest) ? body.manifest : {}
+  const dependencies = body.dependencies == null ? {} : readStringRecord(body.dependencies, 'dependencies')
+  const validationErrors = Array.isArray(body.validationErrors)
+    ? body.validationErrors.filter(isObject)
+    : []
+  const sourceKind = readOptionalString(body.sourceKind) ?? template.sourceKind ?? 'react'
+  const validationStatus = readOptionalString(body.validationStatus) ?? (Object.keys(files).length > 0 ? 'compiled' : 'draft')
+  const compiledArtifactUrl = readOptionalString(body.compiledArtifactUrl)
+  const previewImageUrl = readOptionalString(body.previewImageUrl)
+  const runId = readOptionalString(body.runId)
+  const [latestVersion] = await db
+    .select()
+    .from(designTemplateVersions)
+    .where(eq(designTemplateVersions.templateId, template.id))
+    .orderBy(desc(designTemplateVersions.versionNumber))
+    .limit(1)
+  const now = new Date()
+  const nextVersionNumber = (latestVersion?.versionNumber ?? 0) + 1
+
+  const [version] = await db
+    .insert(designTemplateVersions)
+    .values({
+      id: randomUUID(),
+      organizationId: template.organizationId,
+      templateId: template.id,
+      versionNumber: nextVersionNumber,
+      schemaVersion: 1,
+      sourceKind,
+      files,
+      manifest,
+      dependencies,
+      compiledArtifactUrl: compiledArtifactUrl ?? undefined,
+      previewImageUrl: previewImageUrl ?? undefined,
+      validationStatus,
+      validationErrors,
+      createdByRunId: runId ?? undefined,
+      createdAt: now,
+    })
+    .returning()
+
+  await db
+    .update(designTemplates)
+    .set({
+      currentVersionId: version.id,
+      sourceKind,
+      updatedAt: now,
+    })
+    .where(eq(designTemplates.id, template.id))
+
+  if (runId) {
+    const [run] = await db
+      .select()
+      .from(designTemplateRuns)
+      .where(or(eq(designTemplateRuns.id, runId), eq(designTemplateRuns.agentRunId, runId)))
+      .limit(1)
+    if (run && canAccessOrganization(req, run.organizationId)) {
+      await db
+        .update(designTemplateRuns)
+        .set({
+          status: validationStatus === 'invalid' ? 'failed' : 'completed',
+          targetVersionId: version.id,
+          updatedAt: now,
+        })
+        .where(eq(designTemplateRuns.id, run.id))
+    }
+  }
+
+  return {
+    ok: true,
+    templateId: template.id,
+    version: serializeDesignTemplateVersion(version),
+  }
+}
+
+async function reportProgress(req: AuthenticatedRequest, args: unknown) {
+  const body = ensureObject(args)
+  const phase = readRequiredString(args, 'phase')
+  const issueId = readOptionalString(body.issueId)
+  const runId = readOptionalString(body.runId)
   const message = typeof body.message === 'string' ? body.message : phase
   const percent = typeof body.percent === 'number' ? Math.floor(Math.max(0, Math.min(100, body.percent))) : null
   const metadata = isObject(body.metadata) ? body.metadata : {}
@@ -786,12 +1020,15 @@ async function reportProgress(req: AuthenticatedRequest, args: unknown) {
   if (runId) {
     const [run] = await getDb().select().from(agentRuns).where(eq(agentRuns.id, runId)).limit(1)
     if (!run) throw new Error('Agent run not found')
-    if (run.issueId !== issue.id) throw new Error('Agent run does not belong to this issue')
+    if (issueId && run.issueId) {
+      const { issue } = await readAccessibleIssue(req, issueId)
+      if (run.issueId !== issue.id) throw new Error('Agent run does not belong to this issue')
+    }
 
     await getDb().insert(agentRunProgressReports).values({
       id: randomUUID(),
       runId: run.id,
-      issueId: issue.id,
+      issueId: run.issueId ?? undefined,
       workerId: run.workerId ?? undefined,
       phase,
       level,
@@ -820,7 +1057,8 @@ async function reportProgress(req: AuthenticatedRequest, args: unknown) {
         updatedAt: now,
       })
       .where(eq(agentRuns.id, run.id))
-  } else {
+  } else if (issueId) {
+    const { issue } = await readAccessibleIssue(req, issueId)
     await appendIssueActivity(req, {
       issueId: issue.id,
       type: 'agent_progress',
@@ -833,11 +1071,13 @@ async function reportProgress(req: AuthenticatedRequest, args: unknown) {
         ...metadata,
       },
     })
+  } else {
+    throw new Error('Provide runId, or issueId for legacy issue progress')
   }
 
   return {
     ok: true,
-    issueId: issue.id,
+    issueId: issueId ?? null,
     runId,
     phase,
     message,
@@ -870,6 +1110,90 @@ function canAccessIssue(req: AuthenticatedRequest, issue: typeof pmIssues.$infer
   return issue.contextCompanyId
     ? Boolean(auth?.organizationIds.includes(issue.contextCompanyId) || user?.organizationIds.includes(issue.contextCompanyId))
     : Boolean(auth?.canAccessUnscoped || user?.canAccessUnscoped)
+}
+
+function canAccessOrganization(req: AuthenticatedRequest, organizationId: string | null | undefined) {
+  const user = req.user
+  const auth = req.mcpAuth
+  if (!auth && !user) return false
+  if (auth?.allOrganizations || user?.sub === LOCAL_MCP_USER.sub) return true
+
+  return organizationId
+    ? Boolean(auth?.organizationIds.includes(organizationId) || user?.organizationIds.includes(organizationId))
+    : Boolean(auth?.canAccessUnscoped || user?.canAccessUnscoped)
+}
+
+function serializeDesignTemplate(
+  template: typeof designTemplates.$inferSelect,
+  organization?: typeof organizations.$inferSelect,
+) {
+  return {
+    id: template.id,
+    organizationId: template.organizationId,
+    organizationName: organization?.name ?? null,
+    organizationProject: organization?.project ?? null,
+    type: template.type,
+    name: template.name,
+    slug: template.slug,
+    status: template.status,
+    sourceKind: template.sourceKind,
+    currentVersionId: template.currentVersionId,
+    metadata: template.metadata ?? {},
+    createdAt: template.createdAt.toISOString(),
+    updatedAt: template.updatedAt.toISOString(),
+  }
+}
+
+function serializeDesignSystem(system: typeof designSystems.$inferSelect) {
+  return {
+    id: system.id,
+    organizationId: system.organizationId,
+    name: system.name,
+    slug: system.slug,
+    tokens: system.tokens ?? {},
+    assets: system.assets ?? {},
+    metadata: system.metadata ?? {},
+    createdAt: system.createdAt.toISOString(),
+    updatedAt: system.updatedAt.toISOString(),
+  }
+}
+
+function serializeDesignTemplateVersion(version: typeof designTemplateVersions.$inferSelect) {
+  return {
+    id: version.id,
+    organizationId: version.organizationId,
+    templateId: version.templateId,
+    versionNumber: version.versionNumber,
+    schemaVersion: version.schemaVersion,
+    sourceKind: version.sourceKind,
+    files: version.files ?? {},
+    manifest: version.manifest ?? {},
+    dependencies: version.dependencies ?? {},
+    compiledArtifactUrl: version.compiledArtifactUrl,
+    previewImageUrl: version.previewImageUrl,
+    validationStatus: version.validationStatus,
+    validationErrors: version.validationErrors ?? [],
+    createdByRunId: version.createdByRunId,
+    createdAt: version.createdAt.toISOString(),
+  }
+}
+
+function serializeDesignTemplateRun(run: typeof designTemplateRuns.$inferSelect) {
+  return {
+    id: run.id,
+    organizationId: run.organizationId,
+    templateId: run.templateId,
+    agentRunId: run.agentRunId,
+    templateSlug: run.templateSlug,
+    prompt: run.prompt,
+    status: run.status,
+    statusMessage: run.statusMessage,
+    sourceVersionId: run.sourceVersionId,
+    targetVersionId: run.targetVersionId,
+    metadata: run.metadata ?? {},
+    createdAt: run.createdAt.toISOString(),
+    updatedAt: run.updatedAt.toISOString(),
+  }
 }
 
 async function appendIssueActivity(
@@ -973,6 +1297,16 @@ function readNumberArray(value: unknown) {
   return Array.isArray(value)
     ? value.filter((item): item is number => typeof item === 'number' && Number.isFinite(item)).map((item) => Math.floor(item))
     : []
+}
+
+function readStringRecord(value: unknown, field: string) {
+  if (!isObject(value)) throw new Error(`${field} must be an object`)
+  const result: Record<string, string> = {}
+  for (const [key, entry] of Object.entries(value)) {
+    if (typeof entry !== 'string') throw new Error(`${field}.${key} must be a string`)
+    result[key] = entry
+  }
+  return result
 }
 
 function matchesAny(needle: string, values: Array<string | null | undefined>) {

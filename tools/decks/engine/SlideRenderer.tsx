@@ -35,7 +35,7 @@ const ScaledSlide = forwardRef<
   return (
     <div ref={containerRef} className="w-full">
       <div
-        className="border border-edge/12 rounded-xl overflow-hidden origin-top-left bg-pit-2"
+        className="border border-edge/12 rounded-lg overflow-hidden origin-top-left bg-pit-2"
         style={{
           width: width * scale,
           height: height * scale,
@@ -102,7 +102,7 @@ export function SlideRenderer({
   }, [filename, width, height, theme.bg])
 
   return (
-    <div className="flex-1 min-h-0 bg-pit text-fg-1 overflow-y-auto overflow-x-hidden">
+    <div className="h-full min-h-0 bg-pit text-fg-1 overflow-y-auto overflow-x-hidden">
       {/* Header — Pach aesthetic */}
       <div className="sticky top-0 z-20 bg-pit/90 backdrop-blur-sm border-b border-edge/15 px-4 py-3 md:px-8 md:py-4">
         <div className="flex flex-wrap items-center justify-between gap-3 max-w-[1200px] mx-auto">
@@ -111,14 +111,14 @@ export function SlideRenderer({
               <button
                 onClick={onBack}
                 className="inline-flex h-8 w-8 shrink-0 items-center justify-center border border-edge/20 bg-pit-3 text-fg-3 transition hover:text-accent hover:border-edge/40"
-                title="back to decks"
-                aria-label="back to decks"
+                title="back to templates"
+                aria-label="back to templates"
               >
                 <ArrowLeft className="h-4 w-4" />
               </button>
             )}
             <div className="min-w-0">
-              <div className="text-[10px] uppercase tracking-label text-fg-3">◊ decks</div>
+              <div className="text-[10px] uppercase tracking-label text-fg-3">◊ design</div>
               <h1 className="font-mono text-base md:text-lg font-bold lowercase text-fg-1 truncate">{title}</h1>
               {description && (
                 <p className="hidden md:block text-xs text-fg-3 mt-0.5 truncate">{description}</p>
@@ -138,7 +138,7 @@ export function SlideRenderer({
             <button
               onClick={handleDownloadPdf}
               className="inline-flex items-center gap-1.5 border border-edge/30 bg-accent-fill/8 px-3 py-1.5 font-mono text-[10px] uppercase tracking-label text-accent transition hover:bg-accent-fill/16 hover:shadow-glow-xs"
-              title="download the deck as PDF"
+              title="download as PDF"
             >
               <Download className="h-3 w-3" />
               <span className="hidden sm:inline">download </span>pdf

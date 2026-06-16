@@ -1,13 +1,12 @@
-import { Routes, Route, NavLink, Navigate, useLocation, useNavigate } from 'react-router-dom'
+import { Routes, Route, NavLink, Navigate, useLocation, useNavigate, useParams } from 'react-router-dom'
 import { useQuery, useZero, ZeroProvider } from '@rocicorp/zero/react'
 import { CircleDollarSign, FileText, FolderKanban, LayoutTemplate, LogOut, MessageCircleMore, Menu, Moon, Rows3, Sun, X } from 'lucide-react'
 import { createContext, useContext, useEffect, useMemo, useState, type ComponentType, type ReactNode } from 'react'
-import { schema } from './zero-schema'
+import { schema, type Schema } from './zero-schema'
 import { mutators, type Mutators } from './mutators'
 import { config } from './config'
 import { AuthProvider, useAuth } from './lib/auth'
-import Decks from './pages/Decks'
-import DeckViewer from './pages/DeckViewer'
+import Design from './pages/design/Design'
 import CRM from './pages/crm/CRM'
 import Docs from './pages/docs/Docs'
 import Finance from './pages/finance/Finance'
@@ -27,14 +26,20 @@ import { SearchPalette } from './components/SearchPalette'
 const HOME_PATH = '/issues'
 const WHATSAPP_PROJECTS = new Set(['ardia', 'ardia-mkt'])
 
-const OUTER_NAV_ITEMS = [
+type OuterNavItem = {
+  label: string
+  path: string
+  requiresWhatsApp?: boolean
+}
+
+const OUTER_NAV_ITEMS: readonly OuterNavItem[] = [
   { label: 'Issues', path: '/issues' },
   { label: 'Docs', path: '/docs' },
   { label: 'CRM', path: '/crm' },
   { label: 'Finance', path: '/finance/dashboard' },
   { label: 'WhatsApp', path: '/whatsapp/templates', requiresWhatsApp: true },
-  { label: 'Decks', path: '/decks' },
-] as const
+  { label: 'Design', path: '/design' },
+]
 
 type ThemeMode = 'dark' | 'light'
 
@@ -204,7 +209,7 @@ const MOBILE_NAV_ITEMS: Array<{
   { to: '/crm', label: 'crm', icon: FolderKanban },
   { to: '/finance/dashboard', label: 'finance', icon: CircleDollarSign },
   { to: '/whatsapp/templates', label: 'whatsapp', icon: MessageCircleMore, requiresWhatsApp: true },
-  { to: '/decks', label: 'decks', icon: LayoutTemplate },
+  { to: '/design', label: 'design', icon: LayoutTemplate },
 ]
 
 function MobileHeader({ onMenuClick }: { onMenuClick: () => void }) {
@@ -351,7 +356,7 @@ function AppShell() {
         if (item.path === '/crm') return location.pathname.startsWith('/crm')
         if (item.path === '/docs') return location.pathname.startsWith('/docs')
         if (item.path.startsWith('/finance')) return location.pathname.startsWith('/finance')
-        if (item.path === '/decks') return location.pathname.startsWith('/decks')
+        if (item.path === '/design') return location.pathname.startsWith('/design') || location.pathname.startsWith('/decks')
         if (item.path === '/issues') return location.pathname.startsWith('/issues')
         if (item.path === '/whatsapp/templates') return location.pathname.startsWith('/whatsapp')
         return false
@@ -404,8 +409,10 @@ function AppShell() {
                   <Route path="campaigns/:id" element={<CampaignDetail />} />
                 </Route>
               )}
-              <Route path="/decks" element={<Decks />} />
-              <Route path="/decks/:slug" element={<DeckViewer />} />
+              <Route path="/design" element={<Design />} />
+              <Route path="/design/:templateSlug" element={<Design />} />
+              <Route path="/decks" element={<Navigate to="/design" replace />} />
+              <Route path="/decks/:slug" element={<LegacyDeckRedirect />} />
             </Routes>
           </div>
         </div>
@@ -444,6 +451,11 @@ function useVisibleOuterNavItems() {
         })),
     [canAccessWhatsApp],
   )
+}
+
+function LegacyDeckRedirect() {
+  const { slug } = useParams<{ slug: string }>()
+  return <Navigate to={slug ? `/design/${slug}` : '/design'} replace />
 }
 
 function useVisibleMobileNavItems() {

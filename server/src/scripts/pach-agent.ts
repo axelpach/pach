@@ -15,7 +15,9 @@ type CommandResult = {
 
 type AgentRunRecord = {
   id: string
-  issueId: string
+  issueId?: string | null
+  subjectType?: string
+  subjectId?: string | null
   branchName: string
   metadata?: Record<string, unknown>
 }
@@ -141,7 +143,7 @@ async function executeSmokeRun(worker: WorkerRecord, run: AgentRunRecord) {
 }
 
 async function executeGeneralMcpRun(worker: WorkerRecord, run: AgentRunRecord) {
-  console.log(`[${new Date().toISOString()}] claimed general MCP run ${run.id} for issue ${run.issueId}`)
+  console.log(`[${new Date().toISOString()}] claimed general MCP run ${run.id} for ${run.subjectType ?? 'issue'} ${run.subjectId ?? run.issueId ?? run.id}`)
 
   await reportRunProgress(worker, run, {
     phase: 'codex_start',
@@ -372,6 +374,8 @@ async function reportRunProgress(
 }
 
 function buildGeneralMcpPrompt(run: AgentRunRecord) {
+  if (run.subjectType === 'design_template_run') return buildDesignTemplateMcpPrompt(run)
+
   const feedback = readMetadataString(run.metadata, 'feedback')
   const parentRunId = readMetadataString(run.metadata, 'parentRunId')
   return [
@@ -394,6 +398,34 @@ function buildGeneralMcpPrompt(run: AgentRunRecord) {
     '5. If you update issue fields, use pach.issue.update and explain the change in activitySummary.',
     '',
     'Keep the final result concise and useful inside the Pach run progress stream.',
+  ].filter((line): line is string => Boolean(line)).join('\n')
+}
+
+function buildDesignTemplateMcpPrompt(run: AgentRunRecord) {
+  const prompt = readMetadataString(run.metadata, 'prompt')
+  const templateSlug = readMetadataString(run.metadata, 'designTemplateSlug')
+  const templateId = readMetadataString(run.metadata, 'designTemplateId')
+  const designTemplateRunId = readMetadataString(run.metadata, 'designTemplateRunId') ?? run.subjectId ?? undefined
+  return [
+    'You are Pach design template MCP worker.',
+    '',
+    'Use Pach MCP tools for Pach state. You may call Pach MCP tools directly and repeatedly as needed.',
+    'For this worker, Codex is running with full local trust. Still act conservatively: do not send external messages, publish content, push code, open pull requests, or perform irreversible external actions unless the prompt explicitly asks for it.',
+    `Agent run id: ${run.id}`,
+    designTemplateRunId ? `Design template run id: ${designTemplateRunId}` : null,
+    templateId ? `Template id: ${templateId}` : null,
+    templateSlug ? `Template slug: ${templateSlug}` : null,
+    prompt ? `User prompt: ${prompt}` : null,
+    '',
+    'Workflow:',
+    '1. Read the template with pach.design.template.get using the template id or slug above.',
+    '2. Follow agentInstructions.mustUseOrganizationDesignSystem from the template response as a hard constraint.',
+    '3. Report progress with pach.progress.report and include the agent run id.',
+    '4. Edit or create the template source files requested by the user. Prefer React source with manifest.entry set to src/Template.tsx and a default React component export so Pach can compile-preview it.',
+    '5. Create a new template version with pach.design.template.version.create. Pass the full files object, manifest.entry, dependencies for any third-party package imports, and the agent run id as runId.',
+    '6. Put the final result in pach.progress.report with phase "final_result".',
+    '',
+    'Keep the final result concise and useful inside the Pach design chat.',
   ].filter((line): line is string => Boolean(line)).join('\n')
 }
 

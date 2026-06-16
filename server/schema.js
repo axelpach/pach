@@ -16,6 +16,84 @@ const decks = table('decks')
     updatedAt: number().from('updated_at'),
 })
     .primaryKey('id');
+const designSystems = table('design_systems')
+    .columns({
+    id: string(),
+    organizationId: string().from('organization_id'),
+    name: string(),
+    slug: string(),
+    tokens: json(),
+    assets: json(),
+    metadata: json(),
+    createdAt: number().from('created_at'),
+    updatedAt: number().from('updated_at'),
+})
+    .primaryKey('id');
+const designTemplates = table('design_templates')
+    .columns({
+    id: string(),
+    organizationId: string().from('organization_id'),
+    type: string(),
+    name: string(),
+    slug: string(),
+    status: string(),
+    sourceKind: string().from('source_kind'),
+    currentVersionId: string().optional().from('current_version_id'),
+    metadata: json(),
+    createdAt: number().from('created_at'),
+    updatedAt: number().from('updated_at'),
+})
+    .primaryKey('id');
+const designTemplateVersions = table('design_template_versions')
+    .columns({
+    id: string(),
+    organizationId: string().from('organization_id'),
+    templateId: string().from('template_id'),
+    versionNumber: number().from('version_number'),
+    schemaVersion: number().from('schema_version'),
+    sourceKind: string().from('source_kind'),
+    files: json(),
+    manifest: json(),
+    dependencies: json(),
+    compiledArtifactUrl: string().optional().from('compiled_artifact_url'),
+    previewImageUrl: string().optional().from('preview_image_url'),
+    validationStatus: string().from('validation_status'),
+    validationErrors: json().from('validation_errors'),
+    createdByRunId: string().optional().from('created_by_run_id'),
+    createdAt: number().from('created_at'),
+})
+    .primaryKey('id');
+const designAssets = table('design_assets')
+    .columns({
+    id: string(),
+    organizationId: string().from('organization_id'),
+    templateId: string().optional().from('template_id'),
+    kind: string(),
+    name: string(),
+    storageKey: string().optional().from('storage_key'),
+    url: string().optional(),
+    metadata: json(),
+    createdAt: number().from('created_at'),
+    updatedAt: number().from('updated_at'),
+})
+    .primaryKey('id');
+const designTemplateRuns = table('design_template_runs')
+    .columns({
+        id: string(),
+        organizationId: string().from('organization_id'),
+        templateId: string().optional().from('template_id'),
+        agentRunId: string().optional().from('agent_run_id'),
+        templateSlug: string().optional().from('template_slug'),
+    prompt: string(),
+    status: string(),
+    statusMessage: string().optional().from('status_message'),
+    sourceVersionId: string().optional().from('source_version_id'),
+    targetVersionId: string().optional().from('target_version_id'),
+    metadata: json(),
+    createdAt: number().from('created_at'),
+    updatedAt: number().from('updated_at'),
+})
+    .primaryKey('id');
 const users = table('users')
     .columns({
     id: string(),
@@ -512,9 +590,13 @@ const githubRepositories = table('github_repositories')
     .primaryKey('id');
 const agentRuns = table('agent_runs')
     .columns({
-    id: string(),
-    issueId: string().from('issue_id'),
-    workerId: string().optional().from('worker_id'),
+        id: string(),
+        conversationId: string().optional().from('conversation_id'),
+        parentRunId: string().optional().from('parent_run_id'),
+        issueId: string().optional().from('issue_id'),
+        subjectType: string().from('subject_type'),
+        subjectId: string().optional().from('subject_id'),
+        workerId: string().optional().from('worker_id'),
     repositoryId: string().optional().from('repository_id'),
     projectKey: string().from('project_key'),
     repoFullName: string().from('repo_full_name'),
@@ -532,6 +614,28 @@ const agentRuns = table('agent_runs')
     updatedAt: number().from('updated_at'),
 })
     .primaryKey('id');
+const agentConversations = table('agent_conversations')
+    .columns({
+    id: string(),
+    issueId: string().optional().from('issue_id'),
+    title: string(),
+    status: string(),
+    metadata: json(),
+    createdAt: number().from('created_at'),
+    updatedAt: number().from('updated_at'),
+})
+    .primaryKey('id');
+const agentMessages = table('agent_messages')
+    .columns({
+    id: string(),
+    conversationId: string().from('conversation_id'),
+    runId: string().optional().from('run_id'),
+    role: string(),
+    body: string(),
+    metadata: json(),
+    createdAt: number().from('created_at'),
+})
+    .primaryKey('id');
 const agentTerminals = table('agent_terminals')
     .columns({
     id: string(),
@@ -545,6 +649,20 @@ const agentTerminals = table('agent_terminals')
     metadata: json(),
     createdAt: number().from('created_at'),
     updatedAt: number().from('updated_at'),
+})
+    .primaryKey('id');
+const agentRunProgressReports = table('agent_run_progress_reports')
+    .columns({
+    id: string(),
+    runId: string().from('run_id'),
+    issueId: string().optional().from('issue_id'),
+    workerId: string().optional().from('worker_id'),
+    phase: string().optional(),
+    level: string(),
+    message: string(),
+    percent: number().optional(),
+    metadata: json(),
+    createdAt: number().from('created_at'),
 })
     .primaryKey('id');
 const agentRunArtifacts = table('agent_run_artifacts')
@@ -673,6 +791,11 @@ const whatsappMessages = table('whatsapp_messages')
 export const schema = createSchema({
     tables: [
         decks,
+        designSystems,
+        designTemplates,
+        designTemplateVersions,
+        designAssets,
+        designTemplateRuns,
         users,
         organizations,
         organizationMemberships,
@@ -704,8 +827,11 @@ export const schema = createSchema({
         pmTaskTriggerRuns,
         agentWorkers,
         githubRepositories,
+        agentConversations,
         agentRuns,
+        agentMessages,
         agentTerminals,
+        agentRunProgressReports,
         agentRunArtifacts,
         githubBranches,
         githubPullRequests,
@@ -736,6 +862,11 @@ const authenticatedReadOnly = readOnly([allowAuthenticated]);
 export const permissions = definePermissions(schema, () => {
     return {
         decks: organizationScoped(),
+        design_systems: organizationScoped(),
+        design_templates: organizationScoped(),
+        design_template_versions: organizationScoped(),
+        design_assets: organizationScoped(),
+        design_template_runs: organizationScoped(),
         users: authenticatedReadOnly,
         organizations: readOnly([allowOrganization]),
         organization_memberships: readOnly([allowOrganizationMembership]),
@@ -767,8 +898,11 @@ export const permissions = definePermissions(schema, () => {
         pm_task_trigger_runs: unscopedOnly,
         agent_workers: unscopedOnly,
         github_repositories: unscopedOnly,
+        agent_conversations: unscopedOnly,
         agent_runs: unscopedOnly,
+        agent_messages: unscopedOnly,
         agent_terminals: unscopedOnly,
+        agent_run_progress_reports: unscopedOnly,
         agent_run_artifacts: unscopedOnly,
         github_branches: unscopedOnly,
         github_pull_requests: unscopedOnly,

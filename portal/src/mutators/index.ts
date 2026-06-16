@@ -32,6 +32,107 @@ export const mutators = {
     },
   },
 
+  design_systems: {
+    async create(tx: Tx, args: { id: string; organizationId: string; name: string; slug: string; tokens?: Record<string, unknown>; assets?: Record<string, unknown>; metadata?: Record<string, unknown> }) {
+      const now = Date.now()
+      await tx.mutate.design_systems.insert({
+        tokens: {},
+        assets: {},
+        metadata: {},
+        ...args,
+        createdAt: now,
+        updatedAt: now,
+      } as any)
+    },
+    async update(tx: Tx, args: { id: string; name?: string; slug?: string; tokens?: Record<string, unknown>; assets?: Record<string, unknown>; metadata?: Record<string, unknown> }) {
+      const { id, ...updates } = args
+      await tx.mutate.design_systems.update({ id, ...updates, updatedAt: Date.now() } as any)
+    },
+    async delete(tx: Tx, args: { id: string }) {
+      await tx.mutate.design_systems.delete({ id: args.id })
+    },
+  },
+
+  design_templates: {
+    async create(tx: Tx, args: { id: string; organizationId: string; type?: string; name: string; slug: string; status?: string; sourceKind?: string; currentVersionId?: string; metadata?: Record<string, unknown> }) {
+      const now = Date.now()
+      await tx.mutate.design_templates.insert({
+        type: 'deck',
+        status: 'active',
+        sourceKind: 'react',
+        metadata: {},
+        ...args,
+        createdAt: now,
+        updatedAt: now,
+      } as any)
+    },
+    async update(tx: Tx, args: { id: string; type?: string; name?: string; slug?: string; status?: string; sourceKind?: string; currentVersionId?: string | null; metadata?: Record<string, unknown> }) {
+      const { id, ...updates } = args
+      await tx.mutate.design_templates.update({ id, ...updates, updatedAt: Date.now() } as any)
+    },
+    async delete(tx: Tx, args: { id: string }) {
+      await tx.mutate.design_templates.delete({ id: args.id })
+    },
+  },
+
+  design_template_versions: {
+    async create(tx: Tx, args: { id: string; organizationId: string; templateId: string; versionNumber?: number; schemaVersion?: number; sourceKind?: string; files?: Record<string, string>; manifest?: Record<string, unknown>; dependencies?: Record<string, string>; compiledArtifactUrl?: string; previewImageUrl?: string; validationStatus?: string; validationErrors?: Array<Record<string, unknown>>; createdByRunId?: string }) {
+      await tx.mutate.design_template_versions.insert({
+        versionNumber: 1,
+        schemaVersion: 1,
+        sourceKind: 'react',
+        files: {},
+        manifest: {},
+        dependencies: {},
+        validationStatus: 'draft',
+        validationErrors: [],
+        ...args,
+        createdAt: Date.now(),
+      } as any)
+    },
+    async update(tx: Tx, args: { id: string; versionNumber?: number; schemaVersion?: number; sourceKind?: string; files?: Record<string, string>; manifest?: Record<string, unknown>; dependencies?: Record<string, string>; compiledArtifactUrl?: string | null; previewImageUrl?: string | null; validationStatus?: string; validationErrors?: Array<Record<string, unknown>>; createdByRunId?: string | null }) {
+      const { id, ...updates } = args
+      await tx.mutate.design_template_versions.update({ id, ...updates } as any)
+    },
+    async delete(tx: Tx, args: { id: string }) {
+      await tx.mutate.design_template_versions.delete({ id: args.id })
+    },
+  },
+
+  design_assets: {
+    async create(tx: Tx, args: { id: string; organizationId: string; templateId?: string; kind: string; name: string; storageKey?: string; url?: string; metadata?: Record<string, unknown> }) {
+      const now = Date.now()
+      await tx.mutate.design_assets.insert({ metadata: {}, ...args, createdAt: now, updatedAt: now } as any)
+    },
+    async update(tx: Tx, args: { id: string; templateId?: string | null; kind?: string; name?: string; storageKey?: string | null; url?: string | null; metadata?: Record<string, unknown> }) {
+      const { id, ...updates } = args
+      await tx.mutate.design_assets.update({ id, ...updates, updatedAt: Date.now() } as any)
+    },
+    async delete(tx: Tx, args: { id: string }) {
+      await tx.mutate.design_assets.delete({ id: args.id })
+    },
+  },
+
+  design_template_runs: {
+    async create(tx: Tx, args: { id: string; organizationId: string; templateId?: string; agentRunId?: string; templateSlug?: string; prompt: string; status?: string; statusMessage?: string; sourceVersionId?: string; targetVersionId?: string; metadata?: Record<string, unknown> }) {
+      const now = Date.now()
+      await tx.mutate.design_template_runs.insert({
+        status: 'queued',
+        metadata: {},
+        ...args,
+        createdAt: now,
+        updatedAt: now,
+      } as any)
+    },
+    async update(tx: Tx, args: { id: string; templateId?: string | null; agentRunId?: string | null; templateSlug?: string | null; prompt?: string; status?: string; statusMessage?: string | null; sourceVersionId?: string | null; targetVersionId?: string | null; metadata?: Record<string, unknown> }) {
+      const { id, ...updates } = args
+      await tx.mutate.design_template_runs.update({ id, ...updates, updatedAt: Date.now() } as any)
+    },
+    async delete(tx: Tx, args: { id: string }) {
+      await tx.mutate.design_template_runs.delete({ id: args.id })
+    },
+  },
+
   crm_companies: {
     async create(tx: Tx, args: { id: string; organizationId?: string; name: string; website?: string; instagram?: string; phone?: string; city?: string; industry?: string; size?: string; description?: string }) {
       const now = Date.now()
@@ -521,20 +622,22 @@ export const mutators = {
   },
 
   agent_runs: {
-    async create(tx: Tx, args: { id: string; conversationId?: string; parentRunId?: string; issueId: string; workerId?: string; repositoryId?: string; projectKey: string; repoFullName: string; baseBranch?: string; branchName: string; workspacePath?: string; tmuxSession?: string; agentKind?: string; status?: string; statusMessage?: string; startedAt?: number; completedAt?: number; metadata?: Record<string, unknown> }) {
+    async create(tx: Tx, args: { id: string; conversationId?: string; parentRunId?: string; issueId?: string; subjectType?: string; subjectId?: string; workerId?: string; repositoryId?: string; projectKey: string; repoFullName: string; baseBranch?: string; branchName: string; workspacePath?: string; tmuxSession?: string; agentKind?: string; status?: string; statusMessage?: string; startedAt?: number; completedAt?: number; metadata?: Record<string, unknown> }) {
       const now = Date.now()
       await tx.mutate.agent_runs.insert({
         baseBranch: 'main',
         agentKind: 'codex',
         status: 'queued',
+        subjectType: args.issueId ? 'issue' : 'generic',
+        subjectId: args.issueId,
         metadata: {},
         ...args,
         createdAt: now,
         updatedAt: now,
       })
-      await tx.mutate.pm_issues.update({ id: args.issueId, lastActivityAt: now, updatedAt: now })
+      if (args.issueId) await tx.mutate.pm_issues.update({ id: args.issueId, lastActivityAt: now, updatedAt: now })
     },
-    async update(tx: Tx, args: { id: string; conversationId?: string | null; parentRunId?: string | null; workerId?: string | null; repositoryId?: string | null; projectKey?: string; repoFullName?: string; baseBranch?: string; branchName?: string; workspacePath?: string | null; tmuxSession?: string | null; agentKind?: string; status?: string; statusMessage?: string | null; startedAt?: number | null; completedAt?: number | null; metadata?: Record<string, unknown> }) {
+    async update(tx: Tx, args: { id: string; conversationId?: string | null; parentRunId?: string | null; issueId?: string | null; subjectType?: string; subjectId?: string | null; workerId?: string | null; repositoryId?: string | null; projectKey?: string; repoFullName?: string; baseBranch?: string; branchName?: string; workspacePath?: string | null; tmuxSession?: string | null; agentKind?: string; status?: string; statusMessage?: string | null; startedAt?: number | null; completedAt?: number | null; metadata?: Record<string, unknown> }) {
       const { id, ...updates } = args
       await tx.mutate.agent_runs.update({ id, ...updates, updatedAt: Date.now() })
     },

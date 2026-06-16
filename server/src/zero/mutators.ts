@@ -6,6 +6,11 @@ import type { JWTPayload } from '../lib/auth.js'
 type Tx = ServerTransaction<Schema, PostgresJsTransaction>
 type ScopedTable =
   | 'decks'
+  | 'design_systems'
+  | 'design_templates'
+  | 'design_template_versions'
+  | 'design_assets'
+  | 'design_template_runs'
   | 'organizations'
   | 'organization_memberships'
   | 'crm_companies'
@@ -35,6 +40,11 @@ type ScopedTable =
 
 const ORG_COLUMN_BY_TABLE: Record<ScopedTable, string> = {
   decks: 'organization_id',
+  design_systems: 'organization_id',
+  design_templates: 'organization_id',
+  design_template_versions: 'organization_id',
+  design_assets: 'organization_id',
+  design_template_runs: 'organization_id',
   organizations: 'id',
   organization_memberships: 'organization_id',
   crm_companies: 'organization_id',
@@ -165,6 +175,127 @@ export function createServerMutators(authData?: JWTPayload) {
       async delete(tx: Tx, args: { id: string }) {
         await requireExistingOrganizationAccess(tx, 'organization_memberships', args.id)
         await tx.mutate.organization_memberships.delete({ id: args.id })
+      },
+    },
+
+    design_systems: {
+      async create(tx: Tx, args: { id: string; organizationId: string; name: string; slug: string; tokens?: Record<string, unknown>; assets?: Record<string, unknown>; metadata?: Record<string, unknown> }) {
+        requireOrganizationAccess(args.organizationId)
+        const now = Date.now()
+        await tx.mutate.design_systems.insert({
+          tokens: {},
+          assets: {},
+          metadata: {},
+          ...args,
+          createdAt: now,
+          updatedAt: now,
+        } as any)
+      },
+      async update(tx: Tx, args: { id: string; name?: string; slug?: string; tokens?: Record<string, unknown>; assets?: Record<string, unknown>; metadata?: Record<string, unknown> }) {
+        await requireExistingOrganizationAccess(tx, 'design_systems', args.id)
+        const { id, ...updates } = args
+        await tx.mutate.design_systems.update({ id, ...updates, updatedAt: Date.now() } as any)
+      },
+      async delete(tx: Tx, args: { id: string }) {
+        await requireExistingOrganizationAccess(tx, 'design_systems', args.id)
+        await tx.mutate.design_systems.delete({ id: args.id })
+      },
+    },
+
+    design_templates: {
+      async create(tx: Tx, args: { id: string; organizationId: string; type?: string; name: string; slug: string; status?: string; sourceKind?: string; currentVersionId?: string; metadata?: Record<string, unknown> }) {
+        requireOrganizationAccess(args.organizationId)
+        const now = Date.now()
+        await tx.mutate.design_templates.insert({
+          type: 'deck',
+          status: 'active',
+          sourceKind: 'react',
+          metadata: {},
+          ...args,
+          createdAt: now,
+          updatedAt: now,
+        } as any)
+      },
+      async update(tx: Tx, args: { id: string; type?: string; name?: string; slug?: string; status?: string; sourceKind?: string; currentVersionId?: string | null; metadata?: Record<string, unknown> }) {
+        await requireExistingOrganizationAccess(tx, 'design_templates', args.id)
+        const { id, ...updates } = args
+        await tx.mutate.design_templates.update({ id, ...updates, updatedAt: Date.now() } as any)
+      },
+      async delete(tx: Tx, args: { id: string }) {
+        await requireExistingOrganizationAccess(tx, 'design_templates', args.id)
+        await tx.mutate.design_templates.delete({ id: args.id })
+      },
+    },
+
+    design_template_versions: {
+      async create(tx: Tx, args: { id: string; organizationId: string; templateId: string; versionNumber?: number; schemaVersion?: number; sourceKind?: string; files?: Record<string, string>; manifest?: Record<string, unknown>; dependencies?: Record<string, string>; compiledArtifactUrl?: string; previewImageUrl?: string; validationStatus?: string; validationErrors?: Array<Record<string, unknown>>; createdByRunId?: string }) {
+        requireOrganizationAccess(args.organizationId)
+        await requireExistingOrganizationAccess(tx, 'design_templates', args.templateId)
+        await tx.mutate.design_template_versions.insert({
+          versionNumber: 1,
+          schemaVersion: 1,
+          sourceKind: 'react',
+          files: {},
+          manifest: {},
+          dependencies: {},
+          validationStatus: 'draft',
+          validationErrors: [],
+          ...args,
+          createdAt: Date.now(),
+        } as any)
+      },
+      async update(tx: Tx, args: { id: string; versionNumber?: number; schemaVersion?: number; sourceKind?: string; files?: Record<string, string>; manifest?: Record<string, unknown>; dependencies?: Record<string, string>; compiledArtifactUrl?: string | null; previewImageUrl?: string | null; validationStatus?: string; validationErrors?: Array<Record<string, unknown>>; createdByRunId?: string | null }) {
+        await requireExistingOrganizationAccess(tx, 'design_template_versions', args.id)
+        const { id, ...updates } = args
+        await tx.mutate.design_template_versions.update({ id, ...updates } as any)
+      },
+      async delete(tx: Tx, args: { id: string }) {
+        await requireExistingOrganizationAccess(tx, 'design_template_versions', args.id)
+        await tx.mutate.design_template_versions.delete({ id: args.id })
+      },
+    },
+
+    design_assets: {
+      async create(tx: Tx, args: { id: string; organizationId: string; templateId?: string; kind: string; name: string; storageKey?: string; url?: string; metadata?: Record<string, unknown> }) {
+        requireOrganizationAccess(args.organizationId)
+        if (args.templateId) await requireExistingOrganizationAccess(tx, 'design_templates', args.templateId)
+        const now = Date.now()
+        await tx.mutate.design_assets.insert({ metadata: {}, ...args, createdAt: now, updatedAt: now } as any)
+      },
+      async update(tx: Tx, args: { id: string; templateId?: string | null; kind?: string; name?: string; storageKey?: string | null; url?: string | null; metadata?: Record<string, unknown> }) {
+        await requireExistingOrganizationAccess(tx, 'design_assets', args.id)
+        if (args.templateId) await requireExistingOrganizationAccess(tx, 'design_templates', args.templateId)
+        const { id, ...updates } = args
+        await tx.mutate.design_assets.update({ id, ...updates, updatedAt: Date.now() } as any)
+      },
+      async delete(tx: Tx, args: { id: string }) {
+        await requireExistingOrganizationAccess(tx, 'design_assets', args.id)
+        await tx.mutate.design_assets.delete({ id: args.id })
+      },
+    },
+
+    design_template_runs: {
+      async create(tx: Tx, args: { id: string; organizationId: string; templateId?: string; agentRunId?: string; templateSlug?: string; prompt: string; status?: string; statusMessage?: string; sourceVersionId?: string; targetVersionId?: string; metadata?: Record<string, unknown> }) {
+        requireOrganizationAccess(args.organizationId)
+        if (args.templateId) await requireExistingOrganizationAccess(tx, 'design_templates', args.templateId)
+        const now = Date.now()
+        await tx.mutate.design_template_runs.insert({
+          status: 'queued',
+          metadata: {},
+          ...args,
+          createdAt: now,
+          updatedAt: now,
+        } as any)
+      },
+      async update(tx: Tx, args: { id: string; templateId?: string | null; agentRunId?: string | null; templateSlug?: string | null; prompt?: string; status?: string; statusMessage?: string | null; sourceVersionId?: string | null; targetVersionId?: string | null; metadata?: Record<string, unknown> }) {
+        await requireExistingOrganizationAccess(tx, 'design_template_runs', args.id)
+        if (args.templateId) await requireExistingOrganizationAccess(tx, 'design_templates', args.templateId)
+        const { id, ...updates } = args
+        await tx.mutate.design_template_runs.update({ id, ...updates, updatedAt: Date.now() } as any)
+      },
+      async delete(tx: Tx, args: { id: string }) {
+        await requireExistingOrganizationAccess(tx, 'design_template_runs', args.id)
+        await tx.mutate.design_template_runs.delete({ id: args.id })
       },
     },
 
@@ -762,21 +893,23 @@ export function createServerMutators(authData?: JWTPayload) {
     },
 
     agent_runs: {
-      async create(tx: Tx, args: { id: string; conversationId?: string; parentRunId?: string; issueId: string; workerId?: string; repositoryId?: string; projectKey: string; repoFullName: string; baseBranch?: string; branchName: string; workspacePath?: string; tmuxSession?: string; agentKind?: string; status?: string; statusMessage?: string; startedAt?: number; completedAt?: number; metadata?: Record<string, unknown> }) {
+      async create(tx: Tx, args: { id: string; conversationId?: string; parentRunId?: string; issueId?: string; subjectType?: string; subjectId?: string; workerId?: string; repositoryId?: string; projectKey: string; repoFullName: string; baseBranch?: string; branchName: string; workspacePath?: string; tmuxSession?: string; agentKind?: string; status?: string; statusMessage?: string; startedAt?: number; completedAt?: number; metadata?: Record<string, unknown> }) {
         requireUnscopedAccess()
         const now = Date.now()
         await tx.mutate.agent_runs.insert({
           baseBranch: 'main',
           agentKind: 'codex',
           status: 'queued',
+          subjectType: args.issueId ? 'issue' : 'generic',
+          subjectId: args.issueId,
           metadata: {},
           ...args,
           createdAt: now,
           updatedAt: now,
         })
-        await tx.mutate.pm_issues.update({ id: args.issueId, lastActivityAt: now, updatedAt: now })
+        if (args.issueId) await tx.mutate.pm_issues.update({ id: args.issueId, lastActivityAt: now, updatedAt: now })
       },
-      async update(tx: Tx, args: { id: string; conversationId?: string | null; parentRunId?: string | null; workerId?: string | null; repositoryId?: string | null; projectKey?: string; repoFullName?: string; baseBranch?: string; branchName?: string; workspacePath?: string | null; tmuxSession?: string | null; agentKind?: string; status?: string; statusMessage?: string | null; startedAt?: number | null; completedAt?: number | null; metadata?: Record<string, unknown> }) {
+      async update(tx: Tx, args: { id: string; conversationId?: string | null; parentRunId?: string | null; issueId?: string | null; subjectType?: string; subjectId?: string | null; workerId?: string | null; repositoryId?: string | null; projectKey?: string; repoFullName?: string; baseBranch?: string; branchName?: string; workspacePath?: string | null; tmuxSession?: string | null; agentKind?: string; status?: string; statusMessage?: string | null; startedAt?: number | null; completedAt?: number | null; metadata?: Record<string, unknown> }) {
         requireUnscopedAccess()
         const { id, ...updates } = args
         await tx.mutate.agent_runs.update({ id, ...updates, updatedAt: Date.now() })

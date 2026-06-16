@@ -74,6 +74,93 @@ export const decks = pgTable('decks', {
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
 });
+/* ────────────────────────── DESIGN ────────────────────────── */
+export const designSystems = pgTable('design_systems', {
+    id: uuid('id').primaryKey().defaultRandom(),
+    organizationId: uuid('organization_id').notNull().references(() => organizations.id),
+    name: text('name').notNull(),
+    slug: text('slug').notNull(),
+    tokens: jsonb('tokens').$type().notNull().default({}),
+    assets: jsonb('assets').$type().notNull().default({}),
+    metadata: jsonb('metadata').$type().notNull().default({}),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+}, (table) => ({
+    organizationIdIdx: index('design_systems_organization_idx').on(table.organizationId),
+    organizationSlugIdx: uniqueIndex('design_systems_organization_slug_idx').on(table.organizationId, table.slug),
+}));
+export const designTemplates = pgTable('design_templates', {
+    id: uuid('id').primaryKey().defaultRandom(),
+    organizationId: uuid('organization_id').notNull().references(() => organizations.id),
+    type: text('type').notNull().default('deck'),
+    name: text('name').notNull(),
+    slug: text('slug').notNull(),
+    status: text('status').notNull().default('active'),
+    sourceKind: text('source_kind').notNull().default('react'),
+    currentVersionId: uuid('current_version_id'),
+    metadata: jsonb('metadata').$type().notNull().default({}),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+}, (table) => ({
+    organizationIdIdx: index('design_templates_organization_idx').on(table.organizationId),
+    organizationSlugIdx: uniqueIndex('design_templates_organization_slug_idx').on(table.organizationId, table.slug),
+}));
+export const designTemplateVersions = pgTable('design_template_versions', {
+    id: uuid('id').primaryKey().defaultRandom(),
+    organizationId: uuid('organization_id').notNull().references(() => organizations.id),
+    templateId: uuid('template_id').notNull().references(() => designTemplates.id),
+    versionNumber: integer('version_number').notNull().default(1),
+    schemaVersion: integer('schema_version').notNull().default(1),
+    sourceKind: text('source_kind').notNull().default('react'),
+    files: jsonb('files').$type().notNull().default({}),
+    manifest: jsonb('manifest').$type().notNull().default({}),
+    dependencies: jsonb('dependencies').$type().notNull().default({}),
+    compiledArtifactUrl: text('compiled_artifact_url'),
+    previewImageUrl: text('preview_image_url'),
+    validationStatus: text('validation_status').notNull().default('draft'),
+    validationErrors: jsonb('validation_errors').$type().notNull().default([]),
+    createdByRunId: uuid('created_by_run_id'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+}, (table) => ({
+    organizationIdIdx: index('design_template_versions_organization_idx').on(table.organizationId),
+    templateIdIdx: index('design_template_versions_template_idx').on(table.templateId),
+    templateVersionIdx: uniqueIndex('design_template_versions_template_version_idx').on(table.templateId, table.versionNumber),
+}));
+export const designAssets = pgTable('design_assets', {
+    id: uuid('id').primaryKey().defaultRandom(),
+    organizationId: uuid('organization_id').notNull().references(() => organizations.id),
+    templateId: uuid('template_id').references(() => designTemplates.id),
+    kind: text('kind').notNull(),
+    name: text('name').notNull(),
+    storageKey: text('storage_key'),
+    url: text('url'),
+    metadata: jsonb('metadata').$type().notNull().default({}),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+}, (table) => ({
+    organizationIdIdx: index('design_assets_organization_idx').on(table.organizationId),
+    templateIdIdx: index('design_assets_template_idx').on(table.templateId),
+}));
+export const designTemplateRuns = pgTable('design_template_runs', {
+    id: uuid('id').primaryKey().defaultRandom(),
+    organizationId: uuid('organization_id').notNull().references(() => organizations.id),
+    templateId: uuid('template_id').references(() => designTemplates.id),
+    agentRunId: uuid('agent_run_id'),
+    templateSlug: text('template_slug'),
+    prompt: text('prompt').notNull(),
+    status: text('status').notNull().default('queued'),
+    statusMessage: text('status_message'),
+    sourceVersionId: uuid('source_version_id'),
+    targetVersionId: uuid('target_version_id'),
+    metadata: jsonb('metadata').$type().notNull().default({}),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+}, (table) => ({
+    organizationIdIdx: index('design_template_runs_organization_idx').on(table.organizationId),
+    templateIdIdx: index('design_template_runs_template_idx').on(table.templateId),
+    agentRunIdIdx: index('design_template_runs_agent_run_idx').on(table.agentRunId),
+    templateSlugIdx: index('design_template_runs_template_slug_idx').on(table.templateSlug),
+}));
 /* ─────────────────────────── CRM ─────────────────────────── */
 export const crmCompanies = pgTable('crm_companies', {
     id: uuid('id').primaryKey().defaultRandom(),
@@ -579,7 +666,9 @@ export const agentRuns = pgTable('agent_runs', {
     id: uuid('id').primaryKey().defaultRandom(),
     conversationId: uuid('conversation_id').references(() => agentConversations.id),
     parentRunId: uuid('parent_run_id'),
-    issueId: uuid('issue_id').notNull().references(() => pmIssues.id),
+    issueId: uuid('issue_id').references(() => pmIssues.id),
+    subjectType: text('subject_type').notNull().default('issue'),
+    subjectId: uuid('subject_id'),
     workerId: uuid('worker_id').references(() => agentWorkers.id),
     repositoryId: uuid('repository_id').references(() => githubRepositories.id),
     projectKey: text('project_key').notNull(),
