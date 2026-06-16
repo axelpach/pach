@@ -405,6 +405,7 @@ function buildDesignTemplateMcpPrompt(run: AgentRunRecord) {
   const prompt = readMetadataString(run.metadata, 'prompt')
   const templateSlug = readMetadataString(run.metadata, 'designTemplateSlug')
   const templateId = readMetadataString(run.metadata, 'designTemplateId')
+  const organizationProject = readMetadataString(run.metadata, 'organizationProject')
   const designTemplateRunId = readMetadataString(run.metadata, 'designTemplateRunId') ?? run.subjectId ?? undefined
   return [
     'You are Pach design template MCP worker.',
@@ -415,11 +416,13 @@ function buildDesignTemplateMcpPrompt(run: AgentRunRecord) {
     designTemplateRunId ? `Design template run id: ${designTemplateRunId}` : null,
     templateId ? `Template id: ${templateId}` : null,
     templateSlug ? `Template slug: ${templateSlug}` : null,
+    organizationProject ? `Organization project: ${organizationProject}` : null,
+    organizationProject ? `If deeper source context is needed, read the related project repo at /home/pach/workspaces/repos/axelpach/${organizationProject} when that path exists.` : null,
     prompt ? `User prompt: ${prompt}` : null,
     '',
     'Workflow:',
     '1. Read the template with pach.design.template.get using the template id or slug above.',
-    '2. Follow agentInstructions.mustUseOrganizationDesignSystem from the template response as a hard constraint.',
+    '2. Follow agentInstructions.mustUseOrganizationDesignSystem from the template response as a hard constraint. Inspect organizationDesignSystem.tokens, organizationDesignSystem.assets, and organizationDesignSystem.metadata before designing.',
     '3. Report progress with pach.progress.report and include the agent run id.',
     '4. Edit or create the template source files requested by the user. Prefer React source with manifest.entry set to src/Template.tsx and a default React component export so Pach can compile-preview it.',
     '5. Create a new template version with pach.design.template.version.create. Pass the full files object, manifest.entry, dependencies for any third-party package imports, and the agent run id as runId.',

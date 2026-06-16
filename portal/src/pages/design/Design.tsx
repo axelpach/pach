@@ -337,6 +337,9 @@ function buildDesignSystemRunMetadata(
       `Use ${organization.name}'s organization design system as a hard constraint for all deck edits.`,
       'Do not introduce a competing visual direction unless the user explicitly asks to change the organization design system.',
       'When changing layout, copy, colors, typography, components, or imagery, preserve the organization design system tokens and principles.',
+      organization.project === 'ardia'
+        ? 'For Ardia, match the buyer landing: Inter Tight 200 titles, Instrument Serif italic only as a restrained accent, hairline product/data surfaces, one vermilion accent per slide, and the real Ardia mark.'
+        : '',
     ].join(' '),
     system: system
       ? {
@@ -376,8 +379,34 @@ function buildDesignSystemRunMetadata(
             })),
             metrics: palette.metrics,
           },
-          assets: {},
-          metadata: { fallbackSnapshot: true },
+          assets: organization.project === 'ardia'
+            ? {
+                logo: {
+                  preferred: 'svg',
+                  usage: 'Use the Ardia building mark plus Instrument Serif italic wordmark. Do not draw a generic square logo.',
+                  publicCandidates: [
+                    { url: 'https://www.ardia.mx/ardia-iso-light.png', width: 190, height: 190, usage: 'light icon for dark backgrounds' },
+                    { url: 'https://www.ardia.mx/ardia-iso-dark.png', width: 162, height: 162, usage: 'dark icon for light backgrounds' },
+                  ],
+                },
+              }
+            : {},
+          metadata: {
+            fallbackSnapshot: true,
+            agentInstruction: organization.project === 'ardia'
+              ? 'Match the Ardia buyer landing, not a generic executive deck. Use Inter Tight 200 for primary titles; Instrument Serif italic only for one accent word or line. Use hairline dividers and whitespace instead of boxed cards. Use the real Ardia logo asset or inline mark.'
+              : undefined,
+            avoid: organization.project === 'ardia'
+              ? [
+                  'large serif titles',
+                  'all-italic headlines',
+                  'fake square logos',
+                  'generic dark SaaS cards',
+                  'purple or blue gradients',
+                  'filled red blocks',
+                ]
+              : undefined,
+          },
         },
   }
 }

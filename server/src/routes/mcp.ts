@@ -31,6 +31,7 @@ import {
   type McpAuthContext,
   type McpCapability,
 } from '../lib/mcp-token.js'
+import { getFallbackDesignSystemForOrganization, mergeDesignSystemWithFallback } from '../design-systems/fallback.js'
 
 const router = Router()
 const MCP_PROTOCOL_VERSION = '2024-11-05'
@@ -904,18 +905,25 @@ async function getDesignTemplate(req: AuthenticatedRequest, args: unknown) {
       .limit(1),
   ])
   const designSystem = organizationDesignSystems[0]
+  const fallbackDesignSystem = getFallbackDesignSystemForOrganization(organization)
+  const effectiveDesignSystem = mergeDesignSystemWithFallback(
+    designSystem ? serializeDesignSystem(designSystem) : null,
+    fallbackDesignSystem,
+  )
+  const designSystemAgentInstruction = readOptionalString(effectiveDesignSystem?.metadata?.agentInstruction)
 
   return {
     ok: true,
     template: serializeDesignTemplate(template, organization),
-    organizationDesignSystem: designSystem ? serializeDesignSystem(designSystem) : null,
+    organizationDesignSystem: effectiveDesignSystem,
     agentInstructions: {
       mustUseOrganizationDesignSystem: true,
-      designSystemId: designSystem?.id ?? null,
+      designSystemId: effectiveDesignSystem?.id ?? null,
       instruction: [
         `Use ${organization?.name ?? 'the organization'}'s design system as a hard constraint for all template edits.`,
         'Do not introduce a competing visual direction unless the user explicitly asks to change the organization design system.',
         'When changing layout, copy, colors, typography, components, or imagery, preserve the organization design system tokens and principles.',
+        designSystemAgentInstruction,
       ].join(' '),
     },
     versions: versions.map(serializeDesignTemplateVersion),
