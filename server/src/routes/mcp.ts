@@ -4,6 +4,7 @@ import type { Request } from 'express'
 import { desc, eq, ilike, inArray, or } from 'drizzle-orm'
 import {
   agentRunProgressReports,
+  designAssets,
   agentRuns,
   designSystems,
   designTemplateRuns,
@@ -884,7 +885,7 @@ async function getDesignTemplate(req: AuthenticatedRequest, args: unknown) {
   if (!template) throw new Error('Design template not found')
 
   const [organization] = await db.select().from(organizations).where(eq(organizations.id, template.organizationId)).limit(1)
-  const [versions, runs, organizationDesignSystems] = await Promise.all([
+  const [versions, runs, organizationDesignSystems, assets] = await Promise.all([
     db
       .select()
       .from(designTemplateVersions)
@@ -903,6 +904,12 @@ async function getDesignTemplate(req: AuthenticatedRequest, args: unknown) {
       .where(eq(designSystems.organizationId, template.organizationId))
       .orderBy(desc(designSystems.updatedAt))
       .limit(1),
+    db
+      .select()
+      .from(designAssets)
+      .where(eq(designAssets.organizationId, template.organizationId))
+      .orderBy(desc(designAssets.updatedAt))
+      .limit(100),
   ])
   const designSystem = organizationDesignSystems[0]
   const fallbackDesignSystem = getFallbackDesignSystemForOrganization(organization)
@@ -916,6 +923,7 @@ async function getDesignTemplate(req: AuthenticatedRequest, args: unknown) {
     ok: true,
     template: serializeDesignTemplate(template, organization),
     organizationDesignSystem: effectiveDesignSystem,
+    assets: assets.map(serializeDesignAsset),
     agentInstructions: {
       mustUseOrganizationDesignSystem: true,
       designSystemId: effectiveDesignSystem?.id ?? null,
@@ -923,8 +931,18 @@ async function getDesignTemplate(req: AuthenticatedRequest, args: unknown) {
         `Use ${organization?.name ?? 'the organization'}'s design system as a hard constraint for all template edits.`,
         'Do not introduce a competing visual direction unless the user explicitly asks to change the organization design system.',
         'When changing layout, copy, colors, typography, components, or imagery, preserve the organization design system tokens and principles.',
+        assets.length > 0
+          ? 'Use available assets from the assets array when a logo, product image, screenshot, or uploaded visual is needed. Respect each asset url, dimensions, and metadata.'
+          : 'If an asset is needed but not available, report that in progress instead of inventing a fake logo or product image.',
         designSystemAgentInstruction,
       ].join(' '),
+      availableAspectRatios: [
+        { id: 'deck-landscape', label: 'deck landscape', width: 1920, height: 1080, ratio: '16:9' },
+        { id: 'deck-portrait', label: 'deck portrait', width: 1080, height: 1528, ratio: '1:1.414' },
+        { id: 'mobile-story', label: 'mobile story', width: 1080, height: 1920, ratio: '9:16' },
+        { id: 'square', label: 'square', width: 1080, height: 1080, ratio: '1:1' },
+      ],
+      preferredAspectRatio: { id: 'deck-landscape', label: 'deck landscape', width: 1920, height: 1080, ratio: '16:9' },
     },
     versions: versions.map(serializeDesignTemplateVersion),
     runs: runs.map(serializeDesignTemplateRun),
@@ -1201,6 +1219,21 @@ function serializeDesignTemplateRun(run: typeof designTemplateRuns.$inferSelect)
     metadata: run.metadata ?? {},
     createdAt: run.createdAt.toISOString(),
     updatedAt: run.updatedAt.toISOString(),
+  }
+}
+
+function serializeDesignAsset(asset: typeof designAssets.$inferSelect) {
+  return {
+    id: asset.id,
+    organizationId: asset.organizationId,
+    templateId: asset.templateId,
+    kind: asset.kind,
+    name: asset.name,
+    storageKey: asset.storageKey,
+    url: asset.url,
+    metadata: asset.metadata ?? {},
+    createdAt: asset.createdAt.toISOString(),
+    updatedAt: asset.updatedAt.toISOString(),
   }
 }
 

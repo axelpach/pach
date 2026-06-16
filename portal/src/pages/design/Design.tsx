@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type CSSProperties, type FormEvent } from 'react'
+import { useEffect, useMemo, useState, type CSSProperties, type DragEvent, type FormEvent, type KeyboardEvent } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { useQuery, useZero } from '@rocicorp/zero/react'
 import {
@@ -7,19 +7,25 @@ import {
   Braces,
   Check,
   CheckCircle2,
+  ExternalLink,
+  FileImage,
+  Image as ImageIcon,
   Layers3,
   Palette,
   Plus,
+  Printer,
   Search,
   Send,
   Sparkles,
   Type,
+  UploadCloud,
   X,
 } from 'lucide-react'
 import { SlideRenderer } from '@decks/engine/SlideRenderer'
 import { getTheme } from '@decks/engine/themes'
 import { PachSelect, type PachSelectOption } from '../../components/PachSelect'
 import { config } from '../../config'
+import { authFetch } from '../../lib/auth'
 import type { Schema } from '../../zero-schema'
 import type { Mutators } from '../../mutators'
 import { legacyDesignTemplates, type LegacyDesignTemplate } from './legacyTemplates'
@@ -103,6 +109,19 @@ type AgentRunProgressReportRow = {
   createdAt: number
 }
 
+type DesignAssetRow = {
+  id: string
+  organizationId: string
+  templateId?: string | null
+  kind: string
+  name: string
+  storageKey?: string | null
+  url?: string | null
+  metadata: Record<string, unknown>
+  createdAt: number
+  updatedAt: number
+}
+
 type TemplateListItem = {
   id: string
   slug: string
@@ -145,6 +164,13 @@ type DesignPalette = {
 const ARDIA_SANS = "'Inter Tight', ui-sans-serif, system-ui, sans-serif"
 const ARDIA_SERIF = "'Instrument Serif', 'Newsreader', Georgia, serif"
 const ARDIA_MONO = "'Geist Mono', ui-monospace, Menlo, monospace"
+
+const DESIGN_ASPECT_RATIOS = [
+  { id: 'deck-landscape', label: 'deck landscape', width: 1920, height: 1080, ratio: '16:9' },
+  { id: 'deck-portrait', label: 'deck portrait', width: 1080, height: 1528, ratio: '1:1.414' },
+  { id: 'mobile-story', label: 'mobile story', width: 1080, height: 1920, ratio: '9:16' },
+  { id: 'square', label: 'square', width: 1080, height: 1080, ratio: '1:1' },
+] as const
 
 const displayTextStyle: CSSProperties = {
   fontFamily: ARDIA_SANS,
@@ -318,6 +344,21 @@ function formatDate(value?: number | string) {
   return new Intl.DateTimeFormat('en-US', { month: 'short', day: '2-digit', year: 'numeric' }).format(value)
 }
 
+function formatDateTime(value?: number | string) {
+  if (!value) return ''
+  const date = typeof value === 'string' ? new Date(value) : new Date(value)
+  if (Number.isNaN(date.getTime())) return typeof value === 'string' ? value : ''
+  return new Intl.DateTimeFormat('en-US', {
+    month: 'short',
+    day: '2-digit',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: false,
+  }).format(date)
+}
+
 function slugifyTemplateName(value: string) {
   return value
     .toLowerCase()
@@ -337,6 +378,7 @@ function buildDesignSystemRunMetadata(
       `Use ${organization.name}'s organization design system as a hard constraint for all deck edits.`,
       'Do not introduce a competing visual direction unless the user explicitly asks to change the organization design system.',
       'When changing layout, copy, colors, typography, components, or imagery, preserve the organization design system tokens and principles.',
+      `Use one of these predefined aspect ratios unless the user requests otherwise: ${DESIGN_ASPECT_RATIOS.map((ratio) => `${ratio.label} ${ratio.width}x${ratio.height}`).join(', ')}. Set manifest.dimensions or manifest.aspectRatioId so preview and export sizing stay predictable.`,
       organization.project === 'ardia'
         ? 'For Ardia, match the buyer landing: Inter Tight 200 titles, Instrument Serif italic only as a restrained accent, hairline product/data surfaces, one vermilion accent per slide, and the real Ardia mark.'
         : '',
@@ -521,6 +563,7 @@ export default function Design() {
   const [designSystems] = useQuery(z.query.design_systems.orderBy('updatedAt', 'desc'))
   const [dbTemplates] = useQuery(z.query.design_templates.orderBy('updatedAt', 'desc'))
   const [templateVersions] = useQuery(z.query.design_template_versions.orderBy('createdAt', 'desc'))
+  const [designAssets] = useQuery(z.query.design_assets.orderBy('createdAt', 'desc'))
   const [templateRuns] = useQuery(z.query.design_template_runs.orderBy('createdAt', 'desc'))
   const [agentRuns] = useQuery(z.query.agent_runs.orderBy('createdAt', 'desc'))
   const [agentRunProgressReports] = useQuery(z.query.agent_run_progress_reports.orderBy('createdAt', 'desc'))
@@ -531,11 +574,13 @@ export default function Design() {
   const [chatError, setChatError] = useState<string | null>(null)
   const [sidebarError, setSidebarError] = useState<string | null>(null)
   const [isCreatingTemplate, setIsCreatingTemplate] = useState(false)
+  const [isAssetsModalOpen, setIsAssetsModalOpen] = useState(false)
 
   const typedOrganizations = organizations as Organization[]
   const typedSystems = designSystems as DesignSystemRow[]
   const typedDbTemplates = dbTemplates as DesignTemplateRow[]
   const typedVersions = templateVersions as DesignTemplateVersionRow[]
+  const typedAssets = designAssets as DesignAssetRow[]
   const typedRuns = templateRuns as DesignTemplateRunRow[]
   const typedAgentRuns = agentRuns as AgentRunRow[]
   const typedProgressReports = agentRunProgressReports as AgentRunProgressReportRow[]
@@ -611,7 +656,11 @@ export default function Design() {
       if (!selectedTemplate) return false
       return run.templateSlug === selectedTemplate.slug || run.templateId === selectedTemplate.id
     })
-    .slice(0, 8)
+    .sort((a, b) => a.createdAt - b.createdAt)
+    .slice(-8)
+  const assetsForOrganization = selectedOrganization
+    ? typedAssets.filter((asset) => asset.organizationId === selectedOrganization.id)
+    : []
   const agentRunByDesignRunId = useMemo(() => {
     const byId = new Map<string, AgentRunRow>()
     for (const run of typedAgentRuns) {
@@ -672,6 +721,8 @@ export default function Design() {
           prompt: cleanPrompt,
           mustUseOrganizationDesignSystem: true,
           designSystem: designSystemMetadata,
+          availableAspectRatios: DESIGN_ASPECT_RATIOS,
+          preferredAspectRatio: DESIGN_ASPECT_RATIOS[0],
         },
       })
       await z.mutate.design_template_runs.create({
@@ -689,6 +740,8 @@ export default function Design() {
           sourceKind: selectedTemplate.sourceKind,
           mustUseOrganizationDesignSystem: true,
           designSystem: designSystemMetadata,
+          availableAspectRatios: DESIGN_ASPECT_RATIOS,
+          preferredAspectRatio: DESIGN_ASPECT_RATIOS[0],
           agentRunId,
         },
       })
@@ -796,6 +849,7 @@ export default function Design() {
         chatError={chatError}
         onRenameTemplate={handleRenameTemplate}
         designSystemName={selectedSystem?.name ?? palette.name}
+        onOpenAssets={() => setIsAssetsModalOpen(true)}
         onBack={() => navigate('/design')}
         onOpenTemplate={(slug) => navigate(`/design/${slug}`)}
       />
@@ -807,6 +861,15 @@ export default function Design() {
           <DesignSystemCanvas organization={selectedOrganization} palette={palette} />
         )}
       </main>
+
+      {isAssetsModalOpen && selectedOrganization && (
+        <DesignAssetsModal
+          organization={selectedOrganization}
+          template={selectedTemplate}
+          assets={assetsForOrganization}
+          onClose={() => setIsAssetsModalOpen(false)}
+        />
+      )}
     </div>
   )
 }
@@ -833,6 +896,7 @@ function DesignSidebar({
   chatError,
   onRenameTemplate,
   designSystemName,
+  onOpenAssets,
   onBack,
   onOpenTemplate,
 }: {
@@ -857,6 +921,7 @@ function DesignSidebar({
   chatError: string | null
   onRenameTemplate: (template: TemplateListItem, nextName: string) => Promise<void>
   designSystemName: string
+  onOpenAssets: () => void
   onBack: () => void
   onOpenTemplate: (slug: string) => void
 }) {
@@ -885,6 +950,7 @@ function DesignSidebar({
           chatError={chatError}
           onRenameTemplate={onRenameTemplate}
           designSystemName={designSystemName}
+          onOpenAssets={onOpenAssets}
           onBack={onBack}
         />
       ) : (
@@ -993,6 +1059,7 @@ function TemplateChatSidebar({
   chatError,
   onRenameTemplate,
   designSystemName,
+  onOpenAssets,
   onBack,
 }: {
   template: TemplateListItem
@@ -1005,6 +1072,7 @@ function TemplateChatSidebar({
   chatError: string | null
   onRenameTemplate: (template: TemplateListItem, nextName: string) => Promise<void>
   designSystemName: string
+  onOpenAssets: () => void
   onBack: () => void
 }) {
   const [templateName, setTemplateName] = useState(template.title)
@@ -1035,6 +1103,13 @@ function TemplateChatSidebar({
     }
   }
 
+  function handlePromptKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
+    if (event.key !== 'Enter' || event.shiftKey) return
+    event.preventDefault()
+    if (!prompt.trim()) return
+    event.currentTarget.form?.requestSubmit()
+  }
+
   return (
     <>
       <div className="border-b border-edge/12 px-4 py-4">
@@ -1046,6 +1121,15 @@ function TemplateChatSidebar({
           aria-label="return to templates"
         >
           <ArrowLeft className="h-4 w-4" />
+        </button>
+        <button
+          type="button"
+          onClick={onOpenAssets}
+          className="mb-4 ml-2 inline-flex h-8 w-8 items-center justify-center border border-edge/20 bg-pit-3 text-fg-3 transition hover:border-edge/40 hover:text-accent"
+          title="open assets"
+          aria-label="open assets"
+        >
+          <ImageIcon className="h-4 w-4" />
         </button>
         <div className="flex items-start gap-3">
           <div className="flex h-9 w-9 shrink-0 items-center justify-center border border-accent-fill/25 bg-accent-fill/8 text-accent">
@@ -1129,6 +1213,7 @@ function TemplateChatSidebar({
         <textarea
           value={prompt}
           onChange={(event) => onPromptChange(event.target.value)}
+          onKeyDown={handlePromptKeyDown}
           className="min-h-[112px] w-full resize-none border border-edge/20 bg-pit-3 px-3 py-2.5 text-sm leading-5 text-fg-1 outline-none transition placeholder:text-fg-4 focus:border-accent/60"
           placeholder="Change tone, layout, copy, structure..."
         />
@@ -1167,7 +1252,7 @@ function TemplateRunCard({
   return (
     <div className="border border-edge/12 bg-pit-2 px-3 py-3">
       <div className="mb-2 flex items-center justify-between gap-2 font-mono text-[9px] uppercase tracking-label">
-        <span className="text-fg-4">{formatDate(run.createdAt)}</span>
+        <span className="text-fg-4">{formatDateTime(run.createdAt)}</span>
         <span className={statusClass}>{effectiveStatus}</span>
       </div>
       <p className="text-xs leading-5 text-fg-2">{run.prompt}</p>
@@ -1186,6 +1271,257 @@ function TemplateRunCard({
       )}
     </div>
   )
+}
+
+function DesignAssetsModal({
+  organization,
+  template,
+  assets,
+  onClose,
+}: {
+  organization: Organization
+  template?: TemplateListItem
+  assets: DesignAssetRow[]
+  onClose: () => void
+}) {
+  const [step, setStep] = useState<'library' | 'upload'>('library')
+  const [selectedFile, setSelectedFile] = useState<File | null>(null)
+  const [assetName, setAssetName] = useState('')
+  const [isUploading, setIsUploading] = useState(false)
+  const [uploadError, setUploadError] = useState<string | null>(null)
+  const sortedAssets = [...assets].sort((a, b) => b.createdAt - a.createdAt)
+
+  function handleSelectFile(file: File | undefined) {
+    if (!file) return
+    setSelectedFile(file)
+    if (!assetName.trim()) setAssetName(file.name.replace(/\.[^.]+$/, ''))
+    setUploadError(null)
+  }
+
+  function handleDrop(event: DragEvent<HTMLLabelElement>) {
+    event.preventDefault()
+    handleSelectFile(event.dataTransfer.files[0])
+  }
+
+  async function handleUpload(event: FormEvent) {
+    event.preventDefault()
+    if (!selectedFile || isUploading) return
+
+    setIsUploading(true)
+    setUploadError(null)
+    try {
+      const dimensions = await readImageDimensions(selectedFile)
+      const contentBase64 = await readFileAsBase64(selectedFile)
+      await authFetch(`${config.apiUrl}/media/design-assets/upload`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          organizationId: organization.id,
+          templateId: template?.legacy ? undefined : template?.id,
+          name: assetName.trim() || selectedFile.name,
+          fileName: selectedFile.name,
+          mimeType: selectedFile.type || 'application/octet-stream',
+          contentBase64,
+          width: dimensions?.width,
+          height: dimensions?.height,
+          kind: selectedFile.type.startsWith('image/') ? 'image' : 'file',
+        }),
+      })
+      setSelectedFile(null)
+      setAssetName('')
+      setStep('library')
+    } catch (error) {
+      setUploadError(error instanceof Error ? error.message : 'could not upload asset')
+    } finally {
+      setIsUploading(false)
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 px-4 py-6 backdrop-blur-sm">
+      <div className="flex max-h-[88vh] w-full max-w-5xl flex-col border border-edge/20 bg-pit shadow-2xl">
+        <div className="flex items-start justify-between gap-4 border-b border-edge/12 px-5 py-4">
+          <div>
+            <div className="mb-1 flex items-center gap-2 font-mono text-[10px] uppercase tracking-label text-accent">
+              <ImageIcon className="h-3.5 w-3.5" />
+              assets
+            </div>
+            <h2 className="font-mono text-lg font-semibold lowercase text-fg-1">{organization.name}</h2>
+            <p className="mt-1 text-xs leading-5 text-fg-4">
+              Approved images and files the design agent can reference by URL, size, and usage metadata.
+            </p>
+          </div>
+          <div className="flex items-center gap-2">
+            {step === 'upload' ? (
+              <button
+                type="button"
+                onClick={() => setStep('library')}
+                className="inline-flex h-8 items-center border border-edge/20 bg-pit-3 px-3 font-mono text-[10px] uppercase tracking-label text-fg-3 transition hover:border-edge/40 hover:text-fg-1"
+              >
+                library
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={() => setStep('upload')}
+                className="inline-flex h-8 items-center gap-1.5 border border-accent-fill/25 bg-accent-fill/8 px-3 font-mono text-[10px] uppercase tracking-label text-accent transition hover:bg-accent-fill/14"
+              >
+                <Plus className="h-3.5 w-3.5" />
+                new asset
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={onClose}
+              className="inline-flex h-8 w-8 items-center justify-center border border-edge/20 bg-pit-3 text-fg-3 transition hover:border-edge/40 hover:text-fg-1"
+              title="close assets"
+              aria-label="close assets"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          </div>
+        </div>
+
+        {step === 'library' ? (
+          <div className="min-h-0 flex-1 overflow-y-auto p-5">
+            {sortedAssets.length ? (
+              <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+                {sortedAssets.map((asset) => (
+                  <DesignAssetCard key={asset.id} asset={asset} />
+                ))}
+              </div>
+            ) : (
+              <div className="flex min-h-[320px] flex-col items-center justify-center border border-dashed border-edge/20 bg-pit-2 px-6 text-center">
+                <FileImage className="mb-4 h-8 w-8 text-fg-4" />
+                <p className="font-mono text-sm lowercase text-fg-2">no assets yet</p>
+                <p className="mt-2 max-w-sm text-xs leading-5 text-fg-4">
+                  Add logos, screenshots, diagrams, photos, or document imagery for design templates to reuse.
+                </p>
+              </div>
+            )}
+          </div>
+        ) : (
+          <form onSubmit={handleUpload} className="min-h-0 flex-1 overflow-y-auto p-5">
+            <label
+              onDragOver={(event) => event.preventDefault()}
+              onDrop={handleDrop}
+              className="flex min-h-[300px] cursor-pointer flex-col items-center justify-center border border-dashed border-edge/24 bg-pit-2 px-6 py-12 text-center transition hover:border-accent/50 hover:bg-accent-fill/4"
+            >
+              <UploadCloud className="mb-4 h-9 w-9 text-accent" />
+              <div className="font-mono text-sm lowercase text-fg-1">
+                {selectedFile ? selectedFile.name : 'drop an asset or click to browse'}
+              </div>
+              <div className="mt-2 text-xs leading-5 text-fg-4">
+                PNG, JPG, SVG, WebP, PDF, or reference files. Images up to 10 MB.
+              </div>
+              <input
+                type="file"
+                className="sr-only"
+                onChange={(event) => handleSelectFile(event.target.files?.[0])}
+              />
+            </label>
+
+            <div className="mt-5 grid gap-4 md:grid-cols-[minmax(0,1fr)_220px]">
+              <label className="block">
+                <span className="mb-2 block font-mono text-[10px] uppercase tracking-label text-fg-4">optional name</span>
+                <input
+                  value={assetName}
+                  onChange={(event) => setAssetName(event.target.value)}
+                  className="h-10 w-full border border-edge/20 bg-pit-3 px-3 font-mono text-sm text-fg-1 outline-none transition placeholder:text-fg-4 focus:border-accent/60"
+                  placeholder="brand mark, dashboard screenshot..."
+                />
+              </label>
+              <button
+                type="submit"
+                disabled={!selectedFile || isUploading}
+                className="self-end inline-flex h-10 items-center justify-center gap-2 border border-accent-fill/30 bg-accent-fill/10 font-mono text-[10px] uppercase tracking-label text-accent transition hover:bg-accent-fill/16 disabled:cursor-not-allowed disabled:border-edge/12 disabled:bg-pit-3 disabled:text-fg-4"
+              >
+                <UploadCloud className="h-3.5 w-3.5" />
+                {isUploading ? 'uploading' : 'upload'}
+              </button>
+            </div>
+
+            {uploadError && (
+              <div className="mt-4 border border-fail/25 bg-fail/5 px-3 py-2 text-xs text-fail">
+                {uploadError}
+              </div>
+            )}
+          </form>
+        )}
+      </div>
+    </div>
+  )
+}
+
+function DesignAssetCard({ asset }: { asset: DesignAssetRow }) {
+  const width = readNumber(asset.metadata?.width)
+  const height = readNumber(asset.metadata?.height)
+  const sizeBytes = readNumber(asset.metadata?.sizeBytes)
+  const mimeType = readString(asset.metadata?.mimeType)
+
+  return (
+    <div className="border border-edge/12 bg-pit-2">
+      <div className="flex aspect-[4/3] items-center justify-center overflow-hidden border-b border-edge/10 bg-void">
+        {asset.url && asset.kind !== 'file' ? (
+          <img src={asset.url} alt={asset.name} className="h-full w-full object-contain" />
+        ) : (
+          <FileImage className="h-10 w-10 text-fg-4" />
+        )}
+      </div>
+      <div className="p-3">
+        <div className="truncate font-mono text-sm font-semibold lowercase text-fg-1">{asset.name}</div>
+        <div className="mt-2 flex flex-wrap gap-2 font-mono text-[9px] uppercase tracking-label text-fg-4">
+          <span>{asset.kind}</span>
+          {width && height ? <span>{width} x {height}</span> : null}
+          {sizeBytes ? <span>{formatBytes(sizeBytes)}</span> : null}
+        </div>
+        {mimeType ? <div className="mt-2 truncate font-mono text-[9px] text-fg-4">{mimeType}</div> : null}
+        {asset.url ? (
+          <a
+            href={asset.url}
+            target="_blank"
+            rel="noreferrer"
+            className="mt-3 inline-flex items-center gap-1.5 border-b border-accent/70 pb-1 font-mono text-[10px] uppercase tracking-label text-accent"
+          >
+            open <ExternalLink className="h-3 w-3" />
+          </a>
+        ) : null}
+      </div>
+    </div>
+  )
+}
+
+function readFileAsBase64(file: File) {
+  return new Promise<string>((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => resolve(String(reader.result ?? ''))
+    reader.onerror = () => reject(reader.error ?? new Error('Could not read file'))
+    reader.readAsDataURL(file)
+  })
+}
+
+function readImageDimensions(file: File) {
+  if (!file.type.startsWith('image/')) return Promise.resolve(null)
+
+  return new Promise<{ width: number; height: number } | null>((resolve) => {
+    const image = new Image()
+    const url = URL.createObjectURL(file)
+    image.onload = () => {
+      URL.revokeObjectURL(url)
+      resolve({ width: image.naturalWidth, height: image.naturalHeight })
+    }
+    image.onerror = () => {
+      URL.revokeObjectURL(url)
+      resolve(null)
+    }
+    image.src = url
+  })
+}
+
+function formatBytes(value: number) {
+  if (value < 1024) return `${value} b`
+  if (value < 1024 * 1024) return `${(value / 1024).toFixed(1)} kb`
+  return `${(value / (1024 * 1024)).toFixed(1)} mb`
 }
 
 function TemplatePreview({
@@ -1216,13 +1552,56 @@ function TemplatePreview({
   const previewUrl = getTemplatePreviewUrl(version)
 
   if (previewUrl) {
+    const previewDimensions = getTemplatePreviewDimensions(version)
     return (
-      <iframe
-        title={template.title}
-        src={previewUrl}
-        sandbox="allow-scripts allow-downloads"
-        className="h-full w-full border-0 bg-pit"
-      />
+      <div className="h-full min-h-0 overflow-y-auto bg-pit text-fg-1">
+        <div className="sticky top-0 z-20 border-b border-edge/15 bg-pit/90 px-4 py-3 backdrop-blur-sm md:px-8 md:py-4">
+          <div className="mx-auto flex max-w-[1400px] flex-wrap items-center justify-between gap-3">
+            <div className="min-w-0">
+              <div className="font-mono text-[10px] uppercase tracking-label text-fg-3">design preview</div>
+              <h1 className="truncate font-mono text-base font-bold lowercase text-fg-1 md:text-lg">{template.title}</h1>
+              <p className="mt-0.5 font-mono text-[10px] uppercase tracking-label text-fg-4">
+                {previewDimensions.label} / {previewDimensions.width} x {previewDimensions.height}px
+              </p>
+            </div>
+            <div className="flex items-center gap-2">
+              <a
+                href={previewUrl}
+                target="_blank"
+                rel="noreferrer"
+                className="inline-flex h-8 items-center gap-1.5 border border-edge/20 bg-pit-3 px-3 font-mono text-[10px] uppercase tracking-label text-fg-2 transition hover:border-edge/35 hover:text-fg-1"
+              >
+                <ExternalLink className="h-3.5 w-3.5" />
+                open
+              </a>
+              <button
+                type="button"
+                onClick={() => window.open(previewUrl, '_blank', 'noopener,noreferrer')}
+                className="inline-flex h-8 items-center gap-1.5 border border-accent-fill/30 bg-accent-fill/8 px-3 font-mono text-[10px] uppercase tracking-label text-accent transition hover:bg-accent-fill/16"
+                title="open preview, then print or save as PDF"
+              >
+                <Printer className="h-3.5 w-3.5" />
+                print pdf
+              </button>
+            </div>
+          </div>
+        </div>
+        <div className="px-4 py-8 md:px-8 md:py-12">
+          <div className="mx-auto max-w-[1400px]">
+            <div
+              className="w-full overflow-hidden border border-edge/16 bg-void shadow-2xl"
+              style={{ aspectRatio: `${previewDimensions.width} / ${previewDimensions.height}` }}
+            >
+              <iframe
+                title={template.title}
+                src={previewUrl}
+                sandbox="allow-scripts allow-downloads"
+                className="h-full w-full border-0 bg-pit"
+              />
+            </div>
+          </div>
+        </div>
+      </div>
     )
   }
 
@@ -1256,6 +1635,17 @@ function getTemplatePreviewUrl(version?: DesignTemplateVersionRow) {
     : null
 }
 
+function getTemplatePreviewDimensions(version?: DesignTemplateVersionRow) {
+  const dimensions = readRecord(version?.manifest?.dimensions)
+  const width = readNumber(dimensions?.width) ?? readNumber(version?.manifest?.width)
+  const height = readNumber(dimensions?.height) ?? readNumber(version?.manifest?.height)
+  if (width && height) return { width, height, label: 'custom' }
+
+  const aspectRatioId = readString(version?.manifest?.aspectRatioId)
+  const match = DESIGN_ASPECT_RATIOS.find((entry) => entry.id === aspectRatioId)
+  return match ?? DESIGN_ASPECT_RATIOS[0]
+}
+
 function buildDefaultTemplateFiles(name: string, organization: Organization): Record<string, string> {
   const organizationName = organization.name
   return {
@@ -1282,10 +1672,11 @@ export default function Template() {
       <h1 style={{
         maxWidth: 900,
         margin: '72px 0 24px',
-        fontFamily: 'Instrument Serif, Georgia, serif',
-        fontSize: 'clamp(64px, 11vw, 156px)',
-        fontWeight: 400,
-        lineHeight: 0.9
+        fontFamily: 'Inter Tight, ui-sans-serif, system-ui, sans-serif',
+        fontSize: 'clamp(56px, 10vw, 132px)',
+        fontWeight: 200,
+        letterSpacing: 0,
+        lineHeight: 0.94
       }}>
         {${JSON.stringify(name)}}
       </h1>

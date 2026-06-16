@@ -3,7 +3,7 @@ import { GetObjectCommand, PutObjectCommand, S3Client } from '@aws-sdk/client-s3
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner'
 import { Router, type Request } from 'express'
 import { eq } from 'drizzle-orm'
-import { documents, pmIssues } from '../../../db/schema.js'
+import { designAssets, documents, organizations, pmIssues } from '../../../db/schema.js'
 import { getDb } from '../db.js'
 import type { JWTPayload } from '../lib/auth.js'
 
@@ -198,6 +198,98 @@ router.post('/presign-read', async (req, res) => {
   }
 })
 
+router.post('/design-assets/upload', async (req, res) => {
+  try {
+    const user = authenticatedUser(req)
+    const body = req.body ?? {}
+    const organizationId = typeof body.organizationId === 'string' ? body.organizationId : ''
+    const templateId = typeof body.templateId === 'string' && body.templateId ? body.templateId : null
+    const fileName = typeof body.fileName === 'string' ? body.fileName : ''
+    const displayName = typeof body.name === 'string' && body.name.trim() ? body.name.trim() : fileName
+    const mimeType = typeof body.mimeType === 'string' && body.mimeType.trim() ? body.mimeType : 'application/octet-stream'
+    const contentBase64 = typeof body.contentBase64 === 'string' ? body.contentBase64 : ''
+    const width = typeof body.width === 'number' && Number.isFinite(body.width) ? Math.round(body.width) : null
+    const height = typeof body.height === 'number' && Number.isFinite(body.height) ? Math.round(body.height) : null
+    const kind = readDesignAssetKind(body.kind, mimeType)
+
+    if (!organizationId || !fileName || !contentBase64) {
+      res.status(400).json({ error: 'VALIDATION', message: 'Missing design asset upload fields.' })
+      return
+    }
+    if (kind === 'image' && !mimeType.startsWith('image/')) {
+      res.status(400).json({ error: 'VALIDATION', message: 'Only image MIME types can be uploaded as design images.' })
+      return
+    }
+
+    const organization = await getAccessibleOrganization(organizationId, user)
+    if (!organization) {
+      res.status(404).json({ error: 'NOT_FOUND', message: 'Organization not found.' })
+      return
+    }
+
+    const bytes = decodeBase64Payload(contentBase64)
+    if (bytes.length === 0) {
+      res.status(400).json({ error: 'VALIDATION', message: 'Asset is empty.' })
+      return
+    }
+    if (kind === 'image' && bytes.length > MAX_IMAGE_BYTES) {
+      res.status(400).json({ error: 'VALIDATION', message: 'Images must be 10 MB or smaller.' })
+      return
+    }
+    if (kind !== 'image' && bytes.length > MAX_FILE_BYTES) {
+      res.status(400).json({ error: 'VALIDATION', message: 'Files must be 50 MB or smaller.' })
+      return
+    }
+
+    const key = designAssetKey({ organizationId, fileName, kind })
+    await getS3Client().send(new PutObjectCommand({
+      Bucket: getBucketName(),
+      Key: key,
+      Body: bytes,
+      ContentType: mimeType,
+      ContentDisposition: kind === 'file' ? `attachment; filename="${sanitizeContentDispositionFileName(fileName)}"` : undefined,
+    }))
+
+    const publicUrl = publicReadUrl(key)
+    const now = new Date()
+    const [asset] = await getDb()
+      .insert(designAssets)
+      .values({
+        id: randomUUID(),
+        organizationId,
+        templateId: templateId ?? undefined,
+        kind,
+        name: displayName,
+        storageKey: key,
+        url: publicUrl,
+        metadata: {
+          fileName,
+          mimeType,
+          sizeBytes: bytes.length,
+          width,
+          height,
+          aspectRatio: width && height ? Number((width / height).toFixed(4)) : undefined,
+          uploadedVia: 'design_assets_modal',
+        },
+        createdAt: now,
+        updatedAt: now,
+      })
+      .returning()
+
+    res.status(201).json({
+      asset,
+      readUrl: publicUrl,
+      signedReadUrl: await signedReadUrl(key),
+    })
+  } catch (error) {
+    console.error('Design asset upload failed', error)
+    res.status(500).json({
+      error: 'DESIGN_ASSET_UPLOAD_FAILED',
+      message: error instanceof Error ? error.message : 'Could not upload design asset.',
+    })
+  }
+})
+
 async function getAccessibleDocument(documentId: string, user: JWTPayload | undefined) {
   const db = getDb()
   const [document] = await db.select().from(documents).where(eq(documents.id, documentId)).limit(1)
@@ -216,6 +308,13 @@ async function getAccessibleIssue(issueId: string, user: JWTPayload | undefined)
     return user?.organizationIds.includes(issue.contextCompanyId) ? issue : null
   }
   return user?.canAccessUnscoped ? issue : null
+}
+
+async function getAccessibleOrganization(organizationId: string, user: JWTPayload | undefined) {
+  const db = getDb()
+  const [organization] = await db.select().from(organizations).where(eq(organizations.id, organizationId)).limit(1)
+  if (!organization) return null
+  return user?.organizationIds.includes(organization.id) || user?.canAccessUnscoped ? organization : null
 }
 
 async function getAccessibleMediaOwner(ownerType: MediaOwnerType, ownerId: string, user: JWTPayload | undefined) {
@@ -291,6 +390,37 @@ function mediaOwnerKey({
     folder,
     `${randomUUID()}-${sanitizeFileName(fileName)}`,
   ].join('/')
+}
+
+function designAssetKey({
+  organizationId,
+  fileName,
+  kind,
+}: {
+  organizationId: string
+  fileName: string
+  kind: string
+}) {
+  return [
+    storageEnvironmentPrefix(),
+    'organizations',
+    organizationId,
+    'design-assets',
+    kind === 'image' ? 'images' : 'files',
+    `${randomUUID()}-${sanitizeFileName(fileName)}`,
+  ].join('/')
+}
+
+function publicReadUrl(key: string) {
+  const baseUrl = process.env.S3_PUBLIC_BASE_URL || process.env.AWS_S3_PUBLIC_BASE_URL
+  if (baseUrl) return `${baseUrl.replace(/\/$/, '')}/${key.split('/').map(encodeURIComponent).join('/')}`
+
+  return `https://${getBucketName()}.s3.${getAwsRegion()}.amazonaws.com/${key.split('/').map(encodeURIComponent).join('/')}`
+}
+
+function readDesignAssetKind(value: unknown, mimeType: string) {
+  if (value === 'logo' || value === 'screenshot' || value === 'photo' || value === 'file') return value
+  return mimeType.startsWith('image/') ? 'image' : 'file'
 }
 
 function parseMediaOwnerKey(key: string) {
