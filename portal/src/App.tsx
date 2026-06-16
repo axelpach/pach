@@ -1,6 +1,6 @@
 import { Routes, Route, NavLink, Navigate, useLocation, useNavigate, useParams } from 'react-router-dom'
 import { useQuery, useZero, ZeroProvider } from '@rocicorp/zero/react'
-import { CircleDollarSign, FileText, FolderKanban, LayoutTemplate, LogOut, MessageCircleMore, Menu, Moon, Rows3, Sun, X } from 'lucide-react'
+import { CircleDollarSign, FileText, FolderKanban, LogOut, MessageCircleMore, Menu, Moon, Palette, Rows3, Sun, X } from 'lucide-react'
 import { createContext, useContext, useEffect, useMemo, useState, type ComponentType, type ReactNode } from 'react'
 import { schema, type Schema } from './zero-schema'
 import { mutators, type Mutators } from './mutators'
@@ -209,7 +209,7 @@ const MOBILE_NAV_ITEMS: Array<{
   { to: '/crm', label: 'crm', icon: FolderKanban },
   { to: '/finance/dashboard', label: 'finance', icon: CircleDollarSign },
   { to: '/whatsapp/templates', label: 'whatsapp', icon: MessageCircleMore, requiresWhatsApp: true },
-  { to: '/design', label: 'design', icon: LayoutTemplate },
+  { to: '/design', label: 'design', icon: Palette },
 ]
 
 function MobileHeader({ onMenuClick }: { onMenuClick: () => void }) {
@@ -447,7 +447,7 @@ function useVisibleOuterNavItems() {
             item.path === '/crm' ? FolderKanban :
             item.path.startsWith('/finance') ? CircleDollarSign :
             item.path === '/whatsapp/templates' ? MessageCircleMore :
-            LayoutTemplate,
+            Palette,
         })),
     [canAccessWhatsApp],
   )
