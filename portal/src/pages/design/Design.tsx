@@ -394,7 +394,7 @@ function buildDesignSystemRunMetadata(
       'When changing layout, copy, colors, typography, components, or imagery, preserve the organization design system tokens and principles.',
       `Use one of these predefined aspect ratios unless the user requests otherwise: ${DESIGN_ASPECT_RATIOS.map((ratio) => `${ratio.label} ${ratio.width}x${ratio.height}`).join(', ')}. Set manifest.dimensions or manifest.aspectRatioId so preview and export sizing stay predictable.`,
       organization.project === 'ardia'
-        ? 'For Ardia, the buyer landing, Pach legacy ardia-one-pager, and Universo aBanza onboarding decks are canonical. Preserve that quiet-minimalist system for every edit: Inter Tight 200 display titles, Geist Mono labels, one emotionally important inline Instrument Serif italic vermilion phrase, hairline product/data surfaces, recurring low-area vermilion signals, optional subtle off-canvas red radial glow, real Ardia mark/assets, and no generic executive-deck drift.'
+        ? 'For Ardia, the Pach legacy ardia-one-pager is the default composition skeleton for every deck slide: top brand row, right metadata, dot/mono eyebrow, Inter Tight 200 title scale, one emotionally important inline Instrument Serif italic vermilion phrase, short body, hairline rows, transparent framed modules, footer hairline, and subtle off-canvas red radial glow. Buyer landing, data, chart, KPI, table, WhatsApp, and Universo aBanza modules are allowed, but they must inherit that one-pager skeleton rather than replacing the whole slide composition.'
         : '',
     ].join(' '),
     system: system
@@ -459,6 +459,8 @@ function buildDesignSystemRunMetadata(
                   ],
                   nonNegotiables: [
                     'Preserve the Ardia quiet-minimalist system unless the user explicitly asks to replace the organization design system.',
+                    'Use the legacy Ardia one-pager composition skeleton for the whole slide: top brand row, right metadata, dot/mono eyebrow, Inter Tight 200 title scale, inline red serif phrase, short body, hairline rows, transparent framed modules, footer hairline, and subtle off-canvas red glow.',
+                    'Charts, KPIs, tables, WhatsApp mocks, product surfaces, buyer-landing data panels, and Universo aBanza checklist modules are allowed, but they must be inserted into the one-pager skeleton and inherit its margins, type scale, hairline rhythm, transparent frames, and footer structure.',
                     'Use Inter Tight 200 display titles, Geist Mono labels, and Instrument Serif italic vermilion as one emotionally important inline title phrase, accent word, or short accent line.',
                     'Use real Ardia logo/assets; do not draw or invent a generic square logo.',
                     'Use near-black backgrounds, whitespace, one-pixel hairlines, quiet data/product surfaces, and vermilion as a recurring low-area signal: dot, inline serif phrase, KPI unit, chart stroke/faint fill, CTA underline, status text.',
@@ -479,7 +481,7 @@ function buildDesignSystemRunMetadata(
                 }
               : undefined,
             agentInstruction: organization.project === 'ardia'
-              ? 'MANDATORY ARDIA DESIGN CONTRACT: match the Ardia buyer landing plus Pach legacy ardia-one-pager and Universo aBanza onboarding decks. Treat metadata.requiredDesignContract as a QA checklist. Do not drift into generic executive decks, generic SaaS cards, blue/purple gradients, neon/glass/bokeh panels, large serif primary titles, all-italic headlines, fake square logos, opaque red panels, or one long scrolling document. Use Inter Tight 200 display titles, Geist Mono labels, one emotionally important inline Instrument Serif italic vermilion title phrase, hairlines, whitespace, quiet product/data surfaces, recurring low-area vermilion signals, the allowed subtle off-canvas red radial glow, and the real Ardia logo asset or inline mark.'
+              ? 'MANDATORY ARDIA DESIGN CONTRACT: use the Pach legacy ardia-one-pager as the composition skeleton for the whole slide. Treat metadata.requiredDesignContract as a QA checklist. Do not drift into generic executive decks, generic SaaS cards, blue/purple gradients, neon/glass/bokeh panels, large serif primary titles, all-italic headlines, fake square logos, opaque red panels, or one long scrolling document. Use Inter Tight 200 display titles, Geist Mono labels, one emotionally important inline Instrument Serif italic vermilion title phrase, hairlines, whitespace, recurring low-area vermilion signals, the allowed subtle off-canvas red radial glow, and the real Ardia logo asset or inline mark. Charts, KPIs, tables, WhatsApp mocks, and product/data surfaces are allowed, but they must inherit the one-pager margins, title scale, text hierarchy, hairline rhythm, transparent frames, footer, and subtle glow.'
               : undefined,
             avoid: organization.project === 'ardia'
               ? [

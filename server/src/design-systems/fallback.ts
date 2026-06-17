@@ -151,13 +151,18 @@ const ARDIA_TOKENS = {
     forms: 'Underline-only inputs, transparent background.',
   },
   deckGuidance: {
-    referenceStyle: 'Match the Ardia buyer landing plus Pach legacy decks "ardia one-pager" and "onboarding - universo abanza". Treat those as canon over generic SaaS deck instincts.',
+    referenceStyle: 'Use the Pach legacy "ardia one-pager" as the default composition skeleton for Ardia decks. Use the buyer landing and Universo aBanza patterns as modules inside that skeleton, not as replacements for the overall page grammar.',
+    compositionSkeleton: [
+      'Default every Ardia deck slide to the one-pager composition grammar: top brand row, right-side metadata, dot/mono eyebrow, large Inter Tight 200 title, one inline Instrument Serif italic vermilion phrase, short body, hairline section rows, transparent framed modules, footer hairline, and subtle off-canvas vermilion glow.',
+      'Charts, KPIs, tables, WhatsApp mocks, product surfaces, and buyer-landing data panels are allowed, but they must inherit the one-pager margins, title scale, text hierarchy, hairline rhythm, transparent frames, and footer structure.',
+      'Do not let a content module change the slide into a separate dashboard/report composition. The module can vary; the one-pager skeleton stays.',
+    ],
     preferredSlideStructure: [
       'Start with mono eyebrow plus small Ardia brand lockup.',
       'Use a large Inter Tight 200 title with one emotionally important inline phrase in Instrument Serif italic vermilion, like the legacy one-pager title treatments.',
       'Keep body copy short and warm, max 58ch.',
       'Use hairline dividers and whitespace instead of bordered cards.',
-      'For product/value slides, include a dashboard-like data surface inspired by QHeroSurface: mono header, two KPI blocks, subtle chart, activity rows.',
+      'For product/value slides, insert a dashboard-like data surface inspired by QHeroSurface into the one-pager skeleton: mono header, two KPI blocks, subtle chart, activity rows, transparent frame or hairline boundary.',
       'Use vermilion as a recurring low-area signal: 6px dot, inline serif phrase, KPI unit, chart stroke/faint fill, CTA underline, status text, and optional off-canvas radial glow.',
     ],
     canonicalPatterns: [
@@ -179,7 +184,7 @@ const ARDIA_TOKENS = {
       {
         name: 'Buyer landing surface',
         useFor: 'Dashboard or operational proof visuals.',
-        structure: 'Left copy/right data surface, mono dashboard metadata, large KPI numbers, one vermilion chart stroke, faint hairline row dividers, no boxy card stack.',
+        structure: 'Use as a module inside the one-pager skeleton: mono dashboard metadata, large KPI numbers, one vermilion chart stroke, faint hairline row dividers, transparent or hairline frame, no boxy card stack.',
       },
     ],
     starterKit: {
@@ -262,6 +267,8 @@ const ARDIA_METADATA = {
       'Use the Ardia quiet-minimalist system for every Ardia template edit unless the user explicitly asks to change the organization design system.',
       'Use Inter Tight 200 for large display titles, Geist Mono for small technical labels, and Instrument Serif italic vermilion for one emotionally important inline title phrase, accent word, or short accent line.',
       'Use the real Ardia mark from assets.logo.inlineSvg, assets.logo.publicCandidates, or uploaded organization assets; never draw a fake square logo.',
+      'Use the legacy Ardia one-pager composition skeleton for the whole slide: top brand row, right metadata, dot/mono eyebrow, Inter Tight 200 title scale, inline red serif phrase, short body, hairline rows, transparent framed modules, footer hairline, and subtle off-canvas red glow.',
+      'Charts, KPIs, tables, WhatsApp mocks, and product/data surfaces are allowed, but they must be inserted into the one-pager skeleton and inherit its margins, type scale, hairline rhythm, transparent frames, and footer structure.',
       'Keep backgrounds near black, structure with whitespace and one-pixel hairlines, and use vermilion as a recurring low-area signal: dots, inline serif phrases, KPI units, chart strokes/faint fills, CTA underlines, status text, and optional off-canvas radial glow.',
       'Use the legacy Ardia one-pager atmospheric glow when useful: one subtle vermilion radial gradient per slide, placed off-canvas, opacity 0.08-0.13, fading to transparent. Do not replace it with neon, bokeh, blue/purple gradients, or opaque red panels.',
       'When a slide needs visuals, create quiet product/data surfaces like the buyer landing QHeroSurface or the legacy Ardia one-pager data panels.',
@@ -289,6 +296,7 @@ const ARDIA_METADATA = {
     'Treat metadata.requiredDesignContract as a QA checklist before saving; this is a hard constraint, not optional inspiration.',
     'Do not drift into a generic executive deck, generic SaaS cards, blue/purple gradients, neon/glass/bokeh panels, large serif primary titles, opaque red panels, or fake square logos.',
     'Use Inter Tight 200 for large titles, Geist Mono for small labels, and Instrument Serif italic vermilion for one emotionally important inline title phrase, accent word, or short accent line.',
+    'Use the Ardia one-pager composition skeleton for the whole slide. Charts, KPIs, product surfaces, and other content modules are allowed, but they must inherit the one-pager margins, title scale, text hierarchy, hairline rhythm, transparent frames, footer, and subtle glow.',
     'Use the Ardia one-pager red atmosphere: one subtle off-canvas vermilion radial glow per slide when useful, opacity 0.08-0.13, fading to transparent; this is allowed and canonical.',
     'Use the real Ardia mark from assets.logo.inlineSvg, assets.logo.publicCandidates, or uploaded organization assets.',
     'Create quiet hairline, data-rich product surfaces inspired by QHeroSurface and the legacy Ardia one-pager when a slide needs visuals.',
