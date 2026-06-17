@@ -933,6 +933,9 @@ async function getDesignTemplate(req: AuthenticatedRequest, args: unknown) {
         'When changing layout, copy, colors, typography, components, or imagery, preserve the organization design system tokens and principles.',
         'For deck templates, prefer one React component per slide and export const slides = [SlideOne, SlideTwo, ...]. Set manifest.dimensions or manifest.aspectRatioId so Pach can render separated, scaled slide frames.',
         'Templates render as standalone iframe documents outside the Pach app shell. Tailwind classes are supported only when manifest.styling is "tailwind"; otherwise use inline React style objects or import a local CSS file included in the template files. Do not rely on Pach CSS variables or app global CSS.',
+        organization?.project === 'ardia'
+          ? 'For Ardia, treat organizationDesignSystem.tokens.deckGuidance.referenceStyle, canonicalPatterns, and starterKit as the canonical implementation brief. Match the buyer landing plus Pach legacy ardia-one-pager and Universo aBanza onboarding decks. Use real fixed-size slides, not one long scrolling document.'
+          : '',
         assets.length > 0
           ? 'Use available assets from the assets array when a logo, product image, screenshot, or uploaded visual is needed. Respect each asset url, dimensions, and metadata.'
           : 'If an asset is needed but not available, report that in progress instead of inventing a fake logo or product image.',

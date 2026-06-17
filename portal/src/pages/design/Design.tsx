@@ -792,6 +792,7 @@ export default function Design() {
         type: 'deck',
         entry: 'src/Template.tsx',
         styling: 'tailwind',
+        googleFontsHref: 'https://fonts.googleapis.com/css2?family=Inter+Tight:wght@200;300;400;500&family=Instrument+Serif:ital@0;1&family=Geist+Mono:wght@400;500&display=swap',
         tailwindConfig: buildDefaultTailwindConfig(selectedOrganization),
         aspectRatioId: 'deck-landscape',
         dimensions: { width: 1920, height: 1080 },
@@ -1818,6 +1819,12 @@ function buildDefaultTailwindConfig(organization: Organization) {
 
 function buildDefaultTemplateFiles(name: string, organization: Organization): Record<string, string> {
   const organizationName = organization.name
+  if (organization.project === 'ardia') {
+    return {
+      'src/Template.tsx': buildArdiaDefaultTemplateSource(name),
+    }
+  }
+
   return {
     'src/Template.tsx': `import React from 'react'
 
@@ -1877,6 +1884,219 @@ export default function Template() {
 }
 `,
   }
+}
+
+function buildArdiaDefaultTemplateSource(name: string) {
+  return `import React from 'react'
+
+type SlideProps = {
+  width: number
+  height: number
+  pageIndex?: number
+  pageCount?: number
+}
+
+const QM = {
+  bg: '#14110f',
+  fg: '#ede6db',
+  fg2: 'rgba(237, 230, 219, 0.78)',
+  fgDim: 'rgba(237, 230, 219, 0.42)',
+  fgFaint: 'rgba(237, 230, 219, 0.22)',
+  accent: '#E43F3F',
+  hair: 'rgba(237, 230, 219, 0.10)',
+  hair2: 'rgba(237, 230, 219, 0.06)',
+}
+
+const sans = "'Inter Tight', ui-sans-serif, system-ui, sans-serif"
+const serif = "'Instrument Serif', Georgia, serif"
+const mono = "'Geist Mono', ui-monospace, Menlo, monospace"
+
+function ArdiaMark({ size = 30 }: { size?: number }) {
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+      <svg width={size} height={size} viewBox="0 0 32 32" fill="none" aria-hidden="true" style={{ color: QM.accent }}>
+        <path d="M5 28V12L13 8V28" stroke="currentColor" strokeWidth="1.5" />
+        <path d="M13 28V6L23 10V28" stroke="currentColor" strokeWidth="1.5" />
+        <path d="M5 28H27" stroke="currentColor" strokeWidth="1.5" />
+        <path d="M7 14V26M9 13V26M11 12V26" stroke="currentColor" strokeWidth="0.6" opacity="0.55" />
+        <rect x="14.5" y="14" width="6" height="6" transform="rotate(45 17.5 17)" fill="currentColor" />
+      </svg>
+      <span style={{ fontFamily: serif, fontStyle: 'italic', fontSize: size, letterSpacing: '-0.01em', color: QM.fg, lineHeight: 1 }}>
+        Ardia
+      </span>
+    </div>
+  )
+}
+
+function MonoLabel({ children }: { children: React.ReactNode }) {
+  return (
+    <span style={{ fontFamily: mono, fontSize: 11, fontWeight: 500, letterSpacing: '0.18em', textTransform: 'uppercase', color: QM.fgDim }}>
+      {children}
+    </span>
+  )
+}
+
+function DotLabel({ children }: { children: React.ReactNode }) {
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+      <span style={{ width: 6, height: 6, background: QM.accent, display: 'inline-block' }} />
+      <MonoLabel>{children}</MonoLabel>
+    </div>
+  )
+}
+
+function SlideShell({ width, height, children, pageIndex = 0, pageCount = 1 }: SlideProps & { children: React.ReactNode }) {
+  return (
+    <main style={{
+      width,
+      height,
+      position: 'relative',
+      overflow: 'hidden',
+      display: 'flex',
+      flexDirection: 'column',
+      background: QM.bg,
+      color: QM.fg,
+      fontFamily: sans,
+    }}>
+      <div style={{
+        position: 'absolute',
+        top: -220,
+        right: -220,
+        width: 760,
+        height: 760,
+        background: 'radial-gradient(circle, rgba(228, 63, 63, 0.10) 0%, rgba(228, 63, 63, 0) 60%)',
+        pointerEvents: 'none',
+      }} />
+      <header style={{ padding: '56px 72px 0', display: 'flex', alignItems: 'center', justifyContent: 'space-between', position: 'relative', zIndex: 1 }}>
+        <ArdiaMark />
+        <MonoLabel>{String(pageIndex + 1).padStart(2, '0')} / {String(pageCount).padStart(2, '0')}</MonoLabel>
+      </header>
+      <div style={{ position: 'relative', zIndex: 1, flex: 1 }}>
+        {children}
+      </div>
+      <footer style={{ borderTop: '1px solid ' + QM.hair, padding: '20px 72px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', position: 'relative', zIndex: 1 }}>
+        <MonoLabel>ardia.mx</MonoLabel>
+        <MonoLabel>Quiet Minimalist</MonoLabel>
+      </footer>
+    </main>
+  )
+}
+
+function HairlineRow({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div style={{ borderTop: '1px solid ' + QM.hair, padding: '24px 0', display: 'grid', gridTemplateColumns: '180px 1fr', gap: 40, alignItems: 'baseline' }}>
+      <MonoLabel>{label}</MonoLabel>
+      <div style={{ fontSize: 24, fontWeight: 300, lineHeight: 1.35, color: QM.fg2, letterSpacing: '-0.015em' }}>{children}</div>
+    </div>
+  )
+}
+
+function Metric({ value, unit, label, detail, first }: { value: string; unit?: string; label: string; detail: string; first?: boolean }) {
+  return (
+    <div style={{ flex: 1, padding: '0 34px', borderLeft: first ? 'none' : '1px solid ' + QM.hair2 }}>
+      <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
+        <span style={{ fontSize: 74, fontWeight: 200, lineHeight: 0.95, letterSpacing: '-0.05em' }}>{value}</span>
+        {unit ? <span style={{ fontFamily: serif, fontStyle: 'italic', fontSize: 31, color: QM.accent }}>{unit}</span> : null}
+      </div>
+      <div style={{ marginTop: 14, fontSize: 16, fontWeight: 400, letterSpacing: '-0.01em' }}>{label}</div>
+      <div style={{ marginTop: 8, fontSize: 14, fontWeight: 300, lineHeight: 1.5, color: QM.fgDim }}>{detail}</div>
+    </div>
+  )
+}
+
+function ProductSurface() {
+  const rows = [
+    ['09:12', 'Recordatorio enviado', 'WhatsApp'],
+    ['09:18', 'Pago reportado', 'Inbox'],
+    ['09:27', 'Conciliacion lista', 'Auto'],
+    ['09:31', 'Recibo emitido', 'Cerrado'],
+  ]
+
+  return (
+    <div style={{ borderLeft: '1px solid ' + QM.hair, paddingLeft: 44, minHeight: 430 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '1px solid ' + QM.hair, paddingBottom: 24 }}>
+        <MonoLabel>Dashboard · abr 2026</MonoLabel>
+        <MonoLabel>22.04 · 14:08</MonoLabel>
+      </div>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 48, padding: '38px 0' }}>
+        <div>
+          <MonoLabel>Ingresos</MonoLabel>
+          <div style={{ marginTop: 18, fontSize: 78, fontWeight: 200, lineHeight: 0.95, letterSpacing: '-0.055em' }}>111.4<span style={{ color: QM.fgFaint }}>M</span></div>
+          <p style={{ margin: '12px 0 0', color: QM.fgDim, fontSize: 15, lineHeight: 1.4 }}>47 contratos activos</p>
+        </div>
+        <div>
+          <MonoLabel>Pagos a tiempo</MonoLabel>
+          <div style={{ marginTop: 18, fontSize: 78, fontWeight: 200, lineHeight: 0.95, letterSpacing: '-0.055em' }}>70<span style={{ fontFamily: serif, fontStyle: 'italic', color: QM.accent, fontSize: 30 }}>%</span></div>
+          <p style={{ margin: '12px 0 0', color: QM.fgDim, fontSize: 15, lineHeight: 1.4 }}>+12 pts vs. mar</p>
+        </div>
+      </div>
+      <div style={{ height: 118, borderTop: '1px solid ' + QM.hair2, borderBottom: '1px solid ' + QM.hair2, position: 'relative', overflow: 'hidden' }}>
+        <svg viewBox="0 0 560 118" preserveAspectRatio="none" style={{ width: '100%', height: '100%' }}>
+          <path d="M0 86 C80 76 110 54 170 64 C220 72 238 42 302 46 C360 48 392 30 450 28 C500 26 526 18 560 18 L560 118 L0 118 Z" fill="rgba(228,63,63,0.13)" />
+          <path d="M0 86 C80 76 110 54 170 64 C220 72 238 42 302 46 C360 48 392 30 450 28 C500 26 526 18 560 18" stroke={QM.accent} strokeWidth="2" fill="none" />
+        </svg>
+      </div>
+      <div style={{ marginTop: 30 }}>
+        <MonoLabel>Actividades pendientes</MonoLabel>
+        {rows.map(([time, event, status]) => (
+          <div key={time} style={{ display: 'grid', gridTemplateColumns: '64px 1fr 92px', gap: 18, padding: '13px 0', borderBottom: '1px solid ' + QM.hair2, fontSize: 14, color: QM.fg2 }}>
+            <span style={{ fontFamily: mono, color: QM.fgDim }}>{time}</span>
+            <span>{event}</span>
+            <span style={{ fontFamily: serif, fontStyle: 'italic', color: status === 'Auto' ? QM.accent : QM.fgDim }}>{status}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+export function CoverSlide(props: SlideProps) {
+  return (
+    <SlideShell {...props}>
+      <section style={{ padding: '90px 72px 0', display: 'grid', gridTemplateColumns: '1.05fr 0.95fr', gap: 72, alignItems: 'center' }}>
+        <div>
+          <div style={{ marginBottom: 30 }}><DotLabel>Deck ejecutivo</DotLabel></div>
+          <h1 style={{ margin: 0, fontSize: 92, fontWeight: 200, lineHeight: 0.98, letterSpacing: '-0.055em', maxWidth: 860 }}>
+            {${JSON.stringify(name)}}.
+          </h1>
+          <div style={{ marginTop: 28, fontFamily: serif, fontStyle: 'italic', fontSize: 54, lineHeight: 1.0, color: QM.accent, letterSpacing: '-0.025em' }}>
+            Cobranza exacta.
+          </div>
+          <p style={{ marginTop: 30, maxWidth: 680, color: QM.fg2, fontSize: 21, fontWeight: 300, lineHeight: 1.55, letterSpacing: '-0.01em' }}>
+            Un deck base inspirado en la landing de compradores, Ardia One-Pager y onboarding Universo aBanza. Mantiene la estructura Quiet Minimalist: aire, jerarquia ligera y superficies de datos con hairlines.
+          </p>
+        </div>
+        <ProductSurface />
+      </section>
+    </SlideShell>
+  )
+}
+
+export function StructureSlide(props: SlideProps) {
+  return (
+    <SlideShell {...props}>
+      <section style={{ padding: '82px 72px 0' }}>
+        <div style={{ marginBottom: 30 }}><DotLabel>Sistema visual</DotLabel></div>
+        <h2 style={{ margin: 0, maxWidth: 860, fontSize: 68, fontWeight: 200, lineHeight: 1.0, letterSpacing: '-0.05em' }}>
+          Usa la menor estructura posible, <span style={{ fontFamily: serif, fontStyle: 'italic', color: QM.accent, fontWeight: 400 }}>pero suficiente.</span>
+        </h2>
+        <div style={{ marginTop: 64 }}>
+          <HairlineRow label="01 / titulo">Inter Tight 200 para titulares grandes. El serif se reserva para una sola frase o palabra de acento.</HairlineRow>
+          <HairlineRow label="02 / datos">Las superficies de producto son transparentes, con bordes hairline, labels mono y numeros grandes.</HairlineRow>
+          <HairlineRow label="03 / color">Un solo acento vermilion por vista: punto, subrayado, linea de grafica o palabra italic.</HairlineRow>
+          <div style={{ borderTop: '1px solid ' + QM.hair }} />
+        </div>
+      </section>
+    </SlideShell>
+  )
+}
+
+export const slides = [CoverSlide, StructureSlide]
+
+export default function Template() {
+  return <CoverSlide width={1920} height={1080} pageIndex={0} pageCount={2} />
+}
+`
 }
 
 function PreviewStat({ label, value }: { label: string; value: string }) {

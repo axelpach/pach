@@ -82,6 +82,12 @@ const ARDIA_TOKENS = {
       'apps/buyers-ardia/components/qm/QMNav.tsx',
       'apps/buyers-ardia/app/globals.css',
     ],
+    canonicalDeckFiles: [
+      'tools/decks/library/ardia-one-pager/slides/01-cover.tsx',
+      'tools/decks/library/ardia-one-pager/slides/02-features.tsx',
+      'tools/decks/library/ardia-one-pager/slides/03-results.tsx',
+      'tools/decks/library/ardia-universo-abanza-onboarding/slides/01-onboarding.tsx',
+    ],
   },
   direction: 'Quiet Minimalist',
   principle: 'Whitespace is the container. Hierarchy comes from weight contrast, mono metadata, and restrained serif accents, not from boxes, borders, or color.',
@@ -144,6 +150,7 @@ const ARDIA_TOKENS = {
     forms: 'Underline-only inputs, transparent background.',
   },
   deckGuidance: {
+    referenceStyle: 'Match the Ardia buyer landing plus Pach legacy decks "ardia one-pager" and "onboarding - universo abanza". Treat those as canon over generic SaaS deck instincts.',
     preferredSlideStructure: [
       'Start with mono eyebrow plus small Ardia brand lockup.',
       'Use a large Inter Tight 200 title with one optional Instrument Serif italic accent line.',
@@ -152,6 +159,34 @@ const ARDIA_TOKENS = {
       'For product/value slides, include a dashboard-like data surface inspired by QHeroSurface: mono header, two KPI blocks, subtle chart, activity rows.',
       'Use one vermilion accent per slide viewport: a dot, underline, chart stroke, or accent word.',
     ],
+    canonicalPatterns: [
+      {
+        name: 'Ardia one-pager cover',
+        useFor: 'Problem, promise, WhatsApp/payment flow, and sales one-pager slides.',
+        structure: 'Top brand row, dot eyebrow, oversized Inter Tight 200 headline, single Instrument Serif italic accent phrase, short body, hairline rows, transparent WhatsApp/product frame, footer hairline.',
+      },
+      {
+        name: 'Ardia one-pager features/results',
+        useFor: 'Feature, product, KPI, implementation, and CTA slides.',
+        structure: 'Headline followed by a hairline-only product surface; stats use Inter Tight 200 numbers with small serif accent units; feature rows are separated by thin rules rather than cards.',
+      },
+      {
+        name: 'Universo aBanza onboarding',
+        useFor: 'Checklists, onboarding guides, data collection, co-branded project instructions.',
+        structure: 'Co-brand top row, dot eyebrow, calm title, compact body, three numbered hairline sections, mono field names in two columns, final note and footer.',
+      },
+      {
+        name: 'Buyer landing surface',
+        useFor: 'Dashboard or operational proof visuals.',
+        structure: 'Left copy/right data surface, mono dashboard metadata, large KPI numbers, one vermilion chart stroke, faint hairline row dividers, no boxy card stack.',
+      },
+    ],
+    starterKit: {
+      requiredExports: 'For deck templates export one component per slide and export const slides = [CoverSlide, ...].',
+      preferredComponents: ['SlideShell', 'ArdiaMark', 'MonoLabel', 'DotLabel', 'HairlineRow', 'Metric', 'ProductSurface'],
+      sizing: 'Default to 1920x1080 unless the user asks for portrait/mobile. Every slide component must accept { width, height, pageIndex, pageCount } and render exactly one fixed-size slide.',
+      styling: 'Inline styles are acceptable and preferred for fidelity. Tailwind is supported, but do not depend on Pach app CSS variables. Include manifest.googleFontsHref for Inter Tight, Instrument Serif, and Geist Mono.',
+    },
     avoid: [
       'Generic dark SaaS dashboards with glowing cards.',
       'Large serif titles or all-italic headlines.',
@@ -204,17 +239,23 @@ const ARDIA_ASSETS = {
 
 const ARDIA_METADATA = {
   fallbackSnapshot: true,
-  sourceLabel: 'Ardia buyer landing',
+  sourceLabel: 'Ardia buyer landing + Pach legacy Ardia decks',
   sourceReferences: [
     '../ardia/apps/buyers-ardia/DESIGN_SYSTEM.md',
     '../ardia/apps/buyers-ardia/components/qm/QMSections.tsx',
     '../ardia/apps/buyers-ardia/components/qm/atoms.tsx',
     '../ardia/apps/buyers-ardia/components/qm/QMNav.tsx',
+    'tools/decks/library/ardia-one-pager/slides/01-cover.tsx',
+    'tools/decks/library/ardia-one-pager/slides/02-features.tsx',
+    'tools/decks/library/ardia-one-pager/slides/03-results.tsx',
+    'tools/decks/library/ardia-universo-abanza-onboarding/slides/01-onboarding.tsx',
   ],
   agentInstruction: [
-    'Match the Ardia buyer landing, not a generic executive deck.',
+    'Match the Ardia buyer landing and the Pach legacy Ardia one-pager / Universo aBanza onboarding decks, not a generic executive deck.',
     'Use Inter Tight 200 for large titles and Instrument Serif italic only as a restrained accent.',
     'Use the Ardia mark from assets.logo.inlineSvg or assets.logo.publicCandidates; do not draw a generic square mark.',
     'Create hairline, data-rich product surfaces inspired by QHeroSurface when a slide needs visuals.',
+    'For decks, keep each slide as a real fixed-size React component and export a slides array; do not create one long scrolling document pretending to be multiple slides.',
+    'Prefer the starter kit names and patterns in tokens.deckGuidance.starterKit/canonicalPatterns when creating or editing Ardia templates.',
   ].join(' '),
 }

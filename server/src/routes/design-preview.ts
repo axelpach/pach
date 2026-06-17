@@ -55,7 +55,9 @@ router.get('/versions/:versionId/modules/*', async (req, res, next) => {
   try {
     const version = await readVersion(req.params.versionId)
     const files = readFiles(version.files)
-    const modulePath = normalizeModulePath(String(req.params[0] ?? ''))
+    const wildcardParams = req.params as Record<string, string | string[] | undefined>
+    const rawModulePath = wildcardParams[0] ?? wildcardParams['0'] ?? ''
+    const modulePath = normalizeModulePath(Array.isArray(rawModulePath) ? rawModulePath.join('/') : rawModulePath)
     const resolvedPath = resolveModulePath(files, '', modulePath) ?? modulePath
     const source = files[resolvedPath]
 
@@ -199,6 +201,7 @@ function renderReactPreviewShell(
   const importMap = buildImportMap(dependencies)
   const dimensions = readPreviewDimensions(manifest)
   const tailwindRuntime = renderTailwindRuntime(manifest)
+  const fontLinks = renderFontLinks(manifest)
   return `<!doctype html>
 <html>
   <head>
@@ -246,6 +249,7 @@ function renderReactPreviewShell(
         text-transform: uppercase;
       }
     </style>
+    ${fontLinks}
     ${tailwindRuntime}
     <script type="importmap">${JSON.stringify({ imports: importMap }, null, 6)}</script>
   </head>
@@ -429,6 +433,18 @@ function renderTailwindRuntime(manifest: Record<string, unknown>) {
   return [
     `<script>window.tailwind = window.tailwind || {}; window.tailwind.config = ${safeJsonForScript(tailwindConfig)};</script>`,
     '<script src="https://cdn.tailwindcss.com"></script>',
+  ].join('\n    ')
+}
+
+function renderFontLinks(manifest: Record<string, unknown>) {
+  const href = typeof manifest.googleFontsHref === 'string' ? manifest.googleFontsHref.trim() : ''
+  if (!href) return ''
+  if (!/^https:\/\/fonts\.googleapis\.com\/css2\?/i.test(href)) return ''
+
+  return [
+    '<link rel="preconnect" href="https://fonts.googleapis.com">',
+    '<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>',
+    `<link rel="stylesheet" href="${escapeHtml(href)}">`,
   ].join('\n    ')
 }
 
