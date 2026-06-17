@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type CSSProperties, type DragEvent, type FormEvent, type KeyboardEvent } from 'react'
+import { useEffect, useMemo, useRef, useState, type CSSProperties, type DragEvent, type FormEvent, type KeyboardEvent } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { useQuery, useZero } from '@rocicorp/zero/react'
 import {
@@ -7,13 +7,13 @@ import {
   Braces,
   Check,
   CheckCircle2,
+  Download,
   ExternalLink,
   FileImage,
   Image as ImageIcon,
   Layers3,
   Palette,
   Plus,
-  Printer,
   Search,
   Send,
   Sparkles,
@@ -1644,6 +1644,8 @@ function TemplatePreview({
   template: TemplateListItem
   version?: DesignTemplateVersionRow
 }) {
+  const iframeRef = useRef<HTMLIFrameElement | null>(null)
+
   if (template.legacy) {
     const theme = getTheme(template.legacy.config.theme)
     return (
@@ -1666,6 +1668,16 @@ function TemplatePreview({
 
   if (previewUrl) {
     const previewDimensions = getTemplatePreviewDimensions(version)
+    const sendExportCommand = (format: 'png' | 'pdf') => {
+      const target = iframeRef.current?.contentWindow
+      if (!target) return
+      target.postMessage({
+        type: 'pach-design-export',
+        format,
+        filename: template.slug,
+      }, '*')
+    }
+
     return (
       <div className="h-full min-h-0 overflow-y-auto bg-pit text-fg-1">
         <div className="sticky top-0 z-20 border-b border-edge/15 bg-pit/90 px-4 py-3 backdrop-blur-sm md:px-8 md:py-4">
@@ -1678,6 +1690,24 @@ function TemplatePreview({
               </p>
             </div>
             <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => sendExportCommand('png')}
+                className="inline-flex h-8 items-center gap-1.5 border border-edge/20 bg-pit-3 px-3 font-mono text-[10px] uppercase tracking-label text-fg-2 transition hover:border-edge/35 hover:text-fg-1"
+                title="export each slide as PNG"
+              >
+                <FileImage className="h-3.5 w-3.5" />
+                png
+              </button>
+              <button
+                type="button"
+                onClick={() => sendExportCommand('pdf')}
+                className="inline-flex h-8 items-center gap-1.5 border border-accent-fill/30 bg-accent-fill/8 px-3 font-mono text-[10px] uppercase tracking-label text-accent transition hover:bg-accent-fill/16"
+                title="download as PDF"
+              >
+                <Download className="h-3.5 w-3.5" />
+                download pdf
+              </button>
               <a
                 href={previewUrl}
                 target="_blank"
@@ -1687,15 +1717,6 @@ function TemplatePreview({
                 <ExternalLink className="h-3.5 w-3.5" />
                 open
               </a>
-              <button
-                type="button"
-                onClick={() => window.open(previewUrl, '_blank', 'noopener,noreferrer')}
-                className="inline-flex h-8 items-center gap-1.5 border border-accent-fill/30 bg-accent-fill/8 px-3 font-mono text-[10px] uppercase tracking-label text-accent transition hover:bg-accent-fill/16"
-                title="open preview, then print or save as PDF"
-              >
-                <Printer className="h-3.5 w-3.5" />
-                print pdf
-              </button>
             </div>
           </div>
         </div>
@@ -1703,6 +1724,7 @@ function TemplatePreview({
           <div className="mx-auto max-w-[1400px]">
             <div className="h-[min(78vh,920px)] min-h-[520px] w-full overflow-hidden border border-edge/16 bg-void shadow-2xl">
               <iframe
+                ref={iframeRef}
                 title={template.title}
                 src={previewUrl}
                 sandbox="allow-scripts allow-downloads"

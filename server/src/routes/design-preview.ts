@@ -254,6 +254,8 @@ function renderReactPreviewShell(
     <script type="module">
       import React from 'react'
       import { createRoot } from 'react-dom/client'
+      import { toJpeg, toPng } from 'https://esm.sh/html-to-image@1.11.13'
+      import { jsPDF } from 'https://esm.sh/jspdf@4.2.0'
       import * as TemplateModule from '${moduleUrl(versionId, entryPath)}'
 
       const rootElement = document.getElementById('root')
@@ -309,6 +311,86 @@ function renderReactPreviewShell(
         )
       }
 
+      async function captureSlideAtFullSize(slideCanvas, capture) {
+        const savedTransform = slideCanvas.style.transform
+        const savedTransformOrigin = slideCanvas.style.transformOrigin
+        slideCanvas.style.transform = 'none'
+        slideCanvas.style.transformOrigin = ''
+
+        try {
+          return await capture(slideCanvas)
+        } finally {
+          slideCanvas.style.transform = savedTransform
+          slideCanvas.style.transformOrigin = savedTransformOrigin
+        }
+      }
+
+      function downloadDataUrl(dataUrl, filename) {
+        const link = document.createElement('a')
+        link.download = filename
+        link.href = dataUrl
+        link.click()
+      }
+
+      async function waitForRenderAssets() {
+        if (document.fonts?.ready) await document.fonts.ready.catch(() => undefined)
+        const images = Array.from(document.images)
+        await Promise.all(images.map((image) => {
+          if (image.complete) return Promise.resolve()
+          return new Promise((resolve) => {
+            image.addEventListener('load', resolve, { once: true })
+            image.addEventListener('error', resolve, { once: true })
+          })
+        }))
+      }
+
+      async function exportPng(filename) {
+        await waitForRenderAssets()
+        const slides = Array.from(document.querySelectorAll('.design-slide-canvas'))
+        for (let index = 0; index < slides.length; index += 1) {
+          const dataUrl = await captureSlideAtFullSize(slides[index], (element) =>
+            toPng(element, {
+              width: slideWidth,
+              height: slideHeight,
+              pixelRatio: 2,
+              backgroundColor: '#0f0d0c',
+            })
+          )
+          downloadDataUrl(dataUrl, slides.length === 1 ? filename + '.png' : filename + '-slide-' + (index + 1) + '.png')
+          if (index < slides.length - 1) await new Promise((resolve) => setTimeout(resolve, 400))
+        }
+      }
+
+      async function exportPdf(filename) {
+        await waitForRenderAssets()
+        const slides = Array.from(document.querySelectorAll('.design-slide-canvas'))
+        const orientation = slideWidth > slideHeight ? 'landscape' : 'portrait'
+        const pdf = new jsPDF({ orientation, unit: 'px', format: [slideWidth, slideHeight] })
+
+        for (let index = 0; index < slides.length; index += 1) {
+          if (index > 0) pdf.addPage([slideWidth, slideHeight], orientation)
+          const dataUrl = await captureSlideAtFullSize(slides[index], (element) =>
+            toJpeg(element, {
+              width: slideWidth,
+              height: slideHeight,
+              pixelRatio: 1.5,
+              quality: 0.85,
+              backgroundColor: '#0f0d0c',
+            })
+          )
+          pdf.addImage(dataUrl, 'JPEG', 0, 0, slideWidth, slideHeight)
+        }
+
+        pdf.save(filename + '.pdf')
+      }
+
+      window.addEventListener('message', (event) => {
+        if (event.data?.type !== 'pach-design-export') return
+        const filename = String(event.data.filename || ${JSON.stringify(slugifyExportTitle(title))})
+        if (event.data.format === 'png') void exportPng(filename)
+        if (event.data.format === 'pdf') void exportPdf(filename)
+      })
+
       if (slideComponents.length > 0) {
         createRoot(rootElement).render(React.createElement(DeckPreview))
       } else if (typeof TemplateModule.render === 'function') {
@@ -357,6 +439,14 @@ function safeJsonForScript(value: unknown) {
     .replace(/&/g, '\\u0026')
     .replace(/\u2028/g, '\\u2028')
     .replace(/\u2029/g, '\\u2029')
+}
+
+function slugifyExportTitle(value: string) {
+  return value
+    .toLowerCase()
+    .trim()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '') || 'design-template'
 }
 
 function buildImportMap(dependencies: Record<string, string>) {
