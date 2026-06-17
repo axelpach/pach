@@ -394,7 +394,7 @@ function buildDesignSystemRunMetadata(
       'When changing layout, copy, colors, typography, components, or imagery, preserve the organization design system tokens and principles.',
       `Use one of these predefined aspect ratios unless the user requests otherwise: ${DESIGN_ASPECT_RATIOS.map((ratio) => `${ratio.label} ${ratio.width}x${ratio.height}`).join(', ')}. Set manifest.dimensions or manifest.aspectRatioId so preview and export sizing stay predictable.`,
       organization.project === 'ardia'
-        ? 'For Ardia, match the buyer landing: Inter Tight 200 titles, Instrument Serif italic only as a restrained accent, hairline product/data surfaces, one vermilion accent per slide, and the real Ardia mark.'
+        ? 'For Ardia, the buyer landing, Pach legacy ardia-one-pager, and Universo aBanza onboarding decks are canonical. Preserve that quiet-minimalist system for every edit: Inter Tight 200 display titles, Geist Mono labels, one restrained Instrument Serif italic accent, hairline product/data surfaces, one precise vermilion accent per slide, real Ardia mark/assets, and no generic executive-deck drift.'
         : '',
     ].join(' '),
     system: system
@@ -449,8 +449,35 @@ function buildDesignSystemRunMetadata(
             : {},
           metadata: {
             fallbackSnapshot: true,
+            requiredDesignContract: organization.project === 'ardia'
+              ? {
+                  priority: 'hard_constraint',
+                  canonicalReferences: [
+                    'Ardia buyer landing',
+                    'Pach legacy ardia-one-pager deck',
+                    'Pach legacy Universo aBanza onboarding deck',
+                  ],
+                  nonNegotiables: [
+                    'Preserve the Ardia quiet-minimalist system unless the user explicitly asks to replace the organization design system.',
+                    'Use Inter Tight 200 display titles, Geist Mono labels, and Instrument Serif italic only as one restrained accent phrase or line.',
+                    'Use real Ardia logo/assets; do not draw or invent a generic square logo.',
+                    'Use near-black backgrounds, whitespace, one-pixel hairlines, quiet data/product surfaces, and precise vermilion accents.',
+                    'For decks, create fixed-size slide components and export a slides array so Pach renders separated slide frames.',
+                  ],
+                  forbiddenDrift: [
+                    'generic executive deck layouts',
+                    'generic dark SaaS cards',
+                    'blue or purple gradients',
+                    'glowing panels',
+                    'large serif primary titles',
+                    'all-italic headlines',
+                    'fake square logos',
+                    'one long scrolling document pretending to be slides',
+                  ],
+                }
+              : undefined,
             agentInstruction: organization.project === 'ardia'
-              ? 'Match the Ardia buyer landing, not a generic executive deck. Use Inter Tight 200 for primary titles; Instrument Serif italic only for one accent word or line. Use hairline dividers and whitespace instead of boxed cards. Use the real Ardia logo asset or inline mark.'
+              ? 'MANDATORY ARDIA DESIGN CONTRACT: match the Ardia buyer landing plus Pach legacy ardia-one-pager and Universo aBanza onboarding decks. Treat metadata.requiredDesignContract as a QA checklist. Do not drift into generic executive decks, generic SaaS cards, blue/purple gradients, glowing panels, large serif primary titles, all-italic headlines, fake square logos, or one long scrolling document. Use Inter Tight 200 display titles, Geist Mono labels, one restrained Instrument Serif italic accent, hairlines, whitespace, quiet product/data surfaces, precise vermilion accents, and the real Ardia logo asset or inline mark.'
               : undefined,
             avoid: organization.project === 'ardia'
               ? [
