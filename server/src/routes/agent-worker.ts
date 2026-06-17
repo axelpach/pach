@@ -4,6 +4,7 @@ import type { Request } from 'express'
 import { and, desc, eq, inArray, isNull, or } from 'drizzle-orm'
 import { agentRunProgressReports, agentRuns, agentWorkers, mcpTokens, pmIssueActivity, pmIssues } from '../../../db/schema.js'
 import { getDb } from '../db.js'
+import { buildGeneralMcpPrompt } from '../lib/agent-run-prompt.js'
 import { hashMcpToken, hasMcpCapability, type McpAuthContext, type McpCapability } from '../lib/mcp-token.js'
 
 const router = Router()
@@ -179,7 +180,13 @@ router.post('/runs/claim', async (req: AgentWorkerRequest, res) => {
         },
       })
 
-      res.json({ ok: true, run: claimed, worker })
+      res.json({
+        ok: true,
+        run: claimed,
+        worker,
+        executionPrompt: buildGeneralMcpPrompt(claimed),
+        executionPromptSource: 'server',
+      })
       return
     }
 

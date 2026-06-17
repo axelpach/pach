@@ -20,6 +20,7 @@ type AgentRunRecord = {
   subjectId?: string | null
   branchName: string
   metadata?: Record<string, unknown>
+  executionPrompt?: string | null
 }
 
 type CancelState = {
@@ -98,10 +99,14 @@ async function heartbeat() {
 }
 
 async function claimRun(nextWorkerId: string) {
-  const payload = await postJson<{ run: AgentRunRecord | null }>('/agent-worker/runs/claim', {
+  const payload = await postJson<{ run: AgentRunRecord | null; executionPrompt?: string | null }>('/agent-worker/runs/claim', {
     workerId: nextWorkerId,
     capabilities,
   })
+
+  if (payload.run && payload.executionPrompt?.trim()) {
+    payload.run.executionPrompt = payload.executionPrompt
+  }
 
   return payload.run
 }
@@ -156,7 +161,7 @@ async function executeGeneralMcpRun(worker: WorkerRecord, run: AgentRunRecord) {
   })
 
   try {
-    const prompt = buildGeneralMcpPrompt(run)
+    const prompt = run.executionPrompt?.trim() || buildGeneralMcpPrompt(run)
     const startedAt = Date.now()
     const { stdout, stderr } = await runCodexExec(prompt, run.metadata, worker, run)
     const durationMs = Date.now() - startedAt
