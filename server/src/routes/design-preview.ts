@@ -197,6 +197,7 @@ function renderReactPreviewShell(
 ) {
   const title = typeof manifest.title === 'string' ? manifest.title : 'Design template preview'
   const importMap = buildImportMap(dependencies)
+  const dimensions = readPreviewDimensions(manifest)
   return `<!doctype html>
 <html>
   <head>
@@ -205,8 +206,44 @@ function renderReactPreviewShell(
     <title>${escapeHtml(title)}</title>
     <style>
       html, body, #root { width: 100%; min-height: 100%; margin: 0; }
-      body { background: #0f0d0c; color: #f3f0e9; overflow: auto; }
+      body { background: #050706; color: #f3f0e9; overflow: auto; }
       * { box-sizing: border-box; }
+      .design-preview-stack {
+        width: 100%;
+        min-height: 100vh;
+        padding: 48px clamp(18px, 4vw, 72px);
+      }
+      .design-slide-shell {
+        width: min(100%, ${dimensions.width}px);
+        margin: 0 auto 48px;
+      }
+      .design-slide-viewport {
+        position: relative;
+        width: 100%;
+        aspect-ratio: ${dimensions.width} / ${dimensions.height};
+        overflow: hidden;
+        border: 1px solid rgba(97, 255, 143, 0.18);
+        background: #0f0d0c;
+        box-shadow: 0 24px 80px rgba(0, 0, 0, 0.32);
+      }
+      .design-slide-canvas {
+        position: absolute;
+        left: 0;
+        top: 0;
+        width: ${dimensions.width}px;
+        height: ${dimensions.height}px;
+        transform-origin: top left;
+      }
+      .design-slide-meta {
+        display: flex;
+        justify-content: space-between;
+        gap: 16px;
+        margin-top: 10px;
+        color: rgba(199, 213, 201, 0.48);
+        font: 10px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace;
+        letter-spacing: 0.24em;
+        text-transform: uppercase;
+      }
     </style>
     <script type="importmap">${JSON.stringify({ imports: importMap }, null, 6)}</script>
   </head>
@@ -219,12 +256,59 @@ function renderReactPreviewShell(
 
       const rootElement = document.getElementById('root')
       const Component = TemplateModule.default || TemplateModule.Template || TemplateModule.App
+      const exportedSlides = Array.isArray(TemplateModule.slides) ? TemplateModule.slides : []
+      const slideComponents = exportedSlides.length > 0 ? exportedSlides : (Component ? [Component] : [])
+      const slideWidth = ${dimensions.width}
+      const slideHeight = ${dimensions.height}
 
-      if (Component) {
-        createRoot(rootElement).render(React.createElement(Component, {
-          width: window.innerWidth,
-          height: window.innerHeight
-        }))
+      function SlideFrame({ Slide, index, total }) {
+        const viewportRef = React.useRef(null)
+        const [scale, setScale] = React.useState(1)
+
+        React.useLayoutEffect(() => {
+          const viewport = viewportRef.current
+          if (!viewport) return
+
+          const updateScale = () => setScale(viewport.clientWidth / slideWidth)
+          updateScale()
+
+          if (typeof ResizeObserver === 'undefined') {
+            window.addEventListener('resize', updateScale)
+            return () => window.removeEventListener('resize', updateScale)
+          }
+
+          const observer = new ResizeObserver(updateScale)
+          observer.observe(viewport)
+          return () => observer.disconnect()
+        }, [])
+
+        return React.createElement('section', { className: 'design-slide-shell' },
+          React.createElement('div', { className: 'design-slide-viewport', ref: viewportRef },
+            React.createElement('div', {
+              className: 'design-slide-canvas',
+              style: { transform: 'scale(' + scale + ')' },
+            }, React.createElement(Slide, { width: slideWidth, height: slideHeight, pageIndex: index, pageCount: total }))
+          ),
+          React.createElement('div', { className: 'design-slide-meta' },
+            React.createElement('span', null, 'slide ' + String(index + 1).padStart(2, '0')),
+            React.createElement('span', null, slideWidth + ' x ' + slideHeight + 'px')
+          )
+        )
+      }
+
+      function DeckPreview() {
+        return React.createElement('div', { className: 'design-preview-stack' },
+          slideComponents.map((Slide, index) => React.createElement(SlideFrame, {
+            key: index,
+            Slide,
+            index,
+            total: slideComponents.length,
+          }))
+        )
+      }
+
+      if (slideComponents.length > 0) {
+        createRoot(rootElement).render(React.createElement(DeckPreview))
       } else if (typeof TemplateModule.render === 'function') {
         TemplateModule.render(rootElement)
       } else {
@@ -235,6 +319,20 @@ function renderReactPreviewShell(
     </script>
   </body>
 </html>`
+}
+
+function readPreviewDimensions(manifest: Record<string, unknown>) {
+  const dimensions = manifest.dimensions && typeof manifest.dimensions === 'object' && !Array.isArray(manifest.dimensions)
+    ? manifest.dimensions as Record<string, unknown>
+    : {}
+  const width = readPositiveNumber(dimensions.width) ?? readPositiveNumber(manifest.width) ?? 1920
+  const height = readPositiveNumber(dimensions.height) ?? readPositiveNumber(manifest.height) ?? 1080
+  return { width, height }
+}
+
+function readPositiveNumber(value: unknown) {
+  const number = typeof value === 'number' ? value : typeof value === 'string' ? Number(value) : NaN
+  return Number.isFinite(number) && number > 0 ? Math.round(number) : null
 }
 
 function buildImportMap(dependencies: Record<string, string>) {

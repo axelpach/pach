@@ -931,6 +931,7 @@ async function getDesignTemplate(req: AuthenticatedRequest, args: unknown) {
         `Use ${organization?.name ?? 'the organization'}'s design system as a hard constraint for all template edits.`,
         'Do not introduce a competing visual direction unless the user explicitly asks to change the organization design system.',
         'When changing layout, copy, colors, typography, components, or imagery, preserve the organization design system tokens and principles.',
+        'For deck templates, prefer one React component per slide and export const slides = [SlideOne, SlideTwo, ...]. Set manifest.dimensions or manifest.aspectRatioId so Pach can render separated, scaled slide frames.',
         assets.length > 0
           ? 'Use available assets from the assets array when a logo, product image, screenshot, or uploaded visual is needed. Respect each asset url, dimensions, and metadata.'
           : 'If an asset is needed but not available, report that in progress instead of inventing a fake logo or product image.',

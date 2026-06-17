@@ -63,8 +63,10 @@ type DesignTemplateRow = {
 
 type DesignTemplateVersionRow = {
   id: string
+  organizationId?: string
   templateId: string
   versionNumber: number
+  schemaVersion?: number
   sourceKind: string
   files: Record<string, string>
   manifest: Record<string, unknown>
@@ -72,6 +74,9 @@ type DesignTemplateVersionRow = {
   compiledArtifactUrl?: string | null
   previewImageUrl?: string | null
   validationStatus: string
+  validationErrors?: Array<Record<string, unknown>>
+  createdByRunId?: string | null
+  createdAt?: number
 }
 
 type DesignTemplateRunRow = {
@@ -555,6 +560,13 @@ function buildDbTemplateItems(rows: DesignTemplateRow[]): TemplateListItem[] {
   })
 }
 
+function mergeRowsById<T extends { id: string }>(primary: T[], secondary: T[]) {
+  const byId = new Map<string, T>()
+  for (const row of secondary) byId.set(row.id, row)
+  for (const row of primary) byId.set(row.id, row)
+  return Array.from(byId.values())
+}
+
 export default function Design() {
   const { templateSlug } = useParams<{ templateSlug: string }>()
   const navigate = useNavigate()
@@ -575,11 +587,21 @@ export default function Design() {
   const [sidebarError, setSidebarError] = useState<string | null>(null)
   const [isCreatingTemplate, setIsCreatingTemplate] = useState(false)
   const [isAssetsModalOpen, setIsAssetsModalOpen] = useState(false)
+  const [localCreatedTemplates, setLocalCreatedTemplates] = useState<DesignTemplateRow[]>([])
+  const [localCreatedVersions, setLocalCreatedVersions] = useState<DesignTemplateVersionRow[]>([])
 
   const typedOrganizations = organizations as Organization[]
   const typedSystems = designSystems as DesignSystemRow[]
-  const typedDbTemplates = dbTemplates as DesignTemplateRow[]
-  const typedVersions = templateVersions as DesignTemplateVersionRow[]
+  const zeroDbTemplates = dbTemplates as DesignTemplateRow[]
+  const zeroVersions = templateVersions as DesignTemplateVersionRow[]
+  const typedDbTemplates = useMemo(
+    () => mergeRowsById(zeroDbTemplates, localCreatedTemplates),
+    [zeroDbTemplates, localCreatedTemplates],
+  )
+  const typedVersions = useMemo(
+    () => mergeRowsById(zeroVersions, localCreatedVersions),
+    [zeroVersions, localCreatedVersions],
+  )
   const typedAssets = designAssets as DesignAssetRow[]
   const typedRuns = templateRuns as DesignTemplateRunRow[]
   const typedAgentRuns = agentRuns as AgentRunRow[]
@@ -763,36 +785,43 @@ export default function Design() {
     setSidebarError(null)
     setIsCreatingTemplate(true)
     try {
-      await z.mutate.design_templates.create({
-        id: templateId,
-        organizationId: selectedOrganization.id,
+      const files = buildDefaultTemplateFiles(name, selectedOrganization)
+      const manifest = {
+        title: name,
         type: 'deck',
-        name,
-        slug,
-        status: 'draft',
-        sourceKind: 'react',
-        currentVersionId: versionId,
-        metadata: {
-          project: selectedOrganization.project,
-          description: 'Draft deck template',
-          slideCount: 0,
-        },
-      })
-      await z.mutate.design_template_versions.create({
-        id: versionId,
-        organizationId: selectedOrganization.id,
-        templateId,
-        versionNumber: 1,
-        sourceKind: 'react',
-        files: buildDefaultTemplateFiles(name, selectedOrganization),
-        manifest: {
-          title: name,
+        entry: 'src/Template.tsx',
+        aspectRatioId: 'deck-landscape',
+        dimensions: { width: 1920, height: 1080 },
+      }
+      const response = await authFetch(`${config.apiUrl}/design/templates`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          templateId,
+          versionId,
+          organizationId: selectedOrganization.id,
           type: 'deck',
-          entry: 'src/Template.tsx',
-        },
-        dependencies: {},
-        validationStatus: 'compiled',
+          name,
+          slug,
+          status: 'draft',
+          sourceKind: 'react',
+          files,
+          manifest,
+          dependencies: {},
+          metadata: {
+            project: selectedOrganization.project,
+            description: 'Draft deck template',
+            slideCount: 1,
+          },
+        }),
       })
+      if (!response.ok) {
+        const payload = await response.json().catch(() => ({}))
+        throw new Error(readString(payload.message) ?? readString(payload.error) ?? 'could not create template')
+      }
+      const payload = await response.json() as { template: DesignTemplateRow; version: DesignTemplateVersionRow }
+      setLocalCreatedTemplates((current) => mergeRowsById([payload.template], current))
+      setLocalCreatedVersions((current) => mergeRowsById([payload.version], current))
       navigate(`/design/${slug}`)
     } catch (error) {
       setSidebarError(error instanceof Error ? error.message : 'could not create template')
@@ -1588,10 +1617,7 @@ function TemplatePreview({
         </div>
         <div className="px-4 py-8 md:px-8 md:py-12">
           <div className="mx-auto max-w-[1400px]">
-            <div
-              className="w-full overflow-hidden border border-edge/16 bg-void shadow-2xl"
-              style={{ aspectRatio: `${previewDimensions.width} / ${previewDimensions.height}` }}
-            >
+            <div className="h-[min(78vh,920px)] min-h-[520px] w-full overflow-hidden border border-edge/16 bg-void shadow-2xl">
               <iframe
                 title={template.title}
                 src={previewUrl}
@@ -1651,13 +1677,20 @@ function buildDefaultTemplateFiles(name: string, organization: Organization): Re
   return {
     'src/Template.tsx': `import React from 'react'
 
-export default function Template() {
+type SlideProps = {
+  width: number
+  height: number
+}
+
+export function CoverSlide({ width, height }: SlideProps) {
   return (
     <main style={{
-      minHeight: '100vh',
+      width,
+      height,
+      overflow: 'hidden',
       background: '#0f0d0c',
       color: '#f3f0e9',
-      padding: '72px clamp(32px, 6vw, 96px)',
+      padding: 96,
       fontFamily: 'Inter, ui-sans-serif, system-ui, sans-serif'
     }}>
       <p style={{
@@ -1691,6 +1724,12 @@ export default function Template() {
       </p>
     </main>
   )
+}
+
+export const slides = [CoverSlide]
+
+export default function Template() {
+  return <CoverSlide width={1920} height={1080} />
 }
 `,
   }

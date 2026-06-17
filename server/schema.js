@@ -79,11 +79,11 @@ const designAssets = table('design_assets')
     .primaryKey('id');
 const designTemplateRuns = table('design_template_runs')
     .columns({
-        id: string(),
-        organizationId: string().from('organization_id'),
-        templateId: string().optional().from('template_id'),
-        agentRunId: string().optional().from('agent_run_id'),
-        templateSlug: string().optional().from('template_slug'),
+    id: string(),
+    organizationId: string().from('organization_id'),
+    templateId: string().optional().from('template_id'),
+    agentRunId: string().optional().from('agent_run_id'),
+    templateSlug: string().optional().from('template_slug'),
     prompt: string(),
     status: string(),
     statusMessage: string().optional().from('status_message'),
@@ -590,13 +590,13 @@ const githubRepositories = table('github_repositories')
     .primaryKey('id');
 const agentRuns = table('agent_runs')
     .columns({
-        id: string(),
-        conversationId: string().optional().from('conversation_id'),
-        parentRunId: string().optional().from('parent_run_id'),
-        issueId: string().optional().from('issue_id'),
-        subjectType: string().from('subject_type'),
-        subjectId: string().optional().from('subject_id'),
-        workerId: string().optional().from('worker_id'),
+    id: string(),
+    conversationId: string().optional().from('conversation_id'),
+    parentRunId: string().optional().from('parent_run_id'),
+    issueId: string().optional().from('issue_id'),
+    subjectType: string().from('subject_type'),
+    subjectId: string().optional().from('subject_id'),
+    workerId: string().optional().from('worker_id'),
     repositoryId: string().optional().from('repository_id'),
     projectKey: string().from('project_key'),
     repoFullName: string().from('repo_full_name'),

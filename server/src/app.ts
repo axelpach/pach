@@ -14,6 +14,7 @@ import financeRoute from './routes/finance.js'
 import mediaRoute from './routes/media.js'
 import mcpRoute from './routes/mcp.js'
 import designPreviewRoute from './routes/design-preview.js'
+import designRoute from './routes/design.js'
 import { requireAuth, requireUnscopedAccess } from './middleware/auth.js'
 import { startTaskTriggerRunner } from './services/task-triggers/runner.js'
 
@@ -36,6 +37,7 @@ app.use('/task-triggers', requireAuth, requireUnscopedAccess, taskTriggersRoute)
 app.use('/agent', requireAuth, requireUnscopedAccess, agentRoute)
 app.use('/agent-worker', agentWorkerRoute)
 app.use('/mcp', mcpRoute)
+app.use('/design', requireAuth, designRoute)
 app.use('/design-preview', designPreviewRoute)
 app.use('/finance', requireAuth, financeRoute)
 app.use('/media', requireAuth, mediaRoute)
