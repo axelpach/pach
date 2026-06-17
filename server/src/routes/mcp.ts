@@ -932,6 +932,7 @@ async function getDesignTemplate(req: AuthenticatedRequest, args: unknown) {
         'Do not introduce a competing visual direction unless the user explicitly asks to change the organization design system.',
         'When changing layout, copy, colors, typography, components, or imagery, preserve the organization design system tokens and principles.',
         'For deck templates, prefer one React component per slide and export const slides = [SlideOne, SlideTwo, ...]. Set manifest.dimensions or manifest.aspectRatioId so Pach can render separated, scaled slide frames.',
+        'Templates render as standalone iframe documents outside the Pach app shell. Tailwind classes are supported only when manifest.styling is "tailwind"; otherwise use inline React style objects or import a local CSS file included in the template files. Do not rely on Pach CSS variables or app global CSS.',
         assets.length > 0
           ? 'Use available assets from the assets array when a logo, product image, screenshot, or uploaded visual is needed. Respect each asset url, dimensions, and metadata.'
           : 'If an asset is needed but not available, report that in progress instead of inventing a fake logo or product image.',
@@ -959,12 +960,15 @@ async function createDesignTemplateVersion(req: AuthenticatedRequest, args: unkn
   if (!canAccessOrganization(req, template.organizationId)) throw new Error('Not authorized for this design template')
 
   const files = readStringRecord(body.files, 'files')
-  const manifest = isObject(body.manifest) ? body.manifest : {}
+  const rawManifest = isObject(body.manifest) ? body.manifest : {}
   const dependencies = body.dependencies == null ? {} : readStringRecord(body.dependencies, 'dependencies')
   const validationErrors = Array.isArray(body.validationErrors)
     ? body.validationErrors.filter(isObject)
     : []
   const sourceKind = readOptionalString(body.sourceKind) ?? template.sourceKind ?? 'react'
+  const manifest = sourceKind === 'react' && rawManifest.styling == null
+    ? { ...rawManifest, styling: 'tailwind' }
+    : rawManifest
   const validationStatus = readOptionalString(body.validationStatus) ?? (Object.keys(files).length > 0 ? 'compiled' : 'draft')
   const compiledArtifactUrl = readOptionalString(body.compiledArtifactUrl)
   const previewImageUrl = readOptionalString(body.previewImageUrl)

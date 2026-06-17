@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import { Router, type Request } from 'express'
 import { eq } from 'drizzle-orm'
-import { designTemplates, designTemplateVersions, organizations } from '../../../db/schema.js'
+import { designAssets, designTemplateRuns, designTemplates, designTemplateVersions, organizations } from '../../../db/schema.js'
 import { getDb } from '../db.js'
 import type { JWTPayload } from '../lib/auth.js'
 
@@ -82,6 +82,40 @@ router.post('/templates', async (req, res) => {
     res.status(500).json({
       error: 'DESIGN_TEMPLATE_CREATE_FAILED',
       message: error instanceof Error ? error.message : 'Could not create design template.',
+    })
+  }
+})
+
+router.delete('/templates/:templateId', async (req, res) => {
+  try {
+    const user = authenticatedUser(req)
+    const templateId = req.params.templateId
+    const [template] = await getDb().select().from(designTemplates).where(eq(designTemplates.id, templateId)).limit(1)
+
+    if (!template || !(await canAccessOrganization(template.organizationId, user))) {
+      res.status(404).json({ error: 'NOT_FOUND', message: 'Design template not found.' })
+      return
+    }
+
+    await getDb().transaction(async (tx) => {
+      await tx
+        .update(designAssets)
+        .set({ templateId: null, updatedAt: new Date() })
+        .where(eq(designAssets.templateId, template.id))
+      await tx
+        .update(designTemplateRuns)
+        .set({ templateId: null, updatedAt: new Date() })
+        .where(eq(designTemplateRuns.templateId, template.id))
+      await tx.delete(designTemplateVersions).where(eq(designTemplateVersions.templateId, template.id))
+      await tx.delete(designTemplates).where(eq(designTemplates.id, template.id))
+    })
+
+    res.json({ ok: true, templateId: template.id })
+  } catch (error) {
+    console.error('Design template delete failed', error)
+    res.status(500).json({
+      error: 'DESIGN_TEMPLATE_DELETE_FAILED',
+      message: error instanceof Error ? error.message : 'Could not delete design template.',
     })
   }
 })

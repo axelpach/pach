@@ -198,6 +198,7 @@ function renderReactPreviewShell(
   const title = typeof manifest.title === 'string' ? manifest.title : 'Design template preview'
   const importMap = buildImportMap(dependencies)
   const dimensions = readPreviewDimensions(manifest)
+  const tailwindRuntime = renderTailwindRuntime(manifest)
   return `<!doctype html>
 <html>
   <head>
@@ -245,6 +246,7 @@ function renderReactPreviewShell(
         text-transform: uppercase;
       }
     </style>
+    ${tailwindRuntime}
     <script type="importmap">${JSON.stringify({ imports: importMap }, null, 6)}</script>
   </head>
   <body>
@@ -333,6 +335,28 @@ function readPreviewDimensions(manifest: Record<string, unknown>) {
 function readPositiveNumber(value: unknown) {
   const number = typeof value === 'number' ? value : typeof value === 'string' ? Number(value) : NaN
   return Number.isFinite(number) && number > 0 ? Math.round(number) : null
+}
+
+function renderTailwindRuntime(manifest: Record<string, unknown>) {
+  if (manifest.styling !== 'tailwind' && !manifest.tailwindConfig) return ''
+
+  const tailwindConfig = manifest.tailwindConfig && typeof manifest.tailwindConfig === 'object' && !Array.isArray(manifest.tailwindConfig)
+    ? manifest.tailwindConfig
+    : {}
+
+  return [
+    `<script>window.tailwind = window.tailwind || {}; window.tailwind.config = ${safeJsonForScript(tailwindConfig)};</script>`,
+    '<script src="https://cdn.tailwindcss.com"></script>',
+  ].join('\n    ')
+}
+
+function safeJsonForScript(value: unknown) {
+  return JSON.stringify(value)
+    .replace(/</g, '\\u003c')
+    .replace(/>/g, '\\u003e')
+    .replace(/&/g, '\\u0026')
+    .replace(/\u2028/g, '\\u2028')
+    .replace(/\u2029/g, '\\u2029')
 }
 
 function buildImportMap(dependencies: Record<string, string>) {

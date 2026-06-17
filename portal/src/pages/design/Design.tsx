@@ -18,6 +18,7 @@ import {
   Send,
   Sparkles,
   Type,
+  Trash2,
   UploadCloud,
   X,
 } from 'lucide-react'
@@ -790,6 +791,8 @@ export default function Design() {
         title: name,
         type: 'deck',
         entry: 'src/Template.tsx',
+        styling: 'tailwind',
+        tailwindConfig: buildDefaultTailwindConfig(selectedOrganization),
         aspectRatioId: 'deck-landscape',
         dimensions: { width: 1920, height: 1080 },
       }
@@ -850,6 +853,22 @@ export default function Design() {
     }
   }
 
+  async function handleDeleteTemplate(template: TemplateListItem) {
+    if (template.legacy) return
+
+    const response = await authFetch(`${config.apiUrl}/design/templates/${encodeURIComponent(template.id)}`, {
+      method: 'DELETE',
+    })
+    if (!response.ok) {
+      const payload = await response.json().catch(() => ({}))
+      throw new Error(readString(payload.message) ?? readString(payload.error) ?? 'could not delete template')
+    }
+
+    setLocalCreatedTemplates((current) => current.filter((row) => row.id !== template.id))
+    setLocalCreatedVersions((current) => current.filter((row) => row.templateId !== template.id))
+    navigate('/design')
+  }
+
   return (
     <div className="flex flex-1 min-h-0 overflow-hidden bg-pit text-fg-1">
       <DesignSidebar
@@ -877,6 +896,7 @@ export default function Design() {
         progressReportsByRunId={progressReportsByRunId}
         chatError={chatError}
         onRenameTemplate={handleRenameTemplate}
+        onDeleteTemplate={handleDeleteTemplate}
         designSystemName={selectedSystem?.name ?? palette.name}
         onOpenAssets={() => setIsAssetsModalOpen(true)}
         onBack={() => navigate('/design')}
@@ -924,6 +944,7 @@ function DesignSidebar({
   progressReportsByRunId,
   chatError,
   onRenameTemplate,
+  onDeleteTemplate,
   designSystemName,
   onOpenAssets,
   onBack,
@@ -949,6 +970,7 @@ function DesignSidebar({
   progressReportsByRunId: Map<string, AgentRunProgressReportRow[]>
   chatError: string | null
   onRenameTemplate: (template: TemplateListItem, nextName: string) => Promise<void>
+  onDeleteTemplate: (template: TemplateListItem) => Promise<void>
   designSystemName: string
   onOpenAssets: () => void
   onBack: () => void
@@ -978,6 +1000,7 @@ function DesignSidebar({
           progressReportsByRunId={progressReportsByRunId}
           chatError={chatError}
           onRenameTemplate={onRenameTemplate}
+          onDeleteTemplate={onDeleteTemplate}
           designSystemName={designSystemName}
           onOpenAssets={onOpenAssets}
           onBack={onBack}
@@ -1087,6 +1110,7 @@ function TemplateChatSidebar({
   progressReportsByRunId,
   chatError,
   onRenameTemplate,
+  onDeleteTemplate,
   designSystemName,
   onOpenAssets,
   onBack,
@@ -1100,6 +1124,7 @@ function TemplateChatSidebar({
   progressReportsByRunId: Map<string, AgentRunProgressReportRow[]>
   chatError: string | null
   onRenameTemplate: (template: TemplateListItem, nextName: string) => Promise<void>
+  onDeleteTemplate: (template: TemplateListItem) => Promise<void>
   designSystemName: string
   onOpenAssets: () => void
   onBack: () => void
@@ -1107,7 +1132,9 @@ function TemplateChatSidebar({
   const [templateName, setTemplateName] = useState(template.title)
   const [renameError, setRenameError] = useState<string | null>(null)
   const [isRenaming, setIsRenaming] = useState(false)
+  const [isDeleting, setIsDeleting] = useState(false)
   const canRename = !template.legacy
+  const canDelete = !template.legacy
   const cleanTemplateName = templateName.trim()
   const hasNameChange = cleanTemplateName.length > 0 && cleanTemplateName !== template.title
 
@@ -1115,6 +1142,7 @@ function TemplateChatSidebar({
     setTemplateName(template.title)
     setRenameError(null)
     setIsRenaming(false)
+    setIsDeleting(false)
   }, [template.id, template.title])
 
   async function handleRenameSubmit(event: FormEvent) {
@@ -1129,6 +1157,20 @@ function TemplateChatSidebar({
       setRenameError(error instanceof Error ? error.message : 'could not rename template')
     } finally {
       setIsRenaming(false)
+    }
+  }
+
+  async function handleDeleteClick() {
+    if (!canDelete || isDeleting) return
+    if (!window.confirm(`Delete "${template.title}"? This removes the template and its saved versions.`)) return
+
+    setRenameError(null)
+    setIsDeleting(true)
+    try {
+      await onDeleteTemplate(template)
+    } catch (error) {
+      setRenameError(error instanceof Error ? error.message : 'could not delete template')
+      setIsDeleting(false)
     }
   }
 
@@ -1160,6 +1202,18 @@ function TemplateChatSidebar({
         >
           <ImageIcon className="h-4 w-4" />
         </button>
+        {canDelete && (
+          <button
+            type="button"
+            onClick={handleDeleteClick}
+            disabled={isDeleting}
+            className="mb-4 ml-2 inline-flex h-8 w-8 items-center justify-center border border-edge/20 bg-pit-3 text-fg-3 transition hover:border-fail/40 hover:text-fail disabled:cursor-not-allowed disabled:opacity-50"
+            title="delete template"
+            aria-label="delete template"
+          >
+            <Trash2 className="h-4 w-4" />
+          </button>
+        )}
         <div className="flex items-start gap-3">
           <div className="flex h-9 w-9 shrink-0 items-center justify-center border border-accent-fill/25 bg-accent-fill/8 text-accent">
             <Sparkles className="h-4 w-4" />
@@ -1270,6 +1324,7 @@ function TemplateRunCard({
 }) {
   const effectiveStatus = agentRun?.status ?? run.status
   const latestProgress = progressReports[0]
+  const isActive = effectiveStatus === 'queued' || effectiveStatus === 'running'
   const statusClass = effectiveStatus === 'failed'
     ? 'text-fail'
     : effectiveStatus === 'completed'
@@ -1282,13 +1337,20 @@ function TemplateRunCard({
     <div className="border border-edge/12 bg-pit-2 px-3 py-3">
       <div className="mb-2 flex items-center justify-between gap-2 font-mono text-[9px] uppercase tracking-label">
         <span className="text-fg-4">{formatDateTime(run.createdAt)}</span>
-        <span className={statusClass}>{effectiveStatus}</span>
+        <span className={`inline-flex items-center gap-1.5 ${statusClass}`}>
+          {isActive ? <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-accent shadow-[0_0_10px_rgba(0,255,120,0.8)]" /> : null}
+          {effectiveStatus}
+        </span>
       </div>
       <p className="text-xs leading-5 text-fg-2">{run.prompt}</p>
       {latestProgress ? (
         <div className="mt-3 border-t border-edge/10 pt-2">
           <div className="mb-1 flex items-center justify-between gap-2 font-mono text-[9px] uppercase tracking-label text-fg-4">
-            <span>{latestProgress.phase ?? 'progress'}</span>
+            {isActive ? (
+              <AnimatedRunPhase phase={latestProgress.phase ?? 'designing'} />
+            ) : (
+              <span>{formatRunPhase(latestProgress.phase ?? 'progress')}</span>
+            )}
             {typeof latestProgress.percent === 'number' ? <span>{latestProgress.percent}%</span> : null}
           </div>
           <p className="text-[11px] leading-4 text-fg-3">{latestProgress.message}</p>
@@ -1300,6 +1362,28 @@ function TemplateRunCard({
       )}
     </div>
   )
+}
+
+function AnimatedRunPhase({ phase }: { phase: string }) {
+  const [tick, setTick] = useState(0)
+
+  useEffect(() => {
+    const interval = window.setInterval(() => setTick((current) => (current + 1) % 4), 420)
+    return () => window.clearInterval(interval)
+  }, [])
+
+  return (
+    <span className="inline-flex items-center gap-1.5 text-accent">
+      <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-accent shadow-[0_0_10px_rgba(0,255,120,0.8)]" />
+      <span>{formatRunPhase(phase)}{'.'.repeat(tick)}</span>
+    </span>
+  )
+}
+
+function formatRunPhase(phase: string) {
+  return phase
+    .replace(/[_-]+/g, ' ')
+    .replace(/\b\w/g, (letter) => letter.toUpperCase())
 }
 
 function DesignAssetsModal({
@@ -1670,6 +1754,44 @@ function getTemplatePreviewDimensions(version?: DesignTemplateVersionRow) {
   const aspectRatioId = readString(version?.manifest?.aspectRatioId)
   const match = DESIGN_ASPECT_RATIOS.find((entry) => entry.id === aspectRatioId)
   return match ?? DESIGN_ASPECT_RATIOS[0]
+}
+
+function buildDefaultTailwindConfig(organization: Organization) {
+  if (organization.project === 'ardia') {
+    return {
+      theme: {
+        extend: {
+          colors: {
+            pit: '#0f0d0c',
+            ink: '#f3f0e9',
+            muted: '#8f8880',
+            hairline: 'rgba(243, 240, 233, 0.12)',
+            vermilion: '#ff5a52',
+          },
+          fontFamily: {
+            sans: ['Inter Tight', 'ui-sans-serif', 'system-ui', 'sans-serif'],
+            serif: ['Instrument Serif', 'Georgia', 'serif'],
+            mono: ['Geist Mono', 'ui-monospace', 'Menlo', 'monospace'],
+          },
+          letterSpacing: {
+            label: '0.28em',
+          },
+        },
+      },
+    }
+  }
+
+  return {
+    theme: {
+      extend: {
+        colors: {
+          pit: '#0f0d0c',
+          ink: '#f3f0e9',
+          accent: '#61ff8f',
+        },
+      },
+    },
+  }
 }
 
 function buildDefaultTemplateFiles(name: string, organization: Organization): Record<string, string> {
