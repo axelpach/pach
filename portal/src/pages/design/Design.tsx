@@ -394,7 +394,7 @@ function buildDesignSystemRunMetadata(
       'When changing layout, copy, colors, typography, components, or imagery, preserve the organization design system tokens and principles.',
       `Use one of these predefined aspect ratios unless the user requests otherwise: ${DESIGN_ASPECT_RATIOS.map((ratio) => `${ratio.label} ${ratio.width}x${ratio.height}`).join(', ')}. Set manifest.dimensions or manifest.aspectRatioId so preview and export sizing stay predictable.`,
       organization.project === 'ardia'
-        ? 'For Ardia, the buyer landing, Pach legacy ardia-one-pager, and Universo aBanza onboarding decks are canonical. Preserve that quiet-minimalist system for every edit: Inter Tight 200 display titles, Geist Mono labels, one restrained Instrument Serif italic accent, hairline product/data surfaces, one precise vermilion accent per slide, real Ardia mark/assets, and no generic executive-deck drift.'
+        ? 'For Ardia, the buyer landing, Pach legacy ardia-one-pager, and Universo aBanza onboarding decks are canonical. Preserve that quiet-minimalist system for every edit: Inter Tight 200 display titles, Geist Mono labels, one emotionally important inline Instrument Serif italic vermilion phrase, hairline product/data surfaces, recurring low-area vermilion signals, optional subtle off-canvas red radial glow, real Ardia mark/assets, and no generic executive-deck drift.'
         : '',
     ].join(' '),
     system: system
@@ -459,25 +459,27 @@ function buildDesignSystemRunMetadata(
                   ],
                   nonNegotiables: [
                     'Preserve the Ardia quiet-minimalist system unless the user explicitly asks to replace the organization design system.',
-                    'Use Inter Tight 200 display titles, Geist Mono labels, and Instrument Serif italic only as one restrained accent phrase or line.',
+                    'Use Inter Tight 200 display titles, Geist Mono labels, and Instrument Serif italic vermilion as one emotionally important inline title phrase, accent word, or short accent line.',
                     'Use real Ardia logo/assets; do not draw or invent a generic square logo.',
-                    'Use near-black backgrounds, whitespace, one-pixel hairlines, quiet data/product surfaces, and precise vermilion accents.',
+                    'Use near-black backgrounds, whitespace, one-pixel hairlines, quiet data/product surfaces, and vermilion as a recurring low-area signal: dot, inline serif phrase, KPI unit, chart stroke/faint fill, CTA underline, status text.',
+                    'The legacy Ardia one-pager red atmosphere is allowed: one subtle off-canvas vermilion radial glow per slide, opacity 0.08-0.13, fading to transparent. Do not use neon, bokeh, blue/purple gradients, or opaque red panels.',
                     'For decks, create fixed-size slide components and export a slides array so Pach renders separated slide frames.',
                   ],
                   forbiddenDrift: [
                     'generic executive deck layouts',
                     'generic dark SaaS cards',
                     'blue or purple gradients',
-                    'glowing panels',
+                    'neon glows, bokeh, glass panels, or glowing card stacks',
                     'large serif primary titles',
                     'all-italic headlines',
                     'fake square logos',
+                    'opaque red panels or heavy red backgrounds',
                     'one long scrolling document pretending to be slides',
                   ],
                 }
               : undefined,
             agentInstruction: organization.project === 'ardia'
-              ? 'MANDATORY ARDIA DESIGN CONTRACT: match the Ardia buyer landing plus Pach legacy ardia-one-pager and Universo aBanza onboarding decks. Treat metadata.requiredDesignContract as a QA checklist. Do not drift into generic executive decks, generic SaaS cards, blue/purple gradients, glowing panels, large serif primary titles, all-italic headlines, fake square logos, or one long scrolling document. Use Inter Tight 200 display titles, Geist Mono labels, one restrained Instrument Serif italic accent, hairlines, whitespace, quiet product/data surfaces, precise vermilion accents, and the real Ardia logo asset or inline mark.'
+              ? 'MANDATORY ARDIA DESIGN CONTRACT: match the Ardia buyer landing plus Pach legacy ardia-one-pager and Universo aBanza onboarding decks. Treat metadata.requiredDesignContract as a QA checklist. Do not drift into generic executive decks, generic SaaS cards, blue/purple gradients, neon/glass/bokeh panels, large serif primary titles, all-italic headlines, fake square logos, opaque red panels, or one long scrolling document. Use Inter Tight 200 display titles, Geist Mono labels, one emotionally important inline Instrument Serif italic vermilion title phrase, hairlines, whitespace, quiet product/data surfaces, recurring low-area vermilion signals, the allowed subtle off-canvas red radial glow, and the real Ardia logo asset or inline mark.'
               : undefined,
             avoid: organization.project === 'ardia'
               ? [
@@ -486,7 +488,7 @@ function buildDesignSystemRunMetadata(
                   'fake square logos',
                   'generic dark SaaS cards',
                   'purple or blue gradients',
-                  'filled red blocks',
+                  'filled or opaque red blocks',
                 ]
               : undefined,
           },
@@ -2300,12 +2302,9 @@ export function CoverSlide(props: SlideProps) {
         <div>
           <div style={{ marginBottom: 30 }}><DotLabel>Deck ejecutivo</DotLabel></div>
           <h1 style={{ margin: 0, fontSize: 92, fontWeight: 200, lineHeight: 0.98, letterSpacing: '-0.055em', maxWidth: 860 }}>
-            {${JSON.stringify(name)}}.
+            {${JSON.stringify(name)}} <span style={{ fontFamily: serif, fontStyle: 'italic', fontWeight: 400, color: QM.accent, letterSpacing: '-0.025em' }}>sin friccion</span>.
           </h1>
-          <div style={{ marginTop: 28, fontFamily: serif, fontStyle: 'italic', fontSize: 54, lineHeight: 1.0, color: QM.accent, letterSpacing: '-0.025em' }}>
-            Cobranza exacta.
-          </div>
-          <p style={{ marginTop: 30, maxWidth: 680, color: QM.fg2, fontSize: 21, fontWeight: 300, lineHeight: 1.55, letterSpacing: '-0.01em' }}>
+          <p style={{ marginTop: 32, maxWidth: 680, color: QM.fg2, fontSize: 21, fontWeight: 300, lineHeight: 1.55, letterSpacing: '-0.01em' }}>
             Un deck base inspirado en la landing de compradores, Ardia One-Pager y onboarding Universo aBanza. Mantiene la estructura Quiet Minimalist: aire, jerarquia ligera y superficies de datos con hairlines.
           </p>
         </div>
