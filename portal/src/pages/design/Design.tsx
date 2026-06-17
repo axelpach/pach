@@ -1247,11 +1247,18 @@ function TemplateChatSidebar({
   const [isRenaming, setIsRenaming] = useState(false)
   const [isDeleting, setIsDeleting] = useState(false)
   const [isInputMediaDragActive, setIsInputMediaDragActive] = useState(false)
+  const chatScrollRef = useRef<HTMLDivElement | null>(null)
+  const chatBottomRef = useRef<HTMLDivElement | null>(null)
   const fileInputRef = useRef<HTMLInputElement | null>(null)
   const canRename = !template.legacy
   const canDelete = !template.legacy
   const cleanTemplateName = templateName.trim()
   const hasNameChange = cleanTemplateName.length > 0 && cleanTemplateName !== template.title
+  const chatScrollKey = runs.map((run) => {
+    const agentRun = agentRunByDesignRunId.get(run.id)
+    const latestProgress = agentRun ? progressReportsByRunId.get(agentRun.id)?.[0] : undefined
+    return `${run.id}:${agentRun?.status ?? run.status}:${latestProgress?.id ?? ''}:${latestProgress?.createdAt ?? ''}`
+  }).join('|')
 
   useEffect(() => {
     setTemplateName(template.title)
@@ -1259,6 +1266,26 @@ function TemplateChatSidebar({
     setIsRenaming(false)
     setIsDeleting(false)
   }, [template.id, template.title])
+
+  useEffect(() => {
+    scrollTemplateChatToBottom('auto')
+  }, [template.id])
+
+  useEffect(() => {
+    scrollTemplateChatToBottom('smooth')
+  }, [chatScrollKey])
+
+  function scrollTemplateChatToBottom(behavior: ScrollBehavior) {
+    window.requestAnimationFrame(() => {
+      if (chatBottomRef.current) {
+        chatBottomRef.current.scrollIntoView({ block: 'end', behavior })
+        return
+      }
+      if (chatScrollRef.current) {
+        chatScrollRef.current.scrollTop = chatScrollRef.current.scrollHeight
+      }
+    })
+  }
 
   async function handleRenameSubmit(event: FormEvent) {
     event.preventDefault()
@@ -1294,6 +1321,11 @@ function TemplateChatSidebar({
     event.preventDefault()
     if (!prompt.trim()) return
     event.currentTarget.form?.requestSubmit()
+  }
+
+  function handleQueueSubmit(event: FormEvent) {
+    onQueueRun(event)
+    scrollTemplateChatToBottom('smooth')
   }
 
   return (
@@ -1380,7 +1412,7 @@ function TemplateChatSidebar({
         </div>
       </div>
 
-      <div className="min-h-0 flex-1 overflow-y-auto px-4 py-4">
+      <div ref={chatScrollRef} className="min-h-0 flex-1 overflow-y-auto px-4 py-4">
         <div className="space-y-3">
           <div className="border border-edge/12 bg-pit-2 px-3 py-3">
             <div className="mb-2 flex items-center gap-2 font-mono text-[10px] uppercase tracking-label text-accent">
@@ -1399,11 +1431,12 @@ function TemplateChatSidebar({
               progressReports={agentRunByDesignRunId.get(run.id) ? progressReportsByRunId.get(agentRunByDesignRunId.get(run.id)!.id) ?? [] : []}
             />
           ))}
+          <div ref={chatBottomRef} aria-hidden="true" />
         </div>
       </div>
 
       <form
-        onSubmit={onQueueRun}
+        onSubmit={handleQueueSubmit}
         onDragEnter={(event) => {
           event.preventDefault()
           setIsInputMediaDragActive(true)
