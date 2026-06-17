@@ -1,6 +1,13 @@
-import { useEffect, useRef, useState } from 'react'
-import { MessageSquare, Send, TerminalSquare } from 'lucide-react'
+import { useEffect, useRef, useState, type DragEvent } from 'react'
+import { FileImage, MessageSquare, Paperclip, Send, TerminalSquare, X } from 'lucide-react'
 import type { Schema } from '../../zero-schema'
+
+type PendingAgentInputMedia = {
+  id: string
+  file: File
+  name: string
+  dimensions: { width: number; height: number } | null
+}
 
 type AgentConversationViewProps = {
   issue: Schema['tables']['pm_issues']['row']
@@ -12,7 +19,7 @@ type AgentConversationViewProps = {
   repositories: Schema['tables']['github_repositories']['row'][]
   onCreateRun: () => void | Promise<void>
   onSeedRepositories: () => void | Promise<void>
-  onSendFeedback: (feedback: string) => void | Promise<void>
+  onSendFeedback: (feedback: string, inputMedia?: PendingAgentInputMedia[]) => void | Promise<void>
   onCancelRun: () => void | Promise<void>
   canceling: boolean
   onClose: () => void
@@ -47,7 +54,10 @@ export function AgentConversationView({
   const [feedbackDraft, setFeedbackDraft] = useState('')
   const [feedbackBusy, setFeedbackBusy] = useState(false)
   const [feedbackMessage, setFeedbackMessage] = useState<string | null>(null)
+  const [feedbackInputMedia, setFeedbackInputMedia] = useState<PendingAgentInputMedia[]>([])
+  const [feedbackDragActive, setFeedbackDragActive] = useState(false)
   const conversationEndRef = useRef<HTMLDivElement | null>(null)
+  const feedbackFileInputRef = useRef<HTMLInputElement | null>(null)
   const onlineWorkers = workers.filter((worker) => worker.status !== 'offline')
   const canCreateRun = repositories.length > 0 && !run
   const canCancelRun = Boolean(run && !['completed', 'failed', 'canceled'].includes(run.status))
@@ -69,14 +79,37 @@ export function AgentConversationView({
     setFeedbackMessage(null)
 
     try {
-      await onSendFeedback(feedback)
+      await onSendFeedback(feedback, feedbackInputMedia)
       setFeedbackDraft('')
+      setFeedbackInputMedia([])
       setFeedbackMessage('follow-up queued')
     } catch (error) {
       setFeedbackMessage(error instanceof Error ? error.message : 'Failed to queue follow-up')
     } finally {
       setFeedbackBusy(false)
     }
+  }
+
+  async function addFeedbackInputMedia(files: FileList | File[]) {
+    const selectedFiles = Array.from(files).slice(0, 8)
+    if (!selectedFiles.length) return
+    const items = await Promise.all(selectedFiles.map(async (file) => ({
+      id: crypto.randomUUID(),
+      file,
+      name: file.name,
+      dimensions: await readImageDimensions(file),
+    })))
+    setFeedbackInputMedia((current) => [...current, ...items].slice(0, 8))
+  }
+
+  function removeFeedbackInputMedia(id: string) {
+    setFeedbackInputMedia((current) => current.filter((item) => item.id !== id))
+  }
+
+  function handleFeedbackDrop(event: DragEvent<HTMLElement>) {
+    event.preventDefault()
+    setFeedbackDragActive(false)
+    if (event.dataTransfer.files.length) void addFeedbackInputMedia(event.dataTransfer.files)
   }
 
   return (
@@ -173,13 +206,50 @@ export function AgentConversationView({
 
         <div className="shrink-0 border-t border-edge/12 bg-pit/80 px-4 py-4 md:px-8">
           <form
-            className="mx-auto max-w-5xl"
+            className={`mx-auto max-w-5xl border border-transparent p-1 transition ${feedbackDragActive ? 'border-accent/50 bg-accent-fill/6' : ''}`}
+            onDragEnter={(event) => {
+              event.preventDefault()
+              setFeedbackDragActive(true)
+            }}
+            onDragOver={(event) => {
+              event.preventDefault()
+              setFeedbackDragActive(true)
+            }}
+            onDragLeave={(event) => {
+              if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setFeedbackDragActive(false)
+            }}
+            onDrop={handleFeedbackDrop}
             onSubmit={(event) => {
               event.preventDefault()
               void submitFeedback()
             }}
           >
             <div className="border border-edge/18 bg-pit-3 p-2 focus-within:border-accent/70">
+              {feedbackInputMedia.length ? (
+                <div className="mb-2 flex flex-wrap gap-1.5 px-2">
+                  {feedbackInputMedia.map((item) => (
+                    <span
+                      key={item.id}
+                      className="inline-flex max-w-full items-center gap-1.5 border border-edge/16 bg-pit px-1.5 py-1 font-mono text-[9px] uppercase tracking-label text-fg-3"
+                    >
+                      <FileImage className="h-3 w-3 shrink-0 text-accent" />
+                      <span className="max-w-[180px] truncate">{item.name}</span>
+                      <span className="shrink-0 text-fg-4">
+                        {item.dimensions ? `${item.dimensions.width}x${item.dimensions.height}` : formatBytes(item.file.size)}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => removeFeedbackInputMedia(item.id)}
+                        className="shrink-0 text-fg-4 transition hover:text-fail"
+                        title="remove attachment"
+                        aria-label={`remove ${item.name}`}
+                      >
+                        <X className="h-3 w-3" />
+                      </button>
+                    </span>
+                  ))}
+                </div>
+              ) : null}
               <textarea
                 value={feedbackDraft}
                 onChange={(event) => setFeedbackDraft(event.target.value)}
@@ -198,14 +268,38 @@ export function AgentConversationView({
                   {run?.workerId ? 'will try the same worker/session first' : 'agent feedback attaches to the active run'}
                   {feedbackMessage ? ` · ${feedbackMessage}` : ''}
                 </span>
-                <button
-                  type="submit"
-                  disabled={!feedbackDraft.trim() || feedbackBusy || !run}
-                  className="inline-flex items-center gap-1.5 border border-edge/24 bg-accent-fill/8 px-3 py-1.5 font-mono text-[10px] uppercase tracking-label text-accent transition hover:border-accent disabled:cursor-not-allowed disabled:opacity-40"
-                >
-                  <Send className="h-3.5 w-3.5" />
-                  {feedbackBusy ? 'queuing...' : 'send'}
-                </button>
+                <div className="flex items-center gap-1.5">
+                  <input
+                    ref={feedbackFileInputRef}
+                    type="file"
+                    multiple
+                    className="sr-only"
+                    accept="image/*,.pdf"
+                    onChange={(event) => {
+                      const files = event.target.files
+                      if (files) void addFeedbackInputMedia(files)
+                      event.target.value = ''
+                    }}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => feedbackFileInputRef.current?.click()}
+                    disabled={!run || feedbackBusy}
+                    className="inline-flex h-8 w-8 items-center justify-center border border-edge/24 bg-accent-fill/4 text-fg-3 transition hover:border-accent hover:text-accent disabled:cursor-not-allowed disabled:opacity-40"
+                    title="attach context"
+                    aria-label="attach context"
+                  >
+                    <Paperclip className="h-3.5 w-3.5" />
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={!feedbackDraft.trim() || feedbackBusy || !run}
+                    className="inline-flex items-center gap-1.5 border border-edge/24 bg-accent-fill/8 px-3 py-1.5 font-mono text-[10px] uppercase tracking-label text-accent transition hover:border-accent disabled:cursor-not-allowed disabled:opacity-40"
+                  >
+                    <Send className="h-3.5 w-3.5" />
+                    {feedbackBusy ? 'queuing...' : 'send'}
+                  </button>
+                </div>
               </div>
             </div>
           </form>
@@ -415,6 +509,30 @@ function readMetadataString(metadata: unknown, key: string) {
   if (!metadata || typeof metadata !== 'object') return null
   const value = (metadata as Record<string, unknown>)[key]
   return typeof value === 'string' && value.trim() ? value : null
+}
+
+function readImageDimensions(file: File) {
+  if (!file.type.startsWith('image/')) return Promise.resolve(null)
+
+  return new Promise<{ width: number; height: number } | null>((resolve) => {
+    const image = new Image()
+    const url = URL.createObjectURL(file)
+    image.onload = () => {
+      URL.revokeObjectURL(url)
+      resolve({ width: image.naturalWidth, height: image.naturalHeight })
+    }
+    image.onerror = () => {
+      URL.revokeObjectURL(url)
+      resolve(null)
+    }
+    image.src = url
+  })
+}
+
+function formatBytes(value: number) {
+  if (value < 1024) return `${value} b`
+  if (value < 1024 * 1024) return `${(value / 1024).toFixed(1)} kb`
+  return `${(value / (1024 * 1024)).toFixed(1)} mb`
 }
 
 function legacyProgressPhase(type: string) {

@@ -155,6 +155,27 @@ export const designAssets = pgTable('design_assets', {
   templateIdIdx: index('design_assets_template_idx').on(table.templateId),
 }))
 
+export const agentRunInputMediaObjects = pgTable('agent_run_input_media_objects', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  organizationId: uuid('organization_id').references(() => organizations.id),
+  kind: text('kind').notNull().default('file'),
+  name: text('name').notNull(),
+  fileName: text('file_name').notNull(),
+  mimeType: text('mime_type').notNull().default('application/octet-stream'),
+  sizeBytes: integer('size_bytes'),
+  width: integer('width'),
+  height: integer('height'),
+  storageKey: text('storage_key').notNull(),
+  url: text('url'),
+  source: text('source').notNull().default('upload'),
+  metadata: jsonb('metadata').$type<Record<string, unknown>>().notNull().default({}),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+}, (table) => ({
+  organizationIdIdx: index('agent_run_input_media_objects_organization_idx').on(table.organizationId),
+  storageKeyIdx: index('agent_run_input_media_objects_storage_key_idx').on(table.storageKey),
+}))
+
 export const designTemplateRuns = pgTable('design_template_runs', {
   id: uuid('id').primaryKey().defaultRandom(),
   organizationId: uuid('organization_id').notNull().references(() => organizations.id),
@@ -758,6 +779,26 @@ export const agentMessages = pgTable('agent_messages', {
   metadata: jsonb('metadata').$type<Record<string, unknown>>().notNull().default({}),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
 })
+
+export const agentRunInputMedia = pgTable('agent_run_input_media', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  runId: uuid('run_id').notNull().references(() => agentRuns.id),
+  mediaObjectId: uuid('media_object_id').notNull().references(() => agentRunInputMediaObjects.id),
+  messageId: uuid('message_id').references(() => agentMessages.id),
+  issueId: uuid('issue_id').references(() => pmIssues.id),
+  subjectType: text('subject_type'),
+  subjectId: uuid('subject_id'),
+  role: text('role').notNull().default('input'),
+  caption: text('caption'),
+  sortOrder: integer('sort_order').notNull().default(0),
+  metadata: jsonb('metadata').$type<Record<string, unknown>>().notNull().default({}),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+}, (table) => ({
+  runIdIdx: index('agent_run_input_media_run_idx').on(table.runId),
+  mediaObjectIdIdx: index('agent_run_input_media_media_object_idx').on(table.mediaObjectId),
+  issueIdIdx: index('agent_run_input_media_issue_idx').on(table.issueId),
+  subjectIdx: index('agent_run_input_media_subject_idx').on(table.subjectType, table.subjectId),
+}))
 
 export const agentTerminals = pgTable('agent_terminals', {
   id: uuid('id').primaryKey().defaultRandom(),

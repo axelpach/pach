@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, type DragEvent } from 'react'
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { useQuery, useZero } from '@rocicorp/zero/react'
 import { Terminal as XTerm } from '@xterm/xterm'
@@ -14,10 +14,13 @@ import {
   ChevronDown,
   ChevronUp,
   Circle,
+  FileImage,
   FolderKanban,
   Maximize2,
+  Paperclip,
   Plus,
   TerminalSquare,
+  X,
 } from 'lucide-react'
 import type { Schema } from '../../zero-schema'
 import type { Mutators } from '../../mutators'
@@ -52,6 +55,13 @@ const DEFAULT_TERMINALS = [
   { name: 'zero', role: 'zero', tmuxWindow: 'zero', sortOrder: 3 },
   { name: 'shell', role: 'shell', tmuxWindow: 'shell', sortOrder: 4 },
 ] as const
+
+type PendingAgentInputMedia = {
+  id: string
+  file: File
+  name: string
+  dimensions: { width: number; height: number } | null
+}
 
 export default function IssueDetail() {
   const { issueId } = useParams<{ issueId: string }>()
@@ -352,7 +362,7 @@ export default function IssueDetail() {
     })
   }
 
-  async function sendAgentFeedback(feedback: string) {
+  async function sendAgentFeedback(feedback: string, inputMedia: PendingAgentInputMedia[] = []) {
     if (!issue || !activeRun) return
     const trimmed = feedback.trim()
     if (!trimmed) return
@@ -372,6 +382,7 @@ export default function IssueDetail() {
     const issueKey = issue.identifier.toLowerCase()
     const branchName = `agent/${repo.projectKey}-${issueKey}-feedback-${Date.now()}`
     const codexSessionId = readRunCodexSessionId(activeRun.metadata)
+    const hasInputMedia = inputMedia.length > 0
 
     if (!conversationExists) {
       await z.mutate.agent_conversations.create({
@@ -400,8 +411,10 @@ export default function IssueDetail() {
       repoFullName: repo.fullName,
       baseBranch: repo.defaultBranch,
       branchName,
-      status: 'queued',
-      statusMessage: activeRun.workerId ? 'queued for same agent worker' : 'queued for agent worker',
+      status: hasInputMedia ? 'reserved' : 'queued',
+      statusMessage: hasInputMedia
+        ? 'uploading input media'
+        : activeRun.workerId ? 'queued for same agent worker' : 'queued for agent worker',
       metadata: {
         executionClass: 'general',
         handler: 'general-mcp',
@@ -411,6 +424,7 @@ export default function IssueDetail() {
         parentRunId: activeRun.id,
         feedbackMessageId: messageId,
         feedback: trimmed,
+        pendingInputMediaCount: inputMedia.length,
         codexSessionId,
         preferredWorkerId: activeRun.workerId,
       },
@@ -428,13 +442,48 @@ export default function IssueDetail() {
       },
     })
 
+    if (hasInputMedia) {
+      await uploadAgentInputMedia(runId, messageId, inputMedia)
+      await z.mutate.agent_runs.update({
+        id: runId,
+        status: 'queued',
+        statusMessage: activeRun.workerId ? 'queued for same agent worker' : 'queued for agent worker',
+      })
+    }
+
     await logActivity('queued agent follow-up from feedback', 'agent_run_created', {
       runId,
       conversationId,
       parentRunId: activeRun.id,
       workerId: activeRun.workerId,
       codexSessionId,
+      inputMediaCount: inputMedia.length,
     })
+  }
+
+  async function uploadAgentInputMedia(agentRunId: string, messageId: string, mediaItems: PendingAgentInputMedia[]) {
+    for (const item of mediaItems) {
+      const contentBase64 = await readFileAsBase64(item.file)
+      const response = await authFetch(`${config.apiUrl}/media/agent-run-input/upload`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          runId: agentRunId,
+          messageId,
+          name: item.name,
+          fileName: item.file.name,
+          mimeType: item.file.type || 'application/octet-stream',
+          contentBase64,
+          width: item.dimensions?.width,
+          height: item.dimensions?.height,
+          kind: item.file.type.startsWith('image/') ? 'screenshot' : 'file',
+        }),
+      })
+      if (!response.ok) {
+        const payload = await response.json().catch(() => ({}))
+        throw new Error(readString(payload.message) ?? readString(payload.error) ?? `could not upload ${item.name}`)
+      }
+    }
   }
 
   async function cancelAgentRun() {
@@ -1094,7 +1143,7 @@ function AgentRunPanel({
   defaultGoal: string
   onSeedRepositories: () => void | Promise<void>
   onCreateRun: () => void | Promise<void>
-  onSendFeedback: (feedback: string) => void | Promise<void>
+  onSendFeedback: (feedback: string, inputMedia?: PendingAgentInputMedia[]) => void | Promise<void>
   onBootstrapRun: () => void | Promise<void>
   bootstrapping: boolean
   actionMessage: string | null
@@ -1124,7 +1173,10 @@ function AgentRunPanel({
   const [feedbackDraft, setFeedbackDraft] = useState('')
   const [feedbackBusy, setFeedbackBusy] = useState(false)
   const [feedbackMessage, setFeedbackMessage] = useState<string | null>(null)
+  const [feedbackInputMedia, setFeedbackInputMedia] = useState<PendingAgentInputMedia[]>([])
+  const [feedbackDragActive, setFeedbackDragActive] = useState(false)
   const [showFullProgressLog, setShowFullProgressLog] = useState(false)
+  const feedbackFileInputRef = useRef<HTMLInputElement | null>(null)
   const liveTerminalElementRef = useRef<HTMLDivElement | null>(null)
   const liveSocketRef = useRef<WebSocket | null>(null)
   const liveXtermRef = useRef<XTerm | null>(null)
@@ -1442,14 +1494,37 @@ function AgentRunPanel({
     setFeedbackMessage(null)
 
     try {
-      await onSendFeedback(feedback)
+      await onSendFeedback(feedback, feedbackInputMedia)
       setFeedbackDraft('')
+      setFeedbackInputMedia([])
       setFeedbackMessage('follow-up queued')
     } catch (error) {
       setFeedbackMessage(error instanceof Error ? error.message : 'Failed to queue follow-up')
     } finally {
       setFeedbackBusy(false)
     }
+  }
+
+  async function addFeedbackInputMedia(files: FileList | File[]) {
+    const selectedFiles = Array.from(files).slice(0, 8)
+    if (!selectedFiles.length) return
+    const items = await Promise.all(selectedFiles.map(async (file) => ({
+      id: crypto.randomUUID(),
+      file,
+      name: file.name,
+      dimensions: await readImageDimensions(file),
+    })))
+    setFeedbackInputMedia((current) => [...current, ...items].slice(0, 8))
+  }
+
+  function removeFeedbackInputMedia(id: string) {
+    setFeedbackInputMedia((current) => current.filter((item) => item.id !== id))
+  }
+
+  function handleFeedbackDrop(event: DragEvent<HTMLElement>) {
+    event.preventDefault()
+    setFeedbackDragActive(false)
+    if (event.dataTransfer.files.length) void addFeedbackInputMedia(event.dataTransfer.files)
   }
 
   return (
@@ -1611,12 +1686,49 @@ function AgentRunPanel({
               </div>
             ) : null}
             <form
-              className="space-y-2"
+              className={`space-y-2 border border-transparent p-1 transition ${feedbackDragActive ? 'border-accent/50 bg-accent-fill/6' : ''}`}
+              onDragEnter={(event) => {
+                event.preventDefault()
+                setFeedbackDragActive(true)
+              }}
+              onDragOver={(event) => {
+                event.preventDefault()
+                setFeedbackDragActive(true)
+              }}
+              onDragLeave={(event) => {
+                if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setFeedbackDragActive(false)
+              }}
+              onDrop={handleFeedbackDrop}
               onSubmit={(event) => {
                 event.preventDefault()
                 void submitFeedback()
               }}
             >
+              {feedbackInputMedia.length ? (
+                <div className="flex flex-wrap gap-1.5">
+                  {feedbackInputMedia.map((item) => (
+                    <span
+                      key={item.id}
+                      className="inline-flex max-w-full items-center gap-1.5 border border-edge/16 bg-pit-3 px-1.5 py-1 font-mono text-[9px] uppercase tracking-label text-fg-3"
+                    >
+                      <FileImage className="h-3 w-3 shrink-0 text-accent" />
+                      <span className="max-w-[150px] truncate">{item.name}</span>
+                      <span className="shrink-0 text-fg-4">
+                        {item.dimensions ? `${item.dimensions.width}x${item.dimensions.height}` : formatBytes(item.file.size)}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => removeFeedbackInputMedia(item.id)}
+                        className="shrink-0 text-fg-4 transition hover:text-fail"
+                        title="remove attachment"
+                        aria-label={`remove ${item.name}`}
+                      >
+                        <X className="h-3 w-3" />
+                      </button>
+                    </span>
+                  ))}
+                </div>
+              ) : null}
               <textarea
                 value={feedbackDraft}
                 onChange={(event) => setFeedbackDraft(event.target.value)}
@@ -1629,13 +1741,37 @@ function AgentRunPanel({
                 <span className="font-mono text-[10px] lowercase text-fg-4">
                   {run?.workerId ? 'will try the same worker/session first' : 'will start from run context'}
                 </span>
-                <button
-                  type="submit"
-                  disabled={!feedbackDraft.trim() || feedbackBusy || !run}
-                  className="border border-edge/24 bg-accent-fill/8 px-2.5 py-1.5 font-mono text-[10px] uppercase tracking-label text-accent transition hover:border-accent disabled:cursor-not-allowed disabled:opacity-40"
-                >
-                  {feedbackBusy ? 'queuing...' : 'send feedback'}
-                </button>
+                <div className="flex items-center gap-1.5">
+                  <input
+                    ref={feedbackFileInputRef}
+                    type="file"
+                    multiple
+                    className="sr-only"
+                    accept="image/*,.pdf"
+                    onChange={(event) => {
+                      const files = event.target.files
+                      if (files) void addFeedbackInputMedia(files)
+                      event.target.value = ''
+                    }}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => feedbackFileInputRef.current?.click()}
+                    className="inline-flex h-7 w-7 items-center justify-center border border-edge/24 bg-accent-fill/4 text-fg-3 transition hover:border-accent hover:text-accent disabled:cursor-not-allowed disabled:opacity-40"
+                    disabled={!run || feedbackBusy}
+                    title="attach context"
+                    aria-label="attach context"
+                  >
+                    <Paperclip className="h-3.5 w-3.5" />
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={!feedbackDraft.trim() || feedbackBusy || !run}
+                    className="border border-edge/24 bg-accent-fill/8 px-2.5 py-1.5 font-mono text-[10px] uppercase tracking-label text-accent transition hover:border-accent disabled:cursor-not-allowed disabled:opacity-40"
+                  >
+                    {feedbackBusy ? 'queuing...' : 'send feedback'}
+                  </button>
+                </div>
               </div>
               {feedbackMessage ? <div className="font-mono text-[10px] lowercase text-fg-4">{feedbackMessage}</div> : null}
             </form>
@@ -2328,4 +2464,41 @@ function formatRelative(ms: number) {
   const day = Math.floor(hr / 24)
   if (day < 30) return `${day}d ago`
   return formatDate(ms)
+}
+
+function readFileAsBase64(file: File) {
+  return new Promise<string>((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => resolve(String(reader.result ?? ''))
+    reader.onerror = () => reject(reader.error ?? new Error('Could not read file'))
+    reader.readAsDataURL(file)
+  })
+}
+
+function readImageDimensions(file: File) {
+  if (!file.type.startsWith('image/')) return Promise.resolve(null)
+
+  return new Promise<{ width: number; height: number } | null>((resolve) => {
+    const image = new Image()
+    const url = URL.createObjectURL(file)
+    image.onload = () => {
+      URL.revokeObjectURL(url)
+      resolve({ width: image.naturalWidth, height: image.naturalHeight })
+    }
+    image.onerror = () => {
+      URL.revokeObjectURL(url)
+      resolve(null)
+    }
+    image.src = url
+  })
+}
+
+function formatBytes(value: number) {
+  if (value < 1024) return `${value} b`
+  if (value < 1024 * 1024) return `${(value / 1024).toFixed(1)} kb`
+  return `${(value / (1024 * 1024)).toFixed(1)} mb`
+}
+
+function readString(value: unknown) {
+  return typeof value === 'string' && value.trim() ? value.trim() : null
 }

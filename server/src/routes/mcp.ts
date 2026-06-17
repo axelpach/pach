@@ -1,4 +1,6 @@
 import { randomUUID } from 'node:crypto'
+import { GetObjectCommand, S3Client } from '@aws-sdk/client-s3'
+import { getSignedUrl } from '@aws-sdk/s3-request-presigner'
 import { Router } from 'express'
 import type { Request } from 'express'
 import { desc, eq, ilike, inArray, or } from 'drizzle-orm'
@@ -35,6 +37,9 @@ import {
 import { getFallbackDesignSystemForOrganization, mergeDesignSystemWithFallback } from '../design-systems/fallback.js'
 
 const router = Router()
+const SIGNED_READ_SECONDS = 60 * 60
+
+let s3Client: S3Client | null = null
 const MCP_PROTOCOL_VERSION = '2024-11-05'
 const ALLOW_LOCAL_MCP_NO_AUTH =
   process.env.PACH_MCP_ALLOW_LOCAL_NO_AUTH === 'true' ||
@@ -923,7 +928,7 @@ async function getDesignTemplate(req: AuthenticatedRequest, args: unknown) {
     ok: true,
     template: serializeDesignTemplate(template, organization),
     organizationDesignSystem: effectiveDesignSystem,
-    assets: assets.map(serializeDesignAsset),
+    assets: await Promise.all(assets.map(serializeDesignAsset)),
     agentInstructions: {
       mustUseOrganizationDesignSystem: true,
       designSystemId: effectiveDesignSystem?.id ?? null,
@@ -1230,7 +1235,8 @@ function serializeDesignTemplateRun(run: typeof designTemplateRuns.$inferSelect)
   }
 }
 
-function serializeDesignAsset(asset: typeof designAssets.$inferSelect) {
+async function serializeDesignAsset(asset: typeof designAssets.$inferSelect) {
+  const signedUrl = asset.storageKey ? await signedReadUrl(asset.storageKey).catch(() => null) : null
   return {
     id: asset.id,
     organizationId: asset.organizationId,
@@ -1238,11 +1244,43 @@ function serializeDesignAsset(asset: typeof designAssets.$inferSelect) {
     kind: asset.kind,
     name: asset.name,
     storageKey: asset.storageKey,
-    url: asset.url,
+    url: signedUrl ?? asset.url,
+    originalUrl: asset.url,
+    expiresInSeconds: signedUrl ? SIGNED_READ_SECONDS : null,
     metadata: asset.metadata ?? {},
     createdAt: asset.createdAt.toISOString(),
     updatedAt: asset.updatedAt.toISOString(),
   }
+}
+
+function signedReadUrl(key: string) {
+  return getSignedUrl(
+    getS3Client(),
+    new GetObjectCommand({
+      Bucket: getBucketName(),
+      Key: key,
+    }),
+    { expiresIn: SIGNED_READ_SECONDS },
+  )
+}
+
+function getS3Client() {
+  if (!s3Client) {
+    s3Client = new S3Client({
+      region: getAwsRegion(),
+    })
+  }
+  return s3Client
+}
+
+function getBucketName() {
+  const bucket = process.env.S3_BUCKET || process.env.AWS_S3_BUCKET
+  if (!bucket) throw new Error('Missing S3_BUCKET env var.')
+  return bucket
+}
+
+function getAwsRegion() {
+  return process.env.AWS_REGION || process.env.AWS_DEFAULT_REGION || 'us-east-1'
 }
 
 async function appendIssueActivity(

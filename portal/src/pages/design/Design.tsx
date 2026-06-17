@@ -12,6 +12,7 @@ import {
   FileImage,
   Image as ImageIcon,
   Layers3,
+  Paperclip,
   Palette,
   Plus,
   Search,
@@ -126,6 +127,13 @@ type DesignAssetRow = {
   metadata: Record<string, unknown>
   createdAt: number
   updatedAt: number
+}
+
+type PendingAgentInputMedia = {
+  id: string
+  file: File
+  name: string
+  dimensions: { width: number; height: number } | null
 }
 
 type TemplateListItem = {
@@ -588,6 +596,7 @@ export default function Design() {
   const [sidebarError, setSidebarError] = useState<string | null>(null)
   const [isCreatingTemplate, setIsCreatingTemplate] = useState(false)
   const [isAssetsModalOpen, setIsAssetsModalOpen] = useState(false)
+  const [pendingInputMedia, setPendingInputMedia] = useState<PendingAgentInputMedia[]>([])
   const [localCreatedTemplates, setLocalCreatedTemplates] = useState<DesignTemplateRow[]>([])
   const [localCreatedVersions, setLocalCreatedVersions] = useState<DesignTemplateVersionRow[]>([])
 
@@ -713,11 +722,13 @@ export default function Design() {
     if (!cleanPrompt || !selectedTemplate || !selectedOrganization) return
 
     setChatError(null)
+    const mediaToUpload = pendingInputMedia
     try {
       const designRunId = crypto.randomUUID()
       const agentRunId = crypto.randomUUID()
       const branchName = `design/${selectedTemplate.slug}-${agentRunId.slice(0, 8)}`
       const designSystemMetadata = buildDesignSystemRunMetadata(selectedOrganization, selectedSystem, palette)
+      const hasPendingMedia = mediaToUpload.length > 0
       await z.mutate.agent_runs.create({
         id: agentRunId,
         subjectType: 'design_template_run',
@@ -726,8 +737,8 @@ export default function Design() {
         repoFullName: 'pach/design',
         baseBranch: 'main',
         branchName,
-        status: 'queued',
-        statusMessage: 'queued for design agent worker',
+        status: hasPendingMedia ? 'reserved' : 'queued',
+        statusMessage: hasPendingMedia ? 'uploading input media' : 'queued for design agent worker',
         metadata: {
           executionClass: 'general',
           handler: 'design-template-mcp',
@@ -743,6 +754,7 @@ export default function Design() {
           sourceVersionId: selectedVersion?.id,
           prompt: cleanPrompt,
           mustUseOrganizationDesignSystem: true,
+          pendingInputMediaCount: mediaToUpload.length,
           designSystem: designSystemMetadata,
           availableAspectRatios: DESIGN_ASPECT_RATIOS,
           preferredAspectRatio: DESIGN_ASPECT_RATIOS[0],
@@ -755,8 +767,8 @@ export default function Design() {
         agentRunId,
         templateSlug: selectedTemplate.slug,
         prompt: cleanPrompt,
-        status: 'queued',
-        statusMessage: 'queued for agent worker',
+        status: hasPendingMedia ? 'reserved' : 'queued',
+        statusMessage: hasPendingMedia ? 'uploading input media' : 'queued for agent worker',
         sourceVersionId: selectedVersion?.id,
         metadata: {
           templateTitle: selectedTemplate.title,
@@ -768,9 +780,64 @@ export default function Design() {
           agentRunId,
         },
       })
+      if (hasPendingMedia) {
+        await uploadAgentInputMedia(agentRunId, mediaToUpload)
+        await z.mutate.agent_runs.update({
+          id: agentRunId,
+          status: 'queued',
+          statusMessage: 'queued for design agent worker',
+        })
+        await z.mutate.design_template_runs.update({
+          id: designRunId,
+          status: 'queued',
+          statusMessage: 'queued for agent worker',
+        })
+      }
       setPrompt('')
+      setPendingInputMedia([])
     } catch (error) {
       setChatError(error instanceof Error ? error.message : 'could not queue run')
+    }
+  }
+
+  async function handleAddInputMedia(files: FileList | File[]) {
+    const selectedFiles = Array.from(files).slice(0, 8)
+    if (!selectedFiles.length) return
+
+    const items = await Promise.all(selectedFiles.map(async (file) => ({
+      id: crypto.randomUUID(),
+      file,
+      name: file.name,
+      dimensions: await readImageDimensions(file),
+    })))
+    setPendingInputMedia((current) => [...current, ...items].slice(0, 8))
+  }
+
+  function handleRemoveInputMedia(id: string) {
+    setPendingInputMedia((current) => current.filter((item) => item.id !== id))
+  }
+
+  async function uploadAgentInputMedia(agentRunId: string, mediaItems: PendingAgentInputMedia[]) {
+    for (const item of mediaItems) {
+      const contentBase64 = await readFileAsBase64(item.file)
+      const response = await authFetch(`${config.apiUrl}/media/agent-run-input/upload`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          runId: agentRunId,
+          name: item.name,
+          fileName: item.file.name,
+          mimeType: item.file.type || 'application/octet-stream',
+          contentBase64,
+          width: item.dimensions?.width,
+          height: item.dimensions?.height,
+          kind: item.file.type.startsWith('image/') ? 'screenshot' : 'file',
+        }),
+      })
+      if (!response.ok) {
+        const payload = await response.json().catch(() => ({}))
+        throw new Error(readString(payload.message) ?? readString(payload.error) ?? `could not upload ${item.name}`)
+      }
     }
   }
 
@@ -889,6 +956,9 @@ export default function Design() {
         prompt={prompt}
         onPromptChange={setPrompt}
         onQueueRun={handleQueueRun}
+        inputMedia={pendingInputMedia}
+        onAddInputMedia={handleAddInputMedia}
+        onRemoveInputMedia={handleRemoveInputMedia}
         onCreateTemplate={handleCreateTemplate}
         isCreatingTemplate={isCreatingTemplate}
         sidebarError={sidebarError}
@@ -937,6 +1007,9 @@ function DesignSidebar({
   prompt,
   onPromptChange,
   onQueueRun,
+  inputMedia,
+  onAddInputMedia,
+  onRemoveInputMedia,
   onCreateTemplate,
   isCreatingTemplate,
   sidebarError,
@@ -963,6 +1036,9 @@ function DesignSidebar({
   prompt: string
   onPromptChange: (value: string) => void
   onQueueRun: (event: FormEvent) => void
+  inputMedia: PendingAgentInputMedia[]
+  onAddInputMedia: (files: FileList | File[]) => Promise<void>
+  onRemoveInputMedia: (id: string) => void
   onCreateTemplate: () => void
   isCreatingTemplate: boolean
   sidebarError: string | null
@@ -996,6 +1072,9 @@ function DesignSidebar({
           prompt={prompt}
           onPromptChange={onPromptChange}
           onQueueRun={onQueueRun}
+          inputMedia={inputMedia}
+          onAddInputMedia={onAddInputMedia}
+          onRemoveInputMedia={onRemoveInputMedia}
           runs={runs}
           agentRunByDesignRunId={agentRunByDesignRunId}
           progressReportsByRunId={progressReportsByRunId}
@@ -1106,6 +1185,9 @@ function TemplateChatSidebar({
   prompt,
   onPromptChange,
   onQueueRun,
+  inputMedia,
+  onAddInputMedia,
+  onRemoveInputMedia,
   runs,
   agentRunByDesignRunId,
   progressReportsByRunId,
@@ -1120,6 +1202,9 @@ function TemplateChatSidebar({
   prompt: string
   onPromptChange: (value: string) => void
   onQueueRun: (event: FormEvent) => void
+  inputMedia: PendingAgentInputMedia[]
+  onAddInputMedia: (files: FileList | File[]) => Promise<void>
+  onRemoveInputMedia: (id: string) => void
   runs: DesignTemplateRunRow[]
   agentRunByDesignRunId: Map<string, AgentRunRow>
   progressReportsByRunId: Map<string, AgentRunProgressReportRow[]>
@@ -1134,6 +1219,8 @@ function TemplateChatSidebar({
   const [renameError, setRenameError] = useState<string | null>(null)
   const [isRenaming, setIsRenaming] = useState(false)
   const [isDeleting, setIsDeleting] = useState(false)
+  const [isInputMediaDragActive, setIsInputMediaDragActive] = useState(false)
+  const fileInputRef = useRef<HTMLInputElement | null>(null)
   const canRename = !template.legacy
   const canDelete = !template.legacy
   const cleanTemplateName = templateName.trim()
@@ -1288,12 +1375,56 @@ function TemplateChatSidebar({
         </div>
       </div>
 
-      <form onSubmit={onQueueRun} className="border-t border-edge/12 p-4">
+      <form
+        onSubmit={onQueueRun}
+        onDragEnter={(event) => {
+          event.preventDefault()
+          setIsInputMediaDragActive(true)
+        }}
+        onDragOver={(event) => {
+          event.preventDefault()
+          setIsInputMediaDragActive(true)
+        }}
+        onDragLeave={(event) => {
+          if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setIsInputMediaDragActive(false)
+        }}
+        onDrop={(event) => {
+          event.preventDefault()
+          setIsInputMediaDragActive(false)
+          if (event.dataTransfer.files.length) void onAddInputMedia(event.dataTransfer.files)
+        }}
+        className={`border-t border-edge/12 p-4 transition ${isInputMediaDragActive ? 'bg-accent-fill/6 shadow-[inset_0_0_0_1px_rgb(var(--accent-rgb)/0.45)]' : ''}`}
+      >
         {chatError && (
           <div className="mb-3 border border-fail/25 bg-fail/5 px-3 py-2 text-xs text-fail">
             {chatError}
           </div>
         )}
+        {inputMedia.length ? (
+          <div className="mb-3 flex flex-wrap gap-2">
+            {inputMedia.map((item) => (
+              <span
+                key={item.id}
+                className="inline-flex max-w-full items-center gap-2 border border-edge/16 bg-pit-3 px-2 py-1 font-mono text-[9px] uppercase tracking-label text-fg-3"
+              >
+                <FileImage className="h-3.5 w-3.5 shrink-0 text-accent" />
+                <span className="max-w-[190px] truncate">{item.name}</span>
+                <span className="shrink-0 text-fg-4">
+                  {item.dimensions ? `${item.dimensions.width}x${item.dimensions.height}` : formatBytes(item.file.size)}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => onRemoveInputMedia(item.id)}
+                  className="shrink-0 text-fg-4 transition hover:text-fail"
+                  title="remove attachment"
+                  aria-label={`remove ${item.name}`}
+                >
+                  <X className="h-3 w-3" />
+                </button>
+              </span>
+            ))}
+          </div>
+        ) : null}
         <textarea
           value={prompt}
           onChange={(event) => onPromptChange(event.target.value)}
@@ -1301,14 +1432,37 @@ function TemplateChatSidebar({
           className="min-h-[112px] w-full resize-none border border-edge/20 bg-pit-3 px-3 py-2.5 text-sm leading-5 text-fg-1 outline-none transition placeholder:text-fg-4 focus:border-accent/60"
           placeholder="Change tone, layout, copy, structure..."
         />
-        <button
-          type="submit"
-          disabled={!prompt.trim()}
-          className="mt-3 inline-flex h-9 w-full items-center justify-center gap-2 border border-accent-fill/30 bg-accent-fill/10 font-mono text-[10px] uppercase tracking-label text-accent transition hover:bg-accent-fill/16 disabled:cursor-not-allowed disabled:border-edge/12 disabled:bg-pit-3 disabled:text-fg-4"
-        >
-          <Send className="h-3.5 w-3.5" />
-          queue run
-        </button>
+        <div className="mt-3 grid grid-cols-[40px_minmax(0,1fr)] gap-2">
+          <input
+            ref={fileInputRef}
+            type="file"
+            multiple
+            className="sr-only"
+            accept="image/*,.pdf"
+            onChange={(event) => {
+              const files = event.target.files
+              if (files) void onAddInputMedia(files)
+              event.target.value = ''
+            }}
+          />
+          <button
+            type="button"
+            onClick={() => fileInputRef.current?.click()}
+            className="inline-flex h-9 items-center justify-center border border-edge/20 bg-pit-3 text-fg-3 transition hover:border-edge/40 hover:text-accent"
+            title="attach context"
+            aria-label="attach context"
+          >
+            <Paperclip className="h-3.5 w-3.5" />
+          </button>
+          <button
+            type="submit"
+            disabled={!prompt.trim()}
+            className="inline-flex h-9 w-full items-center justify-center gap-2 border border-accent-fill/30 bg-accent-fill/10 font-mono text-[10px] uppercase tracking-label text-accent transition hover:bg-accent-fill/16 disabled:cursor-not-allowed disabled:border-edge/12 disabled:bg-pit-3 disabled:text-fg-4"
+          >
+            <Send className="h-3.5 w-3.5" />
+            queue run
+          </button>
+        </div>
       </form>
     </>
   )
@@ -1325,7 +1479,7 @@ function TemplateRunCard({
 }) {
   const effectiveStatus = agentRun?.status ?? run.status
   const latestProgress = progressReports[0]
-  const isActive = effectiveStatus === 'queued' || effectiveStatus === 'running'
+  const isActive = effectiveStatus === 'reserved' || effectiveStatus === 'queued' || effectiveStatus === 'running'
   const statusClass = effectiveStatus === 'failed'
     ? 'text-fail'
     : effectiveStatus === 'completed'
@@ -1452,7 +1606,12 @@ function DesignAssetsModal({
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 px-4 py-6 backdrop-blur-sm">
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 px-4 py-6 backdrop-blur-sm"
+      onMouseDown={(event) => {
+        if (event.target === event.currentTarget) onClose()
+      }}
+    >
       <div className="flex max-h-[88vh] w-full max-w-5xl flex-col border border-edge/20 bg-pit shadow-2xl">
         <div className="flex items-start justify-between gap-4 border-b border-edge/12 px-5 py-4">
           <div>
@@ -1572,12 +1731,39 @@ function DesignAssetCard({ asset }: { asset: DesignAssetRow }) {
   const height = readNumber(asset.metadata?.height)
   const sizeBytes = readNumber(asset.metadata?.sizeBytes)
   const mimeType = readString(asset.metadata?.mimeType)
+  const [signedUrl, setSignedUrl] = useState<string | null>(null)
+  const [readUrlError, setReadUrlError] = useState(false)
+  const displayUrl = signedUrl ?? (!asset.storageKey ? asset.url ?? null : null)
+
+  useEffect(() => {
+    let canceled = false
+    setSignedUrl(null)
+    setReadUrlError(false)
+
+    if (!asset.storageKey) return
+
+    void authFetch(`${config.apiUrl}/media/design-assets/${encodeURIComponent(asset.id)}/read-url`, {
+      method: 'POST',
+    })
+      .then(async (response) => {
+        if (!response.ok) throw new Error('could not load asset url')
+        const payload = await response.json() as { readUrl?: string }
+        if (!canceled) setSignedUrl(payload.readUrl ?? null)
+      })
+      .catch(() => {
+        if (!canceled) setReadUrlError(true)
+      })
+
+    return () => {
+      canceled = true
+    }
+  }, [asset.id, asset.storageKey])
 
   return (
     <div className="border border-edge/12 bg-pit-2">
       <div className="flex aspect-[4/3] items-center justify-center overflow-hidden border-b border-edge/10 bg-void">
-        {asset.url && asset.kind !== 'file' ? (
-          <img src={asset.url} alt={asset.name} className="h-full w-full object-contain" />
+        {displayUrl && asset.kind !== 'file' ? (
+          <img src={displayUrl} alt={asset.name} className="h-full w-full object-contain" />
         ) : (
           <FileImage className="h-10 w-10 text-fg-4" />
         )}
@@ -1590,9 +1776,10 @@ function DesignAssetCard({ asset }: { asset: DesignAssetRow }) {
           {sizeBytes ? <span>{formatBytes(sizeBytes)}</span> : null}
         </div>
         {mimeType ? <div className="mt-2 truncate font-mono text-[9px] text-fg-4">{mimeType}</div> : null}
-        {asset.url ? (
+        {readUrlError ? <div className="mt-2 text-[10px] leading-4 text-fail">could not load preview url</div> : null}
+        {displayUrl ? (
           <a
-            href={asset.url}
+            href={displayUrl}
             target="_blank"
             rel="noreferrer"
             className="mt-3 inline-flex items-center gap-1.5 border-b border-accent/70 pb-1 font-mono text-[10px] uppercase tracking-label text-accent"
@@ -1721,18 +1908,14 @@ function TemplatePreview({
             </div>
           </div>
         </div>
-        <div className="px-4 py-8 md:px-8 md:py-12">
-          <div className="mx-auto max-w-[1400px]">
-            <div className="h-[min(78vh,920px)] min-h-[520px] w-full overflow-hidden border border-edge/16 bg-void shadow-2xl">
-              <iframe
-                ref={iframeRef}
-                title={template.title}
-                src={previewUrl}
-                sandbox="allow-scripts allow-downloads"
-                className="h-full w-full border-0 bg-pit"
-              />
-            </div>
-          </div>
+        <div className="min-h-0">
+          <iframe
+            ref={iframeRef}
+            title={template.title}
+            src={previewUrl}
+            sandbox="allow-scripts allow-downloads"
+            className="h-[calc(100vh-118px)] min-h-[560px] w-full border-0 bg-pit"
+          />
         </div>
       </div>
     )
@@ -2117,15 +2300,17 @@ function DesignSystemCanvas({
 }) {
   return (
     <div
-      className="h-full w-full min-w-0 overflow-y-auto overflow-x-hidden"
+      className="h-full w-full min-w-0 overflow-y-auto overflow-x-hidden bg-pit px-4 py-6 md:px-8 md:py-8"
       style={{
-        background: palette.bg,
         color: palette.ink,
         fontFamily: ARDIA_SANS,
         containerType: 'inline-size',
       }}
     >
-      <div className="w-full min-w-0 px-5 py-10 md:px-8 md:py-12 lg:px-10">
+      <div
+        className="mx-auto w-full max-w-[1360px] min-w-0 border px-5 py-10 md:px-8 md:py-12 lg:px-10"
+        style={{ background: palette.bg, borderColor: palette.hairline }}
+      >
         <div className="mb-20 grid min-w-0 gap-10 md:grid-cols-[minmax(0,1.1fr)_minmax(220px,0.9fr)]">
           <div className="min-w-0">
             <div

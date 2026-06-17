@@ -3,7 +3,15 @@ import { GetObjectCommand, PutObjectCommand, S3Client } from '@aws-sdk/client-s3
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner'
 import { Router, type Request } from 'express'
 import { eq } from 'drizzle-orm'
-import { designAssets, documents, organizations, pmIssues } from '../../../db/schema.js'
+import {
+  agentRunInputMediaObjects,
+  agentRunInputMedia,
+  agentRuns,
+  designAssets,
+  documents,
+  organizations,
+  pmIssues,
+} from '../../../db/schema.js'
 import { getDb } from '../db.js'
 import type { JWTPayload } from '../lib/auth.js'
 
@@ -16,6 +24,7 @@ const SIGNED_READ_SECONDS = 60 * 60
 
 type MediaOwnerType = 'document' | 'issue'
 type MediaKind = 'image' | 'file'
+type AgentInputMediaKind = 'image' | 'screenshot' | 'file'
 
 let s3Client: S3Client | null = null
 
@@ -290,6 +299,184 @@ router.post('/design-assets/upload', async (req, res) => {
   }
 })
 
+router.post('/design-assets/:id/read-url', async (req, res) => {
+  try {
+    const user = authenticatedUser(req)
+    const assetId = typeof req.params.id === 'string' ? req.params.id : ''
+    if (!assetId) {
+      res.status(400).json({ error: 'VALIDATION', message: 'Missing asset id.' })
+      return
+    }
+
+    const [asset] = await getDb().select().from(designAssets).where(eq(designAssets.id, assetId)).limit(1)
+    if (!asset?.storageKey) {
+      res.status(404).json({ error: 'NOT_FOUND', message: 'Design asset not found.' })
+      return
+    }
+
+    const organization = await getAccessibleOrganization(asset.organizationId, user)
+    if (!organization) {
+      res.status(404).json({ error: 'NOT_FOUND', message: 'Design asset not found.' })
+      return
+    }
+
+    res.json({ readUrl: await signedReadUrl(asset.storageKey) })
+  } catch (error) {
+    console.error('Design asset read presign failed', error)
+    res.status(500).json({
+      error: 'DESIGN_ASSET_READ_FAILED',
+      message: error instanceof Error ? error.message : 'Could not prepare design asset URL.',
+    })
+  }
+})
+
+router.post('/agent-run-input/upload', async (req, res) => {
+  try {
+    const user = authenticatedUser(req)
+    const body = req.body ?? {}
+    const runId = typeof body.runId === 'string' ? body.runId : ''
+    const messageId = typeof body.messageId === 'string' && body.messageId ? body.messageId : null
+    const fileName = typeof body.fileName === 'string' ? body.fileName : ''
+    const displayName = typeof body.name === 'string' && body.name.trim() ? body.name.trim() : fileName
+    const caption = typeof body.caption === 'string' && body.caption.trim() ? body.caption.trim() : null
+    const mimeType = typeof body.mimeType === 'string' && body.mimeType.trim() ? body.mimeType : 'application/octet-stream'
+    const contentBase64 = typeof body.contentBase64 === 'string' ? body.contentBase64 : ''
+    const width = typeof body.width === 'number' && Number.isFinite(body.width) ? Math.round(body.width) : null
+    const height = typeof body.height === 'number' && Number.isFinite(body.height) ? Math.round(body.height) : null
+    const kind = readAgentInputMediaKind(body.kind, mimeType)
+
+    if (!runId || !fileName || !contentBase64) {
+      res.status(400).json({ error: 'VALIDATION', message: 'Missing agent input upload fields.' })
+      return
+    }
+    if ((kind === 'image' || kind === 'screenshot') && !mimeType.startsWith('image/')) {
+      res.status(400).json({ error: 'VALIDATION', message: 'Only image MIME types can be uploaded as image context.' })
+      return
+    }
+
+    const run = await getAccessibleAgentRun(runId, user)
+    if (!run) {
+      res.status(404).json({ error: 'NOT_FOUND', message: 'Agent run not found.' })
+      return
+    }
+
+    const bytes = decodeBase64Payload(contentBase64)
+    if (bytes.length === 0) {
+      res.status(400).json({ error: 'VALIDATION', message: 'Attachment is empty.' })
+      return
+    }
+    if ((kind === 'image' || kind === 'screenshot') && bytes.length > MAX_IMAGE_BYTES) {
+      res.status(400).json({ error: 'VALIDATION', message: 'Images must be 10 MB or smaller.' })
+      return
+    }
+    if (kind === 'file' && bytes.length > MAX_FILE_BYTES) {
+      res.status(400).json({ error: 'VALIDATION', message: 'Files must be 50 MB or smaller.' })
+      return
+    }
+
+    const organizationId = run.organizationId
+    const key = agentInputMediaKey({ organizationId, runId, fileName, kind })
+    await getS3Client().send(new PutObjectCommand({
+      Bucket: getBucketName(),
+      Key: key,
+      Body: bytes,
+      ContentType: mimeType,
+      ContentDisposition: kind === 'file' ? `attachment; filename="${sanitizeContentDispositionFileName(fileName)}"` : undefined,
+    }))
+
+    const now = new Date()
+    const publicUrl = publicReadUrl(key)
+    const db = getDb()
+    const [mediaObject] = await db
+      .insert(agentRunInputMediaObjects)
+      .values({
+        id: randomUUID(),
+        organizationId: organizationId ?? undefined,
+        kind,
+        name: displayName,
+        fileName,
+        mimeType,
+        sizeBytes: bytes.length,
+        width: width ?? undefined,
+        height: height ?? undefined,
+        storageKey: key,
+        url: publicUrl,
+        source: 'agent_run_upload',
+        metadata: {
+          caption,
+          aspectRatio: width && height ? Number((width / height).toFixed(4)) : undefined,
+          uploadedVia: 'agent_run_input',
+        },
+        createdAt: now,
+        updatedAt: now,
+      })
+      .returning()
+
+    const [attachment] = await db
+      .insert(agentRunInputMedia)
+      .values({
+        id: randomUUID(),
+        runId,
+        mediaObjectId: mediaObject.id,
+        messageId: messageId ?? undefined,
+        issueId: run.issueId ?? undefined,
+        subjectType: run.subjectType,
+        subjectId: run.subjectId ?? undefined,
+        role: 'input',
+        caption: caption ?? undefined,
+        sortOrder: run.attachmentCount,
+        metadata: {
+          uploadedVia: 'agent_run_input',
+        },
+        createdAt: now,
+      })
+      .returning()
+
+    const summary = {
+      id: attachment.id,
+      mediaObjectId: mediaObject.id,
+      name: mediaObject.name,
+      fileName: mediaObject.fileName,
+      kind: mediaObject.kind,
+      mimeType: mediaObject.mimeType,
+      sizeBytes: mediaObject.sizeBytes,
+      width: mediaObject.width,
+      height: mediaObject.height,
+      url: mediaObject.url,
+      storageKey: mediaObject.storageKey,
+      caption: attachment.caption,
+      uploadedAt: now.toISOString(),
+    }
+
+    await db
+      .update(agentRuns)
+      .set({
+        metadata: {
+          ...run.metadata,
+          hasInputMedia: true,
+          inputMediaCount: run.attachmentCount + 1,
+          attachments: [...run.attachments, summary],
+        },
+        updatedAt: now,
+      })
+      .where(eq(agentRuns.id, runId))
+
+    res.status(201).json({
+      attachment,
+      mediaObject,
+      summary,
+      readUrl: publicUrl,
+      signedReadUrl: await signedReadUrl(key),
+    })
+  } catch (error) {
+    console.error('Agent input media upload failed', error)
+    res.status(500).json({
+      error: 'AGENT_INPUT_MEDIA_UPLOAD_FAILED',
+      message: error instanceof Error ? error.message : 'Could not upload agent input media.',
+    })
+  }
+})
+
 async function getAccessibleDocument(documentId: string, user: JWTPayload | undefined) {
   const db = getDb()
   const [document] = await db.select().from(documents).where(eq(documents.id, documentId)).limit(1)
@@ -325,6 +512,34 @@ async function getAccessibleMediaOwner(ownerType: MediaOwnerType, ownerId: strin
 
   const document = await getAccessibleDocument(ownerId, user)
   return document ? { organizationId: document.organizationId ?? null } : null
+}
+
+async function getAccessibleAgentRun(runId: string, user: JWTPayload | undefined) {
+  const db = getDb()
+  const [run] = await db.select().from(agentRuns).where(eq(agentRuns.id, runId)).limit(1)
+  if (!run) return null
+
+  const metadata = readObject(run.metadata)
+  let organizationId = readOptionalString(metadata.organizationId)
+
+  if (run.issueId) {
+    const issue = await getAccessibleIssue(run.issueId, user)
+    if (!issue) return null
+    organizationId = issue.contextCompanyId ?? organizationId
+  } else if (organizationId) {
+    const organization = await getAccessibleOrganization(organizationId, user)
+    if (!organization) return null
+  } else if (!user?.canAccessUnscoped) {
+    return null
+  }
+
+  return {
+    ...run,
+    metadata,
+    organizationId: organizationId ?? null,
+    attachments: readAttachmentSummaries(metadata.attachments),
+    attachmentCount: readAttachmentSummaries(metadata.attachments).length,
+  }
 }
 
 function authenticatedUser(req: Request) {
@@ -392,6 +607,28 @@ function mediaOwnerKey({
   ].join('/')
 }
 
+function agentInputMediaKey({
+  organizationId,
+  runId,
+  fileName,
+  kind,
+}: {
+  organizationId: string | null
+  runId: string
+  fileName: string
+  kind: AgentInputMediaKind
+}) {
+  const scope = organizationId ? `organizations/${organizationId}` : 'unscoped'
+  return [
+    storageEnvironmentPrefix(),
+    scope,
+    'agent-runs',
+    runId,
+    kind === 'file' ? 'files' : 'images',
+    `${randomUUID()}-${sanitizeFileName(fileName)}`,
+  ].join('/')
+}
+
 function designAssetKey({
   organizationId,
   fileName,
@@ -421,6 +658,23 @@ function publicReadUrl(key: string) {
 function readDesignAssetKind(value: unknown, mimeType: string) {
   if (value === 'logo' || value === 'screenshot' || value === 'photo' || value === 'file') return value
   return mimeType.startsWith('image/') ? 'image' : 'file'
+}
+
+function readAgentInputMediaKind(value: unknown, mimeType: string): AgentInputMediaKind {
+  if (value === 'screenshot' || value === 'image' || value === 'file') return value
+  return mimeType.startsWith('image/') ? 'image' : 'file'
+}
+
+function readObject(value: unknown): Record<string, unknown> {
+  return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {}
+}
+
+function readOptionalString(value: unknown) {
+  return typeof value === 'string' && value.trim() ? value.trim() : null
+}
+
+function readAttachmentSummaries(value: unknown) {
+  return Array.isArray(value) ? value.filter((entry): entry is Record<string, unknown> => Boolean(entry && typeof entry === 'object')) : []
 }
 
 function parseMediaOwnerKey(key: string) {

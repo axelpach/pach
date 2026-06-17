@@ -636,6 +636,41 @@ const agentMessages = table('agent_messages')
     createdAt: number().from('created_at'),
 })
     .primaryKey('id');
+const agentRunInputMediaObjects = table('agent_run_input_media_objects')
+    .columns({
+    id: string(),
+    organizationId: string().optional().from('organization_id'),
+    kind: string(),
+    name: string(),
+    fileName: string().from('file_name'),
+    mimeType: string().from('mime_type'),
+    sizeBytes: number().optional().from('size_bytes'),
+    width: number().optional(),
+    height: number().optional(),
+    storageKey: string().from('storage_key'),
+    url: string().optional(),
+    source: string(),
+    metadata: json(),
+    createdAt: number().from('created_at'),
+    updatedAt: number().from('updated_at'),
+})
+    .primaryKey('id');
+const agentRunInputMedia = table('agent_run_input_media')
+    .columns({
+    id: string(),
+    runId: string().from('run_id'),
+    mediaObjectId: string().from('media_object_id'),
+    messageId: string().optional().from('message_id'),
+    issueId: string().optional().from('issue_id'),
+    subjectType: string().optional().from('subject_type'),
+    subjectId: string().optional().from('subject_id'),
+    role: string(),
+    caption: string().optional(),
+    sortOrder: number().from('sort_order'),
+    metadata: json(),
+    createdAt: number().from('created_at'),
+})
+    .primaryKey('id');
 const agentTerminals = table('agent_terminals')
     .columns({
     id: string(),
@@ -830,6 +865,8 @@ export const schema = createSchema({
         agentConversations,
         agentRuns,
         agentMessages,
+        agentRunInputMediaObjects,
+        agentRunInputMedia,
         agentTerminals,
         agentRunProgressReports,
         agentRunArtifacts,
@@ -901,6 +938,8 @@ export const permissions = definePermissions(schema, () => {
         agent_conversations: unscopedOnly,
         agent_runs: unscopedOnly,
         agent_messages: unscopedOnly,
+        agent_run_input_media_objects: unscopedOnly,
+        agent_run_input_media: unscopedOnly,
         agent_terminals: unscopedOnly,
         agent_run_progress_reports: unscopedOnly,
         agent_run_artifacts: unscopedOnly,
