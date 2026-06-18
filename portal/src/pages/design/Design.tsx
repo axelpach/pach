@@ -394,7 +394,7 @@ function buildDesignSystemRunMetadata(
       'When changing layout, copy, colors, typography, components, or imagery, preserve the organization design system tokens and principles.',
       `Use one of these predefined aspect ratios unless the user requests otherwise: ${DESIGN_ASPECT_RATIOS.map((ratio) => `${ratio.label} ${ratio.width}x${ratio.height}`).join(', ')}. Set manifest.dimensions or manifest.aspectRatioId so preview and export sizing stay predictable.`,
       organization.project === 'ardia'
-        ? 'For Ardia, the Pach legacy ardia-one-pager is the default composition skeleton for every deck slide: top brand row, right metadata, dot/mono eyebrow, Inter Tight 200 title scale, one emotionally important inline Instrument Serif italic vermilion phrase, short body, hairline rows, transparent framed modules, footer hairline, and subtle off-canvas red radial glow. Buyer landing, data, chart, KPI, table, WhatsApp, and Universo aBanza modules are allowed, but they must inherit that one-pager skeleton rather than replacing the whole slide composition.'
+        ? 'For Ardia, the Pach legacy ardia-one-pager is the default composition skeleton for every deck slide: top brand row, right metadata, dot/mono eyebrow, Inter Tight 200 title scale, one emotionally important inline Instrument Serif italic vermilion phrase, short body, hairline rows, transparent framed modules, footer hairline, and subtle off-canvas red radial glow. Use exact legacy proportions: on 1080x1528, side padding 64px, top brand row y=56px, hero y about 200px, title 64px/1.0 Inter Tight 200, body 19px/1.55 max 780px, hairline rows y about 575px, module y about 865px, footer pinned to bottom; scale proportionally for other aspect ratios. Buyer landing, data, chart, KPI, table, WhatsApp, and Universo aBanza modules are allowed, but they must inherit that one-pager skeleton rather than replacing the whole slide composition.'
         : '',
     ].join(' '),
     system: system
@@ -460,6 +460,7 @@ function buildDesignSystemRunMetadata(
                   nonNegotiables: [
                     'Preserve the Ardia quiet-minimalist system unless the user explicitly asks to replace the organization design system.',
                     'Use the legacy Ardia one-pager composition skeleton for the whole slide: top brand row, right metadata, dot/mono eyebrow, Inter Tight 200 title scale, inline red serif phrase, short body, hairline rows, transparent framed modules, footer hairline, and subtle off-canvas red glow.',
+                    'Use exact legacy one-pager proportions: on 1080x1528, side padding 64px, top brand row y=56px, hero y about 200px, title 64px/1.0 Inter Tight 200, body 19px/1.55 max 780px, hairline rows y about 575px, module y about 865px, footer pinned to bottom; scale proportionally for other aspect ratios. Do not invent larger title scales or wider margins.',
                     'Charts, KPIs, tables, WhatsApp mocks, product surfaces, buyer-landing data panels, and Universo aBanza checklist modules are allowed, but they must be inserted into the one-pager skeleton and inherit its margins, type scale, hairline rhythm, transparent frames, and footer structure.',
                     'Use Inter Tight 200 display titles, Geist Mono labels, and Instrument Serif italic vermilion as one emotionally important inline title phrase, accent word, or short accent line.',
                     'Use real Ardia logo/assets; do not draw or invent a generic square logo.',
@@ -481,7 +482,7 @@ function buildDesignSystemRunMetadata(
                 }
               : undefined,
             agentInstruction: organization.project === 'ardia'
-              ? 'MANDATORY ARDIA DESIGN CONTRACT: use the Pach legacy ardia-one-pager as the composition skeleton for the whole slide. Treat metadata.requiredDesignContract as a QA checklist. Do not drift into generic executive decks, generic SaaS cards, blue/purple gradients, neon/glass/bokeh panels, large serif primary titles, all-italic headlines, fake square logos, opaque red panels, or one long scrolling document. Use Inter Tight 200 display titles, Geist Mono labels, one emotionally important inline Instrument Serif italic vermilion title phrase, hairlines, whitespace, recurring low-area vermilion signals, the allowed subtle off-canvas red radial glow, and the real Ardia logo asset or inline mark. Charts, KPIs, tables, WhatsApp mocks, and product/data surfaces are allowed, but they must inherit the one-pager margins, title scale, text hierarchy, hairline rhythm, transparent frames, footer, and subtle glow.'
+              ? 'MANDATORY ARDIA DESIGN CONTRACT: use the Pach legacy ardia-one-pager as the composition skeleton for the whole slide. Treat metadata.requiredDesignContract as a QA checklist. Use exact legacy proportions: on 1080x1528, side padding 64px, top brand row y=56px, hero y about 200px, title 64px/1.0 Inter Tight 200, body 19px/1.55 max 780px, hairline rows y about 575px, module y about 865px, footer pinned to bottom; scale proportionally for other aspect ratios. Do not drift into generic executive decks, generic SaaS cards, blue/purple gradients, neon/glass/bokeh panels, large serif primary titles, all-italic headlines, fake square logos, opaque red panels, or one long scrolling document. Use Inter Tight 200 display titles, Geist Mono labels, one emotionally important inline Instrument Serif italic vermilion title phrase, hairlines, whitespace, recurring low-area vermilion signals, the allowed subtle off-canvas red radial glow, and the real Ardia logo asset or inline mark. Charts, KPIs, tables, WhatsApp mocks, and product/data surfaces are allowed, but they must inherit the one-pager margins, title scale, text hierarchy, hairline rhythm, transparent frames, footer, and subtle glow.'
               : undefined,
             avoid: organization.project === 'ardia'
               ? [
@@ -1795,33 +1796,9 @@ function DesignAssetCard({ asset }: { asset: DesignAssetRow }) {
   const height = readNumber(asset.metadata?.height)
   const sizeBytes = readNumber(asset.metadata?.sizeBytes)
   const mimeType = readString(asset.metadata?.mimeType)
-  const [signedUrl, setSignedUrl] = useState<string | null>(null)
-  const [readUrlError, setReadUrlError] = useState(false)
-  const displayUrl = signedUrl ?? (!asset.storageKey ? asset.url ?? null : null)
-
-  useEffect(() => {
-    let canceled = false
-    setSignedUrl(null)
-    setReadUrlError(false)
-
-    if (!asset.storageKey) return
-
-    void authFetch(`${config.apiUrl}/media/design-assets/${encodeURIComponent(asset.id)}/read-url`, {
-      method: 'POST',
-    })
-      .then(async (response) => {
-        if (!response.ok) throw new Error('could not load asset url')
-        const payload = await response.json() as { readUrl?: string }
-        if (!canceled) setSignedUrl(payload.readUrl ?? null)
-      })
-      .catch(() => {
-        if (!canceled) setReadUrlError(true)
-      })
-
-    return () => {
-      canceled = true
-    }
-  }, [asset.id, asset.storageKey])
+  const displayUrl = asset.storageKey
+    ? `${config.apiUrl}/media/design-assets/${encodeURIComponent(asset.id)}/file`
+    : asset.url ?? null
 
   return (
     <div className="border border-edge/12 bg-pit-2">
@@ -1840,7 +1817,6 @@ function DesignAssetCard({ asset }: { asset: DesignAssetRow }) {
           {sizeBytes ? <span>{formatBytes(sizeBytes)}</span> : null}
         </div>
         {mimeType ? <div className="mt-2 truncate font-mono text-[9px] text-fg-4">{mimeType}</div> : null}
-        {readUrlError ? <div className="mt-2 text-[10px] leading-4 text-fail">could not load preview url</div> : null}
         {displayUrl ? (
           <a
             href={displayUrl}

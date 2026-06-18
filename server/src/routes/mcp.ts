@@ -928,7 +928,7 @@ async function getDesignTemplate(req: AuthenticatedRequest, args: unknown) {
     ok: true,
     template: serializeDesignTemplate(template, organization),
     organizationDesignSystem: effectiveDesignSystem,
-    assets: await Promise.all(assets.map(serializeDesignAsset)),
+    assets: assets.map((asset) => serializeDesignAsset(asset, req)),
     agentInstructions: {
       mustUseOrganizationDesignSystem: true,
       designSystemId: effectiveDesignSystem?.id ?? null,
@@ -939,10 +939,10 @@ async function getDesignTemplate(req: AuthenticatedRequest, args: unknown) {
         'For deck templates, prefer one React component per slide and export const slides = [SlideOne, SlideTwo, ...]. Set manifest.dimensions or manifest.aspectRatioId so Pach can render separated, scaled slide frames.',
         'Templates render as standalone iframe documents outside the Pach app shell. Tailwind classes are supported only when manifest.styling is "tailwind"; otherwise use inline React style objects or import a local CSS file included in the template files. Do not rely on Pach CSS variables or app global CSS.',
         organization?.project === 'ardia'
-          ? 'For Ardia, organizationDesignSystem.metadata.requiredDesignContract is mandatory. Use the Pach legacy ardia-one-pager as the composition skeleton for the whole slide: top brand row, right metadata, dot/mono eyebrow, Inter Tight 200 title scale, one inline Instrument Serif italic vermilion phrase, short body, hairline rows, transparent framed modules, footer hairline, and subtle off-canvas vermilion glow. Charts, KPIs, tables, WhatsApp mocks, product surfaces, buyer-landing data panels, and Universo aBanza checklist modules are allowed, but they must inherit that skeleton instead of replacing the whole composition. Do not drift into generic executive decks, generic SaaS cards, blue/purple gradients, neon/glass/bokeh panels, large serif primary titles, fake square logos, opaque red panels, or one long scrolling document.'
+          ? 'For Ardia, organizationDesignSystem.metadata.requiredDesignContract is mandatory. Use the Pach legacy ardia-one-pager as the composition skeleton for the whole slide: top brand row, right metadata, dot/mono eyebrow, Inter Tight 200 title scale, one inline Instrument Serif italic vermilion phrase, short body, hairline rows, transparent framed modules, footer hairline, and subtle off-canvas vermilion glow. Use exact legacy proportions: on 1080x1528, side padding 64px, top brand row y=56px, hero y about 200px, title 64px/1.0 Inter Tight 200, body 19px/1.55 max 780px, hairline rows y about 575px, module y about 865px, footer pinned to bottom; scale proportionally for other aspect ratios. Charts, KPIs, tables, WhatsApp mocks, product surfaces, buyer-landing data panels, and Universo aBanza checklist modules are allowed, but they must inherit that skeleton instead of replacing the whole composition. Do not drift into generic executive decks, generic SaaS cards, blue/purple gradients, neon/glass/bokeh panels, large serif primary titles, fake square logos, opaque red panels, or one long scrolling document.'
           : '',
         assets.length > 0
-          ? 'Use available assets from the assets array when a logo, product image, screenshot, or uploaded visual is needed. Respect each asset url, dimensions, and metadata.'
+          ? 'Use available assets from the assets array when a logo, product image, screenshot, or uploaded visual is needed. Persist the stable asset url/stableUrl in template code; do not save temporary signedUrl values in React source. Respect each asset URL, dimensions, and metadata.'
           : 'If an asset is needed but not available, report that in progress instead of inventing a fake logo or product image.',
         designSystemAgentInstruction,
       ].join(' '),
@@ -1235,8 +1235,8 @@ function serializeDesignTemplateRun(run: typeof designTemplateRuns.$inferSelect)
   }
 }
 
-async function serializeDesignAsset(asset: typeof designAssets.$inferSelect) {
-  const signedUrl = asset.storageKey ? await signedReadUrl(asset.storageKey).catch(() => null) : null
+function serializeDesignAsset(asset: typeof designAssets.$inferSelect, req: Request) {
+  const stableUrl = asset.storageKey ? stableDesignAssetUrl(req, asset.id) : asset.url
   return {
     id: asset.id,
     organizationId: asset.organizationId,
@@ -1244,13 +1244,26 @@ async function serializeDesignAsset(asset: typeof designAssets.$inferSelect) {
     kind: asset.kind,
     name: asset.name,
     storageKey: asset.storageKey,
-    url: signedUrl ?? asset.url,
+    url: stableUrl,
+    stableUrl,
     originalUrl: asset.url,
-    expiresInSeconds: signedUrl ? SIGNED_READ_SECONDS : null,
+    expiresInSeconds: null,
     metadata: asset.metadata ?? {},
     createdAt: asset.createdAt.toISOString(),
     updatedAt: asset.updatedAt.toISOString(),
   }
+}
+
+function stableDesignAssetUrl(req: Request, assetId: string) {
+  return `${requestOrigin(req)}/media/design-assets/${encodeURIComponent(assetId)}/file`
+}
+
+function requestOrigin(req: Request) {
+  const forwardedProto = req.header('x-forwarded-proto')?.split(',')[0]?.trim()
+  const forwardedHost = req.header('x-forwarded-host')?.split(',')[0]?.trim()
+  const proto = forwardedProto || req.protocol || 'http'
+  const host = forwardedHost || req.get('host') || `localhost:${process.env.PORT || 3001}`
+  return `${proto}://${host}`
 }
 
 function signedReadUrl(key: string) {

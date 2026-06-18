@@ -15,6 +15,7 @@ import {
 import { getDb } from '../db.js'
 import type { JWTPayload } from '../lib/auth.js'
 
+export const publicMediaRouter = Router()
 const router = Router()
 
 const MAX_IMAGE_BYTES = 10 * 1024 * 1024
@@ -27,6 +28,48 @@ type MediaKind = 'image' | 'file'
 type AgentInputMediaKind = 'image' | 'screenshot' | 'file'
 
 let s3Client: S3Client | null = null
+
+publicMediaRouter.get('/design-assets/:id/file', async (req, res) => {
+  try {
+    const assetId = typeof req.params.id === 'string' ? req.params.id : ''
+    if (!assetId) {
+      res.status(400).type('text/plain').send('Missing asset id.')
+      return
+    }
+
+    const [asset] = await getDb().select().from(designAssets).where(eq(designAssets.id, assetId)).limit(1)
+    if (!asset?.storageKey) {
+      res.status(404).type('text/plain').send('Design asset not found.')
+      return
+    }
+
+    const object = await getS3Client().send(new GetObjectCommand({
+      Bucket: getBucketName(),
+      Key: asset.storageKey,
+    }))
+    const metadata = readObject(asset.metadata)
+    const mimeType = readOptionalString(metadata.mimeType) ?? object.ContentType ?? 'application/octet-stream'
+    const fileName = readOptionalString(metadata.fileName) ?? asset.name
+
+    res.setHeader('Content-Type', mimeType)
+    res.setHeader('Cache-Control', 'public, max-age=300, stale-while-revalidate=3600')
+    res.setHeader('Access-Control-Allow-Origin', '*')
+    if (object.ContentLength != null) res.setHeader('Content-Length', String(object.ContentLength))
+    if (object.ETag) res.setHeader('ETag', object.ETag)
+    res.setHeader('Content-Disposition', `${asset.kind === 'file' ? 'attachment' : 'inline'}; filename="${sanitizeContentDispositionFileName(fileName)}"`)
+
+    const body = object.Body as { pipe?: (destination: typeof res) => void } | undefined
+    if (body?.pipe) {
+      body.pipe(res)
+      return
+    }
+
+    res.status(500).type('text/plain').send('Design asset body is not streamable.')
+  } catch (error) {
+    console.error('Design asset public read failed', error)
+    res.status(500).type('text/plain').send('Could not load design asset.')
+  }
+})
 
 router.post('/upload', async (req, res) => {
   try {
@@ -251,6 +294,7 @@ router.post('/design-assets/upload', async (req, res) => {
     }
 
     const key = designAssetKey({ organizationId, fileName, kind })
+    const assetId = randomUUID()
     await getS3Client().send(new PutObjectCommand({
       Bucket: getBucketName(),
       Key: key,
@@ -259,12 +303,12 @@ router.post('/design-assets/upload', async (req, res) => {
       ContentDisposition: kind === 'file' ? `attachment; filename="${sanitizeContentDispositionFileName(fileName)}"` : undefined,
     }))
 
-    const publicUrl = publicReadUrl(key)
+    const publicUrl = stableDesignAssetUrl(req, assetId)
     const now = new Date()
     const [asset] = await getDb()
       .insert(designAssets)
       .values({
-        id: randomUUID(),
+        id: assetId,
         organizationId,
         templateId: templateId ?? undefined,
         kind,
@@ -320,7 +364,12 @@ router.post('/design-assets/:id/read-url', async (req, res) => {
       return
     }
 
-    res.json({ readUrl: await signedReadUrl(asset.storageKey) })
+    res.json({
+      readUrl: stableDesignAssetUrl(req, asset.id),
+      stableUrl: stableDesignAssetUrl(req, asset.id),
+      signedReadUrl: await signedReadUrl(asset.storageKey),
+      expiresInSeconds: SIGNED_READ_SECONDS,
+    })
   } catch (error) {
     console.error('Design asset read presign failed', error)
     res.status(500).json({
@@ -653,6 +702,18 @@ function publicReadUrl(key: string) {
   if (baseUrl) return `${baseUrl.replace(/\/$/, '')}/${key.split('/').map(encodeURIComponent).join('/')}`
 
   return `https://${getBucketName()}.s3.${getAwsRegion()}.amazonaws.com/${key.split('/').map(encodeURIComponent).join('/')}`
+}
+
+function stableDesignAssetUrl(req: Request, assetId: string) {
+  return `${requestOrigin(req)}/media/design-assets/${encodeURIComponent(assetId)}/file`
+}
+
+function requestOrigin(req: Request) {
+  const forwardedProto = req.header('x-forwarded-proto')?.split(',')[0]?.trim()
+  const forwardedHost = req.header('x-forwarded-host')?.split(',')[0]?.trim()
+  const proto = forwardedProto || req.protocol || 'http'
+  const host = forwardedHost || req.get('host') || `localhost:${process.env.PORT || 3001}`
+  return `${proto}://${host}`
 }
 
 function readDesignAssetKind(value: unknown, mimeType: string) {

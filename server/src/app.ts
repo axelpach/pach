@@ -11,7 +11,7 @@ import taskTriggersRoute from './routes/task-triggers.js'
 import agentRoute, { attachAgentTerminalWebSocket } from './routes/agent.js'
 import agentWorkerRoute from './routes/agent-worker.js'
 import financeRoute from './routes/finance.js'
-import mediaRoute from './routes/media.js'
+import mediaRoute, { publicMediaRouter } from './routes/media.js'
 import mcpRoute from './routes/mcp.js'
 import designPreviewRoute from './routes/design-preview.js'
 import designRoute from './routes/design.js'
@@ -40,6 +40,7 @@ app.use('/mcp', mcpRoute)
 app.use('/design', requireAuth, designRoute)
 app.use('/design-preview', designPreviewRoute)
 app.use('/finance', requireAuth, financeRoute)
+app.use('/media', publicMediaRouter)
 app.use('/media', requireAuth, mediaRoute)
 
 app.use((err: unknown, _req: express.Request, res: express.Response, next: express.NextFunction) => {
