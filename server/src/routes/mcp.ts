@@ -12,6 +12,7 @@ import {
   designTemplateRuns,
   designTemplateVersions,
   designTemplates,
+  documents,
   mcpTokens,
   organizations,
   pmIssueActivity,
@@ -252,6 +253,90 @@ const tools: ToolDefinition[] = [
         activitySummary: {
           type: 'string',
           description: 'Optional human-readable summary to show in the issue activity feed.',
+        },
+      },
+    },
+  },
+  {
+    name: 'pach.document.list',
+    description: 'List Pach documents the caller can access, with filters for organization, status, parent, and search. Returns document metadata and body previews.',
+    inputSchema: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        limit: {
+          type: 'number',
+          description: 'Maximum number of documents to return. Defaults to 25, maximum 100.',
+        },
+        search: {
+          type: 'string',
+          description: 'Optional case-insensitive search across title, slug, and body.',
+        },
+        organizationId: {
+          type: 'string',
+          description: 'Optional organization UUID filter.',
+        },
+        organizationName: {
+          type: 'string',
+          description: 'Optional organization display name filter, e.g. "Pach".',
+        },
+        organizationProject: {
+          type: 'string',
+          description: 'Optional organization project key filter, e.g. "pach" or "ardia".',
+        },
+        parentId: {
+          type: ['string', 'null'],
+          description: 'Optional parent document UUID filter. Use null with rootOnly=true to list root documents.',
+        },
+        rootOnly: {
+          type: 'boolean',
+          description: 'When true, only return documents without a parent.',
+        },
+        status: {
+          type: 'string',
+          description: 'Document status to return. Defaults to active. Use archived to list archived documents.',
+        },
+        includeArchived: {
+          type: 'boolean',
+          description: 'When true and status is omitted, return both active and archived documents.',
+        },
+        bodyPreviewLength: {
+          type: 'number',
+          description: 'Maximum body preview characters per document. Defaults to 240, maximum 2000.',
+        },
+      },
+    },
+  },
+  {
+    name: 'pach.document.get',
+    description: 'Read a Pach document by UUID or slug, including its full body, organization, owner, parent, and children.',
+    inputSchema: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        documentId: {
+          type: 'string',
+          description: 'Document UUID. Either documentId or slug is required.',
+        },
+        slug: {
+          type: 'string',
+          description: 'Document slug. Either documentId or slug is required.',
+        },
+        organizationId: {
+          type: 'string',
+          description: 'Optional organization UUID filter, useful when reading by slug.',
+        },
+        organizationName: {
+          type: 'string',
+          description: 'Optional organization display name filter, useful when reading by slug.',
+        },
+        organizationProject: {
+          type: 'string',
+          description: 'Optional organization project key filter, useful when reading by slug.',
+        },
+        includeArchived: {
+          type: 'boolean',
+          description: 'When true, archived documents may be returned. Defaults to false.',
         },
       },
     },
@@ -536,6 +621,12 @@ async function callTool(req: AuthenticatedRequest, params: unknown) {
       case 'pach.issue.update':
         requireMcpCapability(req, 'pach.issue.write')
         return toolResult(await updateIssue(req, args))
+      case 'pach.document.list':
+        requireMcpCapability(req, 'pach.document.read')
+        return toolResult(await listDocuments(req, args))
+      case 'pach.document.get':
+        requireMcpCapability(req, 'pach.document.read')
+        return toolResult(await getDocument(req, args))
       case 'pach.design.template.list':
         requireMcpCapability(req, 'pach.design.read')
         return toolResult(await listDesignTemplates(req, args))
@@ -666,7 +757,7 @@ async function listIssues(req: AuthenticatedRequest, args: unknown) {
     : []
   const selectedLabelsByIssueId = groupBy(selectedLabelLinks, (link) => link.issueId)
   const activityByIssueId = groupLimitedBy(activity, (entry) => entry.issueId, activityLimit)
-  const runsByIssueId = groupLimitedBy(runs, (run) => run.issueId, runLimit)
+  const runsByIssueId = groupLimitedBy(runs.filter((run) => run.issueId), (run) => run.issueId!, runLimit)
 
   return {
     filters: {
@@ -842,6 +933,167 @@ async function updateIssue(req: AuthenticatedRequest, args: unknown) {
     ok: true,
     issue: serializeIssue(updated),
     changedFields,
+  }
+}
+
+async function listDocuments(req: AuthenticatedRequest, args: unknown) {
+  const body = isObject(args) ? args : {}
+  const limit = readPositiveInteger(body.limit, 25, 1, 100)
+  const bodyPreviewLength = readPositiveInteger(body.bodyPreviewLength, 240, 0, 2000)
+  const search = readOptionalString(body.search)
+  const organizationIds = readStringFilters(body.organizationId, body.organizationIds)
+  const organizationNames = readStringFilters(body.organizationName, body.organizationNames)
+  const organizationProjects = readStringFilters(body.organizationProject, body.organizationProjects)
+  const status = readOptionalString(body.status)
+  const includeArchived = body.includeArchived === true
+  const rootOnly = body.rootOnly === true
+  const { hasParentIdFilter, parentIdFilter } = readParentIdFilter(body)
+  const db = getDb()
+  const scanLimit = Math.max(200, Math.min(1000, limit * 20))
+  const rows = await db
+    .select()
+    .from(documents)
+    .orderBy(desc(documents.updatedAt))
+    .limit(scanLimit)
+
+  const accessibleRows = rows.filter((document) => canAccessDocument(req, document))
+  const accessibleOrganizationIds = uniqueStrings(accessibleRows.map((document) => document.organizationId))
+  const accessibleOwnerIds = uniqueStrings(accessibleRows.map((document) => document.ownerId))
+  const accessibleParentIds = uniqueStrings(accessibleRows.map((document) => document.parentId))
+  const [allOrganizations, allOwners, allParents] = await Promise.all([
+    accessibleOrganizationIds.length > 0
+      ? db.select().from(organizations).where(inArray(organizations.id, accessibleOrganizationIds))
+      : Promise.resolve([]),
+    accessibleOwnerIds.length > 0
+      ? db.select().from(users).where(inArray(users.id, accessibleOwnerIds))
+      : Promise.resolve([]),
+    accessibleParentIds.length > 0
+      ? db.select().from(documents).where(inArray(documents.id, accessibleParentIds))
+      : Promise.resolve([]),
+  ])
+  const organizationById = new Map(allOrganizations.map((organization) => [organization.id, organization]))
+  const ownerById = new Map(allOwners.map((owner) => [owner.id, owner]))
+  const parentById = new Map(allParents.filter((parent) => canAccessDocument(req, parent)).map((parent) => [parent.id, parent]))
+  const childrenByParentId = groupBy(
+    accessibleRows.filter((document) => document.parentId),
+    (document) => document.parentId!,
+  )
+
+  const matchedDocuments = accessibleRows
+    .filter((document) => {
+      const organization = document.organizationId ? organizationById.get(document.organizationId) : undefined
+
+      if (status ? document.status !== status : !includeArchived && document.status !== 'active') return false
+      if (search && !matchesAny(search, [document.title, document.slug, document.body])) return false
+      if (!documentMatchesOrganizationFilters(document, organization, {
+        organizationIds,
+        organizationNames,
+        organizationProjects,
+      })) return false
+      if (rootOnly && document.parentId) return false
+      if (hasParentIdFilter && document.parentId !== parentIdFilter) return false
+      return true
+    })
+  const selectedDocuments = matchedDocuments.slice(0, limit)
+
+  return {
+    filters: {
+      limit,
+      scanLimit,
+      search,
+      organizationIds,
+      organizationNames,
+      organizationProjects,
+      status: status ?? (includeArchived ? null : 'active'),
+      includeArchived,
+      rootOnly,
+      parentId: hasParentIdFilter ? parentIdFilter : undefined,
+      bodyPreviewLength,
+    },
+    totalMatched: matchedDocuments.length,
+    documents: selectedDocuments.map((document) => ({
+      document: serializeDocumentSummary(
+        document,
+        organizationById.get(document.organizationId ?? ''),
+        document.ownerId ? ownerById.get(document.ownerId) : undefined,
+        bodyPreviewLength,
+      ),
+      parent: document.parentId ? serializeDocumentReference(parentById.get(document.parentId)) : null,
+      childCount: childrenByParentId.get(document.id)?.length ?? 0,
+    })),
+  }
+}
+
+async function getDocument(req: AuthenticatedRequest, args: unknown) {
+  const body = ensureObject(args)
+  const documentId = readOptionalString(body.documentId)
+  const slug = readOptionalString(body.slug)
+  if (!documentId && !slug) throw new Error('Provide documentId or slug')
+
+  const organizationIds = readStringFilters(body.organizationId, body.organizationIds)
+  const organizationNames = readStringFilters(body.organizationName, body.organizationNames)
+  const organizationProjects = readStringFilters(body.organizationProject, body.organizationProjects)
+  const includeArchived = body.includeArchived === true
+  const db = getDb()
+  const documentSelector = documentId ?? slug!
+  const candidates = await db
+    .select()
+    .from(documents)
+    .where(documentId && isUuid(documentId) ? eq(documents.id, documentId) : eq(documents.slug, documentSelector))
+    .limit(20)
+
+  const candidateOrganizationIds = uniqueStrings(candidates.map((document) => document.organizationId))
+  const candidateOrganizations = candidateOrganizationIds.length > 0
+    ? await db.select().from(organizations).where(inArray(organizations.id, candidateOrganizationIds))
+    : []
+  const organizationById = new Map(candidateOrganizations.map((organization) => [organization.id, organization]))
+  const accessibleCandidates = candidates
+    .filter((document) => canAccessDocument(req, document))
+    .filter((document) => includeArchived || document.status !== 'archived')
+    .filter((document) => documentMatchesOrganizationFilters(document, organizationById.get(document.organizationId ?? ''), {
+      organizationIds,
+      organizationNames,
+      organizationProjects,
+    }))
+
+  if (accessibleCandidates.length === 0) throw new Error('Document not found')
+  if (accessibleCandidates.length > 1) {
+    throw new Error('Document slug is ambiguous. Provide organizationId, organizationName, or organizationProject.')
+  }
+
+  const document = accessibleCandidates[0]
+  const [owner] = document.ownerId
+    ? await db.select().from(users).where(eq(users.id, document.ownerId)).limit(1)
+    : []
+  const [parent] = document.parentId
+    ? await db.select().from(documents).where(eq(documents.id, document.parentId)).limit(1)
+    : []
+  const children = await db
+    .select()
+    .from(documents)
+    .where(eq(documents.parentId, document.id))
+    .limit(100)
+  const ancestors = await readDocumentAncestors(req, document)
+  const visibleChildren = children
+    .filter((child) => canAccessDocument(req, child))
+    .filter((child) => includeArchived || child.status !== 'archived')
+    .sort(compareDocumentsForTreeOrder)
+
+  return {
+    ok: true,
+    document: serializeDocumentFull(document, organizationById.get(document.organizationId ?? ''), owner),
+    parent: parent && canAccessDocument(req, parent) ? serializeDocumentReference(parent) : null,
+    ancestors: ancestors.map(serializeDocumentReference),
+    children: visibleChildren.map(serializeDocumentReference),
+    context: {
+      title: document.title,
+      slug: document.slug,
+      organizationName: document.organizationId ? organizationById.get(document.organizationId)?.name ?? null : null,
+      organizationProject: document.organizationId ? organizationById.get(document.organizationId)?.project ?? null : null,
+      ownerName: displayUserName(owner),
+      parentTitle: parent && canAccessDocument(req, parent) ? parent.title : null,
+      childTitles: visibleChildren.map((child) => child.title),
+    },
   }
 }
 
@@ -1160,6 +1412,120 @@ function canAccessOrganization(req: AuthenticatedRequest, organizationId: string
   return organizationId
     ? Boolean(auth?.organizationIds.includes(organizationId) || user?.organizationIds.includes(organizationId))
     : Boolean(auth?.canAccessUnscoped || user?.canAccessUnscoped)
+}
+
+function canAccessDocument(req: AuthenticatedRequest, document: typeof documents.$inferSelect) {
+  return canAccessOrganization(req, document.organizationId)
+}
+
+function documentMatchesOrganizationFilters(
+  document: typeof documents.$inferSelect,
+  organization: typeof organizations.$inferSelect | undefined,
+  filters: {
+    organizationIds: string[]
+    organizationNames: string[]
+    organizationProjects: string[]
+  },
+) {
+  if (filters.organizationIds.length > 0 && !matchesStringFilter(document.organizationId, filters.organizationIds, 'exact')) {
+    return false
+  }
+  if (filters.organizationNames.length > 0 && !matchesStringFilter(organization?.name, filters.organizationNames)) {
+    return false
+  }
+  if (filters.organizationProjects.length > 0 && !matchesStringFilter(organization?.project, filters.organizationProjects, 'exact')) {
+    return false
+  }
+  return true
+}
+
+function serializeDocumentSummary(
+  document: typeof documents.$inferSelect,
+  organization: typeof organizations.$inferSelect | undefined,
+  owner: typeof users.$inferSelect | undefined,
+  bodyPreviewLength: number,
+) {
+  return {
+    id: document.id,
+    organizationId: document.organizationId,
+    organizationName: organization?.name ?? null,
+    organizationProject: organization?.project ?? null,
+    parentId: document.parentId,
+    ownerId: document.ownerId,
+    ownerName: displayUserName(owner),
+    title: document.title,
+    slug: document.slug,
+    bodyPreview: truncateText(document.body, bodyPreviewLength),
+    bodyLength: document.body.length,
+    format: document.format,
+    status: document.status,
+    icon: document.icon,
+    sortOrder: document.sortOrder,
+    metadata: document.metadata ?? {},
+    createdAt: document.createdAt.getTime(),
+    updatedAt: document.updatedAt.getTime(),
+  }
+}
+
+function serializeDocumentFull(
+  document: typeof documents.$inferSelect,
+  organization: typeof organizations.$inferSelect | undefined,
+  owner: typeof users.$inferSelect | undefined,
+) {
+  return {
+    ...serializeDocumentSummary(document, organization, owner, document.body.length),
+    body: document.body,
+  }
+}
+
+function serializeDocumentReference(document: typeof documents.$inferSelect | undefined) {
+  if (!document) return null
+  return {
+    id: document.id,
+    organizationId: document.organizationId,
+    parentId: document.parentId,
+    title: document.title,
+    slug: document.slug,
+    format: document.format,
+    status: document.status,
+    sortOrder: document.sortOrder,
+    updatedAt: document.updatedAt.getTime(),
+  }
+}
+
+async function readDocumentAncestors(req: AuthenticatedRequest, document: typeof documents.$inferSelect) {
+  const ancestors: Array<typeof documents.$inferSelect> = []
+  let parentId = document.parentId
+
+  for (let depth = 0; parentId && depth < 20; depth += 1) {
+    const [parent] = await getDb().select().from(documents).where(eq(documents.id, parentId)).limit(1)
+    if (!parent || !canAccessDocument(req, parent)) break
+    ancestors.unshift(parent)
+    parentId = parent.parentId
+  }
+
+  return ancestors
+}
+
+function readParentIdFilter(body: Record<string, unknown>) {
+  const hasParentIdFilter = Object.prototype.hasOwnProperty.call(body, 'parentId')
+  if (!hasParentIdFilter) return { hasParentIdFilter, parentIdFilter: undefined }
+  if (body.parentId === null) return { hasParentIdFilter, parentIdFilter: null }
+  if (typeof body.parentId === 'string' && body.parentId.trim()) {
+    return { hasParentIdFilter, parentIdFilter: body.parentId.trim() }
+  }
+  throw new Error('parentId must be a string or null')
+}
+
+function compareDocumentsForTreeOrder(a: typeof documents.$inferSelect, b: typeof documents.$inferSelect) {
+  if (a.sortOrder !== b.sortOrder) return a.sortOrder - b.sortOrder
+  return a.title.localeCompare(b.title)
+}
+
+function truncateText(value: string, maxLength: number) {
+  if (maxLength <= 0) return ''
+  if (value.length <= maxLength) return value
+  return `${value.slice(0, Math.max(0, maxLength - 3))}...`
 }
 
 function serializeDesignTemplate(

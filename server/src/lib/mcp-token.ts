@@ -5,6 +5,7 @@ export const MCP_TOKEN_PREFIX = 'pach_mcp_'
 export const MCP_CAPABILITIES = [
   'pach.issue.read',
   'pach.issue.write',
+  'pach.document.read',
   'pach.design.read',
   'pach.design.write',
   'pach.progress.report',
