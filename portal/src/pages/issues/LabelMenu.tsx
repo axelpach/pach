@@ -15,6 +15,8 @@ export function LabelMenu({
   onToggle,
   trigger,
   triggerClassName,
+  triggerTitle,
+  triggerAriaLabel,
   openSignal,
   align = 'left',
   popupWidth = '240px',
@@ -24,6 +26,8 @@ export function LabelMenu({
   onToggle: (labelId: string) => void
   trigger: ReactNode
   triggerClassName?: string
+  triggerTitle?: string
+  triggerAriaLabel?: string
   openSignal?: number
   align?: 'left' | 'right'
   popupWidth?: string
@@ -107,6 +111,8 @@ export function LabelMenu({
         ref={triggerRef}
         type="button"
         onClick={handleClick}
+        title={triggerTitle}
+        aria-label={triggerAriaLabel ?? triggerTitle}
         className={triggerClassName ?? 'inline-flex items-center gap-1 transition hover:opacity-80'}
       >
         {trigger}

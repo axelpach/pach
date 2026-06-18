@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { AlertTriangle, ArrowDown, ArrowUp, ArrowUpDown, BookmarkPlus, Bot, Building2, CheckCircle2, Check, ChevronDown, ChevronRight, Circle, FolderKanban, GripVertical, Plus, Save, Settings2 } from 'lucide-react'
+import { AlertTriangle, ArrowDown, ArrowUp, ArrowUpDown, BookmarkPlus, Bot, Building2, CheckCircle2, Check, ChevronDown, ChevronRight, Circle, FolderKanban, GripVertical, Plus, Save, Settings2, Tag } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import {
   DndContext,
@@ -2203,7 +2203,7 @@ function IssueRow({
           navigate(`/issues/${issue.id}`)
         }
       }}
-      className="flex items-center gap-2 px-3 md:px-4 py-2 border-t border-edge/6 transition hover:bg-accent-fill/4 cursor-pointer focus:outline-none focus-visible:bg-accent-fill/6"
+      className="group flex items-center gap-2 px-3 md:px-4 py-2 border-t border-edge/6 transition hover:bg-accent-fill/4 cursor-pointer focus:outline-none focus-visible:bg-accent-fill/6"
     >
       {dragHandleProps ? (
         <button
@@ -2321,23 +2321,38 @@ function IssueRow({
           />
         </div>
       )}
-      {shows('labels') && issueLabels.length > 0 && (
-        <div className="hidden md:block shrink-0" onClick={(event) => event.stopPropagation()}>
+      {(shows('labels') || labelsOpenSignal != null) && (
+        <div
+          className={`hidden md:block shrink-0 ${shows('labels') ? '' : 'w-0 overflow-visible'}`}
+          onClick={(event) => event.stopPropagation()}
+        >
           <LabelMenu
             available={availableLabels}
             selectedIds={new Set(issueLabels.map((l) => l.id))}
             onToggle={(labelId) => onToggleLabel(issue.id, labelId)}
             trigger={
-              <span className="inline-flex items-center gap-1">
-                {issueLabels.slice(0, 3).map((label) => (
-                  <LabelChip key={label.id} label={label} />
-                ))}
-                {issueLabels.length > 3 && (
-                  <span className="font-mono text-[10px] text-fg-4">+{issueLabels.length - 3}</span>
-                )}
-              </span>
+              issueLabels.length > 0 ? (
+                <span className="inline-flex items-center gap-1">
+                  {issueLabels.slice(0, 3).map((label) => (
+                    <LabelChip key={label.id} label={label} />
+                  ))}
+                  {issueLabels.length > 3 && (
+                    <span className="font-mono text-[10px] text-fg-4">+{issueLabels.length - 3}</span>
+                  )}
+                </span>
+              ) : (
+                <span className="inline-flex h-5 w-5 items-center justify-center border border-edge/15 bg-pit-3 text-fg-4 transition group-hover:border-edge/25 group-hover:text-fg-2">
+                  <Tag className="h-3 w-3" strokeWidth={1.7} />
+                </span>
+              )
             }
-            triggerClassName="inline-flex items-center gap-1 p-0 border-0 bg-transparent transition hover:opacity-80"
+            triggerClassName={
+              issueLabels.length > 0
+                ? 'inline-flex items-center gap-1 p-0 border-0 bg-transparent transition hover:opacity-80'
+                : 'inline-flex h-5 w-5 items-center justify-center border-0 bg-transparent p-0 opacity-0 transition hover:opacity-100 focus:opacity-100 group-hover:opacity-100'
+            }
+            triggerTitle="edit labels"
+            triggerAriaLabel={`edit labels for ${issue.identifier}`}
             popupWidth="240px"
             openSignal={labelsOpenSignal}
           />
