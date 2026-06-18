@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import { GetObjectCommand, PutObjectCommand, S3Client } from '@aws-sdk/client-s3'
+import { DeleteObjectCommand, GetObjectCommand, PutObjectCommand, S3Client } from '@aws-sdk/client-s3'
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner'
 import { Router, type Request } from 'express'
 import { eq } from 'drizzle-orm'
@@ -375,6 +375,46 @@ router.post('/design-assets/:id/read-url', async (req, res) => {
     res.status(500).json({
       error: 'DESIGN_ASSET_READ_FAILED',
       message: error instanceof Error ? error.message : 'Could not prepare design asset URL.',
+    })
+  }
+})
+
+router.delete('/design-assets/:id', async (req, res) => {
+  try {
+    const user = authenticatedUser(req)
+    const assetId = typeof req.params.id === 'string' ? req.params.id : ''
+    if (!assetId) {
+      res.status(400).json({ error: 'VALIDATION', message: 'Missing asset id.' })
+      return
+    }
+
+    const [asset] = await getDb().select().from(designAssets).where(eq(designAssets.id, assetId)).limit(1)
+    if (!asset) {
+      res.status(404).json({ error: 'NOT_FOUND', message: 'Design asset not found.' })
+      return
+    }
+
+    const organization = await getAccessibleOrganization(asset.organizationId, user)
+    if (!organization) {
+      res.status(404).json({ error: 'NOT_FOUND', message: 'Design asset not found.' })
+      return
+    }
+
+    if (asset.storageKey) {
+      await getS3Client().send(new DeleteObjectCommand({
+        Bucket: getBucketName(),
+        Key: asset.storageKey,
+      }))
+    }
+
+    await getDb().delete(designAssets).where(eq(designAssets.id, asset.id))
+
+    res.json({ ok: true, id: asset.id })
+  } catch (error) {
+    console.error('Design asset delete failed', error)
+    res.status(500).json({
+      error: 'DESIGN_ASSET_DELETE_FAILED',
+      message: error instanceof Error ? error.message : 'Could not delete design asset.',
     })
   }
 })

@@ -1796,13 +1796,45 @@ function DesignAssetCard({ asset }: { asset: DesignAssetRow }) {
   const height = readNumber(asset.metadata?.height)
   const sizeBytes = readNumber(asset.metadata?.sizeBytes)
   const mimeType = readString(asset.metadata?.mimeType)
+  const [isDeleting, setIsDeleting] = useState(false)
+  const [deleteError, setDeleteError] = useState<string | null>(null)
   const displayUrl = asset.storageKey
     ? `${config.apiUrl}/media/design-assets/${encodeURIComponent(asset.id)}/file`
     : asset.url ?? null
 
+  async function handleDelete() {
+    if (isDeleting) return
+    if (!window.confirm(`Delete "${asset.name}"? This removes it from Pach and storage. Templates using this asset URL will need to be updated.`)) return
+
+    setIsDeleting(true)
+    setDeleteError(null)
+    try {
+      const response = await authFetch(`${config.apiUrl}/media/design-assets/${encodeURIComponent(asset.id)}`, {
+        method: 'DELETE',
+      })
+      if (!response.ok) {
+        const payload = await response.json().catch(() => null) as { message?: string } | null
+        throw new Error(payload?.message ?? 'could not delete asset')
+      }
+    } catch (error) {
+      setDeleteError(error instanceof Error ? error.message : 'could not delete asset')
+      setIsDeleting(false)
+    }
+  }
+
   return (
     <div className="border border-edge/12 bg-pit-2">
-      <div className="flex aspect-[4/3] items-center justify-center overflow-hidden border-b border-edge/10 bg-void">
+      <div className="relative flex aspect-[4/3] items-center justify-center overflow-hidden border-b border-edge/10 bg-void">
+        <button
+          type="button"
+          onClick={handleDelete}
+          disabled={isDeleting}
+          className="absolute right-2 top-2 z-10 inline-flex h-7 w-7 items-center justify-center border border-edge/20 bg-pit/90 text-fg-4 transition hover:border-fail/50 hover:text-fail disabled:cursor-not-allowed disabled:opacity-50"
+          title="delete asset"
+          aria-label={`delete ${asset.name}`}
+        >
+          <Trash2 className="h-3.5 w-3.5" />
+        </button>
         {displayUrl && asset.kind !== 'file' ? (
           <img src={displayUrl} alt={asset.name} className="h-full w-full object-contain" />
         ) : (
@@ -1817,6 +1849,7 @@ function DesignAssetCard({ asset }: { asset: DesignAssetRow }) {
           {sizeBytes ? <span>{formatBytes(sizeBytes)}</span> : null}
         </div>
         {mimeType ? <div className="mt-2 truncate font-mono text-[9px] text-fg-4">{mimeType}</div> : null}
+        {deleteError ? <div className="mt-2 text-[10px] leading-4 text-fail">{deleteError}</div> : null}
         {displayUrl ? (
           <a
             href={displayUrl}
