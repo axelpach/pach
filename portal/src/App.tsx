@@ -1,6 +1,6 @@
 import { Routes, Route, NavLink, Navigate, useLocation, useNavigate, useParams } from 'react-router-dom'
 import { useQuery, useZero, ZeroProvider } from '@rocicorp/zero/react'
-import { CircleDollarSign, FileText, FolderKanban, LogOut, MessageCircleMore, Menu, Moon, Palette, Rows3, Sun, X } from 'lucide-react'
+import { CircleDollarSign, FileText, FolderKanban, LogOut, Megaphone, MessageCircleMore, Menu, Moon, Palette, Rows3, Sun, X } from 'lucide-react'
 import { createContext, useContext, useEffect, useMemo, useState, type ComponentType, type ReactNode } from 'react'
 import { schema, type Schema } from './zero-schema'
 import { mutators, type Mutators } from './mutators'
@@ -10,6 +10,7 @@ import Design from './pages/design/Design'
 import CRM from './pages/crm/CRM'
 import Docs from './pages/docs/Docs'
 import Finance from './pages/finance/Finance'
+import Marketing from './pages/marketing/Marketing'
 import Issues from './pages/issues/Issues'
 import IssueDetail from './pages/issues/IssueDetail'
 import IssuesLayout from './pages/issues/IssuesLayout'
@@ -36,6 +37,7 @@ const OUTER_NAV_ITEMS: readonly OuterNavItem[] = [
   { label: 'Issues', path: '/issues' },
   { label: 'Docs', path: '/docs' },
   { label: 'CRM', path: '/crm' },
+  { label: 'Marketing', path: '/marketing/content' },
   { label: 'Finance', path: '/finance/dashboard' },
   { label: 'WhatsApp', path: '/whatsapp/templates', requiresWhatsApp: true },
   { label: 'Design', path: '/design' },
@@ -92,6 +94,7 @@ function useTheme() {
 
 function isNavPathActive(targetPath: string, pathname: string) {
   if (targetPath.startsWith('/finance')) return pathname.startsWith('/finance')
+  if (targetPath.startsWith('/marketing')) return pathname.startsWith('/marketing')
   if (targetPath.startsWith('/whatsapp')) return pathname.startsWith('/whatsapp')
   return pathname === targetPath || pathname.startsWith(`${targetPath}/`)
 }
@@ -207,6 +210,7 @@ const MOBILE_NAV_ITEMS: Array<{
   { to: '/issues', label: 'issues', icon: Rows3 },
   { to: '/docs', label: 'docs', icon: FileText },
   { to: '/crm', label: 'crm', icon: FolderKanban },
+  { to: '/marketing/content', label: 'marketing', icon: Megaphone },
   { to: '/finance/dashboard', label: 'finance', icon: CircleDollarSign },
   { to: '/whatsapp/templates', label: 'whatsapp', icon: MessageCircleMore, requiresWhatsApp: true },
   { to: '/design', label: 'design', icon: Palette },
@@ -355,6 +359,7 @@ function AppShell() {
       const currentIndex = visibleOuterNavItems.findIndex((item) => {
         if (item.path === '/crm') return location.pathname.startsWith('/crm')
         if (item.path === '/docs') return location.pathname.startsWith('/docs')
+        if (item.path.startsWith('/marketing')) return location.pathname.startsWith('/marketing')
         if (item.path.startsWith('/finance')) return location.pathname.startsWith('/finance')
         if (item.path === '/design') return location.pathname.startsWith('/design') || location.pathname.startsWith('/decks')
         if (item.path === '/issues') return location.pathname.startsWith('/issues')
@@ -392,6 +397,7 @@ function AppShell() {
             <Routes>
               <Route path="/" element={<Navigate to={HOME_PATH} replace />} />
               <Route path="/crm/*" element={<CRM />} />
+              <Route path="/marketing/*" element={<Marketing />} />
               <Route path="/docs" element={<Docs />} />
               <Route path="/docs/:documentId" element={<Docs />} />
               <Route path="/finance/*" element={<Finance />} />
@@ -445,6 +451,7 @@ function useVisibleOuterNavItems() {
             item.path === '/issues' ? Rows3 :
             item.path === '/docs' ? FileText :
             item.path === '/crm' ? FolderKanban :
+            item.path.startsWith('/marketing') ? Megaphone :
             item.path.startsWith('/finance') ? CircleDollarSign :
             item.path === '/whatsapp/templates' ? MessageCircleMore :
             Palette,

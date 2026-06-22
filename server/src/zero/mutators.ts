@@ -29,6 +29,16 @@ type ScopedTable =
   | 'fin_categorization_rules'
   | 'fin_balance_snapshots'
   | 'documents'
+  | 'mkt_sender_profiles'
+  | 'mkt_publications'
+  | 'mkt_ctas'
+  | 'mkt_content_items'
+  | 'mkt_audience_members'
+  | 'mkt_audience_subscriptions'
+  | 'mkt_segments'
+  | 'mkt_segment_members'
+  | 'mkt_distribution_runs'
+  | 'mkt_content_events'
   | 'pm_teams'
   | 'pm_projects'
   | 'pm_statuses'
@@ -63,6 +73,16 @@ const ORG_COLUMN_BY_TABLE: Record<ScopedTable, string> = {
   fin_categorization_rules: 'organization_id',
   fin_balance_snapshots: 'organization_id',
   documents: 'organization_id',
+  mkt_sender_profiles: 'organization_id',
+  mkt_publications: 'organization_id',
+  mkt_ctas: 'organization_id',
+  mkt_content_items: 'organization_id',
+  mkt_audience_members: 'organization_id',
+  mkt_audience_subscriptions: 'organization_id',
+  mkt_segments: 'organization_id',
+  mkt_segment_members: 'organization_id',
+  mkt_distribution_runs: 'organization_id',
+  mkt_content_events: 'organization_id',
   pm_teams: 'company_id',
   pm_projects: 'company_id',
   pm_statuses: 'company_id',
@@ -583,6 +603,192 @@ export function createServerMutators(authData?: JWTPayload) {
       async delete(tx: Tx, args: { id: string }) {
         await requireExistingOrganizationAccess(tx, 'documents', args.id)
         await tx.mutate.documents.delete({ id: args.id })
+      },
+    },
+
+    mkt_sender_profiles: {
+      async create(tx: Tx, args: any) {
+        requireOrganizationAccess(args.organizationId)
+        const now = Date.now()
+        await tx.mutate.mkt_sender_profiles.insert({ provider: 'resend', status: 'active', metadata: {}, ...args, createdAt: now, updatedAt: now })
+      },
+      async update(tx: Tx, args: any) {
+        await requireExistingOrganizationAccess(tx, 'mkt_sender_profiles', args.id)
+        if ('organizationId' in args) requireOrganizationAccess(args.organizationId)
+        const { id, ...updates } = args
+        await tx.mutate.mkt_sender_profiles.update({ id, ...updates, updatedAt: Date.now() })
+      },
+      async delete(tx: Tx, args: { id: string }) {
+        await requireExistingOrganizationAccess(tx, 'mkt_sender_profiles', args.id)
+        await tx.mutate.mkt_sender_profiles.delete({ id: args.id })
+      },
+    },
+
+    mkt_publications: {
+      async create(tx: Tx, args: any) {
+        requireOrganizationAccess(args.organizationId)
+        const now = Date.now()
+        await tx.mutate.mkt_publications.insert({ type: 'newsletter', status: 'active', metadata: {}, ...args, createdAt: now, updatedAt: now })
+      },
+      async update(tx: Tx, args: any) {
+        await requireExistingOrganizationAccess(tx, 'mkt_publications', args.id)
+        if ('organizationId' in args) requireOrganizationAccess(args.organizationId)
+        const { id, ...updates } = args
+        await tx.mutate.mkt_publications.update({ id, ...updates, updatedAt: Date.now() })
+      },
+      async delete(tx: Tx, args: { id: string }) {
+        await requireExistingOrganizationAccess(tx, 'mkt_publications', args.id)
+        await tx.mutate.mkt_publications.delete({ id: args.id })
+      },
+    },
+
+    mkt_ctas: {
+      async create(tx: Tx, args: any) {
+        requireOrganizationAccess(args.organizationId)
+        const now = Date.now()
+        await tx.mutate.mkt_ctas.insert({ status: 'active', metadata: {}, ...args, createdAt: now, updatedAt: now })
+      },
+      async update(tx: Tx, args: any) {
+        await requireExistingOrganizationAccess(tx, 'mkt_ctas', args.id)
+        if ('organizationId' in args) requireOrganizationAccess(args.organizationId)
+        const { id, ...updates } = args
+        await tx.mutate.mkt_ctas.update({ id, ...updates, updatedAt: Date.now() })
+      },
+      async delete(tx: Tx, args: { id: string }) {
+        await requireExistingOrganizationAccess(tx, 'mkt_ctas', args.id)
+        await tx.mutate.mkt_ctas.delete({ id: args.id })
+      },
+    },
+
+    mkt_content_items: {
+      async create(tx: Tx, args: any) {
+        requireOrganizationAccess(args.organizationId)
+        const now = Date.now()
+        await tx.mutate.mkt_content_items.insert({
+          contentKind: 'article',
+          supportedChannels: ['blog', 'newsletter'],
+          status: 'draft',
+          body: '',
+          format: 'markdown',
+          tags: [],
+          metadata: {},
+          ...args,
+          createdAt: now,
+          updatedAt: now,
+        })
+      },
+      async update(tx: Tx, args: any) {
+        await requireExistingOrganizationAccess(tx, 'mkt_content_items', args.id)
+        if ('organizationId' in args) requireOrganizationAccess(args.organizationId)
+        const { id, ...updates } = args
+        await tx.mutate.mkt_content_items.update({ id, ...updates, updatedAt: Date.now() })
+      },
+      async delete(tx: Tx, args: { id: string }) {
+        await requireExistingOrganizationAccess(tx, 'mkt_content_items', args.id)
+        await tx.mutate.mkt_content_items.delete({ id: args.id })
+      },
+    },
+
+    mkt_audience_members: {
+      async create(tx: Tx, args: any) {
+        requireOrganizationAccess(args.organizationId)
+        const now = Date.now()
+        await tx.mutate.mkt_audience_members.insert({ status: 'active', tags: [], metadata: {}, ...args, createdAt: now, updatedAt: now })
+      },
+      async update(tx: Tx, args: any) {
+        await requireExistingOrganizationAccess(tx, 'mkt_audience_members', args.id)
+        if ('organizationId' in args) requireOrganizationAccess(args.organizationId)
+        const { id, ...updates } = args
+        await tx.mutate.mkt_audience_members.update({ id, ...updates, updatedAt: Date.now() })
+      },
+      async delete(tx: Tx, args: { id: string }) {
+        await requireExistingOrganizationAccess(tx, 'mkt_audience_members', args.id)
+        await tx.mutate.mkt_audience_members.delete({ id: args.id })
+      },
+    },
+
+    mkt_audience_subscriptions: {
+      async create(tx: Tx, args: any) {
+        requireOrganizationAccess(args.organizationId)
+        const now = Date.now()
+        await tx.mutate.mkt_audience_subscriptions.insert({ channel: 'newsletter', status: 'subscribed', metadata: {}, ...args, createdAt: now, updatedAt: now })
+      },
+      async update(tx: Tx, args: any) {
+        await requireExistingOrganizationAccess(tx, 'mkt_audience_subscriptions', args.id)
+        if ('organizationId' in args) requireOrganizationAccess(args.organizationId)
+        const { id, ...updates } = args
+        await tx.mutate.mkt_audience_subscriptions.update({ id, ...updates, updatedAt: Date.now() })
+      },
+      async delete(tx: Tx, args: { id: string }) {
+        await requireExistingOrganizationAccess(tx, 'mkt_audience_subscriptions', args.id)
+        await tx.mutate.mkt_audience_subscriptions.delete({ id: args.id })
+      },
+    },
+
+    mkt_segments: {
+      async create(tx: Tx, args: any) {
+        requireOrganizationAccess(args.organizationId)
+        const now = Date.now()
+        await tx.mutate.mkt_segments.insert({ kind: 'manual', rules: {}, status: 'active', metadata: {}, ...args, createdAt: now, updatedAt: now })
+      },
+      async update(tx: Tx, args: any) {
+        await requireExistingOrganizationAccess(tx, 'mkt_segments', args.id)
+        if ('organizationId' in args) requireOrganizationAccess(args.organizationId)
+        const { id, ...updates } = args
+        await tx.mutate.mkt_segments.update({ id, ...updates, updatedAt: Date.now() })
+      },
+      async delete(tx: Tx, args: { id: string }) {
+        await requireExistingOrganizationAccess(tx, 'mkt_segments', args.id)
+        await tx.mutate.mkt_segments.delete({ id: args.id })
+      },
+    },
+
+    mkt_segment_members: {
+      async create(tx: Tx, args: any) {
+        requireOrganizationAccess(args.organizationId)
+        await tx.mutate.mkt_segment_members.insert({ ...args, createdAt: Date.now() })
+      },
+      async delete(tx: Tx, args: { id: string }) {
+        await requireExistingOrganizationAccess(tx, 'mkt_segment_members', args.id)
+        await tx.mutate.mkt_segment_members.delete({ id: args.id })
+      },
+    },
+
+    mkt_distribution_runs: {
+      async create(tx: Tx, args: any) {
+        requireOrganizationAccess(args.organizationId)
+        const now = Date.now()
+        await tx.mutate.mkt_distribution_runs.insert({
+          distributionType: 'broadcast',
+          status: 'draft',
+          recipientFilter: {},
+          metrics: {},
+          metadata: {},
+          ...args,
+          createdAt: now,
+          updatedAt: now,
+        })
+      },
+      async update(tx: Tx, args: any) {
+        await requireExistingOrganizationAccess(tx, 'mkt_distribution_runs', args.id)
+        if ('organizationId' in args) requireOrganizationAccess(args.organizationId)
+        const { id, ...updates } = args
+        await tx.mutate.mkt_distribution_runs.update({ id, ...updates, updatedAt: Date.now() })
+      },
+      async delete(tx: Tx, args: { id: string }) {
+        await requireExistingOrganizationAccess(tx, 'mkt_distribution_runs', args.id)
+        await tx.mutate.mkt_distribution_runs.delete({ id: args.id })
+      },
+    },
+
+    mkt_content_events: {
+      async create(tx: Tx, args: any) {
+        requireOrganizationAccess(args.organizationId)
+        await tx.mutate.mkt_content_events.insert({ metadata: {}, ...args, createdAt: Date.now() })
+      },
+      async delete(tx: Tx, args: { id: string }) {
+        await requireExistingOrganizationAccess(tx, 'mkt_content_events', args.id)
+        await tx.mutate.mkt_content_events.delete({ id: args.id })
       },
     },
 

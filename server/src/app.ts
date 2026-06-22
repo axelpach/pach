@@ -12,6 +12,7 @@ import agentRoute, { attachAgentTerminalWebSocket } from './routes/agent.js'
 import agentWorkerRoute from './routes/agent-worker.js'
 import financeRoute from './routes/finance.js'
 import mediaRoute, { publicMediaRouter } from './routes/media.js'
+import marketingRoute, { publicMarketingRouter } from './routes/marketing.js'
 import mcpRoute from './routes/mcp.js'
 import designPreviewRoute from './routes/design-preview.js'
 import designRoute from './routes/design.js'
@@ -30,6 +31,7 @@ app.get('/health', (_req, res) => res.json({ ok: true }))
 app.use('/auth', authRoute)
 app.use('/whatsapp', publicWhatsAppRouter)
 app.use('/inbound', inboundRoute)
+app.use('/public', publicMarketingRouter)
 app.use('/zero', requireAuth, zeroPushRoute)
 app.use('/whatsapp', requireAuth, whatsappRoute)
 app.use('/linear', requireAuth, requireUnscopedAccess, linearRoute)
@@ -40,6 +42,7 @@ app.use('/mcp', mcpRoute)
 app.use('/design', requireAuth, designRoute)
 app.use('/design-preview', designPreviewRoute)
 app.use('/finance', requireAuth, financeRoute)
+app.use('/marketing', requireAuth, marketingRoute)
 app.use('/media', publicMediaRouter)
 app.use('/media', requireAuth, mediaRoute)
 
@@ -52,6 +55,11 @@ app.use((err: unknown, _req: express.Request, res: express.Response, next: expre
     return
   }
   next(err)
+})
+
+app.use((err: unknown, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
+  console.error('[server]', err)
+  res.status(500).json({ error: 'Internal server error' })
 })
 
 app.use((_req, res) => res.status(404).json({ error: 'Not found' }))

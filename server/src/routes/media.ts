@@ -2,13 +2,15 @@ import { randomUUID } from 'node:crypto'
 import { DeleteObjectCommand, GetObjectCommand, PutObjectCommand, S3Client } from '@aws-sdk/client-s3'
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner'
 import { Router, type Request } from 'express'
-import { eq } from 'drizzle-orm'
+import { and, eq, inArray } from 'drizzle-orm'
 import {
   agentRunInputMediaObjects,
   agentRunInputMedia,
   agentRuns,
   designAssets,
   documents,
+  mktContentItems,
+  mktDistributionRuns,
   organizations,
   pmIssues,
 } from '../../../db/schema.js'
@@ -26,6 +28,12 @@ const SIGNED_READ_SECONDS = 60 * 60
 type MediaOwnerType = 'document' | 'issue'
 type MediaKind = 'image' | 'file'
 type AgentInputMediaKind = 'image' | 'screenshot' | 'file'
+type ParsedMediaOwnerKey = {
+  organizationId: string | null
+  ownerType: MediaOwnerType
+  ownerId: string
+  mediaKind: MediaKind
+}
 
 let s3Client: S3Client | null = null
 
@@ -68,6 +76,51 @@ publicMediaRouter.get('/design-assets/:id/file', async (req, res) => {
   } catch (error) {
     console.error('Design asset public read failed', error)
     res.status(500).type('text/plain').send('Could not load design asset.')
+  }
+})
+
+publicMediaRouter.get('/marketing-assets', async (req, res) => {
+  try {
+    const key = typeof req.query.key === 'string' ? req.query.key : ''
+    const parsed = parseMediaOwnerKey(key)
+    if (!key || !parsed || parsed.ownerType !== 'document' || parsed.mediaKind !== 'image') {
+      res.status(400).type('text/plain').send('Invalid marketing asset key.')
+      return
+    }
+
+    const isPublishedImage = await canReadPublishedMarketingImage(key, parsed)
+    if (!isPublishedImage) {
+      res.status(404).type('text/plain').send('Marketing asset not found.')
+      return
+    }
+
+    const object = await getS3Client().send(new GetObjectCommand({
+      Bucket: getBucketName(),
+      Key: key,
+    }))
+    const mimeType = publicImageMimeType(object.ContentType, key)
+    if (!mimeType) {
+      res.status(415).type('text/plain').send('Marketing asset type is not supported.')
+      return
+    }
+
+    res.setHeader('Content-Type', mimeType)
+    res.setHeader('Cache-Control', 'public, max-age=300, stale-while-revalidate=3600')
+    res.setHeader('Access-Control-Allow-Origin', '*')
+    if (object.ContentLength != null) res.setHeader('Content-Length', String(object.ContentLength))
+    if (object.ETag) res.setHeader('ETag', object.ETag)
+    res.setHeader('Content-Disposition', `inline; filename="${sanitizeContentDispositionFileName(fileNameFromKey(key))}"`)
+
+    const body = object.Body as { pipe?: (destination: typeof res) => void } | undefined
+    if (body?.pipe) {
+      body.pipe(res)
+      return
+    }
+
+    res.status(500).type('text/plain').send('Marketing asset body is not streamable.')
+  } catch (error) {
+    console.error('Marketing asset public read failed', error)
+    res.status(500).type('text/plain').send('Could not load marketing asset.')
   }
 })
 
@@ -778,17 +831,90 @@ function readAttachmentSummaries(value: unknown) {
   return Array.isArray(value) ? value.filter((entry): entry is Record<string, unknown> => Boolean(entry && typeof entry === 'object')) : []
 }
 
-function parseMediaOwnerKey(key: string) {
+async function canReadPublishedMarketingImage(key: string, parsed: ParsedMediaOwnerKey) {
+  if (!parsed.organizationId) return false
+
+  const contentItems = await getDb()
+    .select({
+      id: mktContentItems.id,
+      body: mktContentItems.body,
+      status: mktContentItems.status,
+      supportedChannels: mktContentItems.supportedChannels,
+    })
+    .from(mktContentItems)
+    .where(and(
+      eq(mktContentItems.sourceDocumentId, parsed.ownerId),
+      eq(mktContentItems.organizationId, parsed.organizationId),
+    ))
+
+  const referencedContentIds = contentItems
+    .filter((item) => isPublicBlogContentItem(item) && item.body.includes(`s3://${key}`))
+    .map((item) => item.id)
+
+  if (referencedContentIds.length === 0) return false
+
+  const [publishedRun] = await getDb()
+    .select({ id: mktDistributionRuns.id })
+    .from(mktDistributionRuns)
+    .where(and(
+      eq(mktDistributionRuns.organizationId, parsed.organizationId),
+      inArray(mktDistributionRuns.contentItemId, referencedContentIds),
+      eq(mktDistributionRuns.channel, 'blog'),
+      eq(mktDistributionRuns.status, 'published'),
+    ))
+    .limit(1)
+
+  return Boolean(publishedRun)
+}
+
+function isPublicBlogContentItem(item: Pick<typeof mktContentItems.$inferSelect, 'status' | 'supportedChannels'>) {
+  return ['ready', 'published'].includes(item.status) && item.supportedChannels.includes('blog')
+}
+
+function parseMediaOwnerKey(key: string): ParsedMediaOwnerKey | null {
   const parts = key.split('/')
   const prefix = storageEnvironmentPrefix()
   if (parts[0] !== prefix) return null
   if (parts[1] === 'organizations' && isOwnerFolder(parts[3]) && ['media', 'files'].includes(parts[5])) {
-    return { organizationId: parts[2], ownerType: ownerTypeFromFolder(parts[3]), ownerId: parts[4] }
+    return { organizationId: parts[2], ownerType: ownerTypeFromFolder(parts[3]), ownerId: parts[4], mediaKind: mediaKindFromFolder(parts[5]) }
   }
   if (parts[1] === 'unscoped' && isOwnerFolder(parts[2]) && ['media', 'files'].includes(parts[4])) {
-    return { organizationId: null, ownerType: ownerTypeFromFolder(parts[2]), ownerId: parts[3] }
+    return { organizationId: null, ownerType: ownerTypeFromFolder(parts[2]), ownerId: parts[3], mediaKind: mediaKindFromFolder(parts[4]) }
   }
   return null
+}
+
+function mediaKindFromFolder(folder: string): MediaKind {
+  return folder === 'files' ? 'file' : 'image'
+}
+
+function publicImageMimeType(contentType: string | undefined, key: string) {
+  const normalized = contentType?.split(';')[0]?.trim().toLowerCase()
+  if (normalized && supportedPublicImageMimeTypes.has(normalized)) return normalized
+  const inferred = imageMimeTypeFromKey(key)
+  return inferred && supportedPublicImageMimeTypes.has(inferred) ? inferred : null
+}
+
+function imageMimeTypeFromKey(key: string) {
+  const path = key.toLowerCase()
+  if (path.endsWith('.webp')) return 'image/webp'
+  if (path.endsWith('.png')) return 'image/png'
+  if (path.endsWith('.jpg') || path.endsWith('.jpeg')) return 'image/jpeg'
+  if (path.endsWith('.gif')) return 'image/gif'
+  if (path.endsWith('.avif')) return 'image/avif'
+  return null
+}
+
+const supportedPublicImageMimeTypes = new Set([
+  'image/avif',
+  'image/gif',
+  'image/jpeg',
+  'image/png',
+  'image/webp',
+])
+
+function fileNameFromKey(key: string) {
+  return key.split('/').pop() || 'image'
 }
 
 function ownerFolder(ownerType: MediaOwnerType) {

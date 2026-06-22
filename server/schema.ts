@@ -423,6 +423,186 @@ const documents = table('documents')
   })
   .primaryKey('id')
 
+const mktSenderProfiles = table('mkt_sender_profiles')
+  .columns({
+    id: string(),
+    organizationId: string().from('organization_id'),
+    provider: string(),
+    name: string(),
+    fromName: string().from('from_name'),
+    fromEmail: string().from('from_email'),
+    replyToName: string().optional().from('reply_to_name'),
+    replyToEmail: string().optional().from('reply_to_email'),
+    sendingDomain: string().optional().from('sending_domain'),
+    status: string(),
+    metadata: json(),
+    createdAt: number().from('created_at'),
+    updatedAt: number().from('updated_at'),
+  })
+  .primaryKey('id')
+
+const mktPublications = table('mkt_publications')
+  .columns({
+    id: string(),
+    organizationId: string().from('organization_id'),
+    defaultSenderProfileId: string().optional().from('default_sender_profile_id'),
+    name: string(),
+    slug: string(),
+    type: string(),
+    audienceDescription: string().optional().from('audience_description'),
+    status: string(),
+    metadata: json(),
+    createdAt: number().from('created_at'),
+    updatedAt: number().from('updated_at'),
+  })
+  .primaryKey('id')
+
+const mktCtas = table('mkt_ctas')
+  .columns({
+    id: string(),
+    organizationId: string().from('organization_id'),
+    key: string(),
+    label: string(),
+    url: string(),
+    description: string().optional(),
+    status: string(),
+    metadata: json(),
+    createdAt: number().from('created_at'),
+    updatedAt: number().from('updated_at'),
+  })
+  .primaryKey('id')
+
+const mktContentItems = table('mkt_content_items')
+  .columns({
+    id: string(),
+    organizationId: string().from('organization_id'),
+    sourceDocumentId: string().optional().from('source_document_id'),
+    primaryCtaId: string().optional().from('primary_cta_id'),
+    title: string(),
+    slug: string(),
+    excerpt: string().optional(),
+    contentKind: string().from('content_kind'),
+    supportedChannels: json().from('supported_channels'),
+    status: string(),
+    body: string(),
+    format: string(),
+    tags: json(),
+    metadata: json(),
+    createdAt: number().from('created_at'),
+    updatedAt: number().from('updated_at'),
+  })
+  .primaryKey('id')
+
+const mktAudienceMembers = table('mkt_audience_members')
+  .columns({
+    id: string(),
+    organizationId: string().from('organization_id'),
+    crmContactId: string().optional().from('crm_contact_id'),
+    name: string().optional(),
+    email: string().optional(),
+    phone: string().optional(),
+    whatsappPhone: string().optional().from('whatsapp_phone'),
+    company: string().optional(),
+    role: string().optional(),
+    source: string().optional(),
+    status: string(),
+    tags: json(),
+    metadata: json(),
+    createdAt: number().from('created_at'),
+    updatedAt: number().from('updated_at'),
+  })
+  .primaryKey('id')
+
+const mktAudienceSubscriptions = table('mkt_audience_subscriptions')
+  .columns({
+    id: string(),
+    organizationId: string().from('organization_id'),
+    audienceMemberId: string().from('audience_member_id'),
+    publicationId: string().optional().from('publication_id'),
+    channel: string(),
+    status: string(),
+    consentSource: string().optional().from('consent_source'),
+    consentedAt: number().optional().from('consented_at'),
+    unsubscribedAt: number().optional().from('unsubscribed_at'),
+    metadata: json(),
+    createdAt: number().from('created_at'),
+    updatedAt: number().from('updated_at'),
+  })
+  .primaryKey('id')
+
+const mktSegments = table('mkt_segments')
+  .columns({
+    id: string(),
+    organizationId: string().from('organization_id'),
+    name: string(),
+    slug: string(),
+    description: string().optional(),
+    kind: string(),
+    rules: json(),
+    status: string(),
+    metadata: json(),
+    createdAt: number().from('created_at'),
+    updatedAt: number().from('updated_at'),
+  })
+  .primaryKey('id')
+
+const mktSegmentMembers = table('mkt_segment_members')
+  .columns({
+    id: string(),
+    organizationId: string().from('organization_id'),
+    segmentId: string().from('segment_id'),
+    audienceMemberId: string().from('audience_member_id'),
+    createdAt: number().from('created_at'),
+  })
+  .primaryKey('id')
+
+const mktDistributionRuns = table('mkt_distribution_runs')
+  .columns({
+    id: string(),
+    organizationId: string().from('organization_id'),
+    publicationId: string().optional().from('publication_id'),
+    contentItemId: string().optional().from('content_item_id'),
+    segmentId: string().optional().from('segment_id'),
+    senderProfileId: string().optional().from('sender_profile_id'),
+    designTemplateId: string().optional().from('design_template_id'),
+    designTemplateVersionId: string().optional().from('design_template_version_id'),
+    channel: string(),
+    distributionType: string().from('distribution_type'),
+    name: string(),
+    subject: string().optional(),
+    preheader: string().optional(),
+    status: string(),
+    scheduledAt: number().optional().from('scheduled_at'),
+    startedAt: number().optional().from('started_at'),
+    completedAt: number().optional().from('completed_at'),
+    provider: string().optional(),
+    providerCampaignId: string().optional().from('provider_campaign_id'),
+    recipientFilter: json().from('recipient_filter'),
+    metrics: json(),
+    error: string().optional(),
+    metadata: json(),
+    createdAt: number().from('created_at'),
+    updatedAt: number().from('updated_at'),
+  })
+  .primaryKey('id')
+
+const mktContentEvents = table('mkt_content_events')
+  .columns({
+    id: string(),
+    organizationId: string().from('organization_id'),
+    contentItemId: string().optional().from('content_item_id'),
+    distributionRunId: string().optional().from('distribution_run_id'),
+    audienceMemberId: string().optional().from('audience_member_id'),
+    ctaId: string().optional().from('cta_id'),
+    eventType: string().from('event_type'),
+    channel: string().optional(),
+    source: string().optional(),
+    url: string().optional(),
+    metadata: json(),
+    createdAt: number().from('created_at'),
+  })
+  .primaryKey('id')
+
 const pmTeams = table('pm_teams')
   .columns({
     id: string(),
@@ -903,6 +1083,16 @@ export const schema = createSchema({
     finCategorizationRules,
     finBalanceSnapshots,
     documents,
+    mktSenderProfiles,
+    mktPublications,
+    mktCtas,
+    mktContentItems,
+    mktAudienceMembers,
+    mktAudienceSubscriptions,
+    mktSegments,
+    mktSegmentMembers,
+    mktDistributionRuns,
+    mktContentEvents,
     pmTeams,
     pmProjects,
     pmStatuses,
@@ -1016,6 +1206,16 @@ export const permissions = definePermissions<AuthData, Schema>(schema, () => {
     fin_categorization_rules: organizationScoped<'fin_categorization_rules'>(),
     fin_balance_snapshots: organizationScoped<'fin_balance_snapshots'>(),
     documents: organizationScoped<'documents'>(),
+    mkt_sender_profiles: organizationScoped<'mkt_sender_profiles'>(),
+    mkt_publications: organizationScoped<'mkt_publications'>(),
+    mkt_ctas: organizationScoped<'mkt_ctas'>(),
+    mkt_content_items: organizationScoped<'mkt_content_items'>(),
+    mkt_audience_members: organizationScoped<'mkt_audience_members'>(),
+    mkt_audience_subscriptions: organizationScoped<'mkt_audience_subscriptions'>(),
+    mkt_segments: organizationScoped<'mkt_segments'>(),
+    mkt_segment_members: organizationScoped<'mkt_segment_members'>(),
+    mkt_distribution_runs: organizationScoped<'mkt_distribution_runs'>(),
+    mkt_content_events: organizationScoped<'mkt_content_events'>(),
     pm_teams: authenticatedReadOnly,
     pm_projects: organizationScoped<'pm_projects'>('companyId'),
     pm_statuses: authenticatedReadOnly,

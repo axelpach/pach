@@ -366,6 +366,156 @@ export const mutators = {
     },
   },
 
+  mkt_sender_profiles: {
+    async create(tx: Tx, args: any) {
+      const now = Date.now()
+      await tx.mutate.mkt_sender_profiles.insert({ provider: 'resend', status: 'active', metadata: {}, ...args, createdAt: now, updatedAt: now })
+    },
+    async update(tx: Tx, args: any) {
+      const { id, ...updates } = args
+      await tx.mutate.mkt_sender_profiles.update({ id, ...updates, updatedAt: Date.now() })
+    },
+    async delete(tx: Tx, args: { id: string }) {
+      await tx.mutate.mkt_sender_profiles.delete({ id: args.id })
+    },
+  },
+
+  mkt_publications: {
+    async create(tx: Tx, args: any) {
+      const now = Date.now()
+      await tx.mutate.mkt_publications.insert({ type: 'newsletter', status: 'active', metadata: {}, ...args, createdAt: now, updatedAt: now })
+    },
+    async update(tx: Tx, args: any) {
+      const { id, ...updates } = args
+      await tx.mutate.mkt_publications.update({ id, ...updates, updatedAt: Date.now() })
+    },
+    async delete(tx: Tx, args: { id: string }) {
+      await tx.mutate.mkt_publications.delete({ id: args.id })
+    },
+  },
+
+  mkt_ctas: {
+    async create(tx: Tx, args: any) {
+      const now = Date.now()
+      await tx.mutate.mkt_ctas.insert({ status: 'active', metadata: {}, ...args, createdAt: now, updatedAt: now })
+    },
+    async update(tx: Tx, args: any) {
+      const { id, ...updates } = args
+      await tx.mutate.mkt_ctas.update({ id, ...updates, updatedAt: Date.now() })
+    },
+    async delete(tx: Tx, args: { id: string }) {
+      await tx.mutate.mkt_ctas.delete({ id: args.id })
+    },
+  },
+
+  mkt_content_items: {
+    async create(tx: Tx, args: any) {
+      const now = Date.now()
+      await tx.mutate.mkt_content_items.insert({
+        contentKind: 'article',
+        supportedChannels: ['blog', 'newsletter'],
+        status: 'draft',
+        body: '',
+        format: 'markdown',
+        tags: [],
+        metadata: {},
+        ...args,
+        createdAt: now,
+        updatedAt: now,
+      })
+    },
+    async update(tx: Tx, args: any) {
+      const { id, ...updates } = args
+      await tx.mutate.mkt_content_items.update({ id, ...updates, updatedAt: Date.now() })
+    },
+    async delete(tx: Tx, args: { id: string }) {
+      await tx.mutate.mkt_content_items.delete({ id: args.id })
+    },
+  },
+
+  mkt_audience_members: {
+    async create(tx: Tx, args: any) {
+      const now = Date.now()
+      await tx.mutate.mkt_audience_members.insert({ status: 'active', tags: [], metadata: {}, ...args, createdAt: now, updatedAt: now })
+    },
+    async update(tx: Tx, args: any) {
+      const { id, ...updates } = args
+      await tx.mutate.mkt_audience_members.update({ id, ...updates, updatedAt: Date.now() })
+    },
+    async delete(tx: Tx, args: { id: string }) {
+      await tx.mutate.mkt_audience_members.delete({ id: args.id })
+    },
+  },
+
+  mkt_audience_subscriptions: {
+    async create(tx: Tx, args: any) {
+      const now = Date.now()
+      await tx.mutate.mkt_audience_subscriptions.insert({ channel: 'newsletter', status: 'subscribed', metadata: {}, ...args, createdAt: now, updatedAt: now })
+    },
+    async update(tx: Tx, args: any) {
+      const { id, ...updates } = args
+      await tx.mutate.mkt_audience_subscriptions.update({ id, ...updates, updatedAt: Date.now() })
+    },
+    async delete(tx: Tx, args: { id: string }) {
+      await tx.mutate.mkt_audience_subscriptions.delete({ id: args.id })
+    },
+  },
+
+  mkt_segments: {
+    async create(tx: Tx, args: any) {
+      const now = Date.now()
+      await tx.mutate.mkt_segments.insert({ kind: 'manual', rules: {}, status: 'active', metadata: {}, ...args, createdAt: now, updatedAt: now })
+    },
+    async update(tx: Tx, args: any) {
+      const { id, ...updates } = args
+      await tx.mutate.mkt_segments.update({ id, ...updates, updatedAt: Date.now() })
+    },
+    async delete(tx: Tx, args: { id: string }) {
+      await tx.mutate.mkt_segments.delete({ id: args.id })
+    },
+  },
+
+  mkt_segment_members: {
+    async create(tx: Tx, args: any) {
+      await tx.mutate.mkt_segment_members.insert({ ...args, createdAt: Date.now() })
+    },
+    async delete(tx: Tx, args: { id: string }) {
+      await tx.mutate.mkt_segment_members.delete({ id: args.id })
+    },
+  },
+
+  mkt_distribution_runs: {
+    async create(tx: Tx, args: any) {
+      const now = Date.now()
+      await tx.mutate.mkt_distribution_runs.insert({
+        distributionType: 'broadcast',
+        status: 'draft',
+        recipientFilter: {},
+        metrics: {},
+        metadata: {},
+        ...args,
+        createdAt: now,
+        updatedAt: now,
+      })
+    },
+    async update(tx: Tx, args: any) {
+      const { id, ...updates } = args
+      await tx.mutate.mkt_distribution_runs.update({ id, ...updates, updatedAt: Date.now() })
+    },
+    async delete(tx: Tx, args: { id: string }) {
+      await tx.mutate.mkt_distribution_runs.delete({ id: args.id })
+    },
+  },
+
+  mkt_content_events: {
+    async create(tx: Tx, args: any) {
+      await tx.mutate.mkt_content_events.insert({ metadata: {}, ...args, createdAt: Date.now() })
+    },
+    async delete(tx: Tx, args: { id: string }) {
+      await tx.mutate.mkt_content_events.delete({ id: args.id })
+    },
+  },
+
   pm_teams: {
     async create(tx: Tx, args: { id: string; companyId?: string; key: string; name: string; description?: string; color?: string; icon?: string; position?: number }) {
       const now = Date.now()

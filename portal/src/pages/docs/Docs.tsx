@@ -8,6 +8,7 @@ import {
   FileText,
   List,
   ListTree,
+  Megaphone,
   Plus,
   Search,
 } from 'lucide-react'
@@ -15,7 +16,8 @@ import { useEffect, useMemo, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { PachSelect, type PachSelectOption } from '../../components/PachSelect'
 import { RichEditor } from '../../components/rich-editor/RichEditor'
-import { useAuth } from '../../lib/auth'
+import { config } from '../../config'
+import { authFetch, useAuth } from '../../lib/auth'
 import type { Mutators } from '../../mutators'
 import type { Schema } from '../../zero-schema'
 
@@ -40,8 +42,12 @@ export default function Docs() {
   const [bodyDraft, setBodyDraft] = useState('')
   const [expandedDocumentIds, setExpandedDocumentIds] = useState<Set<string>>(() => new Set())
   const [archiveConfirmDocument, setArchiveConfirmDocument] = useState<DocumentRow | null>(null)
+  const [marketingContentConfirmDocument, setMarketingContentConfirmDocument] = useState<DocumentRow | null>(null)
+  const [creatingMarketingContent, setCreatingMarketingContent] = useState(false)
+  const [marketingContentStatus, setMarketingContentStatus] = useState<{ kind: 'ok' | 'fail'; message: string } | null>(null)
 
   const [documents] = useQuery(z.query.documents.orderBy('updatedAt', 'desc'))
+  const [marketingContentItems] = useQuery(z.query.mkt_content_items.orderBy('updatedAt', 'desc'))
   const [issues] = useQuery(z.query.pm_issues.orderBy('updatedAt', 'desc'))
   const [organizations] = useQuery(z.query.organizations.orderBy('name', 'asc'))
 
@@ -95,6 +101,10 @@ export default function Docs() {
     : selectedDocument
       ? organizationFor(selectedDocument.organizationId, organizations)
       : null
+  const selectedDocumentMarketingItems = useMemo(
+    () => selectedDocument ? marketingContentItems.filter((item) => item.sourceDocumentId === selectedDocument.id) : [],
+    [marketingContentItems, selectedDocument?.id],
+  )
 
   useEffect(() => {
     if (organizationOptions.length === 0) return
@@ -121,10 +131,12 @@ export default function Docs() {
     if (!selectedDocument) {
       setTitleDraft('')
       setBodyDraft('')
+      setMarketingContentStatus(null)
       return
     }
     setTitleDraft(selectedDocument.title)
     setBodyDraft(selectedDocument.body)
+    setMarketingContentStatus(null)
     if (selectedDocument.organizationId) setOrganizationFilter(selectedDocument.organizationId)
     else if (user?.canAccessUnscoped) setOrganizationFilter(NO_ORGANIZATION)
   }, [selectedDocument?.id])
@@ -234,6 +246,47 @@ export default function Docs() {
     navigate(next ? `/docs/${next.id}` : '/docs')
   }
 
+  async function createMarketingContentFromDocument(entry: DocumentRow) {
+    if (!entry.organizationId) {
+      setMarketingContentStatus({ kind: 'fail', message: 'document needs an organization' })
+      return
+    }
+    const existing = marketingContentItems.find((item) => item.sourceDocumentId === entry.id)
+    if (existing) {
+      setMarketingContentStatus({ kind: 'ok', message: 'already marketing content' })
+      navigate(`/marketing/content?content=${existing.id}`)
+      return
+    }
+    setCreatingMarketingContent(true)
+    setMarketingContentStatus(null)
+    try {
+      if (entry.title !== titleDraft || entry.body !== bodyDraft) {
+        await saveDraft(entry, titleDraft, bodyDraft)
+      }
+      const response = await authFetch(`${config.apiUrl}/marketing/content/from-document`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          documentId: entry.id,
+          supportedChannels: ['blog', 'newsletter'],
+        }),
+      })
+      const payload = await readJson(response)
+      setMarketingContentStatus({
+        kind: 'ok',
+        message: payload.alreadyExists ? 'already marketing content' : 'content created',
+      })
+      navigate(`/marketing/content?content=${payload.contentItem.id}`)
+    } catch (error) {
+      setMarketingContentStatus({
+        kind: 'fail',
+        message: error instanceof Error ? error.message : 'could not create content',
+      })
+    } finally {
+      setCreatingMarketingContent(false)
+    }
+  }
+
   return (
     <div className="flex h-full min-h-0 bg-pit text-fg-1">
       <aside className="hidden w-[300px] shrink-0 border-r border-edge/12 bg-void/72 md:flex md:flex-col">
@@ -319,14 +372,46 @@ export default function Docs() {
                 <ListTree className="h-3.5 w-3.5" />
                 <span className="truncate">{organizationLabel(selectedDocument.organizationId, organizations)}</span>
               </div>
+              {selectedDocumentMarketingItems.length > 0 ? (
+                <button
+                  onClick={() => navigate(`/marketing/content?content=${selectedDocumentMarketingItems[0].id}`)}
+                  className="ml-auto inline-flex h-8 items-center gap-2 border border-accent/25 bg-accent-fill/6 px-2.5 font-mono text-[10px] uppercase tracking-label text-accent transition hover:bg-accent-fill/12"
+                  title={`already marketing content: ${uniqueMarketingChannels(selectedDocumentMarketingItems)}`}
+                >
+                  <Megaphone className="h-3.5 w-3.5" />
+                  already content
+                </button>
+              ) : (
+                <button
+                  onClick={() => setMarketingContentConfirmDocument(selectedDocument)}
+                  disabled={creatingMarketingContent}
+                  className="ml-auto inline-flex h-8 items-center gap-2 border border-edge/15 px-2.5 font-mono text-[10px] uppercase tracking-label text-fg-3 transition hover:border-accent hover:text-accent disabled:cursor-not-allowed disabled:opacity-40"
+                  title="create marketing content"
+                >
+                  <Megaphone className="h-3.5 w-3.5" />
+                  {creatingMarketingContent ? 'creating' : 'make content'}
+                </button>
+              )}
               <button
                 onClick={() => selectedDocument && setArchiveConfirmDocument(selectedDocument)}
-                className="ml-auto flex h-8 w-8 items-center justify-center border border-edge/15 text-fg-3 transition hover:border-amber hover:text-amber"
+                className="flex h-8 w-8 items-center justify-center border border-edge/15 text-fg-3 transition hover:border-amber hover:text-amber"
                 title="archive document"
               >
                 <Archive className="h-4 w-4" />
               </button>
             </div>
+
+            {marketingContentStatus ? (
+              <div
+                className={`mb-4 border px-3 py-2 font-mono text-xs ${
+                  marketingContentStatus.kind === 'ok'
+                    ? 'border-ok/25 bg-ok/5 text-ok'
+                    : 'border-fail/25 bg-fail/5 text-fail'
+                }`}
+              >
+                {marketingContentStatus.message}
+              </div>
+            ) : null}
 
             <input
               value={titleDraft}
@@ -374,6 +459,19 @@ export default function Docs() {
           document={archiveConfirmDocument}
           onCancel={() => setArchiveConfirmDocument(null)}
           onConfirm={() => void archiveDocument(archiveConfirmDocument)}
+        />
+      ) : null}
+
+      {marketingContentConfirmDocument ? (
+        <MarketingContentDocumentModal
+          document={marketingContentConfirmDocument}
+          loading={creatingMarketingContent}
+          onCancel={() => setMarketingContentConfirmDocument(null)}
+          onConfirm={() => {
+            const document = marketingContentConfirmDocument
+            setMarketingContentConfirmDocument(null)
+            void createMarketingContentFromDocument(document)
+          }}
         />
       ) : null}
     </div>
@@ -431,6 +529,67 @@ function ArchiveDocumentModal({
             className="border border-warn/36 bg-warn/8 px-3 py-2 font-mono text-xs uppercase tracking-label text-amber transition hover:bg-warn/14"
           >
             archive
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function MarketingContentDocumentModal({
+  document,
+  loading,
+  onCancel,
+  onConfirm,
+}: {
+  document: DocumentRow
+  loading: boolean
+  onCancel: () => void
+  onConfirm: () => void
+}) {
+  useEffect(() => {
+    function handleKey(event: KeyboardEvent) {
+      if (event.key !== 'Escape') return
+      event.preventDefault()
+      onCancel()
+    }
+    window.addEventListener('keydown', handleKey)
+    return () => window.removeEventListener('keydown', handleKey)
+  }, [onCancel])
+
+  return (
+    <div
+      className="fixed inset-0 z-[90] flex items-center justify-center bg-overlay/72 px-4 backdrop-blur-sm"
+      onClick={onCancel}
+    >
+      <div
+        className="w-full max-w-md border border-accent/28 bg-pit shadow-terminal-overlay"
+        onClick={(event) => event.stopPropagation()}
+      >
+        <div className="border-b border-accent/18 px-5 py-4">
+          <div className="font-mono text-[10px] uppercase tracking-label text-accent">make content</div>
+          <h2 className="mt-2 font-mono text-lg font-bold lowercase text-fg-1">{document.title}</h2>
+        </div>
+        <div className="px-5 py-4">
+          <p className="font-mono text-sm leading-relaxed text-fg-3">
+            This creates a marketing content item from the current document snapshot. It will start with blog and newsletter channels.
+          </p>
+        </div>
+        <div className="flex items-center justify-end gap-2 border-t border-edge/12 px-5 py-3">
+          <button
+            type="button"
+            onClick={onCancel}
+            className="border border-edge/16 px-3 py-2 font-mono text-xs uppercase tracking-label text-fg-3 transition hover:border-edge/32 hover:text-fg-1"
+          >
+            cancel
+          </button>
+          <button
+            type="button"
+            onClick={onConfirm}
+            disabled={loading}
+            className="border border-accent/36 bg-accent-fill/8 px-3 py-2 font-mono text-xs uppercase tracking-label text-accent transition hover:bg-accent-fill/14 disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            {loading ? 'creating' : 'create content'}
           </button>
         </div>
       </div>
@@ -655,4 +814,17 @@ function uniqueSlug(title: string, documents: DocumentRow[], organizationId?: st
   let counter = 2
   while (taken.has(`${base}-${counter}`)) counter += 1
   return `${base}-${counter}`
+}
+
+function uniqueMarketingChannels(items: Array<{ supportedChannels: string[] }>) {
+  const channels = Array.from(new Set(items.flatMap((item) => item.supportedChannels)))
+  return channels.length ? channels.join(', ') : 'content'
+}
+
+async function readJson(response: Response) {
+  const payload = await response.json().catch(() => ({}))
+  if (!response.ok) {
+    throw new Error(payload.error || payload.message || `request failed: ${response.status}`)
+  }
+  return payload
 }

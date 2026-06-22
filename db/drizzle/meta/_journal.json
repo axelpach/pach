@@ -218,6 +218,48 @@
       "when": 1781288500000,
       "tag": "0030_agent_input_media",
       "breakpoints": true
+    },
+    {
+      "idx": 31,
+      "version": "7",
+      "when": 1781903000000,
+      "tag": "0031_marketing",
+      "breakpoints": true
+    },
+    {
+      "idx": 32,
+      "version": "7",
+      "when": 1781903100000,
+      "tag": "0032_seed_ardia_design_system",
+      "breakpoints": true
+    },
+    {
+      "idx": 33,
+      "version": "7",
+      "when": 1781989800000,
+      "tag": "0033_marketing_email_header_logo",
+      "breakpoints": true
+    },
+    {
+      "idx": 34,
+      "version": "7",
+      "when": 1781990700000,
+      "tag": "0034_marketing_email_ardia_header",
+      "breakpoints": true
+    },
+    {
+      "idx": 35,
+      "version": "7",
+      "when": 1781992200000,
+      "tag": "0035_marketing_email_transactional_wrapper",
+      "breakpoints": true
+    },
+    {
+      "idx": 36,
+      "version": "7",
+      "when": 1781992600000,
+      "tag": "0036_marketing_email_white_background",
+      "breakpoints": true
     }
   ]
 }
