@@ -148,6 +148,11 @@ publicMarketingRouter.post('/organizations/:project/marketing/subscribe', asyncR
   const contentItemId = readOptionalString(req.body.contentItemId)
   const distributionRunId = readOptionalString(req.body.distributionRunId)
 
+  if (!hasPublicMarketingWriteAccess(req)) {
+    res.status(401).json({ error: 'Unauthorized marketing write' })
+    return
+  }
+
   if (!isValidEmail(email)) {
     res.status(400).json({ error: 'Invalid email' })
     return
@@ -1257,6 +1262,19 @@ function safeEqual(left: string, right: string) {
   const leftBuffer = Buffer.from(left)
   const rightBuffer = Buffer.from(right)
   return leftBuffer.length === rightBuffer.length && timingSafeEqual(leftBuffer, rightBuffer)
+}
+
+function hasPublicMarketingWriteAccess(req: Request) {
+  const secret = publicMarketingWriteSecret()
+  if (!secret) return !isProduction
+  const headerToken = req.header('x-pach-write-token') || req.header('x-pach-marketing-token') || req.header('x-pach-public-write-token')
+  const bearerToken = req.header('authorization')?.replace(/^Bearer\s+/i, '')
+  const token = headerToken || bearerToken
+  return Boolean(token && safeEqual(token, secret))
+}
+
+function publicMarketingWriteSecret() {
+  return process.env.PACH_WRITE_TOKEN || ''
 }
 
 function renderEmailBrandHeader({

@@ -230,12 +230,14 @@ export default function Marketing() {
                   </div>
                 </div>
               </div>
-              <div className="grid grid-cols-2 gap-2 md:grid-cols-4 lg:min-w-[520px]">
-                <Metric label="content" value={orgContentItems.length} />
-                <Metric label="subscribers" value={newsletterSubscriberCount(orgSubscriptions)} />
-                <Metric label="runs" value={orgRuns.length} />
-                <Metric label="conversations" value={countEvents(orgEvents, 'reply')} />
-              </div>
+              {section !== 'analytics' ? (
+                <div className="grid grid-cols-2 gap-2 md:grid-cols-4 lg:min-w-[520px]">
+                  <Metric label="content" value={orgContentItems.length} />
+                  <Metric label="subscribers" value={newsletterSubscriberCount(orgSubscriptions)} />
+                  <Metric label="runs" value={orgRuns.length} />
+                  <Metric label="conversations" value={countEvents(orgEvents, 'reply')} />
+                </div>
+              ) : null}
             </div>
             {message ? (
               <div className="mt-3 border border-ok/25 bg-ok/5 px-3 py-2 font-mono text-xs text-ok">{message}</div>
@@ -294,9 +296,7 @@ export default function Marketing() {
           {section === 'analytics' ? (
             <AnalyticsSection
               contentItems={orgContentItems}
-              runs={orgRuns}
               events={orgEvents}
-              members={orgMembers}
               subscriptions={orgSubscriptions}
               ctas={orgCtas}
             />
@@ -1822,20 +1822,15 @@ function CtasSection({
 
 function AnalyticsSection({
   contentItems,
-  runs,
   events,
-  members,
   subscriptions,
   ctas,
 }: {
   contentItems: ContentItemRow[]
-  runs: DistributionRunRow[]
   events: ContentEventRow[]
-  members: AudienceMemberRow[]
   subscriptions: AudienceSubscriptionRow[]
   ctas: CtaRow[]
 }) {
-  const priorityEvents = events.filter((event) => isPriorityEvent(event.eventType))
   return (
     <div className="space-y-4">
       <div className="grid gap-2 md:grid-cols-6">
@@ -1847,69 +1842,10 @@ function AnalyticsSection({
         <Metric label="unsubscribed" value={newsletterUnsubscriberCount(subscriptions)} />
       </div>
 
-      <Panel title="priority signals">
-        <div className="grid gap-2 md:grid-cols-4">
-          <SignalCard label="conversations" value={countEvents(events, 'reply')} tone="ok" />
-          <SignalCard label="newsletter joins" value={countEvents(events, 'subscribe')} tone="ok" />
-          <SignalCard label="unsubscribes" value={countEvents(events, 'unsubscribe')} tone="fail" />
-          <SignalCard label="cta clicks" value={countEvents(events, 'click')} tone="info" />
-        </div>
-        <div className="mt-4 border-t border-edge/10 pt-3">
-          <div className="mb-2 font-mono text-[10px] uppercase tracking-label text-fg-4">latest priority activity</div>
-          <div className="space-y-2">
-            {priorityEvents.slice(0, 8).map((event) => {
-              const item = contentItems.find((entry) => entry.id === event.contentItemId)
-              const cta = ctas.find((entry) => entry.id === event.ctaId)
-              return (
-                <div key={event.id} className="grid gap-2 border border-edge/10 bg-rim px-3 py-2 font-mono text-xs text-fg-2 md:grid-cols-[150px_1fr_150px]">
-                  <div><StatusPill kind={eventKind(event.eventType)}>{event.eventType}</StatusPill></div>
-                  <div className="min-w-0 truncate">
-                    {item?.title ?? cta?.label ?? event.channel ?? 'marketing activity'}
-                    {event.source ? <span className="ml-2 text-fg-4">· {event.source}</span> : null}
-                  </div>
-                  <div className="text-fg-4 md:text-right">{formatDate(event.createdAt)}</div>
-                </div>
-              )
-            })}
-          </div>
-          {priorityEvents.length === 0 ? <EmptyState label="no priority signals yet" /> : null}
-        </div>
-      </Panel>
-
-      <Panel title="distribution metrics">
-        <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-3">
-          {runs.map((run) => {
-            const metrics = run.metrics as Record<string, unknown>
-            return (
-              <div key={run.id} className="border border-edge/12 bg-rim px-3 py-3 font-mono text-xs">
-                <div className="flex items-center justify-between gap-2">
-                  <div className="truncate text-fg-1">{run.name}</div>
-                  <StatusPill kind={statusKind(run.status)}>{run.status}</StatusPill>
-                </div>
-                <div className="mt-2 grid grid-cols-3 gap-2 text-[11px] uppercase tracking-label text-fg-4">
-                  <span>sent <b className="text-fg-2">{String(metrics.sent ?? 0)}</b></span>
-                  <span>failed <b className="text-fg-2">{String(metrics.failed ?? 0)}</b></span>
-                  <span>attempted <b className="text-fg-2">{String(metrics.attempted ?? 0)}</b></span>
-                </div>
-              </div>
-            )
-          })}
-        </div>
-        {runs.length === 0 ? <EmptyState label="no distribution runs" /> : null}
-      </Panel>
-
-      <div className="grid gap-2 md:grid-cols-5">
-        <Metric label="all events" value={events.length} />
-        <Metric label="members" value={members.length} />
-        <Metric label="content" value={contentItems.length} />
-        <Metric label="runs" value={runs.length} />
-        <Metric label="ctas" value={ctas.length} />
-      </div>
-
-      <Panel title="event log">
-        <div className="overflow-auto">
+      <Panel title="activity">
+        <div className="max-h-[calc(100vh-340px)] overflow-auto">
           <table className="w-full min-w-[920px] text-left font-mono text-xs">
-            <thead className="text-[10px] uppercase tracking-label text-fg-4">
+            <thead className="sticky top-0 z-10 bg-pit text-[10px] uppercase tracking-label text-fg-4">
               <tr className="border-b border-edge/12">
                 <th className="pb-2 pr-3 font-normal">event</th>
                 <th className="pb-2 pr-3 font-normal">channel</th>
@@ -1939,30 +1875,6 @@ function AnalyticsSection({
         </div>
         {events.length === 0 ? <EmptyState label="no events" /> : null}
       </Panel>
-    </div>
-  )
-}
-
-function SignalCard({
-  label,
-  value,
-  tone,
-}: {
-  label: string
-  value: number
-  tone: Parameters<typeof StatusPill>[0]['kind']
-}) {
-  const toneClass = tone === 'fail'
-    ? 'text-fail'
-    : tone === 'info'
-      ? 'text-info'
-      : tone === 'ok'
-        ? 'text-ok'
-        : 'text-fg-2'
-  return (
-    <div className="border border-edge/12 bg-rim px-3 py-3 font-mono">
-      <div className="text-[10px] uppercase tracking-label text-fg-4">{label}</div>
-      <div className={`mt-2 text-3xl font-bold ${toneClass}`}>{value}</div>
     </div>
   )
 }
@@ -2398,10 +2310,6 @@ function eventKind(eventType: string): Parameters<typeof StatusPill>[0]['kind'] 
   if (eventType === 'unsubscribe') return 'fail'
   if (eventType === 'send') return 'warn'
   return 'idle'
-}
-
-function isPriorityEvent(eventType: string) {
-  return ['reply', 'subscribe', 'unsubscribe', 'click'].includes(eventType)
 }
 
 function formatDate(value: number | null | undefined) {
