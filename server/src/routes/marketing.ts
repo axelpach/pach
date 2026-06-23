@@ -652,8 +652,18 @@ router.post('/distribution-runs/:id/render', asyncRoute(async (req, res) => {
     return
   }
 
-  const result = await renderNewsletterRun(run.id, readOptionalString(req.body.recipientName) ?? 'Test recipient')
-  res.json({ ok: true, ...result })
+  try {
+    const result = await renderNewsletterRun(run.id, readOptionalString(req.body.recipientName) ?? 'Test recipient')
+    res.json({ ok: true, ...result })
+  } catch (error) {
+    if (error instanceof MarketingInputError) throw error
+    console.error('[marketing-render]', {
+      distributionRunId: run.id,
+      organizationId: run.organizationId,
+      error,
+    })
+    res.status(500).json({ error: renderErrorMessage(error) })
+  }
 }))
 
 async function sendNewsletterRun(runId: string, testOnly: boolean) {
@@ -1714,6 +1724,11 @@ function normalizePublicBaseUrl(value: string) {
   if (/^https?:\/\//i.test(trimmed)) return trimmed
   if (/^(localhost|127\.0\.0\.1|\[::1])(?::\d+)?(?:\/|$)/i.test(trimmed)) return `http://${trimmed}`
   return `https://${trimmed}`
+}
+
+function renderErrorMessage(error: unknown) {
+  if (error instanceof Error && error.message) return `Render failed: ${error.message}`
+  return `Render failed: ${String(error)}`
 }
 
 function renderEmailAttachment(fileName: string, src: string, sizeBytes: number, mimeType?: string, palette: EmailPalette = DEFAULT_EMAIL_PALETTE) {
