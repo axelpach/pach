@@ -653,7 +653,7 @@ router.post('/distribution-runs/:id/render', asyncRoute(async (req, res) => {
   }
 
   try {
-    const result = await renderNewsletterRun(run.id, readOptionalString(req.body.recipientName) ?? 'Test recipient')
+    const result = await renderNewsletterRun(run.id)
     res.json({ ok: true, ...result })
   } catch (error) {
     if (error instanceof MarketingInputError) throw error
@@ -782,7 +782,7 @@ async function sendNewsletterRun(runId: string, testOnly: boolean) {
   return { distributionRun: serializeDates(updated), metrics, errors }
 }
 
-async function renderNewsletterRun(runId: string, recipientName: string) {
+async function renderNewsletterRun(runId: string) {
   const db = getDb()
   const [run] = await db.select().from(mktDistributionRuns).where(eq(mktDistributionRuns.id, runId)).limit(1)
   if (!run) throw new MarketingInputError('Distribution run not found', 404)
@@ -802,7 +802,7 @@ async function renderNewsletterRun(runId: string, recipientName: string) {
   const primaryCta = await activePrimaryCta(item)
 
   return {
-    html: renderNewsletterHtml({ item, run, publication, sender, designSystem, primaryCta, recipientName }),
+    html: renderNewsletterHtml({ item, run, publication, sender, designSystem, primaryCta }),
     text: renderNewsletterText({ item, publication, primaryCta }),
     warnings: newsletterRenderWarnings(item.body),
     mode: emailThemeMode(run, publication, designSystem),
@@ -1115,7 +1115,7 @@ function renderNewsletterHtml({
   designSystem,
   primaryCta,
   audienceMemberId,
-  recipientName,
+  unsubscribeUrl,
 }: {
   item: typeof mktContentItems.$inferSelect
   run: typeof mktDistributionRuns.$inferSelect
@@ -1124,7 +1124,6 @@ function renderNewsletterHtml({
   designSystem?: typeof designSystems.$inferSelect | null
   primaryCta?: typeof mktCtas.$inferSelect | null
   audienceMemberId?: string | null
-  recipientName?: string | null
   unsubscribeUrl?: string | null
 }) {
   const mode = emailThemeMode(run, publication, designSystem)
