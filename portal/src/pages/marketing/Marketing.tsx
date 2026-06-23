@@ -1344,6 +1344,16 @@ function BroadcastDetailView({
   }, [run.id])
 
   async function renderPreview() {
+    if (!item) {
+      setRenderError('Broadcast is missing a content item')
+      return
+    }
+    if (!sender) {
+      setRenderError(run.senderProfileId
+        ? 'Selected sender profile was not found'
+        : 'Publication default sender profile is missing. Pick a sender on this broadcast or set a default sender on the publication.')
+      return
+    }
     setRendering(true)
     setRenderError('')
     try {
@@ -1490,7 +1500,11 @@ function BroadcastDetailView({
                 options={senderOptions}
                 display={run.senderProfileId ? sender?.name ?? 'sender' : 'publication default'}
               />
-              {sender ? <div className="mt-1 truncate text-[11px] text-fg-4">{sender.fromName} · {sender.fromEmail}</div> : null}
+              {sender ? (
+                <div className="mt-1 truncate text-[11px] text-fg-4">{sender.fromName} · {sender.fromEmail}</div>
+              ) : (
+                <div className="mt-1 text-[11px] text-fail">missing sender profile</div>
+              )}
             </div>
             <CommitInput
               label="subject"
@@ -1580,7 +1594,7 @@ function BroadcastDetailView({
         <div className="border-b border-edge/12 px-4 py-4">
             <FieldLabel>send controls</FieldLabel>
             <div className="flex flex-wrap gap-2">
-              <Button icon={<RefreshCw className="h-3.5 w-3.5" />} onClick={() => void renderPreview()} disabled={rendering}>
+              <Button icon={<RefreshCw className="h-3.5 w-3.5" />} onClick={() => void renderPreview()} disabled={rendering || !item || !sender}>
                 render
               </Button>
               <Button icon={<Mail className="h-3.5 w-3.5" />} onClick={() => onSend(true)} disabled={sending || !preview}>

@@ -33,6 +33,16 @@ type UnsubscribeTokenPayload = {
   iat: number
 }
 
+class MarketingInputError extends Error {
+  status: number
+
+  constructor(message: string, status = 422) {
+    super(message)
+    this.name = 'MarketingInputError'
+    this.status = status
+  }
+}
+
 publicMarketingRouter.get('/organizations/:project/marketing/posts', asyncRoute(async (req, res) => {
   const project = readRequiredString(req.params.project)
   const organization = await findPublicOrganization(project)
@@ -649,13 +659,19 @@ router.post('/distribution-runs/:id/render', asyncRoute(async (req, res) => {
 async function sendNewsletterRun(runId: string, testOnly: boolean) {
   const db = getDb()
   const [run] = await db.select().from(mktDistributionRuns).where(eq(mktDistributionRuns.id, runId)).limit(1)
-  if (!run) throw new Error('run not found')
+  if (!run) throw new MarketingInputError('Distribution run not found', 404)
   const [item] = run.contentItemId ? await db.select().from(mktContentItems).where(eq(mktContentItems.id, run.contentItemId)).limit(1) : []
-  if (!item) throw new Error('content item not found')
+  if (!item) throw new MarketingInputError('Broadcast is missing a content item')
   const [publication] = run.publicationId ? await db.select().from(mktPublications).where(eq(mktPublications.id, run.publicationId)).limit(1) : []
   const senderProfileId = run.senderProfileId ?? publication?.defaultSenderProfileId
   const [sender] = senderProfileId ? await db.select().from(mktSenderProfiles).where(eq(mktSenderProfiles.id, senderProfileId)).limit(1) : []
-  if (!sender) throw new Error('sender profile not found')
+  if (!sender) {
+    throw new MarketingInputError(
+      run.senderProfileId
+        ? 'Selected sender profile was not found'
+        : 'Publication default sender profile is missing. Pick a sender on this broadcast or set a default sender on the publication.',
+    )
+  }
   const designSystem = await organizationDesignSystem(run.organizationId)
   const primaryCta = await activePrimaryCta(item)
 
@@ -759,13 +775,19 @@ async function sendNewsletterRun(runId: string, testOnly: boolean) {
 async function renderNewsletterRun(runId: string, recipientName: string) {
   const db = getDb()
   const [run] = await db.select().from(mktDistributionRuns).where(eq(mktDistributionRuns.id, runId)).limit(1)
-  if (!run) throw new Error('run not found')
+  if (!run) throw new MarketingInputError('Distribution run not found', 404)
   const [item] = run.contentItemId ? await db.select().from(mktContentItems).where(eq(mktContentItems.id, run.contentItemId)).limit(1) : []
-  if (!item) throw new Error('content item not found')
+  if (!item) throw new MarketingInputError('Broadcast is missing a content item')
   const [publication] = run.publicationId ? await db.select().from(mktPublications).where(eq(mktPublications.id, run.publicationId)).limit(1) : []
   const senderProfileId = run.senderProfileId ?? publication?.defaultSenderProfileId
   const [sender] = senderProfileId ? await db.select().from(mktSenderProfiles).where(eq(mktSenderProfiles.id, senderProfileId)).limit(1) : []
-  if (!sender) throw new Error('sender profile not found')
+  if (!sender) {
+    throw new MarketingInputError(
+      run.senderProfileId
+        ? 'Selected sender profile was not found'
+        : 'Publication default sender profile is missing. Pick a sender on this broadcast or set a default sender on the publication.',
+    )
+  }
   const designSystem = await organizationDesignSystem(run.organizationId)
   const primaryCta = await activePrimaryCta(item)
 
@@ -1677,14 +1699,21 @@ function marketingMediaAssetUrl(key: string) {
 }
 
 function pachPublicApiBase() {
-  return (
+  return normalizePublicBaseUrl(
     process.env.PACH_PUBLIC_API_URL ||
     process.env.NEXT_PUBLIC_PACH_API_URL ||
     process.env.PACH_API_URL ||
     process.env.API_PUBLIC_URL ||
     process.env.PUBLIC_API_URL ||
-    'http://localhost:3002'
-  ).replace(/\/$/, '')
+    'http://localhost:3002',
+  )
+}
+
+function normalizePublicBaseUrl(value: string) {
+  const trimmed = value.trim().replace(/\/+$/, '')
+  if (/^https?:\/\//i.test(trimmed)) return trimmed
+  if (/^(localhost|127\.0\.0\.1|\[::1])(?::\d+)?(?:\/|$)/i.test(trimmed)) return `http://${trimmed}`
+  return `https://${trimmed}`
 }
 
 function renderEmailAttachment(fileName: string, src: string, sizeBytes: number, mimeType?: string, palette: EmailPalette = DEFAULT_EMAIL_PALETTE) {
@@ -1891,6 +1920,10 @@ publicMarketingRouter.use(handleMarketingError)
 router.use(handleMarketingError)
 
 function handleMarketingError(error: unknown, _req: Request, res: Response, next: NextFunction) {
+  if (error instanceof MarketingInputError) {
+    res.status(error.status).json({ error: error.message })
+    return
+  }
   if (error instanceof Error && error.message === 'Not authorized') {
     res.status(403).json({ error: 'Not authorized' })
     return
