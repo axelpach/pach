@@ -6,6 +6,7 @@ export const MCP_CAPABILITIES = [
   'pach.issue.read',
   'pach.issue.write',
   'pach.document.read',
+  'pach.document.write',
   'pach.design.read',
   'pach.design.write',
   'pach.progress.report',

@@ -29,6 +29,7 @@ type ScopedTable =
   | 'fin_categorization_rules'
   | 'fin_balance_snapshots'
   | 'documents'
+  | 'document_snapshots'
   | 'mkt_sender_profiles'
   | 'mkt_publications'
   | 'mkt_ctas'
@@ -73,6 +74,7 @@ const ORG_COLUMN_BY_TABLE: Record<ScopedTable, string> = {
   fin_categorization_rules: 'organization_id',
   fin_balance_snapshots: 'organization_id',
   documents: 'organization_id',
+  document_snapshots: 'organization_id',
   mkt_sender_profiles: 'organization_id',
   mkt_publications: 'organization_id',
   mkt_ctas: 'organization_id',
@@ -146,6 +148,35 @@ export function createServerMutators(authData?: JWTPayload) {
 
   function canAccessSavedView(companyId: string | null | undefined, ownerId: string | null | undefined) {
     return ownerId === authData?.sub || canAccessOrganization(companyId)
+  }
+
+  async function nextDocumentPublicId(tx: Tx, organizationId: string | null | undefined) {
+    const prefix = await documentPublicIdPrefix(tx, organizationId)
+    const rows = await tx.dbTransaction.query(
+      'select "public_id" as public_id from "documents" where "organization_id" is not distinct from $1 and "public_id" like $2',
+      [organizationId ?? null, `${prefix}-DOC-%`],
+    )
+    const max = Array.from(rows).reduce((current, row) => {
+      const publicId = String(row.public_id ?? '')
+      const match = publicId.match(/-DOC-(\d+)$/)
+      const value = match ? Number(match[1]) : 0
+      return Number.isFinite(value) ? Math.max(current, value) : current
+    }, 0)
+    return `${prefix}-DOC-${max + 1}`
+  }
+
+  async function documentPublicIdPrefix(tx: Tx, organizationId: string | null | undefined) {
+    if (!organizationId) return 'DOC'
+    const rows = await tx.dbTransaction.query(
+      'select "project", "name" from "organizations" where "id" = $1 limit 1',
+      [organizationId],
+    )
+    const organization = Array.from(rows)[0]
+    const raw = String(organization?.project ?? organization?.name ?? 'doc')
+      .replace(/[^a-zA-Z0-9]/g, '')
+      .slice(0, 3)
+      .toUpperCase()
+    return raw || 'DOC'
   }
 
   function requireSavedViewAccess(companyId: string | null | undefined, ownerId: string | null | undefined) {
@@ -577,10 +608,11 @@ export function createServerMutators(authData?: JWTPayload) {
     },
 
     documents: {
-      async create(tx: Tx, args: { id: string; organizationId?: string; parentId?: string; ownerId?: string; title: string; slug: string; body?: string; format?: string; status?: string; icon?: string; sortOrder?: number; metadata?: any }) {
+      async create(tx: Tx, args: { id: string; organizationId?: string; parentId?: string; ownerId?: string; publicId?: string; currentSnapshotId?: string; title: string; slug: string; body?: string; format?: string; status?: string; icon?: string; sortOrder?: number; metadata?: any }) {
         requireOrganizationAccess(args.organizationId)
         if (args.parentId) await requireExistingOrganizationAccess(tx, 'documents', args.parentId)
         const now = Date.now()
+        const publicId = args.publicId ?? await nextDocumentPublicId(tx, args.organizationId)
         await tx.mutate.documents.insert({
           body: '',
           format: 'markdown',
@@ -588,12 +620,13 @@ export function createServerMutators(authData?: JWTPayload) {
           sortOrder: 0,
           metadata: {},
           ...args,
+          publicId,
           ownerId: args.ownerId ?? authData?.sub,
           createdAt: now,
           updatedAt: now,
         })
       },
-      async update(tx: Tx, args: { id: string; organizationId?: string | null; parentId?: string | null; ownerId?: string | null; title?: string; slug?: string; body?: string; format?: string; status?: string; icon?: string | null; sortOrder?: number; metadata?: any }) {
+      async update(tx: Tx, args: { id: string; organizationId?: string | null; parentId?: string | null; ownerId?: string | null; publicId?: string | null; currentSnapshotId?: string | null; title?: string; slug?: string; body?: string; format?: string; status?: string; icon?: string | null; sortOrder?: number; metadata?: any }) {
         await requireExistingOrganizationAccess(tx, 'documents', args.id)
         if ('organizationId' in args) requireOrganizationAccess(args.organizationId)
         if (args.parentId) await requireExistingOrganizationAccess(tx, 'documents', args.parentId)
@@ -603,6 +636,61 @@ export function createServerMutators(authData?: JWTPayload) {
       async delete(tx: Tx, args: { id: string }) {
         await requireExistingOrganizationAccess(tx, 'documents', args.id)
         await tx.mutate.documents.delete({ id: args.id })
+      },
+    },
+
+    document_snapshots: {
+      async create(tx: Tx, args: { id: string; documentId: string; organizationId?: string; versionNumber: number; title: string; slug: string; body?: string; format?: string; status?: string; createdByType?: string; createdById?: string; agentRunId?: string; metadata?: any; setCurrent?: boolean }) {
+        const documentOrganizationId = await readOrganizationId(tx, 'documents', args.documentId)
+        requireOrganizationAccess(documentOrganizationId)
+        if (args.organizationId && args.organizationId !== documentOrganizationId) throw new AuthorizationError()
+        const now = Date.now()
+        const { setCurrent, organizationId: _organizationId, ...snapshot } = args
+        await tx.mutate.document_snapshots.insert({
+          body: '',
+          format: 'markdown',
+          status: 'version',
+          createdByType: 'user',
+          metadata: {},
+          ...snapshot,
+          organizationId: documentOrganizationId ?? undefined,
+          createdById: args.createdById ?? authData?.sub,
+          createdAt: now,
+        })
+        if (setCurrent) await tx.mutate.documents.update({ id: args.documentId, currentSnapshotId: args.id, updatedAt: now })
+      },
+      async update(tx: Tx, args: { id: string; documentId?: string; status?: string; metadata?: any; applyToDocument?: boolean; title?: string; slug?: string; body?: string; format?: string }) {
+        await requireExistingOrganizationAccess(tx, 'document_snapshots', args.id)
+        if (args.applyToDocument && args.documentId) await requireExistingOrganizationAccess(tx, 'documents', args.documentId)
+        const { id, documentId, applyToDocument, title, slug, body, format, ...updates } = args
+        await tx.mutate.document_snapshots.update({
+          id,
+          ...updates,
+          ...(title != null ? { title } : {}),
+          ...(slug != null ? { slug } : {}),
+          ...(body != null ? { body } : {}),
+          ...(format != null ? { format } : {}),
+        })
+        if (applyToDocument && documentId) {
+          await tx.mutate.documents.update({
+            id: documentId,
+            ...(title != null ? { title } : {}),
+            ...(slug != null ? { slug } : {}),
+            ...(body != null ? { body } : {}),
+            ...(format != null ? { format } : {}),
+            currentSnapshotId: id,
+            updatedAt: Date.now(),
+          })
+        }
+      },
+      async delete(tx: Tx, args: { id: string }) {
+        await requireExistingOrganizationAccess(tx, 'document_snapshots', args.id)
+        const currentRows = await tx.dbTransaction.query(
+          'select "id" from "documents" where "current_snapshot_id" = $1 limit 1',
+          [args.id],
+        )
+        if (Array.from(currentRows).length > 0) throw new Error('main version cannot be deleted')
+        await tx.mutate.document_snapshots.delete({ id: args.id })
       },
     },
 

@@ -344,7 +344,7 @@ export const mutators = {
   },
 
   documents: {
-    async create(tx: Tx, args: { id: string; organizationId?: string; parentId?: string; ownerId?: string; title: string; slug: string; body?: string; format?: string; status?: string; icon?: string; sortOrder?: number; metadata?: Record<string, unknown> }) {
+    async create(tx: Tx, args: { id: string; organizationId?: string; parentId?: string; ownerId?: string; publicId?: string; currentSnapshotId?: string; title: string; slug: string; body?: string; format?: string; status?: string; icon?: string; sortOrder?: number; metadata?: Record<string, unknown> }) {
       const now = Date.now()
       await tx.mutate.documents.insert({
         body: '',
@@ -357,12 +357,53 @@ export const mutators = {
         updatedAt: now,
       })
     },
-    async update(tx: Tx, args: { id: string; organizationId?: string | null; parentId?: string | null; ownerId?: string | null; title?: string; slug?: string; body?: string; format?: string; status?: string; icon?: string | null; sortOrder?: number; metadata?: Record<string, unknown> }) {
+    async update(tx: Tx, args: { id: string; organizationId?: string | null; parentId?: string | null; ownerId?: string | null; publicId?: string | null; currentSnapshotId?: string | null; title?: string; slug?: string; body?: string; format?: string; status?: string; icon?: string | null; sortOrder?: number; metadata?: Record<string, unknown> }) {
       const { id, ...updates } = args
       await tx.mutate.documents.update({ id, ...updates, updatedAt: Date.now() })
     },
     async delete(tx: Tx, args: { id: string }) {
       await tx.mutate.documents.delete({ id: args.id })
+    },
+  },
+
+  document_snapshots: {
+    async create(tx: Tx, args: { id: string; documentId: string; organizationId?: string; versionNumber: number; title: string; slug: string; body?: string; format?: string; status?: string; createdByType?: string; createdById?: string; agentRunId?: string; metadata?: Record<string, unknown>; setCurrent?: boolean }) {
+      const { setCurrent, ...snapshot } = args
+      await tx.mutate.document_snapshots.insert({
+        body: '',
+        format: 'markdown',
+        status: 'version',
+        createdByType: 'user',
+        metadata: {},
+        ...snapshot,
+        createdAt: Date.now(),
+      })
+      if (setCurrent) await tx.mutate.documents.update({ id: args.documentId, currentSnapshotId: args.id, updatedAt: Date.now() })
+    },
+    async update(tx: Tx, args: { id: string; documentId?: string; status?: string; metadata?: Record<string, unknown>; applyToDocument?: boolean; title?: string; slug?: string; body?: string; format?: string }) {
+      const { id, documentId, applyToDocument, title, slug, body, format, ...updates } = args
+      await tx.mutate.document_snapshots.update({
+        id,
+        ...updates,
+        ...(title != null ? { title } : {}),
+        ...(slug != null ? { slug } : {}),
+        ...(body != null ? { body } : {}),
+        ...(format != null ? { format } : {}),
+      })
+      if (applyToDocument && documentId) {
+        await tx.mutate.documents.update({
+          id: documentId,
+          ...(title != null ? { title } : {}),
+          ...(slug != null ? { slug } : {}),
+          ...(body != null ? { body } : {}),
+          ...(format != null ? { format } : {}),
+          currentSnapshotId: id,
+          updatedAt: Date.now(),
+        })
+      }
+    },
+    async delete(tx: Tx, args: { id: string }) {
+      await tx.mutate.document_snapshots.delete({ id: args.id })
     },
   },
 

@@ -122,6 +122,7 @@ const organizations = table('organizations')
     taxRegime: string().optional().from('tax_regime'),
     project: string().optional(),
     description: string().optional(),
+    editorialProfile: json<Record<string, unknown>>().from('editorial_profile'),
     createdAt: number().from('created_at'),
     updatedAt: number().from('updated_at'),
   })
@@ -410,6 +411,8 @@ const documents = table('documents')
     organizationId: string().optional().from('organization_id'),
     parentId: string().optional().from('parent_id'),
     ownerId: string().optional().from('owner_id'),
+    publicId: string().optional().from('public_id'),
+    currentSnapshotId: string().optional().from('current_snapshot_id'),
     title: string(),
     slug: string(),
     body: string(),
@@ -420,6 +423,25 @@ const documents = table('documents')
     metadata: json(),
     createdAt: number().from('created_at'),
     updatedAt: number().from('updated_at'),
+  })
+  .primaryKey('id')
+
+const documentSnapshots = table('document_snapshots')
+  .columns({
+    id: string(),
+    documentId: string().from('document_id'),
+    organizationId: string().optional().from('organization_id'),
+    versionNumber: number().from('version_number'),
+    title: string(),
+    slug: string(),
+    body: string(),
+    format: string(),
+    status: string(),
+    createdByType: string().from('created_by_type'),
+    createdById: string().optional().from('created_by_id'),
+    agentRunId: string().optional().from('agent_run_id'),
+    metadata: json<Record<string, unknown>>(),
+    createdAt: number().from('created_at'),
   })
   .primaryKey('id')
 
@@ -450,6 +472,7 @@ const mktPublications = table('mkt_publications')
     slug: string(),
     type: string(),
     audienceDescription: string().optional().from('audience_description'),
+    editorialProfile: json<Record<string, unknown>>().from('editorial_profile'),
     status: string(),
     metadata: json(),
     createdAt: number().from('created_at'),
@@ -1083,6 +1106,7 @@ export const schema = createSchema({
     finCategorizationRules,
     finBalanceSnapshots,
     documents,
+    documentSnapshots,
     mktSenderProfiles,
     mktPublications,
     mktCtas,
@@ -1206,6 +1230,7 @@ export const permissions = definePermissions<AuthData, Schema>(schema, () => {
     fin_categorization_rules: organizationScoped<'fin_categorization_rules'>(),
     fin_balance_snapshots: organizationScoped<'fin_balance_snapshots'>(),
     documents: organizationScoped<'documents'>(),
+    document_snapshots: organizationScoped<'document_snapshots'>(),
     mkt_sender_profiles: organizationScoped<'mkt_sender_profiles'>(),
     mkt_publications: organizationScoped<'mkt_publications'>(),
     mkt_ctas: organizationScoped<'mkt_ctas'>(),

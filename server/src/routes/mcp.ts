@@ -3,7 +3,7 @@ import { GetObjectCommand, S3Client } from '@aws-sdk/client-s3'
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner'
 import { Router } from 'express'
 import type { Request } from 'express'
-import { desc, eq, ilike, inArray, or } from 'drizzle-orm'
+import { desc, eq, ilike, inArray, isNull, or } from 'drizzle-orm'
 import {
   agentRunProgressReports,
   designAssets,
@@ -12,8 +12,10 @@ import {
   designTemplateRuns,
   designTemplateVersions,
   designTemplates,
+  documentSnapshots,
   documents,
   mcpTokens,
+  mktPublications,
   organizations,
   pmIssueActivity,
   pmIssueLabels,
@@ -45,6 +47,13 @@ const MCP_PROTOCOL_VERSION = '2024-11-05'
 const ALLOW_LOCAL_MCP_NO_AUTH =
   process.env.PACH_MCP_ALLOW_LOCAL_NO_AUTH === 'true' ||
   (process.env.NODE_ENV !== 'production' && process.env.PACH_MCP_ALLOW_LOCAL_NO_AUTH !== 'false')
+const DOCUMENT_FORMAT_VERSION = 'pach-markdown-v1'
+const DOCUMENT_FORMAT_INSTRUCTIONS = [
+  'Documents use Markdown with Pach extensions. Keep output as plain document body text, not JSON, unless a tool asks for JSON arguments.',
+  'Supported blocks: paragraphs, #/##/### headings, unordered lists with "- item", ordered lists with "1. item", checklist items with "- [ ] item" or "- [x] item", blockquotes with "> quote", fenced code blocks with triple backticks, images with "![alt](url)", file blocks as "::file[name](url){size=123 type=application%2Fpdf}", and collapsible sections as ":::toggle", title line, body lines, then ":::".',
+  'Use source material as visible source blocks inside the document for now. Recommended source block: ":::toggle", then "Source: Title", notes/url/excerpt, then ":::" so humans and agents can inspect it.',
+  'For article drafts, prefer this order: brief/context, sources, outline, draft. The final publishable body can later be copied or cleaned from the same document.',
+].join(' ')
 const LOCAL_MCP_USER: JWTPayload = {
   sub: 'local-mcp',
   email: 'local-mcp@pach.dev',
@@ -309,7 +318,7 @@ const tools: ToolDefinition[] = [
   },
   {
     name: 'pach.document.get',
-    description: 'Read a Pach document by UUID or slug, including its full body, organization, owner, parent, and children.',
+    description: 'Read a Pach document by UUID, public id, or slug, including its full body, organization, owner, parent, children, and Pach markdown format instructions.',
     inputSchema: {
       type: 'object',
       additionalProperties: false,
@@ -321,6 +330,10 @@ const tools: ToolDefinition[] = [
         slug: {
           type: 'string',
           description: 'Document slug. Either documentId or slug is required.',
+        },
+        publicId: {
+          type: 'string',
+          description: 'Human-readable document id, e.g. ARD-DOC-1.',
         },
         organizationId: {
           type: 'string',
@@ -338,6 +351,158 @@ const tools: ToolDefinition[] = [
           type: 'boolean',
           description: 'When true, archived documents may be returned. Defaults to false.',
         },
+      },
+    },
+  },
+  {
+    name: 'pach.document.format.get',
+    description: 'Return the expected Pach document body format so an agent can write valid document content for the editor, blog, and email renderers.',
+    inputSchema: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {},
+    },
+  },
+  {
+    name: 'pach.document.create',
+    description: 'Create a Pach document and its first main version. Body must use the Pach markdown format returned by pach.document.format.get.',
+    inputSchema: {
+      type: 'object',
+      additionalProperties: false,
+      required: ['title'],
+      properties: {
+        title: { type: 'string' },
+        body: { type: 'string', description: 'Pach markdown body.' },
+        organizationId: { type: 'string' },
+        organizationName: { type: 'string' },
+        organizationProject: { type: 'string', description: 'Project key such as ardia.' },
+        parentId: { type: 'string' },
+        slug: { type: 'string' },
+        publicId: { type: 'string', description: 'Optional human-readable id. Defaults to ORG-DOC-N.' },
+        icon: { type: 'string' },
+        metadata: { type: 'object', additionalProperties: true },
+        runId: { type: 'string', description: 'Optional agent run id that created the draft.' },
+      },
+    },
+  },
+  {
+    name: 'pach.document.update',
+    description: 'Create a new version candidate for a Pach document by default. Use for agent-authored edits that humans should review. Does not change live content unless makeMain is true.',
+    inputSchema: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        documentId: { type: 'string' },
+        publicId: { type: 'string' },
+        slug: { type: 'string' },
+        organizationId: { type: 'string' },
+        organizationName: { type: 'string' },
+        organizationProject: { type: 'string' },
+        title: { type: 'string' },
+        body: { type: 'string', description: 'Full replacement Pach markdown body.' },
+        appendBody: { type: 'string', description: 'Pach markdown to append to the existing body.' },
+        metadata: { type: 'object', additionalProperties: true },
+        createSnapshot: { type: 'boolean', description: 'Defaults to true. When false, updates live content directly.' },
+        makeMain: { type: 'boolean', description: 'When true, the new version is immediately made live/main. Defaults to false.' },
+        snapshotStatus: { type: 'string', description: 'Deprecated compatibility field. Ignored by the version workflow.' },
+        runId: { type: 'string', description: 'Optional agent run id that produced the edit.' },
+      },
+    },
+  },
+  {
+    name: 'pach.document.snapshot.list',
+    description: 'List saved versions for a Pach document.',
+    inputSchema: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        documentId: { type: 'string' },
+        publicId: { type: 'string' },
+        slug: { type: 'string' },
+        organizationId: { type: 'string' },
+        organizationName: { type: 'string' },
+        organizationProject: { type: 'string' },
+        limit: { type: 'number', description: 'Defaults to 20, maximum 100.' },
+      },
+    },
+  },
+  {
+    name: 'pach.document.snapshot.create',
+    description: 'Create a saved version from the current live document state without otherwise editing the document.',
+    inputSchema: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        documentId: { type: 'string' },
+        publicId: { type: 'string' },
+        slug: { type: 'string' },
+        organizationId: { type: 'string' },
+        organizationName: { type: 'string' },
+        organizationProject: { type: 'string' },
+        status: { type: 'string', description: 'Deprecated compatibility field. Defaults to version.' },
+        runId: { type: 'string' },
+        metadata: { type: 'object', additionalProperties: true },
+      },
+    },
+  },
+  {
+    name: 'pach.document.snapshot.approve',
+    description: 'Make a saved document version the live/main document. Compatibility alias for the old approve action.',
+    inputSchema: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        snapshotId: { type: 'string' },
+        documentId: { type: 'string' },
+        publicId: { type: 'string' },
+        versionNumber: { type: 'number' },
+      },
+    },
+  },
+  {
+    name: 'pach.document.snapshot.restore',
+    description: 'Make a saved document version the live/main document. Compatibility alias for the old restore action.',
+    inputSchema: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        snapshotId: { type: 'string' },
+        documentId: { type: 'string' },
+        publicId: { type: 'string' },
+        versionNumber: { type: 'number' },
+      },
+    },
+  },
+  {
+    name: 'pach.editorial.profile.get',
+    description: 'Read the effective editorial profile for an organization and optionally a marketing publication. Publication profile overrides organization profile.',
+    inputSchema: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        organizationId: { type: 'string' },
+        organizationName: { type: 'string' },
+        organizationProject: { type: 'string' },
+        publicationId: { type: 'string' },
+        publicationSlug: { type: 'string' },
+      },
+    },
+  },
+  {
+    name: 'pach.editorial.profile.update',
+    description: 'Update organization-level or publication-level editorial profile JSON. Use concise structured fields such as tone, audience, constraints, forbiddenPhrases, and exampleDocumentIds.',
+    inputSchema: {
+      type: 'object',
+      additionalProperties: false,
+      required: ['profile'],
+      properties: {
+        organizationId: { type: 'string' },
+        organizationName: { type: 'string' },
+        organizationProject: { type: 'string' },
+        publicationId: { type: 'string' },
+        publicationSlug: { type: 'string' },
+        profile: { type: 'object', additionalProperties: true },
+        merge: { type: 'boolean', description: 'Defaults to true. When false, replaces the profile.' },
       },
     },
   },
@@ -576,6 +741,7 @@ async function handleJsonRpcRequest(req: AuthenticatedRequest, raw: unknown) {
           instructions: [
             'Use Pach tools to read and update Pach state for authorized work only.',
             'Report progress before and after meaningful steps so the Pach web app can show live agent status.',
+            DOCUMENT_FORMAT_INSTRUCTIONS,
             'Ask for approval before irreversible external actions such as sending messages, publishing, or pushing PRs.',
           ].join(' '),
         })
@@ -627,6 +793,33 @@ async function callTool(req: AuthenticatedRequest, params: unknown) {
       case 'pach.document.get':
         requireMcpCapability(req, 'pach.document.read')
         return toolResult(await getDocument(req, args))
+      case 'pach.document.format.get':
+        requireMcpCapability(req, 'pach.document.read')
+        return toolResult(documentFormatContract())
+      case 'pach.document.create':
+        requireMcpCapability(req, 'pach.document.write')
+        return toolResult(await createDocument(req, args))
+      case 'pach.document.update':
+        requireMcpCapability(req, 'pach.document.write')
+        return toolResult(await updateDocument(req, args))
+      case 'pach.document.snapshot.list':
+        requireMcpCapability(req, 'pach.document.read')
+        return toolResult(await listDocumentSnapshots(req, args))
+      case 'pach.document.snapshot.create':
+        requireMcpCapability(req, 'pach.document.write')
+        return toolResult(await createDocumentSnapshot(req, args))
+      case 'pach.document.snapshot.approve':
+        requireMcpCapability(req, 'pach.document.write')
+        return toolResult(await approveDocumentSnapshot(req, args))
+      case 'pach.document.snapshot.restore':
+        requireMcpCapability(req, 'pach.document.write')
+        return toolResult(await restoreDocumentSnapshot(req, args))
+      case 'pach.editorial.profile.get':
+        requireMcpCapability(req, 'pach.document.read')
+        return toolResult(await getEditorialProfile(req, args))
+      case 'pach.editorial.profile.update':
+        requireMcpCapability(req, 'pach.document.write')
+        return toolResult(await updateEditorialProfile(req, args))
       case 'pach.design.template.list':
         requireMcpCapability(req, 'pach.design.read')
         return toolResult(await listDesignTemplates(req, args))
@@ -1027,19 +1220,24 @@ async function listDocuments(req: AuthenticatedRequest, args: unknown) {
 async function getDocument(req: AuthenticatedRequest, args: unknown) {
   const body = ensureObject(args)
   const documentId = readOptionalString(body.documentId)
+  const publicId = readOptionalString(body.publicId)
   const slug = readOptionalString(body.slug)
-  if (!documentId && !slug) throw new Error('Provide documentId or slug')
+  if (!documentId && !publicId && !slug) throw new Error('Provide documentId, publicId, or slug')
 
   const organizationIds = readStringFilters(body.organizationId, body.organizationIds)
   const organizationNames = readStringFilters(body.organizationName, body.organizationNames)
   const organizationProjects = readStringFilters(body.organizationProject, body.organizationProjects)
   const includeArchived = body.includeArchived === true
   const db = getDb()
-  const documentSelector = documentId ?? slug!
+  const documentSelector = documentId ?? publicId ?? slug!
   const candidates = await db
     .select()
     .from(documents)
-    .where(documentId && isUuid(documentId) ? eq(documents.id, documentId) : eq(documents.slug, documentSelector))
+    .where(documentId && isUuid(documentId)
+      ? eq(documents.id, documentId)
+      : publicId
+        ? eq(documents.publicId, documentSelector)
+        : eq(documents.slug, documentSelector))
     .limit(20)
 
   const candidateOrganizationIds = uniqueStrings(candidates.map((document) => document.organizationId))
@@ -1087,6 +1285,7 @@ async function getDocument(req: AuthenticatedRequest, args: unknown) {
     children: visibleChildren.map(serializeDocumentReference),
     context: {
       title: document.title,
+      publicId: document.publicId,
       slug: document.slug,
       organizationName: document.organizationId ? organizationById.get(document.organizationId)?.name ?? null : null,
       organizationProject: document.organizationId ? organizationById.get(document.organizationId)?.project ?? null : null,
@@ -1094,7 +1293,334 @@ async function getDocument(req: AuthenticatedRequest, args: unknown) {
       parentTitle: parent && canAccessDocument(req, parent) ? parent.title : null,
       childTitles: visibleChildren.map((child) => child.title),
     },
+    formatContract: documentFormatContract(),
   }
+}
+
+function documentFormatContract() {
+  return {
+    ok: true,
+    version: DOCUMENT_FORMAT_VERSION,
+    instructions: DOCUMENT_FORMAT_INSTRUCTIONS,
+    examples: {
+      sourceBlock: [
+        ':::toggle',
+        'Source: Interview with CFO',
+        'URL: https://example.com',
+        'Notes: useful source notes here.',
+        ':::',
+      ].join('\n'),
+      collapsible: [
+        ':::toggle',
+        'Section title',
+        'Hidden or secondary details.',
+        ':::',
+      ].join('\n'),
+      checklist: ['- [ ] Confirm data point', '- [x] Draft outline'].join('\n'),
+      file: '::file[one-pager.pdf](https://example.com/one-pager.pdf){size=458000 type=application%2Fpdf}',
+    },
+  }
+}
+
+async function createDocument(req: AuthenticatedRequest, args: unknown) {
+  const body = ensureObject(args)
+  const title = readRequiredString(body, 'title')
+  const rawBody = typeof body.body === 'string' ? body.body : ''
+  const organization = await resolveOrganizationForDocumentCreate(req, body)
+  const parentId = readOptionalString(body.parentId)
+  const db = getDb()
+  if (parentId) {
+    const [parent] = await db.select().from(documents).where(eq(documents.id, parentId)).limit(1)
+    if (!parent || !canAccessDocument(req, parent)) throw new Error('Parent document not found')
+    if ((parent.organizationId ?? null) !== (organization?.id ?? null)) {
+      throw new Error('Parent document belongs to a different organization')
+    }
+  }
+  const now = new Date()
+  const publicId = readOptionalString(body.publicId) ?? await nextDocumentPublicId(organization)
+  const slug = await uniqueDocumentSlug(readOptionalString(body.slug) ?? title, organization?.id ?? null)
+  const metadata = isObject(body.metadata) ? body.metadata : {}
+  const [document] = await db.insert(documents).values({
+    id: randomUUID(),
+    organizationId: organization?.id,
+    parentId: parentId ?? undefined,
+    ownerId: req.mcpAuth?.actorUserId && isUuid(req.mcpAuth.actorUserId) ? req.mcpAuth.actorUserId : undefined,
+    publicId,
+    title,
+    slug,
+    body: rawBody,
+    format: 'markdown',
+    status: 'active',
+    metadata,
+    createdAt: now,
+    updatedAt: now,
+  }).returning()
+  const snapshot = await createSnapshotForDocument(req, document, {
+    status: 'version',
+    runId: readOptionalString(body.runId),
+    metadata: { source: 'pach.document.create' },
+  })
+  await db.update(documents).set({ currentSnapshotId: snapshot.id, updatedAt: now }).where(eq(documents.id, document.id))
+  const updated = { ...document, currentSnapshotId: snapshot.id, updatedAt: now }
+  return {
+    ok: true,
+    document: serializeDocumentFull(updated, organization ?? undefined, undefined),
+    snapshot: serializeDocumentSnapshot(snapshot),
+    formatContract: documentFormatContract(),
+  }
+}
+
+async function updateDocument(req: AuthenticatedRequest, args: unknown) {
+  const body = ensureObject(args)
+  const document = await readAccessibleDocumentFromArgs(req, body)
+  const createVersion = body.createSnapshot !== false
+  const base = createVersion ? await readLatestDocumentVersionBase(document) : documentVersionBaseFromDocument(document)
+  const nextTitle = readOptionalString(body.title) ?? base.title
+  const replaceBody = typeof body.body === 'string' ? body.body : null
+  const appendBody = typeof body.appendBody === 'string' ? body.appendBody : null
+  const nextBody = replaceBody != null
+    ? replaceBody
+    : appendBody != null
+      ? [base.body, appendBody].filter((part) => part.trim()).join('\n\n')
+      : base.body
+  const documentMetadata = isObject(body.metadata) ? { ...(document.metadata ?? {}), ...body.metadata } : document.metadata
+  const snapshotMetadata = isObject(body.metadata) ? body.metadata : {}
+  const slug = nextTitle !== base.title ? await uniqueDocumentSlug(nextTitle, document.organizationId, document.id) : base.slug
+  const now = new Date()
+  let snapshot: typeof documentSnapshots.$inferSelect | null = null
+  let updatedDocument = document
+
+  if (!createVersion) {
+    const [updated] = await getDb().update(documents).set({
+      title: nextTitle,
+      slug,
+      body: nextBody,
+      format: 'markdown',
+      metadata: documentMetadata,
+      updatedAt: now,
+    }).where(eq(documents.id, document.id)).returning()
+    updatedDocument = updated
+  } else {
+    snapshot = await createSnapshotForDocument(req, {
+      ...document,
+      title: nextTitle,
+      slug,
+      body: nextBody,
+      format: 'markdown',
+    }, {
+      status: 'version',
+      runId: readOptionalString(body.runId),
+      metadata: {
+        source: 'pach.document.update',
+        baseSnapshotId: base.kind === 'snapshot' ? base.id : null,
+        baseVersionNumber: base.kind === 'snapshot' ? base.versionNumber : null,
+        ...snapshotMetadata,
+      },
+    })
+    if (body.makeMain === true) {
+      const [updated] = await getDb().update(documents).set({
+        title: nextTitle,
+        slug,
+        body: nextBody,
+        format: 'markdown',
+        metadata: documentMetadata,
+        currentSnapshotId: snapshot.id,
+        updatedAt: now,
+      }).where(eq(documents.id, document.id)).returning()
+      updatedDocument = updated
+    }
+  }
+  const [organization] = updatedDocument.organizationId
+    ? await getDb().select().from(organizations).where(eq(organizations.id, updatedDocument.organizationId)).limit(1)
+    : []
+  return {
+    ok: true,
+    document: serializeDocumentFull(updatedDocument, organization, undefined),
+    appliedToDocument: body.makeMain === true || !createVersion,
+    version: snapshot ? serializeDocumentSnapshot(snapshot) : null,
+    snapshot: snapshot ? serializeDocumentSnapshot(snapshot) : null,
+    formatContract: documentFormatContract(),
+  }
+}
+
+async function listDocumentSnapshots(req: AuthenticatedRequest, args: unknown) {
+  const body = ensureObject(args)
+  const document = await readAccessibleDocumentFromArgs(req, body)
+  const limit = readPositiveInteger(body.limit, 20, 1, 100)
+  const snapshots = await getDb()
+    .select()
+    .from(documentSnapshots)
+    .where(eq(documentSnapshots.documentId, document.id))
+    .orderBy(desc(documentSnapshots.versionNumber))
+    .limit(limit)
+  return {
+    ok: true,
+    document: serializeDocumentReference(document),
+    snapshots: snapshots.map(serializeDocumentSnapshot),
+  }
+}
+
+async function createDocumentSnapshot(req: AuthenticatedRequest, args: unknown) {
+  const body = ensureObject(args)
+  const document = await readAccessibleDocumentFromArgs(req, body)
+  const snapshot = await createSnapshotForDocument(req, document, {
+    status: readSnapshotStatus(body.status) ?? 'version',
+    runId: readOptionalString(body.runId),
+    metadata: isObject(body.metadata) ? body.metadata : { source: 'pach.document.snapshot.create' },
+  })
+  return {
+    ok: true,
+    document: serializeDocumentReference(document),
+    version: serializeDocumentSnapshot(snapshot),
+    snapshot: serializeDocumentSnapshot(snapshot),
+  }
+}
+
+async function approveDocumentSnapshot(req: AuthenticatedRequest, args: unknown) {
+  const { document, snapshot } = await readAccessibleSnapshotFromArgs(req, args)
+  const now = new Date()
+  const [updatedDocument] = await getDb().update(documents).set({
+    title: snapshot.title,
+    slug: snapshot.slug,
+    body: snapshot.body,
+    format: snapshot.format,
+    currentSnapshotId: snapshot.id,
+    updatedAt: now,
+  }).where(eq(documents.id, document.id)).returning()
+  return {
+    ok: true,
+    madeMain: true,
+    document: serializeDocumentReference(updatedDocument),
+    version: serializeDocumentSnapshot(snapshot),
+    snapshot: serializeDocumentSnapshot(snapshot),
+  }
+}
+
+async function restoreDocumentSnapshot(req: AuthenticatedRequest, args: unknown) {
+  const { document, snapshot } = await readAccessibleSnapshotFromArgs(req, args)
+  const now = new Date()
+  const [updatedDocument] = await getDb().update(documents).set({
+    title: snapshot.title,
+    slug: snapshot.slug,
+    body: snapshot.body,
+    format: snapshot.format,
+    currentSnapshotId: snapshot.id,
+    updatedAt: now,
+  }).where(eq(documents.id, document.id)).returning()
+  return {
+    ok: true,
+    madeMain: true,
+    document: serializeDocumentReference(updatedDocument),
+    version: serializeDocumentSnapshot(snapshot),
+    snapshot: serializeDocumentSnapshot(snapshot),
+  }
+}
+
+async function getEditorialProfile(req: AuthenticatedRequest, args: unknown) {
+  const { organization, publication } = await resolveEditorialProfileTarget(req, args)
+  const organizationProfile = isObject(organization.editorialProfile) ? organization.editorialProfile : {}
+  const publicationProfile = publication && isObject(publication.editorialProfile) ? publication.editorialProfile : {}
+  return {
+    ok: true,
+    organization: {
+      id: organization.id,
+      name: organization.name,
+      project: organization.project,
+      editorialProfile: organizationProfile,
+    },
+    publication: publication ? {
+      id: publication.id,
+      name: publication.name,
+      slug: publication.slug,
+      type: publication.type,
+      editorialProfile: publicationProfile,
+    } : null,
+    effectiveProfile: {
+      ...organizationProfile,
+      ...publicationProfile,
+    },
+  }
+}
+
+async function updateEditorialProfile(req: AuthenticatedRequest, args: unknown) {
+  const body = ensureObject(args)
+  const profile = ensureObject(body.profile)
+  const merge = body.merge !== false
+  const { organization, publication } = await resolveEditorialProfileTarget(req, body)
+  const now = new Date()
+
+  if (publication) {
+    const current = isObject(publication.editorialProfile) ? publication.editorialProfile : {}
+    const nextProfile = merge ? { ...current, ...profile } : profile
+    const [updated] = await getDb()
+      .update(mktPublications)
+      .set({ editorialProfile: nextProfile, updatedAt: now })
+      .where(eq(mktPublications.id, publication.id))
+      .returning()
+    return {
+      ok: true,
+      scope: 'publication',
+      organization: { id: organization.id, name: organization.name, project: organization.project },
+      publication: {
+        id: updated.id,
+        name: updated.name,
+        slug: updated.slug,
+        type: updated.type,
+        editorialProfile: updated.editorialProfile ?? {},
+      },
+    }
+  }
+
+  const current = isObject(organization.editorialProfile) ? organization.editorialProfile : {}
+  const nextProfile = merge ? { ...current, ...profile } : profile
+  const [updated] = await getDb()
+    .update(organizations)
+    .set({ editorialProfile: nextProfile, updatedAt: now })
+    .where(eq(organizations.id, organization.id))
+    .returning()
+  return {
+    ok: true,
+    scope: 'organization',
+    organization: {
+      id: updated.id,
+      name: updated.name,
+      project: updated.project,
+      editorialProfile: updated.editorialProfile ?? {},
+    },
+  }
+}
+
+async function resolveEditorialProfileTarget(req: AuthenticatedRequest, args: unknown) {
+  const body = ensureObject(args)
+  const publicationId = readOptionalString(body.publicationId)
+  const publicationSlug = readOptionalString(body.publicationSlug)
+  const hasOrganizationSelector = Boolean(
+    readOptionalString(body.organizationId) ||
+    readOptionalString(body.organizationName) ||
+    readOptionalString(body.organizationProject),
+  )
+
+  if (publicationId && !hasOrganizationSelector) {
+    const [publication] = await getDb().select().from(mktPublications).where(eq(mktPublications.id, publicationId)).limit(1)
+    if (!publication || !canAccessOrganization(req, publication.organizationId)) throw new Error('Publication not found')
+    const [organization] = await getDb().select().from(organizations).where(eq(organizations.id, publication.organizationId)).limit(1)
+    if (!organization) throw new Error('Publication organization not found')
+    return { organization, publication }
+  }
+
+  const organization = await resolveOrganizationForDocumentCreate(req, body)
+  if (!organization) throw new Error('Editorial profiles require an organization')
+
+  if (!publicationId && !publicationSlug) return { organization, publication: null }
+  const candidates = await getDb()
+    .select()
+    .from(mktPublications)
+    .where(publicationId ? eq(mktPublications.id, publicationId) : eq(mktPublications.slug, publicationSlug!))
+    .limit(20)
+  const publicationMatches = candidates.filter((publication) => publication.organizationId === organization.id)
+  if (publicationMatches.length === 0) throw new Error('Publication not found')
+  if (publicationMatches.length > 1) throw new Error('Publication selector is ambiguous. Provide publicationId.')
+  return { organization, publication: publicationMatches[0] }
 }
 
 async function listDesignTemplates(req: AuthenticatedRequest, args: unknown) {
@@ -1453,6 +1979,8 @@ function serializeDocumentSummary(
     parentId: document.parentId,
     ownerId: document.ownerId,
     ownerName: displayUserName(owner),
+    publicId: document.publicId,
+    currentSnapshotId: document.currentSnapshotId,
     title: document.title,
     slug: document.slug,
     bodyPreview: truncateText(document.body, bodyPreviewLength),
@@ -1482,8 +2010,10 @@ function serializeDocumentReference(document: typeof documents.$inferSelect | un
   if (!document) return null
   return {
     id: document.id,
+    publicId: document.publicId,
     organizationId: document.organizationId,
     parentId: document.parentId,
+    currentSnapshotId: document.currentSnapshotId,
     title: document.title,
     slug: document.slug,
     format: document.format,
@@ -1491,6 +2021,238 @@ function serializeDocumentReference(document: typeof documents.$inferSelect | un
     sortOrder: document.sortOrder,
     updatedAt: document.updatedAt.getTime(),
   }
+}
+
+function serializeDocumentSnapshot(snapshot: typeof documentSnapshots.$inferSelect) {
+  return {
+    id: snapshot.id,
+    documentId: snapshot.documentId,
+    organizationId: snapshot.organizationId,
+    versionNumber: snapshot.versionNumber,
+    title: snapshot.title,
+    slug: snapshot.slug,
+    body: snapshot.body,
+    bodyLength: snapshot.body.length,
+    format: snapshot.format,
+    status: snapshot.status,
+    createdByType: snapshot.createdByType,
+    createdById: snapshot.createdById,
+    agentRunId: snapshot.agentRunId,
+    metadata: snapshot.metadata ?? {},
+    createdAt: snapshot.createdAt.getTime(),
+  }
+}
+
+async function readAccessibleDocumentFromArgs(req: AuthenticatedRequest, args: unknown) {
+  const body = ensureObject(args)
+  const documentId = readOptionalString(body.documentId)
+  const publicId = readOptionalString(body.publicId)
+  const slug = readOptionalString(body.slug)
+  if (!documentId && !publicId && !slug) throw new Error('Provide documentId, publicId, or slug')
+
+  const candidates = await getDb()
+    .select()
+    .from(documents)
+    .where(documentId && isUuid(documentId)
+      ? eq(documents.id, documentId)
+      : publicId
+        ? eq(documents.publicId, publicId)
+        : eq(documents.slug, slug!))
+    .limit(20)
+  const organizationIds = uniqueStrings(candidates.map((document) => document.organizationId))
+  const candidateOrganizations = organizationIds.length > 0
+    ? await getDb().select().from(organizations).where(inArray(organizations.id, organizationIds))
+    : []
+  const organizationById = new Map(candidateOrganizations.map((organization) => [organization.id, organization]))
+  const organizationFilters = {
+    organizationIds: readStringFilters(body.organizationId, body.organizationIds),
+    organizationNames: readStringFilters(body.organizationName, body.organizationNames),
+    organizationProjects: readStringFilters(body.organizationProject, body.organizationProjects),
+  }
+  const accessibleCandidates = candidates
+    .filter((document) => canAccessDocument(req, document))
+    .filter((document) => document.status !== 'archived')
+    .filter((document) => documentMatchesOrganizationFilters(document, organizationById.get(document.organizationId ?? ''), organizationFilters))
+
+  if (accessibleCandidates.length === 0) throw new Error('Document not found')
+  if (accessibleCandidates.length > 1) throw new Error('Document selector is ambiguous. Provide organizationId, organizationName, or organizationProject.')
+  return accessibleCandidates[0]
+}
+
+async function readAccessibleSnapshotFromArgs(req: AuthenticatedRequest, args: unknown) {
+  const body = ensureObject(args)
+  const snapshotId = readOptionalString(body.snapshotId)
+  const versionNumber = typeof body.versionNumber === 'number' && Number.isFinite(body.versionNumber)
+    ? Math.floor(body.versionNumber)
+    : null
+
+  if (snapshotId) {
+    const [snapshot] = await getDb().select().from(documentSnapshots).where(eq(documentSnapshots.id, snapshotId)).limit(1)
+    if (!snapshot) throw new Error('Document snapshot not found')
+    const [document] = await getDb().select().from(documents).where(eq(documents.id, snapshot.documentId)).limit(1)
+    if (!document || !canAccessDocument(req, document)) throw new Error('Document snapshot not found')
+    return { document, snapshot }
+  }
+
+  if (versionNumber == null) throw new Error('Provide snapshotId or versionNumber')
+  const document = await readAccessibleDocumentFromArgs(req, body)
+  const snapshots = await getDb()
+    .select()
+    .from(documentSnapshots)
+    .where(eq(documentSnapshots.documentId, document.id))
+    .limit(100)
+  const snapshot = snapshots.find((entry) => entry.versionNumber === versionNumber)
+  if (!snapshot) throw new Error('Document snapshot not found')
+  return { document, snapshot }
+}
+
+async function resolveOrganizationForDocumentCreate(req: AuthenticatedRequest, body: Record<string, unknown>) {
+  const organizationId = readOptionalString(body.organizationId)
+  const organizationName = readOptionalString(body.organizationName)
+  const organizationProject = readOptionalString(body.organizationProject)
+  if (!organizationId && !organizationName && !organizationProject) {
+    if (req.mcpAuth?.organizationIds.length === 1) {
+      const [organization] = await getDb().select().from(organizations).where(eq(organizations.id, req.mcpAuth.organizationIds[0])).limit(1)
+      if (organization && canAccessOrganization(req, organization.id)) return organization
+    }
+    if (canAccessOrganization(req, null)) return null
+    throw new Error('Provide organizationId, organizationName, or organizationProject')
+  }
+  const rows = await getDb().select().from(organizations).limit(200)
+  const matches = rows
+    .filter((organization) => canAccessOrganization(req, organization.id))
+    .filter((organization) => {
+      if (organizationId && organization.id !== organizationId) return false
+      if (organizationName && !matchesStringFilter(organization.name, [organizationName])) return false
+      if (organizationProject && !matchesStringFilter(organization.project, [organizationProject], 'exact')) return false
+      return true
+    })
+  if (matches.length === 0) throw new Error('Organization not found')
+  if (matches.length > 1) throw new Error('Organization selector is ambiguous. Provide organizationId.')
+  return matches[0]
+}
+
+async function nextDocumentPublicId(organization: typeof organizations.$inferSelect | null) {
+  const prefix = documentPublicIdPrefix(organization)
+  const rows = await getDb()
+    .select({ publicId: documents.publicId })
+    .from(documents)
+    .where(organization?.id ? eq(documents.organizationId, organization.id) : isNull(documents.organizationId))
+    .limit(1000)
+  const max = rows.reduce((current, row) => {
+    const match = (row.publicId ?? '').match(/-DOC-(\d+)$/)
+    const value = match ? Number(match[1]) : 0
+    return Number.isFinite(value) ? Math.max(current, value) : current
+  }, 0)
+  return `${prefix}-DOC-${max + 1}`
+}
+
+function documentPublicIdPrefix(organization: typeof organizations.$inferSelect | null) {
+  const raw = (organization?.project ?? organization?.name ?? 'doc')
+    .replace(/[^a-zA-Z0-9]/g, '')
+    .slice(0, 3)
+    .toUpperCase()
+  return raw || 'DOC'
+}
+
+async function uniqueDocumentSlug(title: string, organizationId: string | null | undefined, ignoreId?: string) {
+  const base = slugify(title)
+  const rows = await getDb()
+    .select({ id: documents.id, slug: documents.slug })
+    .from(documents)
+    .where(organizationId ? eq(documents.organizationId, organizationId) : isNull(documents.organizationId))
+    .limit(1000)
+  const taken = new Set(rows.filter((row) => row.id !== ignoreId).map((row) => row.slug))
+  if (!taken.has(base)) return base
+  let counter = 2
+  while (taken.has(`${base}-${counter}`)) counter += 1
+  return `${base}-${counter}`
+}
+
+async function readLatestDocumentVersionBase(document: typeof documents.$inferSelect) {
+  const snapshots = await getDb()
+    .select()
+    .from(documentSnapshots)
+    .where(eq(documentSnapshots.documentId, document.id))
+    .orderBy(desc(documentSnapshots.versionNumber))
+    .limit(20)
+  const candidate = snapshots.find((snapshot) => snapshot.id !== document.currentSnapshotId)
+  if (candidate) {
+    return {
+      kind: 'snapshot' as const,
+      id: candidate.id,
+      versionNumber: candidate.versionNumber,
+      title: candidate.title,
+      slug: candidate.slug,
+      body: candidate.body,
+      format: candidate.format,
+    }
+  }
+  return documentVersionBaseFromDocument(document)
+}
+
+function documentVersionBaseFromDocument(document: typeof documents.$inferSelect) {
+  return {
+    kind: 'document' as const,
+    id: document.id,
+    versionNumber: null,
+    title: document.title,
+    slug: document.slug,
+    body: document.body,
+    format: document.format,
+  }
+}
+
+async function createSnapshotForDocument(
+  req: AuthenticatedRequest,
+  document: typeof documents.$inferSelect,
+  options: {
+    status?: string
+    runId?: string | null
+    metadata?: Record<string, unknown>
+  } = {},
+) {
+  const latest = await getDb()
+    .select({ versionNumber: documentSnapshots.versionNumber })
+    .from(documentSnapshots)
+    .where(eq(documentSnapshots.documentId, document.id))
+    .orderBy(desc(documentSnapshots.versionNumber))
+    .limit(1)
+  const versionNumber = (latest[0]?.versionNumber ?? 0) + 1
+  const [snapshot] = await getDb().insert(documentSnapshots).values({
+    id: randomUUID(),
+    documentId: document.id,
+    organizationId: document.organizationId ?? undefined,
+    versionNumber,
+    title: document.title,
+    slug: document.slug,
+    body: document.body,
+    format: document.format,
+    status: options.status ?? 'version',
+    createdByType: options.runId ? 'agent' : req.mcpAuth?.kind === 'token' ? 'agent' : 'user',
+    createdById: req.mcpAuth?.actorUserId && isUuid(req.mcpAuth.actorUserId) ? req.mcpAuth.actorUserId : undefined,
+    agentRunId: options.runId ?? undefined,
+    metadata: options.metadata ?? {},
+    createdAt: new Date(),
+  }).returning()
+  return snapshot
+}
+
+function readSnapshotStatus(value: unknown): string | null {
+  if (value === 'version' || value === 'draft' || value === 'approved') return value
+  if (value == null) return null
+  throw new Error('snapshot status must be version')
+}
+
+function slugify(value: string) {
+  const slug = value
+    .toLowerCase()
+    .normalize('NFKD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 64)
+  return slug || 'document'
 }
 
 async function readDocumentAncestors(req: AuthenticatedRequest, document: typeof documents.$inferSelect) {

@@ -26,6 +26,7 @@ export const organizations = pgTable('organizations', {
   /** Link to project key in pach.config.ts */
   project: text('project'),
   description: text('description'),
+  editorialProfile: jsonb('editorial_profile').$type<Record<string, unknown>>().notNull().default({}),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
 })
@@ -491,6 +492,8 @@ export const documents = pgTable('documents', {
   organizationId: uuid('organization_id').references(() => organizations.id),
   parentId: uuid('parent_id'),
   ownerId: uuid('owner_id').references(() => users.id),
+  publicId: text('public_id'),
+  currentSnapshotId: uuid('current_snapshot_id'),
   title: text('title').notNull(),
   slug: text('slug').notNull(),
   body: text('body').notNull().default(''),
@@ -508,6 +511,30 @@ export const documents = pgTable('documents', {
   parentIdx: index('documents_parent_idx').on(table.parentId),
   ownerIdx: index('documents_owner_idx').on(table.ownerId),
   organizationSlugIdx: uniqueIndex('documents_organization_slug_idx').on(table.organizationId, table.slug),
+  organizationPublicIdIdx: uniqueIndex('documents_organization_public_id_idx').on(table.organizationId, table.publicId),
+}))
+
+export const documentSnapshots = pgTable('document_snapshots', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  documentId: uuid('document_id').notNull().references(() => documents.id),
+  organizationId: uuid('organization_id').references(() => organizations.id),
+  versionNumber: integer('version_number').notNull(),
+  title: text('title').notNull(),
+  slug: text('slug').notNull(),
+  body: text('body').notNull().default(''),
+  format: text('format').notNull().default('markdown'),
+  /** legacy compatibility field; new rows use version */
+  status: text('status').notNull().default('version'),
+  createdByType: text('created_by_type').notNull().default('user'),
+  createdById: uuid('created_by_id').references(() => users.id),
+  agentRunId: uuid('agent_run_id'),
+  metadata: jsonb('metadata').$type<Record<string, unknown>>().notNull().default({}),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+}, (table) => ({
+  documentVersionIdx: uniqueIndex('document_snapshots_document_version_idx').on(table.documentId, table.versionNumber),
+  documentStatusIdx: index('document_snapshots_document_status_idx').on(table.documentId, table.status),
+  organizationIdx: index('document_snapshots_organization_idx').on(table.organizationId),
+  agentRunIdx: index('document_snapshots_agent_run_idx').on(table.agentRunId),
 }))
 
 /* ─────────────────────────── MARKETING ─────────────────────────── */
@@ -538,6 +565,7 @@ export const mktPublications = pgTable('mkt_publications', {
   slug: text('slug').notNull(),
   type: text('type').notNull().default('newsletter'),
   audienceDescription: text('audience_description'),
+  editorialProfile: jsonb('editorial_profile').$type<Record<string, unknown>>().notNull().default({}),
   status: text('status').notNull().default('active'),
   metadata: jsonb('metadata').$type<Record<string, unknown>>().notNull().default({}),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),

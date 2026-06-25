@@ -6,11 +6,13 @@ import {
   ChevronDown,
   ChevronRight,
   FileText,
-  List,
+  History,
   ListTree,
   Megaphone,
   Plus,
   Search,
+  Trash2,
+  X,
 } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
@@ -22,6 +24,7 @@ import type { Mutators } from '../../mutators'
 import type { Schema } from '../../zero-schema'
 
 type DocumentRow = Schema['tables']['documents']['row']
+type DocumentSnapshotRow = Schema['tables']['document_snapshots']['row']
 type OrganizationRow = Schema['tables']['organizations']['row']
 type DocumentTreeNode = {
   document: DocumentRow
@@ -40,13 +43,17 @@ export default function Docs() {
   const [organizationFilter, setOrganizationFilter] = useState<string>(() => readStoredDocsOrganizationFilter())
   const [titleDraft, setTitleDraft] = useState('')
   const [bodyDraft, setBodyDraft] = useState('')
+  const [selectedSnapshotId, setSelectedSnapshotId] = useState<string | null>(null)
+  const [versionsFrameOpen, setVersionsFrameOpen] = useState(false)
   const [expandedDocumentIds, setExpandedDocumentIds] = useState<Set<string>>(() => new Set())
   const [archiveConfirmDocument, setArchiveConfirmDocument] = useState<DocumentRow | null>(null)
   const [marketingContentConfirmDocument, setMarketingContentConfirmDocument] = useState<DocumentRow | null>(null)
   const [creatingMarketingContent, setCreatingMarketingContent] = useState(false)
   const [marketingContentStatus, setMarketingContentStatus] = useState<{ kind: 'ok' | 'fail'; message: string } | null>(null)
+  const [documentActionStatus, setDocumentActionStatus] = useState<{ kind: 'ok' | 'fail'; message: string } | null>(null)
 
   const [documents] = useQuery(z.query.documents.orderBy('updatedAt', 'desc'))
+  const [documentSnapshots] = useQuery(z.query.document_snapshots.orderBy('createdAt', 'desc'))
   const [marketingContentItems] = useQuery(z.query.mkt_content_items.orderBy('updatedAt', 'desc'))
   const [issues] = useQuery(z.query.pm_issues.orderBy('updatedAt', 'desc'))
   const [organizations] = useQuery(z.query.organizations.orderBy('name', 'asc'))
@@ -90,10 +97,9 @@ export default function Docs() {
       documents.find((entry) =>
         entry.id === documentId &&
         entry.status !== 'archived' &&
-        canAccessOrganization(entry.organizationId) &&
-        documentMatchesOrganizationFilter(entry, organizationFilter)
+        canAccessOrganization(entry.organizationId)
       ) ?? null,
-    [documents, documentId, organizationFilter, user?.canAccessUnscoped, accessibleOrganizationIds],
+    [documents, documentId, user?.canAccessUnscoped, accessibleOrganizationIds],
   )
 
   const selectedOrganization = organizationFilter && organizationFilter !== NO_ORGANIZATION
@@ -105,6 +111,21 @@ export default function Docs() {
     () => selectedDocument ? marketingContentItems.filter((item) => item.sourceDocumentId === selectedDocument.id) : [],
     [marketingContentItems, selectedDocument?.id],
   )
+  const selectedDocumentSnapshots = useMemo(
+    () => selectedDocument
+      ? documentSnapshots
+        .filter((snapshot) => snapshot.documentId === selectedDocument.id)
+        .sort((a, b) => b.versionNumber - a.versionNumber)
+      : [],
+    [documentSnapshots, selectedDocument?.id],
+  )
+  const latestSnapshot = selectedDocumentSnapshots[0] ?? null
+  const mainSnapshot = selectedDocument?.currentSnapshotId
+    ? selectedDocumentSnapshots.find((snapshot) => snapshot.id === selectedDocument.currentSnapshotId) ?? latestSnapshot
+    : latestSnapshot
+  const selectedSnapshot = selectedSnapshotId
+    ? selectedDocumentSnapshots.find((snapshot) => snapshot.id === selectedSnapshotId) ?? null
+    : null
 
   useEffect(() => {
     if (organizationOptions.length === 0) return
@@ -121,25 +142,47 @@ export default function Docs() {
 
   useEffect(() => {
     if (!organizationFilter) return
-    if (documentId && selectedDocument) return
+    if (documentId) return
     const next = documentsInSelectedOrganization[0]
     const nextPath = next ? `/docs/${next.id}` : '/docs'
-    if (documentId || next) navigate(nextPath, { replace: true })
-  }, [documentId, documentsInSelectedOrganization, navigate, organizationFilter, selectedDocument])
+    if (next) navigate(nextPath, { replace: true })
+  }, [documentId, documentsInSelectedOrganization, navigate, organizationFilter])
 
   useEffect(() => {
     if (!selectedDocument) {
       setTitleDraft('')
       setBodyDraft('')
+      setSelectedSnapshotId(null)
+      setVersionsFrameOpen(false)
       setMarketingContentStatus(null)
+      setDocumentActionStatus(null)
       return
     }
     setTitleDraft(selectedDocument.title)
     setBodyDraft(selectedDocument.body)
+    setSelectedSnapshotId(null)
+    setVersionsFrameOpen(false)
     setMarketingContentStatus(null)
+    setDocumentActionStatus(null)
     if (selectedDocument.organizationId) setOrganizationFilter(selectedDocument.organizationId)
     else if (user?.canAccessUnscoped) setOrganizationFilter(NO_ORGANIZATION)
   }, [selectedDocument?.id])
+
+  useEffect(() => {
+    if (!selectedSnapshot) return
+    setTitleDraft(selectedSnapshot.title)
+    setBodyDraft(selectedSnapshot.body)
+    setDocumentActionStatus(null)
+  }, [selectedSnapshot?.id])
+
+  useEffect(() => {
+    if (!selectedSnapshotId) return
+    if (selectedDocumentSnapshots.some((snapshot) => snapshot.id === selectedSnapshotId)) return
+    setSelectedSnapshotId(null)
+    if (!selectedDocument) return
+    setTitleDraft(selectedDocument.title)
+    setBodyDraft(selectedDocument.body)
+  }, [selectedDocument, selectedSnapshotId, selectedDocumentSnapshots])
 
   useEffect(() => {
     if (!selectedDocument) return
@@ -159,17 +202,41 @@ export default function Docs() {
 
   useEffect(() => {
     if (!selectedDocument) return
+    if (selectedSnapshotId && !selectedSnapshot) return
+    if (selectedSnapshot) {
+      if (titleDraft === selectedSnapshot.title && bodyDraft === selectedSnapshot.body) return
+      const timer = window.setTimeout(() => {
+        void saveSnapshotVersion(selectedDocument, selectedSnapshot, titleDraft, bodyDraft)
+      }, 700)
+      return () => window.clearTimeout(timer)
+    }
     if (titleDraft === selectedDocument.title && bodyDraft === selectedDocument.body) return
     const timer = window.setTimeout(() => {
-      void saveDraft(selectedDocument, titleDraft, bodyDraft)
+      void saveLiveDocument(selectedDocument, titleDraft, bodyDraft)
     }, 700)
     return () => window.clearTimeout(timer)
-  }, [bodyDraft, selectedDocument, titleDraft])
+  }, [bodyDraft, selectedDocument, selectedSnapshot, selectedSnapshotId, titleDraft])
 
-  async function saveDraft(entry: DocumentRow, nextTitle: string, nextBody: string) {
+  async function saveLiveDocument(entry: DocumentRow, nextTitle: string, nextBody: string) {
     const cleanTitle = nextTitle.trim() || 'Untitled'
     await z.mutate.documents.update({
       id: entry.id,
+      title: cleanTitle,
+      slug: uniqueSlug(cleanTitle, documents, entry.organizationId, entry.id),
+      body: nextBody,
+      format: 'markdown',
+    })
+  }
+
+  async function saveSnapshotVersion(
+    entry: DocumentRow,
+    snapshot: DocumentSnapshotRow,
+    nextTitle: string,
+    nextBody: string,
+  ) {
+    const cleanTitle = nextTitle.trim() || snapshot.title || 'Untitled'
+    await z.mutate.document_snapshots.update({
+      id: snapshot.id,
       title: cleanTitle,
       slug: uniqueSlug(cleanTitle, documents, entry.organizationId, entry.id),
       body: nextBody,
@@ -190,6 +257,7 @@ export default function Docs() {
       organizationId,
       parentId: parent?.id,
       ownerId: user?.id,
+      publicId: nextDocumentPublicId(organizationId ?? null, organizations, documents),
       title,
       slug: uniqueSlug(title, documents, organizationId ?? null),
       body: '',
@@ -211,6 +279,7 @@ export default function Docs() {
       organizationId,
       parentId: parent.id,
       ownerId: user?.id,
+      publicId: nextDocumentPublicId(organizationId ?? null, organizations, documents),
       title,
       slug: uniqueSlug(title, documents, organizationId ?? null),
       body: '',
@@ -246,6 +315,88 @@ export default function Docs() {
     navigate(next ? `/docs/${next.id}` : '/docs')
   }
 
+  async function createDocumentVersion(entry: DocumentRow) {
+    try {
+      setDocumentActionStatus(null)
+      const snapshots = documentSnapshots.filter((snapshot) => snapshot.documentId === entry.id)
+      const versionNumber = snapshots.reduce((max, snapshot) => Math.max(max, snapshot.versionNumber), 0) + 1
+      const snapshotId = crypto.randomUUID()
+      const sourceSnapshot = selectedSnapshot
+      const cleanTitle = titleDraft.trim() || sourceSnapshot?.title || entry.title
+      await z.mutate.document_snapshots.create({
+        id: snapshotId,
+        documentId: entry.id,
+        organizationId: entry.organizationId ?? undefined,
+        versionNumber,
+        title: cleanTitle,
+        slug: uniqueSlug(cleanTitle, documents, entry.organizationId, entry.id),
+        body: bodyDraft,
+        format: 'markdown',
+        status: 'version',
+        createdByType: 'user',
+        createdById: user?.id,
+        metadata: {
+          source: 'docs_ui',
+          baseSnapshotId: sourceSnapshot?.id ?? null,
+          baseVersionNumber: sourceSnapshot?.versionNumber ?? null,
+        },
+      })
+      setSelectedSnapshotId(snapshotId)
+      setVersionsFrameOpen(true)
+      setDocumentActionStatus({ kind: 'ok', message: `new version v${versionNumber} saved` })
+    } catch (error) {
+      setDocumentActionStatus({ kind: 'fail', message: error instanceof Error ? error.message : 'could not save version' })
+    }
+  }
+
+  async function makeVersionMain(entry: DocumentRow, snapshot: DocumentSnapshotRow) {
+    try {
+      setDocumentActionStatus(null)
+      const cleanTitle = titleDraft.trim() || snapshot.title || entry.title
+      const nextSlug = uniqueSlug(cleanTitle, documents, entry.organizationId, entry.id)
+      await z.mutate.document_snapshots.update({
+        id: snapshot.id,
+        documentId: entry.id,
+        metadata: {
+          ...snapshot.metadata,
+          madeMainVia: 'docs_ui',
+          madeMainAt: new Date().toISOString(),
+        },
+        applyToDocument: true,
+        title: cleanTitle,
+        slug: nextSlug,
+        body: bodyDraft,
+        format: snapshot.format,
+      })
+      setSelectedSnapshotId(null)
+      setTitleDraft(cleanTitle)
+      setBodyDraft(bodyDraft)
+      setDocumentActionStatus({ kind: 'ok', message: `v${snapshot.versionNumber} is now main` })
+    } catch (error) {
+      setDocumentActionStatus({ kind: 'fail', message: error instanceof Error ? error.message : 'could not make version main' })
+    }
+  }
+
+  async function deleteDocumentVersion(entry: DocumentRow, snapshot: DocumentSnapshotRow) {
+    const isMain = isDocumentMainSnapshot(entry, snapshot, mainSnapshot)
+    if (isMain) {
+      setDocumentActionStatus({ kind: 'fail', message: 'main version cannot be deleted' })
+      return
+    }
+    try {
+      setDocumentActionStatus(null)
+      await z.mutate.document_snapshots.delete({ id: snapshot.id })
+      if (selectedSnapshotId === snapshot.id) {
+        setSelectedSnapshotId(null)
+        setTitleDraft(entry.title)
+        setBodyDraft(entry.body)
+      }
+      setDocumentActionStatus({ kind: 'ok', message: `v${snapshot.versionNumber} deleted` })
+    } catch (error) {
+      setDocumentActionStatus({ kind: 'fail', message: error instanceof Error ? error.message : 'could not delete version' })
+    }
+  }
+
   async function createMarketingContentFromDocument(entry: DocumentRow) {
     if (!entry.organizationId) {
       setMarketingContentStatus({ kind: 'fail', message: 'document needs an organization' })
@@ -260,8 +411,8 @@ export default function Docs() {
     setCreatingMarketingContent(true)
     setMarketingContentStatus(null)
     try {
-      if (entry.title !== titleDraft || entry.body !== bodyDraft) {
-        await saveDraft(entry, titleDraft, bodyDraft)
+      if (!selectedSnapshot && (entry.title !== titleDraft || entry.body !== bodyDraft)) {
+        await saveLiveDocument(entry, titleDraft, bodyDraft)
       }
       const response = await authFetch(`${config.apiUrl}/marketing/content/from-document`, {
         method: 'POST',
@@ -413,16 +564,66 @@ export default function Docs() {
               </div>
             ) : null}
 
+            {documentActionStatus ? (
+              <div
+                className={`mb-4 border px-3 py-2 font-mono text-xs ${
+                  documentActionStatus.kind === 'ok'
+                    ? 'border-ok/25 bg-ok/5 text-ok'
+                    : 'border-fail/25 bg-fail/5 text-fail'
+                }`}
+              >
+                {documentActionStatus.message}
+              </div>
+            ) : null}
+
+            <div className="mb-4 flex flex-wrap items-center gap-2 border-y border-edge/12 py-2 font-mono text-[10px] uppercase tracking-label text-fg-4">
+              <span className="border border-edge/14 px-2 py-1 text-fg-3">
+                {selectedDocument.publicId ?? selectedDocument.slug}
+              </span>
+              <span className="border border-ok/28 bg-ok/5 px-2 py-1 text-ok">
+                {mainSnapshot ? `main v${mainSnapshot.versionNumber}` : 'live main'}
+              </span>
+              {selectedSnapshot ? (
+                <span className="border border-amber/28 bg-amber/5 px-2 py-1 text-amber">
+                  editing v{selectedSnapshot.versionNumber} - {formatSnapshotDate(selectedSnapshot.createdAt)}
+                </span>
+              ) : (
+                <span className="border border-edge/14 px-2 py-1 text-fg-3">editing live</span>
+              )}
+              <button
+                type="button"
+                onClick={() => setVersionsFrameOpen(true)}
+                className="ml-auto inline-flex h-7 items-center gap-1.5 border border-edge/15 px-2 text-fg-3 transition hover:border-accent hover:text-accent"
+                title="open versions"
+              >
+                <History className="h-3 w-3" />
+                versions {selectedDocumentSnapshots.length}
+              </button>
+              <button
+                type="button"
+                onClick={() => void createDocumentVersion(selectedDocument)}
+                className="inline-flex h-7 items-center gap-1.5 border border-edge/15 px-2 text-fg-3 transition hover:border-accent hover:text-accent"
+                title="create a new version from the current view"
+              >
+                <Plus className="h-3 w-3" />
+                new version
+              </button>
+            </div>
+
             <input
               value={titleDraft}
               onChange={(event) => setTitleDraft(event.target.value)}
-              onBlur={() => selectedDocument && void saveDraft(selectedDocument, titleDraft, bodyDraft)}
+              onBlur={() => {
+                if (!selectedDocument) return
+                if (selectedSnapshot) void saveSnapshotVersion(selectedDocument, selectedSnapshot, titleDraft, bodyDraft)
+                else void saveLiveDocument(selectedDocument, titleDraft, bodyDraft)
+              }}
               placeholder="Untitled"
               className="w-full bg-transparent font-mono text-3xl font-bold leading-tight text-fg-1 outline-none placeholder:text-fg-4 md:text-4xl"
             />
 
             <RichEditor
-              key={selectedDocument.id}
+              key={selectedSnapshot?.id ?? selectedDocument.id}
               owner={{ type: 'document', id: selectedDocument.id }}
               value={bodyDraft}
               documents={documents}
@@ -472,6 +673,25 @@ export default function Docs() {
             setMarketingContentConfirmDocument(null)
             void createMarketingContentFromDocument(document)
           }}
+        />
+      ) : null}
+
+      {versionsFrameOpen && selectedDocument ? (
+        <DocumentVersionsFrame
+          document={selectedDocument}
+          snapshots={selectedDocumentSnapshots}
+          mainSnapshot={mainSnapshot}
+          selectedSnapshot={selectedSnapshot}
+          onClose={() => setVersionsFrameOpen(false)}
+          onCreateVersion={() => void createDocumentVersion(selectedDocument)}
+          onOpenLive={() => {
+            setSelectedSnapshotId(null)
+            setTitleDraft(selectedDocument.title)
+            setBodyDraft(selectedDocument.body)
+          }}
+          onOpenSnapshot={(snapshot) => setSelectedSnapshotId(snapshot.id)}
+          onMakeMain={(snapshot) => void makeVersionMain(selectedDocument, snapshot)}
+          onDelete={(snapshot) => void deleteDocumentVersion(selectedDocument, snapshot)}
         />
       ) : null}
     </div>
@@ -572,7 +792,7 @@ function MarketingContentDocumentModal({
         </div>
         <div className="px-5 py-4">
           <p className="font-mono text-sm leading-relaxed text-fg-3">
-            This creates a marketing content item from the current document snapshot. It will start with blog and newsletter channels.
+            This creates a marketing content item from the live document content. It will start with blog and newsletter channels.
           </p>
         </div>
         <div className="flex items-center justify-end gap-2 border-t border-edge/12 px-5 py-3">
@@ -593,6 +813,157 @@ function MarketingContentDocumentModal({
           </button>
         </div>
       </div>
+    </div>
+  )
+}
+
+function DocumentVersionsFrame({
+  document,
+  snapshots,
+  mainSnapshot,
+  selectedSnapshot,
+  onClose,
+  onCreateVersion,
+  onOpenLive,
+  onOpenSnapshot,
+  onMakeMain,
+  onDelete,
+}: {
+  document: DocumentRow
+  snapshots: DocumentSnapshotRow[]
+  mainSnapshot: DocumentSnapshotRow | null
+  selectedSnapshot: DocumentSnapshotRow | null
+  onClose: () => void
+  onCreateVersion: () => void
+  onOpenLive: () => void
+  onOpenSnapshot: (snapshot: DocumentSnapshotRow) => void
+  onMakeMain: (snapshot: DocumentSnapshotRow) => void
+  onDelete: (snapshot: DocumentSnapshotRow) => void
+}) {
+  useEffect(() => {
+    function handleKey(event: KeyboardEvent) {
+      if (event.key !== 'Escape') return
+      event.preventDefault()
+      onClose()
+    }
+    window.addEventListener('keydown', handleKey)
+    return () => window.removeEventListener('keydown', handleKey)
+  }, [onClose])
+
+  return (
+    <div className="fixed inset-0 z-[900] flex justify-end" onClick={onClose}>
+      <div className="absolute inset-0 bg-black/70 backdrop-blur-sm" />
+      <aside
+        className="relative h-screen min-h-screen w-[500px] max-w-full overflow-y-auto border-l border-edge/35 bg-bg-2 font-mono"
+        onClick={(event) => event.stopPropagation()}
+      >
+        <div className="sticky top-0 z-10 flex items-center justify-between gap-3 border-b border-edge/15 bg-bg-2 px-6 py-4">
+          <div className="min-w-0">
+            <div className="text-[10px] uppercase tracking-label text-fg-4">versions</div>
+            <h2 className="mt-1 truncate text-base font-bold lowercase text-fg-1">{document.title}</h2>
+          </div>
+          <button onClick={onClose} className="p-1 text-fg-4 transition hover:text-accent" aria-label="Close versions">
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+
+        <div className="space-y-4 px-6 py-5">
+          <div className="flex items-center justify-between gap-3">
+            <div className="text-[10px] uppercase tracking-label text-fg-4">
+              {snapshots.length} saved {snapshots.length === 1 ? 'version' : 'versions'}
+            </div>
+            <button
+              type="button"
+              onClick={onCreateVersion}
+              className="inline-flex h-8 items-center gap-1.5 border border-edge/18 px-2.5 text-[10px] uppercase tracking-label text-fg-3 transition hover:border-accent hover:text-accent"
+              title="create a new version from the current view"
+            >
+              <Plus className="h-3 w-3" />
+              new version
+            </button>
+          </div>
+
+          <button
+            type="button"
+            onClick={onOpenLive}
+            className={`w-full border px-4 py-3 text-left transition ${
+              selectedSnapshot
+                ? 'border-edge/14 text-fg-3 hover:border-accent hover:text-fg-1'
+                : 'border-accent/35 bg-accent-fill/8 text-accent'
+            }`}
+          >
+            <div className="flex items-center gap-2 text-[10px] uppercase tracking-label">
+              <span>live</span>
+              <span className="border border-ok/24 bg-ok/5 px-1.5 py-0.5 text-ok">main</span>
+            </div>
+            <div className="mt-2 text-xs lowercase text-fg-4">current document content</div>
+          </button>
+
+          <div className="space-y-2">
+            {snapshots.length === 0 ? (
+              <div className="border border-dashed border-edge/18 px-4 py-8 text-center text-xs lowercase text-fg-4">
+                no saved versions yet
+              </div>
+            ) : (
+              snapshots.map((snapshot) => {
+                const isMain = isDocumentMainSnapshot(document, snapshot, mainSnapshot)
+                const isSelected = selectedSnapshot?.id === snapshot.id
+                return (
+                  <div
+                    key={snapshot.id}
+                    className={`border transition ${
+                      isSelected
+                        ? 'border-amber/35 bg-amber/6'
+                        : 'border-edge/14 hover:border-edge/30'
+                    }`}
+                  >
+                    <button
+                      type="button"
+                      onClick={() => onOpenSnapshot(snapshot)}
+                      className="w-full px-4 py-3 text-left"
+                    >
+                      <div className="flex min-w-0 items-center gap-2 text-[10px] uppercase tracking-label">
+                        <span className={isSelected ? 'text-amber' : 'text-fg-3'}>v{snapshot.versionNumber}</span>
+                        {isMain ? (
+                          <span className="border border-ok/24 bg-ok/5 px-1.5 py-0.5 text-ok">main</span>
+                        ) : null}
+                        <span className="border border-edge/14 px-1.5 py-0.5 text-fg-4">
+                          {snapshotSourceLabel(snapshot)}
+                        </span>
+                        <span className="ml-auto shrink-0 text-fg-4">{formatSnapshotDate(snapshot.createdAt)}</span>
+                      </div>
+                      <div className="mt-2 truncate text-sm lowercase text-fg-1">{snapshot.title}</div>
+                    </button>
+
+                    {isSelected ? (
+                      <div className="flex flex-wrap items-center gap-2 border-t border-edge/12 px-4 py-3">
+                        <button
+                          type="button"
+                          onClick={() => onMakeMain(snapshot)}
+                          disabled={isMain}
+                          className="h-8 border border-ok/24 px-2.5 text-[10px] uppercase tracking-label text-ok transition hover:bg-ok/8 disabled:cursor-not-allowed disabled:opacity-35"
+                        >
+                          make main
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => onDelete(snapshot)}
+                          disabled={isMain}
+                          className="inline-flex h-8 items-center gap-1.5 border border-fail/24 px-2.5 text-[10px] uppercase tracking-label text-fail transition hover:bg-fail/8 disabled:cursor-not-allowed disabled:opacity-35"
+                          title={isMain ? 'main version cannot be deleted' : 'delete version'}
+                        >
+                          <Trash2 className="h-3 w-3" />
+                          delete
+                        </button>
+                      </div>
+                    ) : null}
+                  </div>
+                )
+              })
+            )}
+          </div>
+        </div>
+      </aside>
     </div>
   )
 }
@@ -816,9 +1187,57 @@ function uniqueSlug(title: string, documents: DocumentRow[], organizationId?: st
   return `${base}-${counter}`
 }
 
+function nextDocumentPublicId(organizationId: string | null, organizations: OrganizationRow[], documents: DocumentRow[]) {
+  const prefix = documentPublicIdPrefix(organizationId, organizations)
+  const max = documents
+    .filter((entry) => (entry.organizationId ?? null) === (organizationId ?? null))
+    .reduce((current, entry) => {
+      const match = (entry.publicId ?? '').match(/-DOC-(\d+)$/)
+      const value = match ? Number(match[1]) : 0
+      return Number.isFinite(value) ? Math.max(current, value) : current
+    }, 0)
+  return `${prefix}-DOC-${max + 1}`
+}
+
+function documentPublicIdPrefix(organizationId: string | null, organizations: OrganizationRow[]) {
+  const organization = organizationId ? organizations.find((entry) => entry.id === organizationId) : null
+  const raw = (organization?.project ?? organization?.name ?? 'doc')
+    .replace(/[^a-zA-Z0-9]/g, '')
+    .slice(0, 3)
+    .toUpperCase()
+  return raw || 'DOC'
+}
+
 function uniqueMarketingChannels(items: Array<{ supportedChannels: string[] }>) {
   const channels = Array.from(new Set(items.flatMap((item) => item.supportedChannels)))
   return channels.length ? channels.join(', ') : 'content'
+}
+
+function isDocumentMainSnapshot(
+  document: DocumentRow,
+  snapshot: DocumentSnapshotRow,
+  mainSnapshot: DocumentSnapshotRow | null,
+) {
+  return document.currentSnapshotId ? document.currentSnapshotId === snapshot.id : mainSnapshot?.id === snapshot.id
+}
+
+function formatSnapshotDate(value: number) {
+  const date = new Date(value)
+  if (!Number.isFinite(date.getTime())) return 'unknown date'
+  const options: Intl.DateTimeFormatOptions = {
+    month: 'short',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+  }
+  if (date.getFullYear() !== new Date().getFullYear()) options.year = 'numeric'
+  return new Intl.DateTimeFormat(undefined, options).format(date)
+}
+
+function snapshotSourceLabel(snapshot: DocumentSnapshotRow) {
+  if (snapshot.createdByType === 'agent') return 'agent'
+  if (snapshot.agentRunId) return 'agent'
+  return 'user'
 }
 
 async function readJson(response: Response) {

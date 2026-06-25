@@ -22,6 +22,7 @@ export default {
     fin_categorization_rules: { row: { select: ['true'], insert: ['true'], update: ['true'], delete: ['true'] } },
     fin_balance_snapshots: { row: { select: ['true'], insert: ['true'], update: ['true'], delete: ['true'] } },
     documents: { row: { select: ['true'], insert: ['true'], update: ['true'], delete: ['true'] } },
+    document_snapshots: { row: { select: ['true'], insert: ['true'], update: ['true'], delete: ['true'] } },
     mkt_sender_profiles: { row: { select: ['true'], insert: ['true'], update: ['true'], delete: ['true'] } },
     mkt_publications: { row: { select: ['true'], insert: ['true'], update: ['true'], delete: ['true'] } },
     mkt_ctas: { row: { select: ['true'], insert: ['true'], update: ['true'], delete: ['true'] } },
