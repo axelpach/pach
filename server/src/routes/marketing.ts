@@ -683,7 +683,7 @@ async function sendNewsletterRun(runId: string, testOnly: boolean) {
     )
   }
   const designSystem = await organizationDesignSystem(run.organizationId)
-  const primaryCta = await activePrimaryCta(item)
+  const primaryCta = await selectedNewsletterCta(item, publication)
 
   const recipients = testOnly
     ? []
@@ -722,7 +722,7 @@ async function sendNewsletterRun(runId: string, testOnly: boolean) {
         to: recipient.email,
         subject: run.subject || item.title,
         html: renderNewsletterHtml({ item, run, publication, sender, designSystem, primaryCta, audienceMemberId: recipient.id, unsubscribeUrl }),
-        text: renderNewsletterText({ item, publication, primaryCta, unsubscribeUrl }),
+        text: renderNewsletterText({ item, primaryCta, unsubscribeUrl }),
         tags: [
           { name: 'run_id', value: run.id },
           { name: 'content_id', value: item.id },
@@ -799,11 +799,11 @@ async function renderNewsletterRun(runId: string) {
     )
   }
   const designSystem = await organizationDesignSystem(run.organizationId)
-  const primaryCta = await activePrimaryCta(item)
+  const primaryCta = await selectedNewsletterCta(item, publication)
 
   return {
     html: renderNewsletterHtml({ item, run, publication, sender, designSystem, primaryCta }),
-    text: renderNewsletterText({ item, publication, primaryCta }),
+    text: renderNewsletterText({ item, primaryCta }),
     warnings: newsletterRenderWarnings(item.body),
     mode: emailThemeMode(run, publication, designSystem),
   }
@@ -1107,6 +1107,12 @@ const DEFAULT_EMAIL_PALETTE: EmailPalette = {
   fontMono: "'Geist Mono', 'SFMono-Regular', Menlo, Consolas, 'Courier New', monospace",
 }
 
+type SelectedEmailCta = {
+  id: string | null
+  label: string
+  url: string
+}
+
 function renderNewsletterHtml({
   item,
   run,
@@ -1122,7 +1128,7 @@ function renderNewsletterHtml({
   publication?: typeof mktPublications.$inferSelect
   sender: typeof mktSenderProfiles.$inferSelect
   designSystem?: typeof designSystems.$inferSelect | null
-  primaryCta?: typeof mktCtas.$inferSelect | null
+  primaryCta?: SelectedEmailCta | null
   audienceMemberId?: string | null
   unsubscribeUrl?: string | null
 }) {
@@ -1136,9 +1142,7 @@ function renderNewsletterHtml({
     : ''
   const selectedCta = primaryCta
     ? { id: primaryCta.id, label: primaryCta.label, url: primaryCta.url }
-    : wrapper.cta?.label && wrapper.cta.url
-      ? { id: null, label: wrapper.cta.label, url: wrapper.cta.url }
-      : null
+    : null
   const ctaBlock = selectedCta
     ? `<div style="text-align:left;margin:24px 0;"><a href="${escapeAttribute(marketingClickUrl({ run, item, ctaId: selectedCta.id, audienceMemberId, url: selectedCta.url }))}" style="display:inline-block;border:1px solid ${palette.accent};border-radius:0;color:${palette.buttonText};background:${palette.buttonBg};padding:11px 22px;text-decoration:none;text-align:center;font-size:13px;font-weight:500;line-height:1.2;">${escapeHtml(selectedCta.label)}</a></div>`
     : ''
@@ -1181,23 +1185,40 @@ async function activePrimaryCta(item: typeof mktContentItems.$inferSelect) {
   return cta?.status === 'active' ? cta : null
 }
 
+async function selectedNewsletterCta(
+  item: typeof mktContentItems.$inferSelect,
+  publication?: typeof mktPublications.$inferSelect,
+): Promise<SelectedEmailCta | null> {
+  const primaryCta = await activePrimaryCta(item)
+  if (primaryCta) return { id: primaryCta.id, label: primaryCta.label, url: primaryCta.url }
+
+  const wrapperCta = publicationEmailWrapper(publication).cta
+  if (!wrapperCta) return null
+  if (wrapperCta.id) {
+    const [cta] = await getDb()
+      .select()
+      .from(mktCtas)
+      .where(and(eq(mktCtas.id, wrapperCta.id), eq(mktCtas.organizationId, item.organizationId)))
+      .limit(1)
+    return cta?.status === 'active' ? { id: cta.id, label: cta.label, url: cta.url } : null
+  }
+  return wrapperCta.label && wrapperCta.url
+    ? { id: null, label: wrapperCta.label, url: wrapperCta.url }
+    : null
+}
+
 function renderNewsletterText({
   item,
-  publication,
   primaryCta,
   unsubscribeUrl,
 }: {
   item: typeof mktContentItems.$inferSelect
-  publication?: typeof mktPublications.$inferSelect
-  primaryCta?: typeof mktCtas.$inferSelect | null
+  primaryCta?: SelectedEmailCta | null
   unsubscribeUrl?: string | null
 }) {
-  const wrapper = publicationEmailWrapper(publication)
   const selectedCta = primaryCta
     ? { label: primaryCta.label, url: primaryCta.url }
-    : wrapper.cta?.label && wrapper.cta.url
-      ? { label: wrapper.cta.label, url: wrapper.cta.url }
-      : null
+    : null
   return [
     item.title,
     item.excerpt,
@@ -1655,6 +1676,7 @@ function publicationEmailWrapper(publication?: typeof mktPublications.$inferSele
   const source = Object.keys(emailWrapper).length ? emailWrapper : emailBlocks
   const cta = readRecord(source.cta)
   const headerLogo = readRecord(source.headerLogo)
+  const id = readOptionalString(cta.id)
   const label = readOptionalString(cta.label)
   const url = readOptionalString(cta.url)
   return {
@@ -1663,7 +1685,7 @@ function publicationEmailWrapper(publication?: typeof mktPublications.$inferSele
     headerLogoAlt: readOptionalString(headerLogo.alt),
     beforeContent: readOptionalString(source.beforeContent) ?? '',
     footer: readOptionalString(source.footer) ?? '',
-    cta: label && url ? { label, url } : null,
+    cta: id ? { id, label, url } : label && url ? { id: null, label, url } : null,
   }
 }
 

@@ -44,6 +44,7 @@ type PublicationEmailWrapper = {
   headerLogoEnabled: boolean
   beforeContent: string
   footer: string
+  ctaId: string
   ctaLabel: string
   ctaUrl: string
 }
@@ -270,6 +271,7 @@ export default function Marketing() {
               selectedPublication={selectedPublication}
               onSelectPublication={setSelectedPublicationId}
               senderProfiles={orgSenderProfiles}
+              ctas={orgCtas}
               members={orgMembers}
               subscriptions={orgSubscriptions}
               onCreateSenderProfile={createSenderProfile}
@@ -282,6 +284,7 @@ export default function Marketing() {
               organizationId={organizationId}
               publications={orgPublications}
               senderProfiles={orgSenderProfiles}
+              ctas={orgCtas}
               contentItems={orgContentItems}
               runs={orgRuns}
               selectedPublication={selectedPublication}
@@ -296,6 +299,7 @@ export default function Marketing() {
           {section === 'analytics' ? (
             <AnalyticsSection
               contentItems={orgContentItems}
+              audienceMembers={orgMembers}
               events={orgEvents}
               subscriptions={orgSubscriptions}
               ctas={orgCtas}
@@ -476,6 +480,7 @@ function NewslettersSection({
   selectedPublication,
   onSelectPublication,
   senderProfiles,
+  ctas,
   members,
   subscriptions,
   onCreateSenderProfile,
@@ -488,6 +493,7 @@ function NewslettersSection({
   selectedPublication: PublicationRow | null
   onSelectPublication: (id: string) => void
   senderProfiles: SenderProfileRow[]
+  ctas: CtaRow[]
   members: AudienceMemberRow[]
   subscriptions: AudienceSubscriptionRow[]
   onCreateSenderProfile: () => Promise<void>
@@ -859,18 +865,11 @@ function NewslettersSection({
                   value={editingPublicationWrapper.beforeContent}
                   onCommit={(beforeContent) => updatePublicationEmailWrapper({ beforeContent })}
                 />
-                <div className="grid gap-3 md:grid-cols-2">
-                  <CommitInput
-                    label="cta label"
-                    value={editingPublicationWrapper.ctaLabel}
-                    onCommit={(ctaLabel) => updatePublicationEmailWrapper({ ctaLabel })}
-                  />
-                  <CommitInput
-                    label="cta url"
-                    value={editingPublicationWrapper.ctaUrl}
-                    onCommit={(ctaUrl) => updatePublicationEmailWrapper({ ctaUrl })}
-                  />
-                </div>
+                <EmailWrapperCtaSelect
+                  wrapper={editingPublicationWrapper}
+                  ctas={ctas}
+                  onChange={updatePublicationEmailWrapper}
+                />
                 <CommitTextarea
                   label="footer"
                   value={editingPublicationWrapper.footer}
@@ -1075,6 +1074,7 @@ function BroadcastsSection({
   organizationId,
   publications,
   senderProfiles,
+  ctas,
   contentItems,
   runs,
   selectedPublication,
@@ -1086,6 +1086,7 @@ function BroadcastsSection({
   organizationId: string
   publications: PublicationRow[]
   senderProfiles: SenderProfileRow[]
+  ctas: CtaRow[]
   contentItems: ContentItemRow[]
   runs: DistributionRunRow[]
   selectedPublication: PublicationRow | null
@@ -1178,6 +1179,7 @@ function BroadcastsSection({
         run={selectedRun}
         publications={publications}
         senderProfiles={senderProfiles}
+        ctas={ctas}
         contentItems={contentItems}
         contentOptions={contentOptions}
         publicationOptions={publicationOptions}
@@ -1296,6 +1298,7 @@ function BroadcastDetailView({
   run,
   publications,
   senderProfiles,
+  ctas,
   contentItems,
   contentOptions,
   publicationOptions,
@@ -1309,6 +1312,7 @@ function BroadcastDetailView({
   run: DistributionRunRow
   publications: PublicationRow[]
   senderProfiles: SenderProfileRow[]
+  ctas: CtaRow[]
   contentItems: ContentItemRow[]
   contentOptions: PachSelectOption[]
   publicationOptions: PachSelectOption[]
@@ -1556,18 +1560,11 @@ function BroadcastDetailView({
                   value={publicationWrapper.beforeContent}
                   onCommit={(beforeContent) => updatePublicationWrapper({ beforeContent })}
                 />
-                <div className="grid gap-3 md:grid-cols-2">
-                  <CommitInput
-                    label="cta label"
-                    value={publicationWrapper.ctaLabel}
-                    onCommit={(ctaLabel) => updatePublicationWrapper({ ctaLabel })}
-                  />
-                  <CommitInput
-                    label="cta url"
-                    value={publicationWrapper.ctaUrl}
-                    onCommit={(ctaUrl) => updatePublicationWrapper({ ctaUrl })}
-                  />
-                </div>
+                <EmailWrapperCtaSelect
+                  wrapper={publicationWrapper}
+                  ctas={ctas}
+                  onChange={updatePublicationWrapper}
+                />
                 <CommitTextarea
                   label="footer"
                   value={publicationWrapper.footer}
@@ -1836,11 +1833,13 @@ function CtasSection({
 
 function AnalyticsSection({
   contentItems,
+  audienceMembers,
   events,
   subscriptions,
   ctas,
 }: {
   contentItems: ContentItemRow[]
+  audienceMembers: AudienceMemberRow[]
   events: ContentEventRow[]
   subscriptions: AudienceSubscriptionRow[]
   ctas: CtaRow[]
@@ -1858,13 +1857,14 @@ function AnalyticsSection({
 
       <Panel title="activity">
         <div className="max-h-[calc(100vh-340px)] overflow-auto">
-          <table className="w-full min-w-[920px] text-left font-mono text-xs">
+          <table className="w-full min-w-[1040px] text-left font-mono text-xs">
             <thead className="sticky top-0 z-10 bg-pit text-[10px] uppercase tracking-label text-fg-4">
               <tr className="border-b border-edge/12">
                 <th className="pb-2 pr-3 font-normal">event</th>
                 <th className="pb-2 pr-3 font-normal">channel</th>
                 <th className="pb-2 pr-3 font-normal">content</th>
                 <th className="pb-2 pr-3 font-normal">cta</th>
+                <th className="pb-2 pr-3 font-normal">subscriber</th>
                 <th className="pb-2 pr-3 font-normal">source</th>
                 <th className="pb-2 font-normal">time</th>
               </tr>
@@ -1873,12 +1873,14 @@ function AnalyticsSection({
               {events.slice(0, 120).map((event) => {
                 const item = contentItems.find((entry) => entry.id === event.contentItemId)
                 const cta = ctas.find((entry) => entry.id === event.ctaId)
+                const audienceMember = audienceMembers.find((entry) => entry.id === event.audienceMemberId)
                 return (
                   <tr key={event.id} className="border-b border-edge/8 text-fg-2">
                     <td className="py-2.5 pr-3"><StatusPill kind={eventKind(event.eventType)}>{event.eventType}</StatusPill></td>
                     <td className="py-2.5 pr-3">{event.channel ?? '-'}</td>
                     <td className="max-w-[280px] truncate py-2.5 pr-3">{item?.title ?? '-'}</td>
                     <td className="py-2.5 pr-3">{cta?.label ?? '-'}</td>
+                    <td className="max-w-[220px] truncate py-2.5 pr-3">{audienceMember?.email ?? audienceMember?.name ?? '-'}</td>
                     <td className="py-2.5 pr-3">{event.source ?? '-'}</td>
                     <td className="py-2.5 text-fg-4">{formatDate(event.createdAt)}</td>
                   </tr>
@@ -2184,6 +2186,54 @@ function EmailBinaryControl({ value, onChange }: { value: boolean; onChange: (ne
   )
 }
 
+function EmailWrapperCtaSelect({
+  wrapper,
+  ctas,
+  onChange,
+}: {
+  wrapper: PublicationEmailWrapper
+  ctas: CtaRow[]
+  onChange: (updates: Partial<PublicationEmailWrapper>) => void
+}) {
+  const activeCtas = ctas.filter((cta) => cta.status === 'active')
+  const ctaOptions = [
+    { value: '', label: 'no cta' },
+    ...activeCtas.map((cta) => ({ value: cta.id, label: cta.label })),
+  ]
+  const selectedCta = ctas.find((cta) => cta.id === wrapper.ctaId) ?? null
+  const hasLegacyCta = !wrapper.ctaId && Boolean(wrapper.ctaLabel && wrapper.ctaUrl)
+  const display = selectedCta?.label ?? (hasLegacyCta ? `legacy · ${wrapper.ctaLabel}` : 'no cta')
+
+  return (
+    <div>
+      <FieldLabel>cta</FieldLabel>
+      <PachSelect
+        value={wrapper.ctaId}
+        onChange={(ctaId) => {
+          const cta = ctas.find((entry) => entry.id === ctaId)
+          onChange({
+            ctaId,
+            ctaLabel: cta?.label ?? '',
+            ctaUrl: cta?.url ?? '',
+          })
+        }}
+        options={ctaOptions}
+        display={display}
+      />
+      {hasLegacyCta ? (
+        <div className="mt-1 font-mono text-[10px] lowercase text-fg-4">
+          legacy url: select a saved cta to replace it
+        </div>
+      ) : null}
+      {activeCtas.length === 0 ? (
+        <div className="mt-1 font-mono text-[10px] lowercase text-fg-4">
+          create an active cta in the ctas tab first
+        </div>
+      ) : null}
+    </div>
+  )
+}
+
 function EmptyState({ label }: { label: string }) {
   return (
     <div className="border border-dashed border-edge/16 px-3 py-6 text-center font-mono text-xs lowercase text-fg-4">
@@ -2217,8 +2267,9 @@ function defaultEmailWrapper(): PublicationEmailWrapper {
     headerLogoEnabled: true,
     beforeContent: '',
     footer: 'Ardia · Infraestructura de cobranza, conciliación y seguimiento para desarrolladoras inmobiliarias en México.',
-    ctaLabel: 'Conversar',
-    ctaUrl: 'https://www.ardia.mx/#contacto',
+    ctaId: '',
+    ctaLabel: '',
+    ctaUrl: '',
   }
 }
 
@@ -2233,6 +2284,12 @@ function defaultHeaderLogo() {
 }
 
 function emailWrapperPayload(wrapper: PublicationEmailWrapper) {
+  const ctaPayload = wrapper.ctaId
+    ? { id: wrapper.ctaId, label: wrapper.ctaLabel, url: wrapper.ctaUrl }
+    : wrapper.ctaLabel && wrapper.ctaUrl
+      ? { label: wrapper.ctaLabel, url: wrapper.ctaUrl }
+      : null
+
   return {
     header: wrapper.header,
     headerLogo: {
@@ -2242,10 +2299,7 @@ function emailWrapperPayload(wrapper: PublicationEmailWrapper) {
     },
     beforeContent: wrapper.beforeContent,
     footer: wrapper.footer,
-    cta: {
-      label: wrapper.ctaLabel,
-      url: wrapper.ctaUrl,
-    },
+    cta: ctaPayload,
   }
 }
 
@@ -2263,6 +2317,7 @@ function publicationEmailWrapper(publication: PublicationRow | null): Publicatio
     headerLogoEnabled: headerLogo.enabled !== false,
     beforeContent: typeof source.beforeContent === 'string' ? source.beforeContent : fallback.beforeContent,
     footer: typeof source.footer === 'string' ? source.footer : fallback.footer,
+    ctaId: typeof cta.id === 'string' ? cta.id : '',
     ctaLabel: typeof cta.label === 'string' ? cta.label : fallback.ctaLabel,
     ctaUrl: typeof cta.url === 'string' ? cta.url : fallback.ctaUrl,
   }

@@ -865,6 +865,20 @@ export function createServerMutators(authData?: JWTPayload) {
       },
       async delete(tx: Tx, args: { id: string }) {
         await requireExistingOrganizationAccess(tx, 'mkt_distribution_runs', args.id)
+        const rows = await tx.dbTransaction.query(
+          'select "status" as status from "mkt_distribution_runs" where "id" = $1 limit 1',
+          [args.id],
+        )
+        const run = Array.from(rows)[0]
+        if (run?.status !== 'draft') throw new Error('Only draft broadcasts can be deleted')
+
+        const eventRows = await tx.dbTransaction.query(
+          'select "id" as id from "mkt_content_events" where "distribution_run_id" = $1',
+          [args.id],
+        )
+        for (const event of Array.from(eventRows)) {
+          await tx.mutate.mkt_content_events.delete({ id: event.id as string })
+        }
         await tx.mutate.mkt_distribution_runs.delete({ id: args.id })
       },
     },

@@ -674,7 +674,7 @@ export const mktContentEvents = pgTable('mkt_content_events', {
     id: uuid('id').primaryKey().defaultRandom(),
     organizationId: uuid('organization_id').notNull().references(() => organizations.id),
     contentItemId: uuid('content_item_id').references(() => mktContentItems.id),
-    distributionRunId: uuid('distribution_run_id').references(() => mktDistributionRuns.id),
+    distributionRunId: uuid('distribution_run_id').references(() => mktDistributionRuns.id, { onDelete: 'cascade' }),
     audienceMemberId: uuid('audience_member_id').references(() => mktAudienceMembers.id),
     ctaId: uuid('cta_id').references(() => mktCtas.id),
     eventType: text('event_type').notNull(),
