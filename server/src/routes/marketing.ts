@@ -65,6 +65,21 @@ publicMarketingRouter.get('/organizations/:project/marketing/posts', asyncRoute(
     ))
     .orderBy(desc(mktDistributionRuns.completedAt), desc(mktDistributionRuns.updatedAt))
 
+  const defaultNewsletterPublication = await findPublicNewsletterPublication({ organizationId: organization.id })
+  const publicationIds = unique(rows.map((row) => row.publicationId).filter((id): id is string => Boolean(id)))
+  const publications = publicationIds.length
+    ? await getDb()
+      .select()
+      .from(mktPublications)
+      .where(and(
+        eq(mktPublications.organizationId, organization.id),
+        eq(mktPublications.type, 'newsletter'),
+        eq(mktPublications.status, 'active'),
+        inArray(mktPublications.id, publicationIds),
+      ))
+    : []
+  const publicationsById = new Map(publications.map((publication) => [publication.id, publication]))
+
   const contentIds = unique(rows.map((row) => row.contentItemId))
   const items = contentIds.length
     ? await getDb().select().from(mktContentItems).where(inArray(mktContentItems.id, contentIds))
@@ -77,9 +92,10 @@ publicMarketingRouter.get('/organizations/:project/marketing/posts', asyncRoute(
       .map((run) => {
         const item = run.contentItemId ? byId.get(run.contentItemId) : null
         if (!item || !isPublicBlogContentItem(item)) return null
-        return publicPostSummary(item, run)
+        return publicPostSummary(item, run, (run.publicationId ? publicationsById.get(run.publicationId) : null) ?? defaultNewsletterPublication ?? null)
       })
       .filter(Boolean),
+    newsletterPublication: defaultNewsletterPublication ? publicPublication(defaultNewsletterPublication) : null,
   })
 }))
 
@@ -123,6 +139,9 @@ publicMarketingRouter.get('/organizations/:project/marketing/posts/:slug', async
   const [primaryCta] = item.primaryCtaId
     ? await getDb().select().from(mktCtas).where(eq(mktCtas.id, item.primaryCtaId)).limit(1)
     : []
+  const newsletterPublication = (run.publicationId
+    ? await findPublicNewsletterPublication({ organizationId: organization.id, publicationId: run.publicationId })
+    : null) ?? await findPublicNewsletterPublication({ organizationId: organization.id, contentItemId: item.id })
 
   await recordEvent({
     organizationId: organization.id,
@@ -137,7 +156,7 @@ publicMarketingRouter.get('/organizations/:project/marketing/posts/:slug', async
   res.json({
     organization: publicOrganization(organization),
     post: {
-      ...publicPostSummary(item, run),
+      ...publicPostSummary(item, run, newsletterPublication),
       body: item.body,
       format: item.format,
       tags: item.tags,
@@ -178,7 +197,7 @@ publicMarketingRouter.post('/organizations/:project/marketing/subscribe', asyncR
     return
   }
 
-  const publication = await findPublicNewsletterPublication(organization.id, publicationSlug)
+  const publication = await findPublicNewsletterPublication({ organizationId: organization.id, slug: publicationSlug, contentItemId, distributionRunId })
   if (!publication) {
     res.status(404).json({ error: 'Publication not found' })
     return
@@ -1791,18 +1810,88 @@ async function findPublicOrganization(project: string) {
   return organization
 }
 
-async function findPublicNewsletterPublication(organizationId: string, slug?: string) {
-  const conditions = [
-    eq(mktPublications.organizationId, organizationId),
-    eq(mktPublications.type, 'newsletter'),
-    eq(mktPublications.status, 'active'),
-  ]
-  if (slug) conditions.push(eq(mktPublications.slug, slug))
+async function findPublicNewsletterPublication({
+  organizationId,
+  slug,
+  publicationId,
+  contentItemId,
+  distributionRunId,
+}: {
+  organizationId: string
+  slug?: string
+  publicationId?: string | null
+  contentItemId?: string | null
+  distributionRunId?: string | null
+}): Promise<typeof mktPublications.$inferSelect | undefined> {
+  if (publicationId) {
+    const [publication] = await getDb()
+      .select()
+      .from(mktPublications)
+      .where(and(
+        eq(mktPublications.id, publicationId),
+        eq(mktPublications.organizationId, organizationId),
+        eq(mktPublications.type, 'newsletter'),
+        eq(mktPublications.status, 'active'),
+      ))
+      .limit(1)
+    if (publication) return publication
+  }
+
+  if (slug) {
+    const [publication] = await getDb()
+      .select()
+      .from(mktPublications)
+      .where(and(
+        eq(mktPublications.organizationId, organizationId),
+        eq(mktPublications.type, 'newsletter'),
+        eq(mktPublications.status, 'active'),
+        eq(mktPublications.slug, slug),
+      ))
+      .limit(1)
+    if (publication) return publication
+  }
+
+  if (distributionRunId) {
+    const [run] = await getDb()
+      .select()
+      .from(mktDistributionRuns)
+      .where(and(
+        eq(mktDistributionRuns.id, distributionRunId),
+        eq(mktDistributionRuns.organizationId, organizationId),
+      ))
+      .limit(1)
+    if (run?.publicationId) {
+      const publication: typeof mktPublications.$inferSelect | undefined = await findPublicNewsletterPublication({ organizationId, publicationId: run.publicationId })
+      if (publication) return publication
+    }
+  }
+
+  if (contentItemId) {
+    const [run] = await getDb()
+      .select()
+      .from(mktDistributionRuns)
+      .where(and(
+        eq(mktDistributionRuns.organizationId, organizationId),
+        eq(mktDistributionRuns.contentItemId, contentItemId),
+        eq(mktDistributionRuns.channel, 'blog'),
+        eq(mktDistributionRuns.status, 'published'),
+      ))
+      .orderBy(desc(mktDistributionRuns.completedAt), desc(mktDistributionRuns.updatedAt))
+      .limit(1)
+    if (run?.publicationId) {
+      const publication: typeof mktPublications.$inferSelect | undefined = await findPublicNewsletterPublication({ organizationId, publicationId: run.publicationId })
+      if (publication) return publication
+    }
+  }
 
   const [publication] = await getDb()
     .select()
     .from(mktPublications)
-    .where(and(...conditions))
+    .where(and(
+      eq(mktPublications.organizationId, organizationId),
+      eq(mktPublications.type, 'newsletter'),
+      eq(mktPublications.status, 'active'),
+    ))
     .orderBy(desc(mktPublications.updatedAt))
     .limit(1)
 
@@ -1817,7 +1906,20 @@ function publicOrganization(organization: typeof organizations.$inferSelect) {
   }
 }
 
-function publicPostSummary(item: typeof mktContentItems.$inferSelect, run: typeof mktDistributionRuns.$inferSelect) {
+function publicPublication(publication: typeof mktPublications.$inferSelect) {
+  return {
+    id: publication.id,
+    name: publication.name,
+    slug: publication.slug,
+    type: publication.type,
+  }
+}
+
+function publicPostSummary(
+  item: typeof mktContentItems.$inferSelect,
+  run: typeof mktDistributionRuns.$inferSelect,
+  newsletterPublication?: typeof mktPublications.$inferSelect | null,
+) {
   return {
     id: item.id,
     distributionRunId: run.id,
@@ -1829,6 +1931,7 @@ function publicPostSummary(item: typeof mktContentItems.$inferSelect, run: typeo
     publishedAt: run.completedAt?.toISOString() ?? run.updatedAt.toISOString(),
     updatedAt: item.updatedAt.toISOString(),
     primaryCtaId: item.primaryCtaId,
+    newsletterPublication: newsletterPublication ? publicPublication(newsletterPublication) : null,
   }
 }
 
