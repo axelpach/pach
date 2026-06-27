@@ -39,6 +39,26 @@ export const organizationMemberships = pgTable('organization_memberships', {
     organizationIdIdx: index('organization_memberships_organization_idx').on(table.organizationId),
     userIdIdx: index('organization_memberships_user_idx').on(table.userId),
 }));
+export const organizationApiKeys = pgTable('organization_api_keys', {
+    id: uuid('id').primaryKey().defaultRandom(),
+    organizationId: uuid('organization_id').notNull().references(() => organizations.id),
+    name: text('name').notNull(),
+    tokenPrefix: text('token_prefix').notNull().unique(),
+    tokenHash: text('token_hash').notNull().unique(),
+    scopes: jsonb('scopes').$type().notNull().default([]),
+    status: text('status').notNull().default('active'),
+    createdByUserId: uuid('created_by_user_id').references(() => users.id),
+    lastUsedAt: timestamp('last_used_at', { withTimezone: true }),
+    revokedAt: timestamp('revoked_at', { withTimezone: true }),
+    metadata: jsonb('metadata').$type().notNull().default({}),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+}, (table) => ({
+    organizationIdIdx: index('organization_api_keys_organization_idx').on(table.organizationId),
+    tokenHashIdx: index('organization_api_keys_token_hash_idx').on(table.tokenHash),
+    tokenPrefixIdx: index('organization_api_keys_token_prefix_idx').on(table.tokenPrefix),
+    revokedAtIdx: index('organization_api_keys_revoked_at_idx').on(table.revokedAt),
+}));
 export const mcpTokens = pgTable('mcp_tokens', {
     id: uuid('id').primaryKey().defaultRandom(),
     name: text('name').notNull(),

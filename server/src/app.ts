@@ -16,6 +16,7 @@ import marketingRoute, { publicMarketingRouter } from './routes/marketing.js'
 import mcpRoute from './routes/mcp.js'
 import designPreviewRoute from './routes/design-preview.js'
 import designRoute from './routes/design.js'
+import apiKeysRoute from './routes/api-keys.js'
 import { requireAuth, requireUnscopedAccess } from './middleware/auth.js'
 import { startTaskTriggerRunner } from './services/task-triggers/runner.js'
 
@@ -43,6 +44,7 @@ app.use('/design', requireAuth, designRoute)
 app.use('/design-preview', designPreviewRoute)
 app.use('/finance', requireAuth, financeRoute)
 app.use('/marketing', requireAuth, marketingRoute)
+app.use('/api-keys', requireAuth, apiKeysRoute)
 app.use('/media', publicMediaRouter)
 app.use('/media', requireAuth, mediaRoute)
 

@@ -1,6 +1,6 @@
 import { Routes, Route, NavLink, Navigate, useLocation, useNavigate, useParams } from 'react-router-dom'
 import { useQuery, useZero, ZeroProvider } from '@rocicorp/zero/react'
-import { CircleDollarSign, FileText, FolderKanban, LogOut, Megaphone, MessageCircleMore, Menu, Moon, Palette, Rows3, Sun, X } from 'lucide-react'
+import { CircleDollarSign, FileText, FolderKanban, LogOut, Megaphone, MessageCircleMore, Menu, Moon, Palette, Rows3, Settings2, Sun, X } from 'lucide-react'
 import { createContext, useContext, useEffect, useMemo, useState, type ComponentType, type ReactNode } from 'react'
 import { schema, type Schema } from './zero-schema'
 import { mutators, type Mutators } from './mutators'
@@ -11,6 +11,7 @@ import CRM from './pages/crm/CRM'
 import Docs from './pages/docs/Docs'
 import Finance from './pages/finance/Finance'
 import Marketing from './pages/marketing/Marketing'
+import SettingsPage from './pages/settings/Settings'
 import Issues from './pages/issues/Issues'
 import IssueDetail from './pages/issues/IssueDetail'
 import IssuesLayout from './pages/issues/IssuesLayout'
@@ -41,6 +42,7 @@ const OUTER_NAV_ITEMS: readonly OuterNavItem[] = [
   { label: 'Finance', path: '/finance/dashboard' },
   { label: 'WhatsApp', path: '/whatsapp/templates', requiresWhatsApp: true },
   { label: 'Design', path: '/design' },
+  { label: 'Settings', path: '/settings/api-keys' },
 ]
 
 type ThemeMode = 'dark' | 'light'
@@ -96,6 +98,7 @@ function isNavPathActive(targetPath: string, pathname: string) {
   if (targetPath.startsWith('/finance')) return pathname.startsWith('/finance')
   if (targetPath.startsWith('/marketing')) return pathname.startsWith('/marketing')
   if (targetPath.startsWith('/whatsapp')) return pathname.startsWith('/whatsapp')
+  if (targetPath.startsWith('/settings')) return pathname.startsWith('/settings')
   return pathname === targetPath || pathname.startsWith(`${targetPath}/`)
 }
 
@@ -214,6 +217,7 @@ const MOBILE_NAV_ITEMS: Array<{
   { to: '/finance/dashboard', label: 'finance', icon: CircleDollarSign },
   { to: '/whatsapp/templates', label: 'whatsapp', icon: MessageCircleMore, requiresWhatsApp: true },
   { to: '/design', label: 'design', icon: Palette },
+  { to: '/settings/api-keys', label: 'settings', icon: Settings2 },
 ]
 
 function MobileHeader({ onMenuClick }: { onMenuClick: () => void }) {
@@ -417,6 +421,7 @@ function AppShell() {
               )}
               <Route path="/design" element={<Design />} />
               <Route path="/design/:templateSlug" element={<Design />} />
+              <Route path="/settings/*" element={<SettingsPage />} />
               <Route path="/decks" element={<Navigate to="/design" replace />} />
               <Route path="/decks/:slug" element={<LegacyDeckRedirect />} />
             </Routes>
@@ -454,6 +459,7 @@ function useVisibleOuterNavItems() {
             item.path.startsWith('/marketing') ? Megaphone :
             item.path.startsWith('/finance') ? CircleDollarSign :
             item.path === '/whatsapp/templates' ? MessageCircleMore :
+            item.path.startsWith('/settings') ? Settings2 :
             Palette,
         })),
     [canAccessWhatsApp],
