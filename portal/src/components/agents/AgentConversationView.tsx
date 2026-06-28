@@ -17,6 +17,7 @@ type AgentConversationViewProps = {
   messages: Schema['tables']['agent_messages']['row'][]
   workers: Schema['tables']['agent_workers']['row'][]
   repositories: Schema['tables']['github_repositories']['row'][]
+  allowCreateRun?: boolean
   onCreateRun: () => void | Promise<void>
   onSeedRepositories: () => void | Promise<void>
   onSendFeedback: (feedback: string, inputMedia?: PendingAgentInputMedia[]) => void | Promise<void>
@@ -44,6 +45,7 @@ export function AgentConversationView({
   messages,
   workers,
   repositories,
+  allowCreateRun = true,
   onCreateRun,
   onSeedRepositories,
   onSendFeedback,
@@ -59,7 +61,7 @@ export function AgentConversationView({
   const conversationEndRef = useRef<HTMLDivElement | null>(null)
   const feedbackFileInputRef = useRef<HTMLInputElement | null>(null)
   const onlineWorkers = workers.filter((worker) => worker.status !== 'offline')
-  const canCreateRun = repositories.length > 0 && !run
+  const canCreateRun = allowCreateRun && repositories.length > 0 && !run
   const canCancelRun = Boolean(run && !['completed', 'failed', 'canceled'].includes(run.status))
   const runIsWorking = isRunWorking(run)
   const streamItems = buildAgentConversationStream({ progressReports, legacyProgressActivity, messages })
@@ -128,7 +130,7 @@ export function AgentConversationView({
               </div>
             </div>
             <div className="flex items-center gap-2">
-              {!run ? (
+              {!run && allowCreateRun ? (
                 <button
                   type="button"
                   onClick={() => {

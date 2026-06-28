@@ -186,6 +186,7 @@ export default function IssueDetail() {
     : null
 
   const workspaceStatuses = getWorkspaceStatuses(statuses)
+  const issueIsDone = Boolean(issue?.completedAt || status?.type === 'completed')
   const teamProjects = team ? projects.filter((p) => p.teamId === team.id) : []
   const labelMap = new Map(scopedLabels.map((l) => [l.id, l]))
   const currentLabels = issueLabelLinks
@@ -642,6 +643,7 @@ export default function IssueDetail() {
             messages={activeMessages}
             workers={workers}
             repositories={repositories}
+            allowCreateRun={!issueIsDone}
             onCreateRun={createAgentRun}
             onSeedRepositories={seedDefaultRepositories}
             onSendFeedback={sendAgentFeedback}
@@ -723,9 +725,9 @@ export default function IssueDetail() {
               run={activeRun}
               progressReports={activeProgressReports}
               legacyProgressActivity={legacyRunProgressActivity}
-              messages={activeMessages}
               workers={workers}
               repositories={repositories}
+              allowCreateRun={!issueIsDone}
               onCreateRun={createAgentRun}
               onSeedRepositories={seedDefaultRepositories}
               onCancelRun={cancelAgentRun}
@@ -938,9 +940,9 @@ function AgentSidebarCard({
   run,
   progressReports,
   legacyProgressActivity,
-  messages,
   workers,
   repositories,
+  allowCreateRun,
   onCreateRun,
   onSeedRepositories,
   onCancelRun,
@@ -950,9 +952,9 @@ function AgentSidebarCard({
   run: Schema['tables']['agent_runs']['row'] | null
   progressReports: Schema['tables']['agent_run_progress_reports']['row'][]
   legacyProgressActivity: Schema['tables']['activity_events']['row'][]
-  messages: Schema['tables']['agent_messages']['row'][]
   workers: Schema['tables']['agent_workers']['row'][]
   repositories: Schema['tables']['github_repositories']['row'][]
+  allowCreateRun: boolean
   onCreateRun: () => void | Promise<void>
   onSeedRepositories: () => void | Promise<void>
   onCancelRun: () => void | Promise<void>
@@ -960,7 +962,7 @@ function AgentSidebarCard({
   onOpenFullView: () => void
 }) {
   const onlineWorkers = workers.filter((worker) => worker.status !== 'offline')
-  const canCreateRun = repositories.length > 0 && !run
+  const canCreateRun = allowCreateRun && repositories.length > 0 && !run
   const runIsActive = Boolean(run && !['completed', 'failed', 'canceled'].includes(run.status))
   const runIsFinal = Boolean(run && ['completed', 'failed', 'canceled'].includes(run.status))
   const canCancelRun = Boolean(run && !runIsFinal)
@@ -988,7 +990,7 @@ function AgentSidebarCard({
           agent
         </div>
         <div className="flex items-center gap-1.5">
-          {run || messages.length > 0 ? (
+          {run ? (
             <button
               type="button"
               onClick={onOpenFullView}
@@ -998,7 +1000,7 @@ function AgentSidebarCard({
               <Maximize2 className="h-3.5 w-3.5" />
             </button>
           ) : null}
-          {!run ? (
+          {!run && allowCreateRun ? (
             <button
               type="button"
               onClick={() => {
