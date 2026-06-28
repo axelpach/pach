@@ -707,6 +707,17 @@ export const mutators = {
       const now = Date.now()
       await tx.mutate.pm_issues.update({ id, ...updates, lastActivityAt: now, updatedAt: now })
     },
+    async reorder(tx: Tx, args: { activeIssueId: string; updates: Array<{ id: string; sortOrder: number; priority?: number; statusId?: string; startedAt?: number; completedAt?: number; canceledAt?: number }> }) {
+      const now = Date.now()
+      for (const update of args.updates) {
+        const { id, ...updates } = update
+        if (id === args.activeIssueId) {
+          await tx.mutate.pm_issues.update({ id, ...updates, lastActivityAt: now, updatedAt: now })
+        } else {
+          await tx.mutate.pm_issues.update({ id, sortOrder: update.sortOrder })
+        }
+      }
+    },
     async delete(tx: Tx, args: { id: string }) {
       await tx.mutate.pm_issues.delete({ id: args.id })
     },

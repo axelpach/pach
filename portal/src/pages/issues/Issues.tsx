@@ -108,6 +108,8 @@ const ROW_FIELDS: Array<{ value: RowField; label: string }> = [
 ]
 
 const DEFAULT_SORT: SortConfig = { field: 'manual', direction: 'asc' }
+const SORT_ORDER_BASE = 1000
+const SORT_ORDER_STEP = 1024
 const DEFAULT_VISIBLE_FIELDS: RowField[] = [
   'status',
   'priority',
@@ -808,7 +810,7 @@ export default function Issues() {
       .filter((issue) => issue.priority === priority && issue.statusId === statusId && issue.id !== excludeIssueId)
       .sort(compareIssuesForBucketOrder)
     const maxSortOrder = bucket[bucket.length - 1]?.sortOrder ?? 0
-    return maxSortOrder + 1024
+    return maxSortOrder + SORT_ORDER_STEP
   }
 
   function getTopSortOrder(priority: number, statusId: string, excludeIssueId?: string) {
@@ -816,7 +818,7 @@ export default function Issues() {
       .filter((issue) => issue.priority === priority && issue.statusId === statusId && issue.id !== excludeIssueId)
       .sort(compareIssuesForBucketOrder)
     const minSortOrder = bucket[0]?.sortOrder
-    return minSortOrder == null ? 1000 : minSortOrder - 1024
+    return minSortOrder == null ? SORT_ORDER_BASE : minSortOrder - SORT_ORDER_STEP
   }
 
   async function logActivity(issueId: string, summary: string, type = 'created') {
@@ -916,24 +918,24 @@ export default function Issues() {
       reordered = [...fullList.slice(0, insertAt), activeIssue, ...fullList.slice(insertAt)]
     }
 
-    const activePos = reordered.findIndex((entry) => entry.id === activeIssue.id)
-    const before = reordered[activePos - 1]?.sortOrder
-    const after = reordered[activePos + 1]?.sortOrder
-    let newSortOrder: number
-    if (before == null && after == null) newSortOrder = 1000
-    else if (before == null) newSortOrder = (after as number) - 1
-    else if (after == null) newSortOrder = before + 1
-    else newSortOrder = (before + after) / 2
+    const orderChanged =
+      oldIndex < 0 ||
+      fullList.length !== reordered.length ||
+      fullList.some((entry, index) => entry.id !== reordered[index]?.id)
+    const targetChanged = activeIssue.priority !== targetPriority || activeIssue.statusId !== targetStatus.id
+    if (!orderChanged && !targetChanged) return
 
-    if (
-      newSortOrder === activeIssue.sortOrder &&
-      activeIssue.priority === targetPriority &&
-      activeIssue.statusId === targetStatus.id
-    ) {
-      return
-    }
-
-    const patch: Record<string, unknown> = { sortOrder: newSortOrder }
+    const sortOrderUpdates = getSortOrderUpdatesForReorderedBucket(reordered, activeIssue.id)
+    const activeSortOrder = sortOrderUpdates.find((entry) => entry.id === activeIssue.id)?.sortOrder ?? activeIssue.sortOrder
+    const patch: {
+      id: string
+      sortOrder: number
+      priority?: number
+      statusId?: string
+      startedAt?: number
+      completedAt?: number
+      canceledAt?: number
+    } = { id: activeIssue.id, sortOrder: activeSortOrder }
     const summaryParts: string[] = []
 
     if (activeIssue.priority !== targetPriority) {
@@ -952,7 +954,17 @@ export default function Issues() {
       summaryParts.push(`moved from ${fromStatus?.name ?? '—'} to ${targetStatus.name}`)
     }
 
-    await z.mutate.pm_issues.update({ id: activeIssue.id, ...patch })
+    const passiveSortOrderUpdates = sortOrderUpdates
+      .filter((entry) => entry.id !== activeIssue.id)
+      .filter((entry) => scopedIssues.find((issue) => issue.id === entry.id)?.sortOrder !== entry.sortOrder)
+
+    await z.mutate.pm_issues.reorder({
+      activeIssueId: activeIssue.id,
+      updates: [
+        patch,
+        ...passiveSortOrderUpdates,
+      ],
+    })
     if (summaryParts.length) {
       await logActivity(activeIssue.id, summaryParts.join(' · '), issueEventTypeForStatus(targetStatus.type))
     }
@@ -2862,6 +2874,36 @@ function compareIssuesForBucketOrder(
   const updatedDiff = b.updatedAt - a.updatedAt
   if (updatedDiff !== 0) return updatedDiff
   return a.identifier.localeCompare(b.identifier)
+}
+
+function getSortOrderUpdatesForReorderedBucket(
+  reordered: Schema['tables']['pm_issues']['row'][],
+  activeIssueId: string,
+) {
+  const activePos = reordered.findIndex((entry) => entry.id === activeIssueId)
+  if (activePos < 0) return []
+
+  const before = reordered[activePos - 1]?.sortOrder
+  const after = reordered[activePos + 1]?.sortOrder
+  const sparseSortOrder = getSparseSortOrder(before, after)
+  if (sparseSortOrder != null) {
+    return [{ id: activeIssueId, sortOrder: sparseSortOrder }]
+  }
+
+  return reordered.map((issue, index) => ({
+    id: issue.id,
+    sortOrder: SORT_ORDER_BASE + index * SORT_ORDER_STEP,
+  }))
+}
+
+function getSparseSortOrder(before: number | undefined, after: number | undefined) {
+  if (before == null && after == null) return SORT_ORDER_BASE
+  if (before == null && after != null) return after - SORT_ORDER_STEP
+  if (before != null && after == null) return before + SORT_ORDER_STEP
+  if (before == null || after == null) return null
+
+  const candidate = Math.floor((before + after) / 2)
+  return candidate > before && candidate < after ? candidate : null
 }
 
 function makeIssueComparator(
