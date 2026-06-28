@@ -50,6 +50,28 @@ export const mutators = {
     },
   },
 
+  activity_event_saved_views: {
+    async create(tx: Tx, args: { id: string; organizationId?: string; ownerId?: string; name: string; slug: string; icon?: string; color?: string; scope?: string; filters?: Record<string, unknown>; display?: Record<string, unknown>; position?: number }) {
+      const now = Date.now()
+      await tx.mutate.activity_event_saved_views.insert({
+        scope: 'personal',
+        filters: {},
+        display: {},
+        position: 0,
+        ...args,
+        createdAt: now,
+        updatedAt: now,
+      })
+    },
+    async update(tx: Tx, args: { id: string; organizationId?: string | null; ownerId?: string | null; name?: string; slug?: string; icon?: string; color?: string; scope?: string; filters?: Record<string, unknown>; display?: Record<string, unknown>; position?: number }) {
+      const { id, ...updates } = args
+      await tx.mutate.activity_event_saved_views.update({ id, ...updates, updatedAt: Date.now() })
+    },
+    async delete(tx: Tx, args: { id: string }) {
+      await tx.mutate.activity_event_saved_views.delete({ id: args.id })
+    },
+  },
+
   design_systems: {
     async create(tx: Tx, args: { id: string; organizationId: string; name: string; slug: string; tokens?: Record<string, unknown>; assets?: Record<string, unknown>; metadata?: Record<string, unknown> }) {
       const now = Date.now()

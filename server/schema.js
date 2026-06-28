@@ -150,6 +150,23 @@ const activityEvents = table('activity_events')
     metadata: json(),
 })
     .primaryKey('id');
+const activityEventSavedViews = table('activity_event_saved_views')
+    .columns({
+    id: string(),
+    organizationId: string().optional().from('organization_id'),
+    ownerId: string().optional().from('owner_id'),
+    name: string(),
+    slug: string(),
+    icon: string().optional(),
+    color: string().optional(),
+    scope: string(),
+    filters: json(),
+    display: json(),
+    position: number(),
+    createdAt: number().from('created_at'),
+    updatedAt: number().from('updated_at'),
+})
+    .primaryKey('id');
 const crmCompanies = table('crm_companies')
     .columns({
     id: string(),
@@ -1050,6 +1067,7 @@ export const schema = createSchema({
         organizations,
         organizationMemberships,
         activityEvents,
+        activityEventSavedViews,
         crmCompanies,
         crmContacts,
         crmDealContacts,
@@ -1111,6 +1129,7 @@ const allowOwnUser = (authData, { cmp }) => cmp('id', authData.sub);
 const allowOrganization = (authData, { cmp }) => cmp('id', 'IN', authData.organizationIds);
 const allowOrganizationMembership = (authData, { cmp }) => cmp('organizationId', 'IN', authData.organizationIds);
 const allowOwnSavedView = (authData, { cmp }) => cmp('ownerId', authData.sub);
+const allowOwnActivityEventSavedView = (authData, { cmp }) => cmp('ownerId', authData.sub);
 const allowScopedField = (field) => (authData, { and, cmp, cmpLit, or }) => or(cmp(field, 'IN', authData.organizationIds), and(cmp(field, 'IS', null), cmpLit(authData.canAccessUnscoped, '=', true)));
 const readOnly = (select) => ({
     row: {
@@ -1135,6 +1154,10 @@ export const permissions = definePermissions(schema, () => {
         organizations: readOnly([allowOrganization]),
         organization_memberships: readOnly([allowOrganizationMembership]),
         activity_events: organizationScoped(),
+        activity_event_saved_views: readOnly([
+            allowScopedField('organizationId'),
+            allowOwnActivityEventSavedView,
+        ]),
         crm_companies: organizationScoped(),
         crm_contacts: organizationScoped(),
         crm_deal_contacts: organizationScoped(),

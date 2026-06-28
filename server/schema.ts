@@ -162,6 +162,24 @@ const activityEvents = table('activity_events')
   })
   .primaryKey('id')
 
+const activityEventSavedViews = table('activity_event_saved_views')
+  .columns({
+    id: string(),
+    organizationId: string().optional().from('organization_id'),
+    ownerId: string().optional().from('owner_id'),
+    name: string(),
+    slug: string(),
+    icon: string().optional(),
+    color: string().optional(),
+    scope: string(),
+    filters: json(),
+    display: json(),
+    position: number(),
+    createdAt: number().from('created_at'),
+    updatedAt: number().from('updated_at'),
+  })
+  .primaryKey('id')
+
 const crmCompanies = table('crm_companies')
   .columns({
     id: string(),
@@ -1115,6 +1133,7 @@ export const schema = createSchema({
     organizations,
     organizationMemberships,
     activityEvents,
+    activityEventSavedViews,
     crmCompanies,
     crmContacts,
     crmDealContacts,
@@ -1206,6 +1225,9 @@ const allowOrganizationMembership: Rule<'organization_memberships'> = (authData,
 const allowOwnSavedView: Rule<'pm_saved_views'> = (authData, { cmp }) =>
   cmp('ownerId', authData.sub)
 
+const allowOwnActivityEventSavedView: Rule<'activity_event_saved_views'> = (authData, { cmp }) =>
+  cmp('ownerId', authData.sub)
+
 const allowScopedField = <TTable extends TableName>(field: string): Rule<TTable> =>
   (authData, { and, cmp, cmpLit, or }) =>
     or(
@@ -1240,6 +1262,10 @@ export const permissions = definePermissions<AuthData, Schema>(schema, () => {
     organizations: readOnly<'organizations'>([allowOrganization]),
     organization_memberships: readOnly<'organization_memberships'>([allowOrganizationMembership]),
     activity_events: organizationScoped<'activity_events'>(),
+    activity_event_saved_views: readOnly<'activity_event_saved_views'>([
+      allowScopedField<'activity_event_saved_views'>('organizationId'),
+      allowOwnActivityEventSavedView,
+    ]),
     crm_companies: organizationScoped<'crm_companies'>(),
     crm_contacts: organizationScoped<'crm_contacts'>(),
     crm_deal_contacts: organizationScoped<'crm_deal_contacts'>(),

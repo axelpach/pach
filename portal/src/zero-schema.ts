@@ -161,6 +161,24 @@ const activityEvents = table('activity_events')
   })
   .primaryKey('id')
 
+const activityEventSavedViews = table('activity_event_saved_views')
+  .columns({
+    id: string(),
+    organizationId: string().optional().from('organization_id'),
+    ownerId: string().optional().from('owner_id'),
+    name: string(),
+    slug: string(),
+    icon: string().optional(),
+    color: string().optional(),
+    scope: string(),
+    filters: json<Record<string, unknown>>(),
+    display: json<Record<string, unknown>>(),
+    position: number(),
+    createdAt: number().from('created_at'),
+    updatedAt: number().from('updated_at'),
+  })
+  .primaryKey('id')
+
 const crmCompanies = table('crm_companies')
   .columns({
     id: string(),
@@ -1114,6 +1132,7 @@ export const schema = createSchema({
     organizations,
     organizationMemberships,
     activityEvents,
+    activityEventSavedViews,
     crmCompanies,
     crmContacts,
     crmDealContacts,

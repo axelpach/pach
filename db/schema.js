@@ -89,6 +89,25 @@ export const activityEvents = pgTable('activity_events', {
     organizationSourceIdx: index('activity_events_organization_source_idx').on(table.organizationId, table.source),
     organizationSeverityIdx: index('activity_events_organization_severity_idx').on(table.organizationId, table.severity),
 }));
+export const activityEventSavedViews = pgTable('activity_event_saved_views', {
+    id: uuid('id').primaryKey().defaultRandom(),
+    organizationId: uuid('organization_id').references(() => organizations.id),
+    ownerId: uuid('owner_id').references(() => users.id),
+    name: text('name').notNull(),
+    slug: text('slug').notNull(),
+    icon: text('icon'),
+    color: text('color'),
+    scope: text('scope').notNull().default('personal'),
+    filters: jsonb('filters').$type().notNull().default({}),
+    display: jsonb('display').$type().notNull().default({}),
+    position: integer('position').notNull().default(0),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+}, (table) => ({
+    organizationIdIdx: index('activity_event_saved_views_organization_idx').on(table.organizationId),
+    ownerIdIdx: index('activity_event_saved_views_owner_idx').on(table.ownerId),
+    ownerPositionIdx: index('activity_event_saved_views_owner_position_idx').on(table.ownerId, table.position),
+}));
 export const mcpTokens = pgTable('mcp_tokens', {
     id: uuid('id').primaryKey().defaultRandom(),
     name: text('name').notNull(),

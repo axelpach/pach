@@ -1,13 +1,15 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
-import { useNavigate, useParams } from 'react-router-dom'
+import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
+import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { useQuery, useZero } from '@rocicorp/zero/react'
-import { Activity as ActivityIcon, AlertTriangle, ArrowDown, ArrowUp, ArrowUpDown, Bot, Building2, Clock3, FileJson, ListTree, Plus, RadioTower, X } from 'lucide-react'
+import { Activity as ActivityIcon, AlertTriangle, ArrowDown, ArrowUp, ArrowUpDown, BookmarkPlus, Bot, Building2, Clock3, FileJson, ListTree, Plus, RadioTower, Save, X } from 'lucide-react'
 import type { Schema } from '../../zero-schema'
 import type { Mutators } from '../../mutators'
 import { useAuth } from '../../lib/auth'
 import { Button } from '../../components/pach'
-import { PachSelect, type PachSelectOption } from '../../components/PachSelect'
+import type { PachSelectOption } from '../../components/PachSelect'
+import { IconTooltip } from '../../components/IconTooltip'
 import { FilterButton, type ActiveFilters, type FilterFieldConfig } from '../issues/IssueFilters'
+import { closePopupFromOutsideClick } from '../issues/popupEvents'
 
 type ActivityEventRow = Schema['tables']['activity_events']['row']
 type OrganizationRow = Schema['tables']['organizations']['row']
@@ -16,6 +18,7 @@ type IssueRow = Schema['tables']['pm_issues']['row']
 type ProjectRow = Schema['tables']['pm_projects']['row']
 type StatusRow = Schema['tables']['pm_statuses']['row']
 type UserRow = Schema['tables']['users']['row']
+type SavedViewRow = Schema['tables']['activity_event_saved_views']['row']
 type ActivityContextField = { label: string; value: string }
 type ActivityContextLookups = {
   issues: Map<string, IssueRow>
@@ -83,6 +86,7 @@ export default function Activity() {
   const { user } = useAuth()
   const navigate = useNavigate()
   const { activityEventId } = useParams<{ activityEventId: string }>()
+  const [searchParams] = useSearchParams()
   const [organizations] = useQuery(z.query.organizations.orderBy('name', 'asc'))
   const [events] = useQuery(z.query.activity_events.orderBy('occurredAt', 'desc'))
   const [teams] = useQuery(z.query.pm_teams.orderBy('position', 'asc'))
@@ -90,6 +94,7 @@ export default function Activity() {
   const [projects] = useQuery(z.query.pm_projects.orderBy('name', 'asc'))
   const [issues] = useQuery(z.query.pm_issues.orderBy('createdAt', 'desc'))
   const [users] = useQuery(z.query.users.orderBy('email', 'asc'))
+  const [savedViews] = useQuery(z.query.activity_event_saved_views.orderBy('position', 'asc'))
 
   const accessibleOrganizationIds = useMemo(() => new Set(user?.organizationIds ?? []), [user?.organizationIds])
   const canAccessOrganization = (organizationId: string | null | undefined) =>
@@ -97,6 +102,21 @@ export default function Activity() {
   const scopedOrganizations = organizations.filter((organization) => canAccessOrganization(organization.id))
   const organizationMap = new Map(scopedOrganizations.map((organization) => [organization.id, organization]))
   const scopedEvents = events.filter((event) => canAccessOrganization(event.organizationId))
+  const activitySavedViews = useMemo(
+    () => savedViews
+      .filter((view) => view.scope === 'personal' && view.ownerId === user?.id)
+      .sort((a, b) => {
+        const positionDiff = a.position - b.position
+        if (positionDiff !== 0) return positionDiff
+        return a.name.localeCompare(b.name)
+      }),
+    [savedViews, user?.id],
+  )
+  const selectedViewId = searchParams.get('view') ?? ''
+  const activeSavedView = selectedViewId
+    ? activitySavedViews.find((view) => view.id === selectedViewId) ?? null
+    : null
+  const activeSavedViewId = activeSavedView?.id ?? ''
   const contextLookups = useMemo<ActivityContextLookups>(() => ({
     issues: new Map(issues.map((issue) => [issue.id, issue])),
     teams: new Map(teams.map((team) => [team.id, team])),
@@ -113,17 +133,67 @@ export default function Activity() {
   const [dateTo, setDateTo] = useState(initialView.dateTo)
   const [activeEventId, setActiveEventId] = useState<string | null>(null)
   const [creatingIssueForId, setCreatingIssueForId] = useState<string | null>(null)
+  const [saveViewModalOpen, setSaveViewModalOpen] = useState(false)
+  const [saveViewName, setSaveViewName] = useState('')
+  const [savingView, setSavingView] = useState(false)
+  const [updatingView, setUpdatingView] = useState(false)
   const [message, setMessage] = useState('')
   const rowRefs = useRef(new Map<string, HTMLButtonElement>())
+  const appliedSavedViewRef = useRef<string | null>(null)
+  const wasViewingSavedViewRef = useRef(false)
+  const skipNextLocalViewPersistRef = useRef(false)
+
+  function applyActivityViewState(viewState: ActivityViewState) {
+    setActiveFilters(viewState.filters)
+    setSortConfig(viewState.sort)
+    setDateFrom(viewState.dateFrom)
+    setDateTo(viewState.dateTo)
+  }
+
+  function getCurrentActivityViewState(): ActivityViewState {
+    return {
+      filters: copyActiveFilters(activeFilters),
+      sort: sortConfig,
+      dateFrom,
+      dateTo,
+    }
+  }
+
+  const activeSavedViewIsDirty = activeSavedView
+    ? !activityViewStatesEqual(getCurrentActivityViewState(), readSavedActivityView(activeSavedView))
+    : false
+
+  useEffect(() => {
+    if (!activeSavedView) {
+      appliedSavedViewRef.current = null
+      if (wasViewingSavedViewRef.current) {
+        wasViewingSavedViewRef.current = false
+        skipNextLocalViewPersistRef.current = true
+        applyActivityViewState(readStoredView(storageKey))
+      }
+      return
+    }
+
+    wasViewingSavedViewRef.current = true
+    const revisionKey = `${activeSavedView.id}:${activeSavedView.updatedAt}`
+    if (appliedSavedViewRef.current === revisionKey) return
+    appliedSavedViewRef.current = revisionKey
+    applyActivityViewState(readSavedActivityView(activeSavedView))
+  }, [activeSavedView, storageKey])
 
   useEffect(() => {
     if (!storageKey) return
+    if (activeSavedView) return
+    if (skipNextLocalViewPersistRef.current) {
+      skipNextLocalViewPersistRef.current = false
+      return
+    }
     try {
       localStorage.setItem(storageKey, JSON.stringify({ filters: activeFilters, sort: sortConfig, dateFrom, dateTo }))
     } catch {
       // Ignore storage failures.
     }
-  }, [activeFilters, dateFrom, dateTo, sortConfig, storageKey])
+  }, [activeFilters, activeSavedView, dateFrom, dateTo, sortConfig, storageKey])
 
   const filterConfigs: FilterFieldConfig[] = [
     {
@@ -217,7 +287,7 @@ export default function Activity() {
         setActiveEventId(nextEvent.id)
         rowRefs.current.get(nextEvent.id)?.scrollIntoView({ block: 'nearest' })
         if (activityEventId) {
-          navigate(`/activity/${nextEvent.id}`, { replace: true })
+          navigate(activityDetailPath(nextEvent.id), { replace: true })
         }
         return
       }
@@ -226,13 +296,13 @@ export default function Activity() {
         const targetId = activeEventId ?? activityEventId
         if (!targetId) return
         event.preventDefault()
-        navigate(`/activity/${targetId}`, { replace: Boolean(activityEventId) })
+        navigate(activityDetailPath(targetId), { replace: Boolean(activityEventId) })
         return
       }
 
       if (event.key === 'Escape' && activityEventId) {
         event.preventDefault()
-        navigate('/activity')
+        navigate(activityListPath())
       }
     }
 
@@ -254,6 +324,92 @@ export default function Activity() {
     setDateFrom('')
     setDateTo('')
   }
+
+  function activitySearch(viewId = activeSavedViewId) {
+    return viewId ? `?view=${encodeURIComponent(viewId)}` : ''
+  }
+
+  function activityListPath(viewId = activeSavedViewId) {
+    return `/activity${activitySearch(viewId)}`
+  }
+
+  function activityDetailPath(eventId: string, viewId = activeSavedViewId) {
+    return `/activity/${eventId}${activitySearch(viewId)}`
+  }
+
+  function selectSavedView(viewId: string) {
+    navigate(activityListPath(viewId))
+  }
+
+  function selectAllActivity() {
+    navigate('/activity')
+  }
+
+  function openSaveViewModal() {
+    if (!user) return
+    setSaveViewName('')
+    setSaveViewModalOpen(true)
+  }
+
+  function closeSaveViewModal() {
+    setSaveViewModalOpen(false)
+    setSaveViewName('')
+    setSavingView(false)
+  }
+
+  async function submitSavedView() {
+    if (!user) return
+    const name = saveViewName.trim()
+    if (!name) return
+
+    setSavingView(true)
+    try {
+      const id = crypto.randomUUID()
+      const state = getCurrentActivityViewState()
+      const existingSlugs = new Set(activitySavedViews.map((view) => view.slug))
+      await z.mutate.activity_event_saved_views.create({
+        id,
+        ownerId: user.id,
+        name,
+        slug: makeUniqueSlug(slugifySavedViewName(name), existingSlugs),
+        scope: 'personal',
+        filters: state.filters,
+        display: getActivityViewDisplay(state),
+        position: activitySavedViews.length,
+      })
+      closeSaveViewModal()
+      selectSavedView(id)
+    } finally {
+      setSavingView(false)
+    }
+  }
+
+  async function updateActiveSavedView() {
+    if (!activeSavedView || !activeSavedViewIsDirty) return
+
+    setUpdatingView(true)
+    try {
+      const state = getCurrentActivityViewState()
+      await z.mutate.activity_event_saved_views.update({
+        id: activeSavedView.id,
+        filters: state.filters,
+        display: getActivityViewDisplay(state),
+      })
+    } finally {
+      setUpdatingView(false)
+    }
+  }
+
+  useEffect(() => {
+    if (!saveViewModalOpen) return
+    function handleEscape(event: KeyboardEvent) {
+      if (event.key !== 'Escape') return
+      event.preventDefault()
+      closeSaveViewModal()
+    }
+    window.addEventListener('keydown', handleEscape)
+    return () => window.removeEventListener('keydown', handleEscape)
+  }, [saveViewModalOpen])
 
   async function createIssueFromActivity(event: ActivityEventRow) {
     if (!user) return
@@ -402,16 +558,17 @@ export default function Activity() {
 
   return (
     <div className="relative flex h-full min-h-0 bg-pit text-fg-1">
+      <ActivityViewsSidebar
+        views={activitySavedViews}
+        activeViewId={activeSavedViewId}
+        allCount={scopedEvents.length}
+        onSelectAll={selectAllActivity}
+        onSelectView={selectSavedView}
+      />
+
       <main className="flex min-w-0 flex-1 flex-col">
-        <div className="border-b border-edge/12 px-4 py-4 md:px-6">
-          <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
-            <div>
-              <div className="flex items-center gap-2 font-mono text-[10px] uppercase tracking-label text-fg-4">
-                <ActivityIcon className="h-3.5 w-3.5 text-accent" />
-                activity
-              </div>
-              <h1 className="mt-1 font-mono text-2xl font-bold lowercase text-fg-1">activity</h1>
-            </div>
+        <div className="flex-1 overflow-auto py-6">
+          <div className="mb-4 flex flex-col gap-3 px-4 md:gap-4 md:px-6 lg:flex-row lg:items-center lg:justify-between">
             <div className="flex flex-wrap items-center gap-2">
               <FilterButton
                 activeFilters={activeFilters}
@@ -421,19 +578,54 @@ export default function Activity() {
               />
               <DateControl label="from" value={dateFrom} onChange={setDateFrom} />
               <DateControl label="to" value={dateTo} onChange={setDateTo} />
-              <SortControls sort={sortConfig} onChange={setSortConfig} />
+            </div>
+            <div className="flex flex-wrap items-center gap-2 lg:ml-auto">
+              <div className="mr-1 font-mono text-xs uppercase tracking-label text-fg-3">
+                {filteredEvents.length} visible
+              </div>
+              {activeSavedView ? (
+                <IconTooltip
+                  label={
+                    activeSavedViewIsDirty
+                      ? `update view - ${activeSavedView.name.toLowerCase()}`
+                      : 'view is up to date'
+                  }
+                >
+                  <button
+                    onClick={updateActiveSavedView}
+                    disabled={!activeSavedViewIsDirty || updatingView}
+                    aria-label={
+                      activeSavedViewIsDirty
+                        ? `update view - ${activeSavedView.name.toLowerCase()}`
+                        : 'view is up to date'
+                    }
+                    className={`flex h-6 w-6 items-center justify-center border transition ${
+                      activeSavedViewIsDirty
+                        ? 'border-edge/30 bg-accent-fill/8 text-accent hover:bg-accent-fill/16 hover:shadow-glow-xs'
+                        : 'border-edge/12 bg-pit-3 text-fg-4 opacity-60'
+                    } disabled:cursor-not-allowed`}
+                  >
+                    <Save className="h-3 w-3" />
+                  </button>
+                </IconTooltip>
+              ) : (
+                <IconTooltip label={user ? 'save as view' : 'sign in to save view'}>
+                  <button
+                    onClick={openSaveViewModal}
+                    disabled={!user}
+                    aria-label={user ? 'save as view' : 'sign in to save view'}
+                    className="flex h-6 w-6 items-center justify-center border border-edge/15 bg-pit-3 text-fg-3 transition hover:border-edge/25 hover:text-fg-1 disabled:opacity-40 disabled:hover:border-edge/15 disabled:hover:text-fg-3"
+                  >
+                    <BookmarkPlus className="h-3 w-3" />
+                  </button>
+                </IconTooltip>
+              )}
+              <SortMenu value={sortConfig} onChange={setSortConfig} />
             </div>
           </div>
           {message ? (
-            <div className="mt-3 border border-fail/20 bg-fail/5 px-3 py-2 font-mono text-xs text-fail">{message}</div>
+            <div className="mx-4 mb-4 border border-fail/20 bg-fail/5 px-3 py-2 font-mono text-xs text-fail md:mx-6">{message}</div>
           ) : null}
-        </div>
-
-        <div className="flex-1 overflow-auto">
-          <div className="flex items-center justify-between px-4 py-3 font-mono text-[10px] uppercase tracking-label text-fg-4 md:px-6">
-            <span>{filteredEvents.length} visible</span>
-            <span>{sortConfig.field} / {sortConfig.direction}</span>
-          </div>
 
           <div className="border-y border-edge/12">
             {filteredEvents.map((event) => {
@@ -453,7 +645,7 @@ export default function Activity() {
                   onFocus={() => setActiveEventId(event.id)}
                   onSelect={() => {
                     setActiveEventId(event.id)
-                    navigate(`/activity/${event.id}`, { replace: Boolean(activityEventId) })
+                    navigate(activityDetailPath(event.id), { replace: Boolean(activityEventId) })
                   }}
                 />
               )
@@ -474,10 +666,162 @@ export default function Activity() {
           organization={organizationMap.get(selectedEvent.organizationId) ?? null}
           context={activityDisplayContext(selectedEvent, contextLookups)}
           creatingIssue={creatingIssueForId === selectedEvent.id}
-          onClose={() => navigate('/activity')}
+          onClose={() => navigate(activityListPath())}
           onCreateIssue={() => void createIssueFromActivity(selectedEvent)}
         />
       ) : null}
+
+      {saveViewModalOpen ? (
+        <SaveViewModal
+          name={saveViewName}
+          saving={savingView}
+          onNameChange={setSaveViewName}
+          onClose={closeSaveViewModal}
+          onSubmit={submitSavedView}
+        />
+      ) : null}
+    </div>
+  )
+}
+
+function ActivityViewsSidebar({
+  views,
+  activeViewId,
+  allCount,
+  onSelectAll,
+  onSelectView,
+}: {
+  views: SavedViewRow[]
+  activeViewId: string
+  allCount: number
+  onSelectAll: () => void
+  onSelectView: (viewId: string) => void
+}) {
+  return (
+    <aside className="hidden w-44 shrink-0 border-r border-edge/12 bg-pit-2/60 px-2 py-4 md:flex md:flex-col">
+      <div className="mb-5 px-3">
+        <div className="flex items-center gap-2 font-mono text-[10px] uppercase tracking-label text-fg-4">
+          <ActivityIcon className="h-3.5 w-3.5 text-accent" />
+          activity
+        </div>
+        <h1 className="mt-1 font-mono text-2xl font-bold lowercase text-fg-1">activity</h1>
+      </div>
+      <div className="px-3 pb-1 font-mono text-[10px] uppercase tracking-label text-fg-4">views</div>
+      <div className="space-y-1">
+        <ActivityViewNavButton
+          active={!activeViewId}
+          label="all activity"
+          meta={`${allCount}`}
+          onClick={onSelectAll}
+        />
+        {views.map((view) => (
+          <ActivityViewNavButton
+            key={view.id}
+            active={activeViewId === view.id}
+            label={view.name.toLowerCase()}
+            onClick={() => onSelectView(view.id)}
+          />
+        ))}
+      </div>
+    </aside>
+  )
+}
+
+function ActivityViewNavButton({
+  active,
+  label,
+  meta,
+  onClick,
+}: {
+  active: boolean
+  label: string
+  meta?: string
+  onClick: () => void
+}) {
+  return (
+    <button
+      onClick={onClick}
+      className={`group flex w-full items-center justify-between gap-2 border-l px-3 py-1.5 text-left font-mono text-xs lowercase transition ${
+        active
+          ? 'border-accent bg-accent-fill/8 text-accent'
+          : 'border-transparent text-fg-3 hover:border-edge/20 hover:bg-accent-fill/4 hover:text-fg-1'
+      }`}
+    >
+      <span className="min-w-0 truncate">{label}</span>
+      {meta ? <span className="shrink-0 text-[10px] uppercase tracking-label text-fg-4">{meta}</span> : null}
+    </button>
+  )
+}
+
+function SaveViewModal({
+  name,
+  saving,
+  onNameChange,
+  onClose,
+  onSubmit,
+}: {
+  name: string
+  saving: boolean
+  onNameChange: (value: string) => void
+  onClose: () => void
+  onSubmit: () => void
+}) {
+  function handleSubmit(event: FormEvent) {
+    event.preventDefault()
+    if (!name.trim() || saving) return
+    onSubmit()
+  }
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-overlay/70 px-4 backdrop-blur-sm"
+      onClick={onClose}
+    >
+      <form
+        className="w-full max-w-lg border border-edge/20 bg-pit-2 shadow-terminal-overlay"
+        onClick={(event) => event.stopPropagation()}
+        onSubmit={handleSubmit}
+      >
+        <div className="border-b border-edge/12 px-6 py-5">
+          <div className="text-[10px] uppercase tracking-label text-fg-3">
+            views - save
+          </div>
+          <div className="mt-1.5 font-mono text-xl lowercase text-fg-1">
+            save as view
+          </div>
+        </div>
+
+        <div className="px-6 py-5">
+          <label className="block">
+            <div className="mb-2 font-mono text-[10px] uppercase tracking-label text-fg-3">view name</div>
+            <input
+              autoFocus
+              value={name}
+              onChange={(event) => onNameChange(event.target.value)}
+              placeholder="$ company progress"
+              className="w-full border border-edge/15 bg-rim px-3 py-2 text-sm text-fg-1 outline-none placeholder:text-fg-4 focus:border-accent focus:shadow-glow-xs"
+            />
+          </label>
+        </div>
+
+        <div className="flex items-center justify-between border-t border-edge/12 px-6 py-4">
+          <button
+            type="button"
+            onClick={onClose}
+            className="px-3 py-2 font-mono text-xs uppercase tracking-label text-fg-3 transition hover:text-fg-1"
+          >
+            [cancel]
+          </button>
+          <button
+            type="submit"
+            disabled={!name.trim() || saving}
+            className="inline-flex items-center gap-2 border border-edge/30 bg-accent-fill/8 px-4 py-2 font-mono text-xs uppercase tracking-label text-accent transition hover:bg-accent-fill/16 hover:shadow-glow-xs disabled:opacity-40 disabled:hover:bg-accent-fill/8 disabled:hover:shadow-none"
+          >
+            <BookmarkPlus className="h-3.5 w-3.5" />
+            {saving ? 'saving...' : 'save view'}
+          </button>
+        </div>
+      </form>
     </div>
   )
 }
@@ -707,33 +1051,95 @@ function DateControl({ label, value, onChange }: { label: string; value: string;
   )
 }
 
-function SortControls({ sort, onChange }: { sort: SortConfig; onChange: (next: SortConfig) => void }) {
-  const field = SORT_FIELDS.find((entry) => entry.value === sort.field)
-  const directionOptions: PachSelectOption[] = [
-    { value: 'desc', label: 'descending', icon: <ArrowDown className="h-3 w-3" /> },
-    { value: 'asc', label: 'ascending', icon: <ArrowUp className="h-3 w-3" /> },
-  ]
+function SortMenu({
+  value,
+  onChange,
+}: {
+  value: SortConfig
+  onChange: (next: SortConfig) => void
+}) {
+  const [open, setOpen] = useState(false)
+  const ref = useRef<HTMLDivElement | null>(null)
+
+  useEffect(() => {
+    if (!open) return
+    function handleClickOutside(event: MouseEvent) {
+      closePopupFromOutsideClick(event, [ref], () => setOpen(false))
+    }
+    function handleKey(event: KeyboardEvent) {
+      if (event.key === 'Escape') setOpen(false)
+    }
+    window.addEventListener('mousedown', handleClickOutside)
+    window.addEventListener('keydown', handleKey)
+    return () => {
+      window.removeEventListener('mousedown', handleClickOutside)
+      window.removeEventListener('keydown', handleKey)
+    }
+  }, [open])
+
+  const currentLabel = SORT_FIELDS.find((field) => field.value === value.field)?.label ?? 'occurred'
+  const tooltipLabel = `sort - ${currentLabel} ${value.direction}`
+
   return (
-    <div className="flex items-center gap-1">
-      <PachSelect
-        value={sort.field}
-        onChange={(value) => onChange({ ...sort, field: value as SortField })}
-        options={SORT_FIELDS}
-        display={field?.label ?? 'sort'}
-        popupWidth="180"
-        triggerClassName="flex h-7 items-center gap-1.5 border border-edge/15 bg-pit-3 px-2.5 font-mono text-[10px] uppercase tracking-label text-fg-3 transition hover:border-edge/25 hover:text-fg-1"
-      />
-      <PachSelect
-        variant="button"
-        value={sort.direction}
-        onChange={(value) => onChange({ ...sort, direction: value as SortDirection })}
-        options={directionOptions}
-        trigger={<ArrowUpDown className="h-3.5 w-3.5" />}
-        triggerTitle="sort direction"
-        triggerClassName="flex h-7 w-7 items-center justify-center border border-edge/15 bg-pit-3 text-fg-3 transition hover:border-edge/25 hover:text-fg-1"
-      />
+    <div className="relative" ref={ref}>
+      <IconTooltip label={tooltipLabel} disabled={open}>
+        <button
+          onClick={() => setOpen((next) => !next)}
+          aria-label={tooltipLabel}
+          className={`flex h-6 w-6 items-center justify-center border transition ${
+            open
+              ? 'border-edge/35 bg-accent-fill/6 text-accent shadow-glow-xs'
+              : 'border-edge/25 bg-pit-3 text-accent hover:border-edge/35 hover:text-accent'
+          }`}
+        >
+          <ArrowUpDown className="h-3 w-3" />
+        </button>
+      </IconTooltip>
+      {open && (
+        <div className="absolute right-0 top-full z-50 mt-1.5 w-[240px] border border-edge/25 bg-pit shadow-terminal-popover">
+          <div className="border-b border-edge/12 px-3 py-2 font-mono text-[10px] uppercase tracking-label text-fg-3">
+            sort by
+          </div>
+          <div className="max-h-72 overflow-auto py-1">
+            {SORT_FIELDS.map((field) => {
+              const isActive = field.value === value.field
+              return (
+                <button
+                  key={field.value}
+                  onClick={() => {
+                    onChange({
+                      field: field.value,
+                      direction: isActive ? oppositeSortDirection(value.direction) : defaultSortDirection(field.value),
+                    })
+                  }}
+                  className={`flex w-full items-center justify-between gap-2 px-3 py-1.5 text-left font-mono text-xs lowercase transition ${
+                    isActive
+                      ? 'bg-accent-fill/8 text-accent'
+                      : 'text-fg-2 hover:bg-accent-fill/4 hover:text-fg-1'
+                  }`}
+                >
+                  <span className="truncate">{field.label}</span>
+                  {isActive && (
+                    value.direction === 'asc'
+                      ? <ArrowUp className="h-3 w-3 shrink-0" />
+                      : <ArrowDown className="h-3 w-3 shrink-0" />
+                  )}
+                </button>
+              )
+            })}
+          </div>
+        </div>
+      )}
     </div>
   )
+}
+
+function defaultSortDirection(field: SortField): SortDirection {
+  return field === 'occurredAt' || field === 'createdAt' || field === 'severity' ? 'desc' : 'asc'
+}
+
+function oppositeSortDirection(direction: SortDirection): SortDirection {
+  return direction === 'asc' ? 'desc' : 'asc'
 }
 
 function SeverityMark({ severity }: { severity: string }) {
@@ -1039,16 +1445,62 @@ function readStoredView(storageKey: string | null): ActivityViewState {
   try {
     const raw = localStorage.getItem(storageKey)
     if (!raw) return DEFAULT_VIEW
-    const parsed = JSON.parse(raw) as Partial<ActivityViewState>
-    return {
-      filters: isFilters(parsed.filters) ? parsed.filters : {},
-      sort: isSortConfig(parsed.sort) ? parsed.sort : DEFAULT_VIEW.sort,
-      dateFrom: typeof parsed.dateFrom === 'string' ? parsed.dateFrom : '',
-      dateTo: typeof parsed.dateTo === 'string' ? parsed.dateTo : '',
-    }
+    return parseActivityViewState(JSON.parse(raw))
   } catch {
     return DEFAULT_VIEW
   }
+}
+
+function readSavedActivityView(view: SavedViewRow): ActivityViewState {
+  return parseActivityViewState({
+    filters: view.filters,
+    display: view.display,
+  })
+}
+
+function getActivityViewDisplay(state: ActivityViewState): Record<string, unknown> {
+  return {
+    sort: state.sort,
+    dateFrom: state.dateFrom,
+    dateTo: state.dateTo,
+  }
+}
+
+function activityViewStatesEqual(a: ActivityViewState, b: ActivityViewState) {
+  return JSON.stringify(normalizeActivityViewState(a)) === JSON.stringify(normalizeActivityViewState(b))
+}
+
+function normalizeActivityViewState(state: ActivityViewState) {
+  const filterEntries = Object.entries(state.filters)
+    .filter(([, values]) => values.length > 0)
+    .map(([field, values]) => [field, [...values].sort()] as const)
+    .sort(([a], [b]) => a.localeCompare(b))
+
+  return {
+    filters: Object.fromEntries(filterEntries),
+    sort: state.sort,
+    dateFrom: state.dateFrom,
+    dateTo: state.dateTo,
+  }
+}
+
+function parseActivityViewState(raw: unknown): ActivityViewState {
+  const parsed = isRecord(raw) ? raw : {}
+  const display = isRecord(parsed.display) ? parsed.display : parsed
+  return {
+    filters: isFilters(parsed.filters) ? parsed.filters : {},
+    sort: isSortConfig(display.sort) ? display.sort : DEFAULT_VIEW.sort,
+    dateFrom: typeof display.dateFrom === 'string' ? display.dateFrom : '',
+    dateTo: typeof display.dateTo === 'string' ? display.dateTo : '',
+  }
+}
+
+function copyActiveFilters(filters: ActiveFilters): ActiveFilters {
+  const copy: ActiveFilters = {}
+  for (const [field, values] of Object.entries(filters)) {
+    if (values.length) copy[field] = [...values]
+  }
+  return copy
 }
 
 function isFilters(value: unknown): value is ActiveFilters {
@@ -1060,4 +1512,24 @@ function isSortConfig(value: unknown): value is SortConfig {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return false
   const candidate = value as Partial<SortConfig>
   return SORT_FIELDS.some((field) => field.value === candidate.field) && (candidate.direction === 'asc' || candidate.direction === 'desc')
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+function slugifySavedViewName(value: string) {
+  return value
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 48) || 'view'
+}
+
+function makeUniqueSlug(base: string, existingSlugs: Set<string>) {
+  if (!existingSlugs.has(base)) return base
+  let counter = 2
+  while (existingSlugs.has(`${base}-${counter}`)) counter += 1
+  return `${base}-${counter}`
 }

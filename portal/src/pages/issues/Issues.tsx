@@ -33,6 +33,7 @@ import type { Schema } from '../../zero-schema'
 import type { Mutators } from '../../mutators'
 import { useAuth } from '../../lib/auth'
 import { useTrackerContext } from './IssuesLayout'
+import { IconTooltip } from '../../components/IconTooltip'
 
 const PRIORITY_GROUPS = [
   { value: 1, label: 'urgent', accent: 'text-amber' },
@@ -1197,32 +1198,42 @@ export default function Issues() {
                   {!(section.kind === 'team' && section.tab === 'projects') && (
                     <>
                       {section.kind === 'all' && (
-                        <button
-                          onClick={openSaveViewModal}
-                          disabled={!user}
-                          title={user ? 'save as view' : 'sign in to save view'}
-                          className="flex h-6 w-6 items-center justify-center border border-edge/15 bg-pit-3 text-fg-3 transition hover:border-edge/25 hover:text-fg-1 disabled:opacity-40 disabled:hover:border-edge/15 disabled:hover:text-fg-3"
-                        >
-                          <BookmarkPlus className="h-3 w-3" />
-                        </button>
+                        <IconTooltip label={user ? 'save as view' : 'sign in to save view'}>
+                          <button
+                            onClick={openSaveViewModal}
+                            disabled={!user}
+                            aria-label={user ? 'save as view' : 'sign in to save view'}
+                            className="flex h-6 w-6 items-center justify-center border border-edge/15 bg-pit-3 text-fg-3 transition hover:border-edge/25 hover:text-fg-1 disabled:opacity-40 disabled:hover:border-edge/15 disabled:hover:text-fg-3"
+                          >
+                            <BookmarkPlus className="h-3 w-3" />
+                          </button>
+                        </IconTooltip>
                       )}
                       {section.kind === 'view' && activeSavedView && (
-                        <button
-                          onClick={updateActiveSavedView}
-                          disabled={!activeSavedViewIsDirty || updatingView}
-                          title={
+                        <IconTooltip
+                          label={
                             activeSavedViewIsDirty
                               ? `update view · ${activeSavedView.name.toLowerCase()}`
                               : 'view is up to date'
                           }
-                          className={`flex h-6 w-6 items-center justify-center border transition ${
-                            activeSavedViewIsDirty
-                              ? 'border-edge/30 bg-accent-fill/8 text-accent hover:bg-accent-fill/16 hover:shadow-glow-xs'
-                              : 'border-edge/12 bg-pit-3 text-fg-4 opacity-60'
-                          } disabled:cursor-not-allowed`}
                         >
-                          <Save className="h-3 w-3" />
-                        </button>
+                          <button
+                            onClick={updateActiveSavedView}
+                            disabled={!activeSavedViewIsDirty || updatingView}
+                            aria-label={
+                              activeSavedViewIsDirty
+                                ? `update view · ${activeSavedView.name.toLowerCase()}`
+                                : 'view is up to date'
+                            }
+                            className={`flex h-6 w-6 items-center justify-center border transition ${
+                              activeSavedViewIsDirty
+                                ? 'border-edge/30 bg-accent-fill/8 text-accent hover:bg-accent-fill/16 hover:shadow-glow-xs'
+                                : 'border-edge/12 bg-pit-3 text-fg-4 opacity-60'
+                            } disabled:cursor-not-allowed`}
+                          >
+                            <Save className="h-3 w-3" />
+                          </button>
+                        </IconTooltip>
                       )}
                       <SortMenu value={sortConfig} onChange={setSortConfig} />
                       <DisplayMenu value={visibleFields} onChange={setVisibleFields} />
@@ -2453,22 +2464,25 @@ function SortMenu({
 
   const currentLabel = SORT_FIELDS.find((f) => f.value === value.field)?.label ?? 'manual order'
   const isManual = value.field === 'manual'
+  const tooltipLabel = `sort - ${currentLabel}${isManual ? '' : ` ${value.direction}`}`
 
   return (
     <div className="relative" ref={ref}>
-      <button
-        onClick={() => setOpen((v) => !v)}
-        title={`sort · ${currentLabel}${isManual ? '' : ` (${value.direction})`}`}
-        className={`flex h-6 w-6 items-center justify-center border transition ${
-          open
-            ? 'border-edge/35 bg-accent-fill/6 text-accent shadow-glow-xs'
-            : !isManual
-              ? 'border-edge/25 bg-pit-3 text-accent'
-              : 'border-edge/15 bg-pit-3 text-fg-3 hover:text-fg-1 hover:border-edge/25'
-        }`}
-      >
-        <ArrowUpDown className="h-3 w-3" />
-      </button>
+      <IconTooltip label={tooltipLabel} disabled={open}>
+        <button
+          onClick={() => setOpen((v) => !v)}
+          aria-label={tooltipLabel}
+          className={`flex h-6 w-6 items-center justify-center border transition ${
+            open
+              ? 'border-edge/35 bg-accent-fill/6 text-accent shadow-glow-xs'
+              : !isManual
+                ? 'border-edge/25 bg-pit-3 text-accent'
+                : 'border-edge/15 bg-pit-3 text-fg-3 hover:text-fg-1 hover:border-edge/25'
+          }`}
+        >
+          <ArrowUpDown className="h-3 w-3" />
+        </button>
+      </IconTooltip>
       {open && (
         <div className="absolute right-0 top-full z-50 mt-1.5 w-[240px] border border-edge/25 bg-pit shadow-terminal-popover">
           <div className="border-b border-edge/12 px-3 py-2 font-mono text-[10px] uppercase tracking-label text-fg-3">
@@ -2555,17 +2569,19 @@ function DisplayMenu({
 
   return (
     <div className="relative" ref={ref}>
-      <button
-        onClick={() => setOpen((v) => !v)}
-        title="display"
-        className={`flex h-6 w-6 items-center justify-center border transition ${
-          open
-            ? 'border-edge/35 bg-accent-fill/6 text-accent shadow-glow-xs'
-            : 'border-edge/15 bg-pit-3 text-fg-3 hover:text-fg-1 hover:border-edge/25'
-        }`}
-      >
-        <Settings2 className="h-3 w-3" />
-      </button>
+      <IconTooltip label="display" disabled={open}>
+        <button
+          onClick={() => setOpen((v) => !v)}
+          aria-label="display"
+          className={`flex h-6 w-6 items-center justify-center border transition ${
+            open
+              ? 'border-edge/35 bg-accent-fill/6 text-accent shadow-glow-xs'
+              : 'border-edge/15 bg-pit-3 text-fg-3 hover:text-fg-1 hover:border-edge/25'
+          }`}
+        >
+          <Settings2 className="h-3 w-3" />
+        </button>
+      </IconTooltip>
       {open && (
         <div className="absolute right-0 top-full z-50 mt-1.5 w-[220px] border border-edge/25 bg-pit shadow-terminal-popover">
           <div className="border-b border-edge/12 px-3 py-2 font-mono text-[10px] uppercase tracking-label text-fg-3">
