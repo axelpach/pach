@@ -1,13 +1,14 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { useQuery, useZero } from '@rocicorp/zero/react'
-import { Activity as ActivityIcon, AlertTriangle, ArrowDown, ArrowUp, ArrowUpDown, BookmarkPlus, Bot, Building2, Clock3, FileJson, ListTree, Plus, RadioTower, Save, X } from 'lucide-react'
+import { Activity as ActivityIcon, AlertTriangle, ArrowDown, ArrowUp, ArrowUpDown, BookmarkPlus, Bot, Building2, Clock3, FileJson, ListTree, Plus, RadioTower, Save, Trash2, X } from 'lucide-react'
 import type { Schema } from '../../zero-schema'
 import type { Mutators } from '../../mutators'
 import { useAuth } from '../../lib/auth'
 import { Button } from '../../components/pach'
 import type { PachSelectOption } from '../../components/PachSelect'
 import { IconTooltip } from '../../components/IconTooltip'
+import { DeleteViewModal } from '../../components/DeleteViewModal'
 import { FilterButton, type ActiveFilters, type FilterFieldConfig } from '../issues/IssueFilters'
 import { closePopupFromOutsideClick } from '../issues/popupEvents'
 
@@ -137,6 +138,8 @@ export default function Activity() {
   const [saveViewName, setSaveViewName] = useState('')
   const [savingView, setSavingView] = useState(false)
   const [updatingView, setUpdatingView] = useState(false)
+  const [deleteViewModalOpen, setDeleteViewModalOpen] = useState(false)
+  const [deletingView, setDeletingView] = useState(false)
   const [message, setMessage] = useState('')
   const rowRefs = useRef(new Map<string, HTMLButtonElement>())
   const appliedSavedViewRef = useRef<string | null>(null)
@@ -357,6 +360,11 @@ export default function Activity() {
     setSavingView(false)
   }
 
+  function closeDeleteViewModal() {
+    setDeleteViewModalOpen(false)
+    setDeletingView(false)
+  }
+
   async function submitSavedView() {
     if (!user) return
     const name = saveViewName.trim()
@@ -397,6 +405,19 @@ export default function Activity() {
       })
     } finally {
       setUpdatingView(false)
+    }
+  }
+
+  async function deleteActiveSavedView() {
+    if (!activeSavedView || deletingView) return
+
+    setDeletingView(true)
+    try {
+      await z.mutate.activity_event_saved_views.delete({ id: activeSavedView.id })
+      closeDeleteViewModal()
+      selectAllActivity()
+    } finally {
+      setDeletingView(false)
     }
   }
 
@@ -568,46 +589,63 @@ export default function Activity() {
 
       <main className="flex min-w-0 flex-1 flex-col">
         <div className="flex-1 overflow-auto py-6">
-          <div className="mb-4 flex flex-col gap-3 px-4 md:gap-4 md:px-6 lg:flex-row lg:items-center lg:justify-between">
-            <div className="flex flex-wrap items-center gap-2">
+          <div className="mb-4 flex flex-col gap-3 px-4 md:gap-4 md:px-6 lg:flex-row lg:items-start lg:justify-between">
+            <div className="flex flex-wrap items-start gap-2">
               <FilterButton
                 activeFilters={activeFilters}
                 filterConfigs={filterConfigs}
                 onFilterChange={setFilterField}
                 onClearAll={clearAllFilters}
+                chipsPlacement="below"
+                afterButton={(
+                  <>
+                    <DateControl label="from" value={dateFrom} onChange={setDateFrom} />
+                    <DateControl label="to" value={dateTo} onChange={setDateTo} />
+                  </>
+                )}
               />
-              <DateControl label="from" value={dateFrom} onChange={setDateFrom} />
-              <DateControl label="to" value={dateTo} onChange={setDateTo} />
             </div>
             <div className="flex flex-wrap items-center gap-2 lg:ml-auto">
               <div className="mr-1 font-mono text-xs uppercase tracking-label text-fg-3">
                 {filteredEvents.length} visible
               </div>
               {activeSavedView ? (
-                <IconTooltip
-                  label={
-                    activeSavedViewIsDirty
-                      ? `update view - ${activeSavedView.name.toLowerCase()}`
-                      : 'view is up to date'
-                  }
-                >
-                  <button
-                    onClick={updateActiveSavedView}
-                    disabled={!activeSavedViewIsDirty || updatingView}
-                    aria-label={
+                <>
+                  <IconTooltip
+                    label={
                       activeSavedViewIsDirty
                         ? `update view - ${activeSavedView.name.toLowerCase()}`
                         : 'view is up to date'
                     }
-                    className={`flex h-6 w-6 items-center justify-center border transition ${
-                      activeSavedViewIsDirty
-                        ? 'border-edge/30 bg-accent-fill/8 text-accent hover:bg-accent-fill/16 hover:shadow-glow-xs'
-                        : 'border-edge/12 bg-pit-3 text-fg-4 opacity-60'
-                    } disabled:cursor-not-allowed`}
                   >
-                    <Save className="h-3 w-3" />
-                  </button>
-                </IconTooltip>
+                    <button
+                      onClick={updateActiveSavedView}
+                      disabled={!activeSavedViewIsDirty || updatingView}
+                      aria-label={
+                        activeSavedViewIsDirty
+                          ? `update view - ${activeSavedView.name.toLowerCase()}`
+                          : 'view is up to date'
+                      }
+                      className={`flex h-6 w-6 items-center justify-center border transition ${
+                        activeSavedViewIsDirty
+                          ? 'border-edge/30 bg-accent-fill/8 text-accent hover:bg-accent-fill/16 hover:shadow-glow-xs'
+                          : 'border-edge/12 bg-pit-3 text-fg-4 opacity-60'
+                      } disabled:cursor-not-allowed`}
+                    >
+                      <Save className="h-3 w-3" />
+                    </button>
+                  </IconTooltip>
+                  <IconTooltip label={`delete view - ${activeSavedView.name.toLowerCase()}`}>
+                    <button
+                      onClick={() => setDeleteViewModalOpen(true)}
+                      disabled={deletingView}
+                      aria-label={`delete view - ${activeSavedView.name.toLowerCase()}`}
+                      className="flex h-6 w-6 items-center justify-center border border-fail/20 bg-fail/5 text-fail transition hover:border-fail/34 hover:bg-fail/10 disabled:opacity-40 disabled:hover:border-fail/20 disabled:hover:bg-fail/5"
+                    >
+                      <Trash2 className="h-3 w-3" />
+                    </button>
+                  </IconTooltip>
+                </>
               ) : (
                 <IconTooltip label={user ? 'save as view' : 'sign in to save view'}>
                   <button
@@ -680,6 +718,15 @@ export default function Activity() {
           onSubmit={submitSavedView}
         />
       ) : null}
+
+      {deleteViewModalOpen && activeSavedView ? (
+        <DeleteViewModal
+          viewName={activeSavedView.name}
+          deleting={deletingView}
+          onClose={closeDeleteViewModal}
+          onConfirm={deleteActiveSavedView}
+        />
+      ) : null}
     </div>
   )
 }
@@ -698,7 +745,7 @@ function ActivityViewsSidebar({
   onSelectView: (viewId: string) => void
 }) {
   return (
-    <aside className="hidden w-44 shrink-0 border-r border-edge/12 bg-pit-2/60 px-2 py-4 md:flex md:flex-col">
+    <aside className="hidden shrink-0 border-r border-edge/12 bg-pit-2/60 px-2 py-4 md:flex md:w-[200px] md:flex-col">
       <div className="mb-5 px-3">
         <div className="flex items-center gap-2 font-mono text-[10px] uppercase tracking-label text-fg-4">
           <ActivityIcon className="h-3.5 w-3.5 text-accent" />
@@ -852,7 +899,7 @@ function ActivityRow({
       aria-current={selected ? 'true' : undefined}
       onFocus={onFocus}
       onClick={onSelect}
-      className={`group relative grid w-full min-w-0 cursor-pointer grid-cols-[16px_54px_86px_minmax(0,1fr)_42px] items-center gap-2 border-t border-edge/6 px-3 py-2 text-left font-mono text-xs transition first:border-t-0 focus:outline-none focus-visible:bg-accent-fill/6 sm:grid-cols-[16px_64px_118px_minmax(0,1fr)_88px_52px] md:px-4 lg:grid-cols-[16px_72px_150px_minmax(0,1fr)_132px_94px_56px] ${
+      className={`group relative grid w-full min-w-0 cursor-pointer grid-cols-[16px_54px_86px_minmax(0,1fr)_64px] items-center gap-2 border-t border-edge/6 px-3 py-2 text-left font-mono text-xs transition first:border-t-0 focus:outline-none focus-visible:bg-accent-fill/6 sm:grid-cols-[16px_64px_118px_minmax(0,1fr)_88px_64px] md:px-4 lg:grid-cols-[16px_72px_150px_minmax(0,1fr)_132px_94px_64px] ${
         selected
           ? 'bg-accent-fill/8 text-fg-1'
           : active
@@ -873,7 +920,7 @@ function ActivityRow({
         {organization?.name ?? event.organizationId}
       </span>
       <span className="hidden min-w-0 truncate text-[10px] uppercase tracking-label text-fg-4 sm:block">{displayContext.actorLabel}</span>
-      <span className="shrink-0 text-[10px] uppercase tracking-label text-fg-4">{formatMainRowDate(event.occurredAt)}</span>
+      <span className="shrink-0 whitespace-nowrap text-right text-[10px] uppercase tracking-label text-fg-4">{formatMainRowDate(event.occurredAt)}</span>
     </button>
   )
 }

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { AlertTriangle, ArrowDown, ArrowUp, ArrowUpDown, BookmarkPlus, Bot, Building2, CheckCircle2, Check, ChevronDown, ChevronRight, Circle, FolderKanban, GripVertical, Plus, Save, Settings2, Tag } from 'lucide-react'
+import { AlertTriangle, ArrowDown, ArrowUp, ArrowUpDown, BookmarkPlus, Bot, Building2, CheckCircle2, Check, ChevronDown, ChevronRight, Circle, FolderKanban, GripVertical, Plus, Save, Settings2, Tag, Trash2 } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import {
   DndContext,
@@ -34,6 +34,7 @@ import type { Mutators } from '../../mutators'
 import { useAuth } from '../../lib/auth'
 import { useTrackerContext } from './IssuesLayout'
 import { IconTooltip } from '../../components/IconTooltip'
+import { DeleteViewModal } from '../../components/DeleteViewModal'
 
 const PRIORITY_GROUPS = [
   { value: 1, label: 'urgent', accent: 'text-amber' },
@@ -207,6 +208,8 @@ export default function Issues() {
   const [saveViewName, setSaveViewName] = useState('')
   const [savingView, setSavingView] = useState(false)
   const [updatingView, setUpdatingView] = useState(false)
+  const [deleteViewModalOpen, setDeleteViewModalOpen] = useState(false)
+  const [deletingView, setDeletingView] = useState(false)
 
   const activeSavedView =
     section.kind === 'view'
@@ -412,6 +415,11 @@ export default function Issues() {
     setSavingView(false)
   }
 
+  function closeDeleteViewModal() {
+    setDeleteViewModalOpen(false)
+    setDeletingView(false)
+  }
+
   async function submitSavedView() {
     if (!user) return
     const name = saveViewName.trim()
@@ -456,6 +464,19 @@ export default function Issues() {
       })
     } finally {
       setUpdatingView(false)
+    }
+  }
+
+  async function deleteActiveSavedView() {
+    if (!activeSavedView || deletingView) return
+
+    setDeletingView(true)
+    try {
+      await z.mutate.pm_saved_views.delete({ id: activeSavedView.id })
+      closeDeleteViewModal()
+      setSection({ kind: 'all' })
+    } finally {
+      setDeletingView(false)
     }
   }
 
@@ -1180,13 +1201,14 @@ export default function Issues() {
     <>
     <div className="flex h-full min-h-0 flex-col">
             <div ref={scrollContainerRef} onScroll={handleScroll} className="flex-1 min-h-0 overflow-auto py-6">
-              <div className="mb-4 flex flex-wrap items-center gap-3 px-4 md:gap-4 md:px-6">
+              <div className="mb-4 flex flex-wrap items-start gap-3 px-4 md:gap-4 md:px-6">
                 {!(section.kind === 'team' && section.tab === 'projects') && (
                   <FilterButton
                     activeFilters={activeFilters}
                     filterConfigs={filterConfigs}
                     onFilterChange={setFilterField}
                     onClearAll={clearAllFilters}
+                    chipsPlacement="below"
                   />
                 )}
                 <div className="ml-auto flex items-center gap-2">
@@ -1210,30 +1232,42 @@ export default function Issues() {
                         </IconTooltip>
                       )}
                       {section.kind === 'view' && activeSavedView && (
-                        <IconTooltip
-                          label={
-                            activeSavedViewIsDirty
-                              ? `update view · ${activeSavedView.name.toLowerCase()}`
-                              : 'view is up to date'
-                          }
-                        >
-                          <button
-                            onClick={updateActiveSavedView}
-                            disabled={!activeSavedViewIsDirty || updatingView}
-                            aria-label={
+                        <>
+                          <IconTooltip
+                            label={
                               activeSavedViewIsDirty
                                 ? `update view · ${activeSavedView.name.toLowerCase()}`
                                 : 'view is up to date'
                             }
-                            className={`flex h-6 w-6 items-center justify-center border transition ${
-                              activeSavedViewIsDirty
-                                ? 'border-edge/30 bg-accent-fill/8 text-accent hover:bg-accent-fill/16 hover:shadow-glow-xs'
-                                : 'border-edge/12 bg-pit-3 text-fg-4 opacity-60'
-                            } disabled:cursor-not-allowed`}
                           >
-                            <Save className="h-3 w-3" />
-                          </button>
-                        </IconTooltip>
+                            <button
+                              onClick={updateActiveSavedView}
+                              disabled={!activeSavedViewIsDirty || updatingView}
+                              aria-label={
+                                activeSavedViewIsDirty
+                                  ? `update view · ${activeSavedView.name.toLowerCase()}`
+                                  : 'view is up to date'
+                              }
+                              className={`flex h-6 w-6 items-center justify-center border transition ${
+                                activeSavedViewIsDirty
+                                  ? 'border-edge/30 bg-accent-fill/8 text-accent hover:bg-accent-fill/16 hover:shadow-glow-xs'
+                                  : 'border-edge/12 bg-pit-3 text-fg-4 opacity-60'
+                              } disabled:cursor-not-allowed`}
+                            >
+                              <Save className="h-3 w-3" />
+                            </button>
+                          </IconTooltip>
+                          <IconTooltip label={`delete view · ${activeSavedView.name.toLowerCase()}`}>
+                            <button
+                              onClick={() => setDeleteViewModalOpen(true)}
+                              disabled={deletingView}
+                              aria-label={`delete view · ${activeSavedView.name.toLowerCase()}`}
+                              className="flex h-6 w-6 items-center justify-center border border-fail/20 bg-fail/5 text-fail transition hover:border-fail/34 hover:bg-fail/10 disabled:opacity-40 disabled:hover:border-fail/20 disabled:hover:bg-fail/5"
+                            >
+                              <Trash2 className="h-3 w-3" />
+                            </button>
+                          </IconTooltip>
+                        </>
                       )}
                       <SortMenu value={sortConfig} onChange={setSortConfig} />
                       <DisplayMenu value={visibleFields} onChange={setVisibleFields} />
@@ -1459,6 +1493,15 @@ export default function Issues() {
         onNameChange={setSaveViewName}
         onClose={closeSaveViewModal}
         onSubmit={submitSavedView}
+      />
+    )}
+
+    {deleteViewModalOpen && activeSavedView && (
+      <DeleteViewModal
+        viewName={activeSavedView.name}
+        deleting={deletingView}
+        onClose={closeDeleteViewModal}
+        onConfirm={deleteActiveSavedView}
       />
     )}
     </>

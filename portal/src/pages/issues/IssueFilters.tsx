@@ -22,11 +22,15 @@ export function FilterButton({
   filterConfigs,
   onFilterChange,
   onClearAll,
+  chipsPlacement = 'inline',
+  afterButton,
 }: {
   activeFilters: ActiveFilters
   filterConfigs: FilterFieldConfig[]
   onFilterChange: (field: string, values: string[]) => void
   onClearAll: () => void
+  chipsPlacement?: 'inline' | 'below'
+  afterButton?: ReactNode
 }) {
   const [isOpen, setIsOpen] = useState(false)
   const [initialField, setInitialField] = useState<string | null>(null)
@@ -62,38 +66,8 @@ export function FilterButton({
     setIsOpen(true)
   }
 
-  return (
-    <div className="flex flex-wrap items-center gap-2" ref={containerRef}>
-      <div className="relative">
-        <button
-          onClick={() => {
-            setInitialField(null)
-            setIsOpen((v) => !v)
-          }}
-          className={`inline-flex items-center gap-1.5 border px-2.5 py-1 font-mono text-[10px] uppercase tracking-label transition ${
-            isOpen
-              ? 'border-edge/35 bg-accent-fill/6 text-accent shadow-glow-xs'
-              : hasActive
-                ? 'border-edge/25 bg-pit-3 text-accent'
-                : 'border-edge/15 bg-pit-3 text-fg-3 hover:text-fg-1 hover:border-edge/25'
-          }`}
-        >
-          filter
-          {hasActive && <span className="text-accent">· {totalActive}</span>}
-        </button>
-
-        {isOpen && (
-          <div className="absolute left-0 top-full z-50 mt-1.5">
-            <FilterDropdown
-              filterConfigs={filterConfigs}
-              activeFilters={activeFilters}
-              onFilterChange={onFilterChange}
-              initialField={initialField}
-            />
-          </div>
-        )}
-      </div>
-
+  const chips = (
+    <>
       {hasActive && Object.entries(activeFilters).map(([field, values]) => {
         if (!values.length) return null
         const config = filterConfigs.find((c) => c.field === field)
@@ -110,7 +84,7 @@ export function FilterButton({
           >
             <button
               onClick={() => openOnField(field)}
-              className="inline-flex items-center gap-1.5 hover:text-fg-1 transition"
+              className="inline-flex items-center gap-1.5 transition hover:text-fg-1"
             >
               <span className="text-fg-4">{config.label}</span>
               <span className="text-fg-1 normal-case tracking-normal">
@@ -123,7 +97,7 @@ export function FilterButton({
                 event.stopPropagation()
                 onFilterChange(field, [])
               }}
-              className="ml-0.5 p-0.5 text-fg-4 hover:text-fail transition"
+              className="ml-0.5 p-0.5 text-fg-4 transition hover:text-fail"
               title="clear"
             >
               <X className="h-3 w-3" strokeWidth={1.5} />
@@ -135,10 +109,56 @@ export function FilterButton({
       {hasActive && (
         <button
           onClick={onClearAll}
-          className="font-mono text-[10px] uppercase tracking-label text-fg-4 hover:text-fail transition"
+          className="font-mono text-[10px] uppercase tracking-label text-fg-4 transition hover:text-fail"
         >
           [clear all]
         </button>
+      )}
+    </>
+  )
+
+  return (
+    <div
+      className={chipsPlacement === 'below' ? 'flex flex-col items-start gap-2' : 'flex flex-wrap items-center gap-2'}
+      ref={containerRef}
+    >
+      <div className="flex flex-wrap items-center gap-2">
+        <div className="relative">
+          <button
+            onClick={() => {
+              setInitialField(null)
+              setIsOpen((v) => !v)
+            }}
+            className={`inline-flex items-center gap-1.5 border px-2.5 py-1 font-mono text-[10px] uppercase tracking-label transition ${
+              isOpen
+                ? 'border-edge/35 bg-accent-fill/6 text-accent shadow-glow-xs'
+                : hasActive
+                  ? 'border-edge/25 bg-pit-3 text-accent'
+                  : 'border-edge/15 bg-pit-3 text-fg-3 hover:text-fg-1 hover:border-edge/25'
+            }`}
+          >
+            filter
+            {hasActive && <span className="text-accent">· {totalActive}</span>}
+          </button>
+
+          {isOpen && (
+            <div className="absolute left-0 top-full z-50 mt-1.5">
+              <FilterDropdown
+                filterConfigs={filterConfigs}
+                activeFilters={activeFilters}
+                onFilterChange={onFilterChange}
+                initialField={initialField}
+              />
+            </div>
+          )}
+        </div>
+        {afterButton}
+      </div>
+
+      {chipsPlacement === 'below' ? (
+        hasActive ? <div className="flex flex-wrap items-center gap-2">{chips}</div> : null
+      ) : (
+        chips
       )}
     </div>
   )
