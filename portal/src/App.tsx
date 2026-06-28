@@ -372,6 +372,7 @@ function AppShell() {
         if (item.path === '/issues') return location.pathname.startsWith('/issues')
         if (item.path === '/activity') return location.pathname.startsWith('/activity')
         if (item.path === '/whatsapp/templates') return location.pathname.startsWith('/whatsapp')
+        if (item.path.startsWith('/settings')) return location.pathname.startsWith('/settings')
         return false
       })
 

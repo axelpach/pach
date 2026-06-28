@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
-import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
+import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { useQuery, useZero } from '@rocicorp/zero/react'
-import { Activity as ActivityIcon, AlertTriangle, ArrowDown, ArrowUp, ArrowUpDown, BookmarkPlus, Bot, Building2, Clock3, FileJson, ListTree, Plus, RadioTower, Save, Trash2, X } from 'lucide-react'
+import { Activity as ActivityIcon, AlertTriangle, ArrowDown, ArrowUp, ArrowUpDown, BookmarkPlus, Bot, Building2, Clock3, ExternalLink, FileJson, ListTree, Plus, RadioTower, Save, Trash2, X } from 'lucide-react'
 import type { Schema } from '../../zero-schema'
 import type { Mutators } from '../../mutators'
 import { useAuth } from '../../lib/auth'
@@ -949,6 +949,7 @@ function ActivityDetail({
     { label: 'subject id', value: event.subjectId ?? '-' },
   ]
   const summary = event.summary.trim()
+  const issueHref = context.issueId ? `/issues/${context.issueId}` : null
 
   return (
     <>
@@ -986,15 +987,25 @@ function ActivityDetail({
                   <p className="mt-2 text-sm leading-relaxed text-fg-3">{summary}</p>
                 ) : null}
               </div>
-              <Button
-                kind="primary"
-                icon={<Plus className="h-3.5 w-3.5" />}
-                onClick={onCreateIssue}
-                disabled={creatingIssue}
-                className="px-2.5 py-1.5 text-[10px]"
-              >
-                issue
-              </Button>
+              {issueHref ? (
+                <Link
+                  to={issueHref}
+                  className="inline-flex shrink-0 items-center gap-1.5 border border-edge/30 bg-accent-fill/8 px-2.5 py-1.5 font-mono text-[10px] uppercase tracking-label text-accent transition hover:bg-accent-fill/16 hover:shadow-glow-xs"
+                >
+                  <ExternalLink className="h-3.5 w-3.5" />
+                  issue
+                </Link>
+              ) : (
+                <Button
+                  kind="primary"
+                  icon={<Plus className="h-3.5 w-3.5" />}
+                  onClick={onCreateIssue}
+                  disabled={creatingIssue}
+                  className="px-2.5 py-1.5 text-[10px]"
+                >
+                  issue
+                </Button>
+              )}
             </div>
             <div className="grid grid-cols-2 gap-3">
               <DetailFact label="kind" value={event.activityKind} />
@@ -1316,11 +1327,13 @@ function activityDisplayContext(event: ActivityEventRow, lookups: ActivityContex
   const actorLabel = activityActorLabel(event, lookups.users)
   let subjectLabel = activitySubjectLabel(event)
   let subjectMeta = event.subjectType
+  let issueId: string | null = null
   const fields: ActivityContextField[] = []
 
   if (event.subjectType === 'pm_issue' && event.subjectId) {
     const issue = lookups.issues.get(event.subjectId)
     if (issue) {
+      issueId = issue.id
       const team = lookups.teams.get(issue.teamId)
       const project = issue.projectId ? lookups.projects.get(issue.projectId) : null
       const status = lookups.statuses.get(issue.statusId)
@@ -1341,7 +1354,7 @@ function activityDisplayContext(event: ActivityEventRow, lookups: ActivityContex
     }
   }
 
-  return { actorLabel, subjectLabel, subjectMeta, fields }
+  return { actorLabel, subjectLabel, subjectMeta, issueId, fields }
 }
 
 function activityActorLabel(event: ActivityEventRow, users?: Map<string, UserRow>) {
