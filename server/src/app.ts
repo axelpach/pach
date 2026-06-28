@@ -17,6 +17,7 @@ import mcpRoute from './routes/mcp.js'
 import designPreviewRoute from './routes/design-preview.js'
 import designRoute from './routes/design.js'
 import apiKeysRoute from './routes/api-keys.js'
+import activityRoute from './routes/activity.js'
 import { requireAuth, requireUnscopedAccess } from './middleware/auth.js'
 import { startTaskTriggerRunner } from './services/task-triggers/runner.js'
 import { startMarketingAutomationRunner } from './services/marketing-automation/runner.js'
@@ -34,6 +35,7 @@ app.use('/auth', authRoute)
 app.use('/whatsapp', publicWhatsAppRouter)
 app.use('/inbound', inboundRoute)
 app.use('/public', publicMarketingRouter)
+app.use('/activity', activityRoute)
 app.use('/zero', requireAuth, zeroPushRoute)
 app.use('/whatsapp', requireAuth, whatsappRoute)
 app.use('/linear', requireAuth, requireUnscopedAccess, linearRoute)

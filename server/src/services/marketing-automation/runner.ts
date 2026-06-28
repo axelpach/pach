@@ -3,13 +3,13 @@ import { and, asc, desc, eq, gte, inArray, isNull, lte } from 'drizzle-orm'
 import {
   mktDistributionRuns,
   mktPublications,
-  pmIssueActivity,
   pmIssues,
   pmStatuses,
   pmTeams,
   users,
 } from '../../../../db/schema.js'
 import { getDb } from '../../db.js'
+import { insertIssueActivityEvent } from '../../lib/activity-events.js'
 import { sendNewsletterRun } from '../../routes/marketing.js'
 
 type MarketingAutomationSummary = {
@@ -261,12 +261,14 @@ async function createCadenceIssueIfNeeded(publication: PublicationRow, cadence: 
       updatedAt: now,
     })
 
-    await tx.insert(pmIssueActivity).values({
-      id: randomUUID(),
+    await insertIssueActivityEvent(tx, {
       issueId,
+      organizationId: publication.organizationId,
+      subjectLabel: identifier,
       actorId: creator?.id ?? null,
       actorName: creator?.name ?? 'Pach marketing automation',
-      type: 'created',
+      eventType: 'created',
+      source: 'marketing_publication_cadence',
       summary: `Created issue ${identifier} from publication cadence check`,
       metadata: {
         source: 'marketing_publication_cadence',
@@ -275,6 +277,7 @@ async function createCadenceIssueIfNeeded(publication: PublicationRow, cadence: 
         lookaheadDays: cadence.lookaheadDays,
         horizon: horizon.toISOString(),
       },
+      occurredAt: now,
       createdAt: now,
     })
 

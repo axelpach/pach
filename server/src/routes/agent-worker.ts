@@ -2,9 +2,10 @@ import { randomUUID } from 'node:crypto'
 import { Router } from 'express'
 import type { Request } from 'express'
 import { and, desc, eq, inArray, isNull, or } from 'drizzle-orm'
-import { agentRunProgressReports, agentRuns, agentWorkers, mcpTokens, pmIssueActivity, pmIssues } from '../../../db/schema.js'
+import { agentRunProgressReports, agentRuns, agentWorkers, mcpTokens, pmIssues } from '../../../db/schema.js'
 import { getDb } from '../db.js'
 import { buildGeneralMcpPrompt } from '../lib/agent-run-prompt.js'
+import { insertIssueActivityEvent } from '../lib/activity-events.js'
 import { hashMcpToken, hasMcpCapability, type McpAuthContext, type McpCapability } from '../lib/mcp-token.js'
 
 const router = Router()
@@ -364,23 +365,26 @@ async function appendRunActivity(
 ) {
   if (!run.issueId) return
 
-  await getDb().insert(pmIssueActivity).values({
-    id: randomUUID(),
+  const now = new Date()
+  await insertIssueActivityEvent(getDb(), {
     issueId: run.issueId,
+    actorType: 'agent',
     actorName: 'Pach agent worker',
-    type,
+    eventType: type,
+    source: 'agent-worker',
     summary,
     metadata: {
       source: 'agent-worker',
       runId: run.id,
       ...metadata,
     },
-    createdAt: new Date(),
+    occurredAt: now,
+    createdAt: now,
   })
 
   await getDb()
     .update(pmIssues)
-    .set({ lastActivityAt: new Date(), updatedAt: new Date() })
+    .set({ lastActivityAt: now, updatedAt: now })
     .where(eq(pmIssues.id, run.issueId))
 }
 

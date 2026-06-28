@@ -1,14 +1,15 @@
 import { Router } from 'express'
 import { and, desc, eq, or } from 'drizzle-orm'
 import { getDb } from '../db.js'
+import { insertIssueActivityEvent } from '../lib/activity-events.js'
 import {
+  activityEvents,
   organizations,
   crmCompanies,
   crmContacts,
   crmDealContacts,
   crmDeals,
   crmNotes,
-  pmIssueActivity,
   pmIssues,
   pmProjects,
   pmStatuses,
@@ -333,18 +334,58 @@ async function createLeadIssue(
     })
     .returning()
 
-  await tx.insert(pmIssueActivity).values({
-    id: crypto.randomUUID(),
+  await insertIssueActivityEvent(tx, {
     issueId: issue.id,
+    organizationId: params.contextCompanyId,
+    subjectLabel: identifier,
     ...(axelUser?.id ? { actorId: axelUser.id } : {}),
     actorName: axelUser?.name ?? 'Ardia landing',
-    type: 'created',
+    eventType: 'created',
+    source: typeof params.payload.source === 'string' && params.payload.source.trim()
+      ? params.payload.source.trim()
+      : 'ardia_landing',
     summary: `Created issue ${identifier} from landing lead`,
     metadata: {
       source: params.payload.source,
       contextCompany: params.payload.contextCompany,
     },
+    occurredAt: params.now,
     createdAt: params.now,
+  })
+
+  const leadSubject = `${params.payload.company ?? params.payload.name ?? 'Lead'}${params.payload.email ? ` · ${params.payload.email}` : ''}`
+  await tx.insert(activityEvents).values({
+    organizationId: params.contextCompanyId,
+    occurredAt: params.now,
+    createdAt: params.now,
+    eventType: 'lead_received',
+    activityKind: 'business_signal',
+    origin: 'pach_work',
+    subjectType: 'inbound_lead',
+    subjectId: issue.id,
+    subjectLabel: leadSubject,
+    actorType: 'external_user',
+    actorName: typeof params.payload.name === 'string' ? params.payload.name : undefined,
+    source: typeof params.payload.source === 'string' && params.payload.source.trim()
+      ? params.payload.source.trim()
+      : 'ardia_landing',
+    severity: 'info',
+    summary: `Received inbound lead ${leadSubject}`,
+    details: {
+      issueId: issue.id,
+      issueIdentifier: identifier,
+      name: params.payload.name,
+      email: params.payload.email,
+      phone: params.payload.phone,
+      company: params.payload.company,
+      interest: params.payload.interest,
+      pageUrl: params.payload.pageUrl,
+    },
+    metadata: {
+      source: params.payload.source,
+      contextCompany: params.payload.contextCompany,
+      referrer: params.payload.referrer,
+    },
   })
 
   return issue

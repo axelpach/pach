@@ -1,4 +1,4 @@
-import { bigint, boolean, date, index, pgTable, uniqueIndex, uuid, text, timestamp, integer, jsonb } from 'drizzle-orm/pg-core';
+import { bigint, boolean, date, index, pgEnum, pgTable, uniqueIndex, uuid, text, timestamp, integer, jsonb } from 'drizzle-orm/pg-core';
 /* ─────────────────────────── USERS ─────────────────────────── */
 export const users = pgTable('users', {
     id: uuid('id').primaryKey().defaultRandom(),
@@ -58,6 +58,36 @@ export const organizationApiKeys = pgTable('organization_api_keys', {
     tokenHashIdx: index('organization_api_keys_token_hash_idx').on(table.tokenHash),
     tokenPrefixIdx: index('organization_api_keys_token_prefix_idx').on(table.tokenPrefix),
     revokedAtIdx: index('organization_api_keys_revoked_at_idx').on(table.revokedAt),
+}));
+export const activityOriginEnum = pgEnum('activity_origin', ['pach_work', 'organization_work', 'organization_user_work']);
+export const activityEvents = pgTable('activity_events', {
+    id: uuid('id').primaryKey().defaultRandom(),
+    organizationId: uuid('organization_id').notNull().references(() => organizations.id),
+    occurredAt: timestamp('occurred_at', { withTimezone: true }).notNull().defaultNow(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    eventType: text('event_type').notNull(),
+    activityKind: text('activity_kind').notNull().default('operational'),
+    origin: activityOriginEnum('origin').notNull().default('pach_work'),
+    subjectType: text('subject_type').notNull(),
+    subjectId: text('subject_id'),
+    subjectLabel: text('subject_label'),
+    actorType: text('actor_type').notNull().default('system'),
+    actorId: text('actor_id'),
+    actorName: text('actor_name'),
+    source: text('source').notNull().default('pach_app'),
+    severity: text('severity').notNull().default('info'),
+    summary: text('summary').notNull(),
+    details: jsonb('details').$type().notNull().default({}),
+    metadata: jsonb('metadata').$type().notNull().default({}),
+}, (table) => ({
+    organizationOccurredAtIdx: index('activity_events_organization_occurred_at_idx').on(table.organizationId, table.occurredAt),
+    organizationActivityKindIdx: index('activity_events_organization_activity_kind_idx').on(table.organizationId, table.activityKind),
+    organizationOriginIdx: index('activity_events_organization_origin_idx').on(table.organizationId, table.origin),
+    organizationEventTypeIdx: index('activity_events_organization_event_type_idx').on(table.organizationId, table.eventType),
+    organizationSubjectTypeIdx: index('activity_events_organization_subject_type_idx').on(table.organizationId, table.subjectType),
+    organizationActorNameIdx: index('activity_events_organization_actor_name_idx').on(table.organizationId, table.actorName),
+    organizationSourceIdx: index('activity_events_organization_source_idx').on(table.organizationId, table.source),
+    organizationSeverityIdx: index('activity_events_organization_severity_idx').on(table.organizationId, table.severity),
 }));
 export const mcpTokens = pgTable('mcp_tokens', {
     id: uuid('id').primaryKey().defaultRandom(),

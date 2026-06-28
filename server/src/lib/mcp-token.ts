@@ -3,6 +3,8 @@ import { createHash, randomBytes } from 'node:crypto'
 export const MCP_TOKEN_PREFIX = 'pach_mcp_'
 
 export const MCP_CAPABILITIES = [
+  'pach.activity.read',
+  'pach.activity.write',
   'pach.issue.read',
   'pach.issue.write',
   'pach.document.read',

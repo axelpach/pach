@@ -3,8 +3,9 @@ import { GetObjectCommand, S3Client } from '@aws-sdk/client-s3'
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner'
 import { Router } from 'express'
 import type { Request } from 'express'
-import { desc, eq, ilike, inArray, isNull, or } from 'drizzle-orm'
+import { and, desc, eq, ilike, inArray, isNull, or } from 'drizzle-orm'
 import {
+  activityEvents,
   agentRunProgressReports,
   designAssets,
   agentRuns,
@@ -17,7 +18,6 @@ import {
   mcpTokens,
   mktPublications,
   organizations,
-  pmIssueActivity,
   pmIssueLabels,
   pmIssues,
   pmLabels,
@@ -263,6 +263,58 @@ const tools: ToolDefinition[] = [
           type: 'string',
           description: 'Optional human-readable summary to show in the issue activity feed.',
         },
+      },
+    },
+  },
+  {
+    name: 'pach.activity.list',
+    description: 'List recent Pach activity events the caller can access, with filters for organization, origin, kind, actor, source, subject type, event type, severity, and search.',
+    inputSchema: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        limit: { type: 'number', description: 'Maximum number of events. Defaults to 25, maximum 100.' },
+        search: { type: 'string', description: 'Optional search across summary, subject label, actor, source, and event type.' },
+        organizationId: { type: 'string' },
+        organizationName: { type: 'string' },
+        organizationProject: { type: 'string' },
+        actorName: { type: 'string' },
+        source: { type: 'string' },
+        origin: { type: 'string', description: 'pach_work, organization_work, or organization_user_work.' },
+        activityKind: { type: 'string', description: 'progress, business_signal, operational, or incident.' },
+        subjectType: { type: 'string' },
+        eventType: { type: 'string' },
+        severity: { type: 'string' },
+      },
+    },
+  },
+  {
+    name: 'pach.activity.record',
+    description: 'Record a Pach activity event for an organization. Use actorName for who did it and source for the technical origin.',
+    inputSchema: {
+      type: 'object',
+      additionalProperties: false,
+      required: ['eventType', 'subjectType', 'summary'],
+      properties: {
+        organizationId: { type: 'string' },
+        organizationName: { type: 'string' },
+        organizationProject: { type: 'string' },
+        occurredAt: { type: 'string', description: 'Optional ISO timestamp.' },
+        eventType: { type: 'string' },
+        activityKind: { type: 'string', description: 'progress, business_signal, operational, or incident. Defaults to operational.' },
+        origin: { type: 'string', description: 'pach_work, organization_work, or organization_user_work. Defaults to pach_work.' },
+        subjectType: { type: 'string' },
+        subjectId: { type: 'string' },
+        subject: { type: 'string', description: 'Human-readable subject for the event. Stored as subjectLabel.' },
+        subjectLabel: { type: 'string' },
+        actorType: { type: 'string' },
+        actorId: { type: 'string' },
+        actorName: { type: 'string' },
+        source: { type: 'string' },
+        severity: { type: 'string' },
+        summary: { type: 'string' },
+        details: { type: 'object', additionalProperties: true },
+        metadata: { type: 'object', additionalProperties: true },
       },
     },
   },
@@ -787,6 +839,12 @@ async function callTool(req: AuthenticatedRequest, params: unknown) {
       case 'pach.issue.update':
         requireMcpCapability(req, 'pach.issue.write')
         return toolResult(await updateIssue(req, args))
+      case 'pach.activity.list':
+        requireMcpCapability(req, 'pach.activity.read')
+        return toolResult(await listActivityEvents(req, args))
+      case 'pach.activity.record':
+        requireMcpCapability(req, 'pach.activity.write')
+        return toolResult(await recordActivityEvent(req, args))
       case 'pach.document.list':
         requireMcpCapability(req, 'pach.document.read')
         return toolResult(await listDocuments(req, args))
@@ -935,9 +993,9 @@ async function listIssues(req: AuthenticatedRequest, args: unknown) {
   const activity = issueIds.length > 0 && activityLimit > 0
     ? await db
       .select()
-      .from(pmIssueActivity)
-      .where(inArray(pmIssueActivity.issueId, issueIds))
-      .orderBy(desc(pmIssueActivity.createdAt))
+      .from(activityEvents)
+      .where(and(eq(activityEvents.subjectType, 'pm_issue'), inArray(activityEvents.subjectId, issueIds)))
+      .orderBy(desc(activityEvents.createdAt))
       .limit(issueIds.length * activityLimit)
     : []
   const runs = issueIds.length > 0 && runLimit > 0
@@ -949,7 +1007,7 @@ async function listIssues(req: AuthenticatedRequest, args: unknown) {
       .limit(issueIds.length * runLimit)
     : []
   const selectedLabelsByIssueId = groupBy(selectedLabelLinks, (link) => link.issueId)
-  const activityByIssueId = groupLimitedBy(activity, (entry) => entry.issueId, activityLimit)
+  const activityByIssueId = groupLimitedBy(activity, (entry) => entry.subjectId ?? '', activityLimit)
   const runsByIssueId = groupLimitedBy(runs.filter((run) => run.issueId), (run) => run.issueId!, runLimit)
 
   return {
@@ -1039,9 +1097,9 @@ async function getIssue(req: AuthenticatedRequest, args: unknown) {
     : []
   const activity = await db
     .select()
-    .from(pmIssueActivity)
-    .where(eq(pmIssueActivity.issueId, issue.id))
-    .orderBy(desc(pmIssueActivity.createdAt))
+    .from(activityEvents)
+    .where(and(eq(activityEvents.subjectType, 'pm_issue'), eq(activityEvents.subjectId, issue.id)))
+    .orderBy(desc(activityEvents.createdAt))
     .limit(20)
   const runs = await db
     .select()
@@ -1126,6 +1184,106 @@ async function updateIssue(req: AuthenticatedRequest, args: unknown) {
     ok: true,
     issue: serializeIssue(updated),
     changedFields,
+  }
+}
+
+async function listActivityEvents(req: AuthenticatedRequest, args: unknown) {
+  const body = isObject(args) ? args : {}
+  const limit = readPositiveInteger(body.limit, 25, 1, 100)
+  const search = readOptionalString(body.search)
+  const organizationIds = readStringFilters(body.organizationId, body.organizationIds)
+  const organizationNames = readStringFilters(body.organizationName, body.organizationNames)
+  const organizationProjects = readStringFilters(body.organizationProject, body.organizationProjects)
+  const actorNames = readStringFilters(body.actorName, body.actorNames)
+  const sources = readStringFilters(body.source, body.sources)
+  const origins = readStringFilters(body.origin, body.origins)
+  const activityKinds = readStringFilters(body.activityKind, body.activityKinds)
+  const subjectTypes = readStringFilters(body.subjectType, body.subjectTypes)
+  const eventTypes = readStringFilters(body.eventType, body.eventTypes)
+  const severities = readStringFilters(body.severity, body.severities)
+  const scanLimit = Math.max(200, Math.min(1000, limit * 20))
+  const db = getDb()
+  const rows = await db
+    .select()
+    .from(activityEvents)
+    .orderBy(desc(activityEvents.occurredAt))
+    .limit(scanLimit)
+
+  const accessibleRows = rows.filter((event) => canAccessOrganization(req, event.organizationId))
+  const accessibleOrganizationIds = uniqueStrings(accessibleRows.map((event) => event.organizationId))
+  const organizationRows = accessibleOrganizationIds.length
+    ? await db.select().from(organizations).where(inArray(organizations.id, accessibleOrganizationIds))
+    : []
+  const organizationById = new Map(organizationRows.map((organization) => [organization.id, organization]))
+
+  const events = accessibleRows
+    .filter((event) => {
+      const organization = organizationById.get(event.organizationId)
+      if (search && !matchesAny(search, [event.summary, event.subjectLabel, event.actorName, event.source, event.origin, event.activityKind, event.eventType])) return false
+      if (organizationIds.length > 0 && !matchesStringFilter(event.organizationId, organizationIds, 'exact')) return false
+      if (organizationNames.length > 0 && !matchesStringFilter(organization?.name, organizationNames)) return false
+      if (organizationProjects.length > 0 && !matchesStringFilter(organization?.project, organizationProjects, 'exact')) return false
+      if (actorNames.length > 0 && !matchesStringFilter(event.actorName, actorNames)) return false
+      if (sources.length > 0 && !matchesStringFilter(event.source, sources, 'exact')) return false
+      if (origins.length > 0 && !matchesStringFilter(event.origin, origins, 'exact')) return false
+      if (activityKinds.length > 0 && !matchesStringFilter(event.activityKind, activityKinds, 'exact')) return false
+      if (subjectTypes.length > 0 && !matchesStringFilter(event.subjectType, subjectTypes, 'exact')) return false
+      if (eventTypes.length > 0 && !matchesStringFilter(event.eventType, eventTypes, 'exact')) return false
+      if (severities.length > 0 && !matchesStringFilter(event.severity, severities, 'exact')) return false
+      return true
+    })
+    .slice(0, limit)
+
+  return {
+    ok: true,
+    count: events.length,
+    events: events.map((event) => serializeActivityEvent(event, organizationById.get(event.organizationId))),
+  }
+}
+
+async function recordActivityEvent(req: AuthenticatedRequest, args: unknown) {
+  const body = ensureObject(args)
+  const organization = await resolveOrganizationForDocumentCreate(req, body)
+  if (!organization) throw new Error('Activity events require an organization. Provide organizationId, organizationName, or organizationProject.')
+
+  const occurredAt = readOptionalDate(body.occurredAt) ?? new Date()
+  const eventType = readRequiredString(body, 'eventType')
+  const activityKind = normalizeActivityKind(readOptionalString(body.activityKind))
+  const origin = normalizeActivityOrigin(readOptionalString(body.origin), 'pach_work')
+  const subjectType = readRequiredString(body, 'subjectType')
+  const subject = readOptionalString(body.subject) ?? readOptionalString(body.subjectLabel)
+  const summary = readRequiredString(body, 'summary')
+  const auth = req.mcpAuth
+  const user = req.user
+  const now = new Date()
+  const [event] = await getDb().insert(activityEvents).values({
+    id: randomUUID(),
+    organizationId: organization.id,
+    occurredAt,
+    createdAt: now,
+    eventType,
+    activityKind,
+    origin,
+    subjectType,
+    subjectId: readOptionalString(body.subjectId) ?? undefined,
+    subjectLabel: subject ?? undefined,
+    actorType: readOptionalString(body.actorType) ?? (auth?.kind === 'jwt' ? 'user' : 'agent'),
+    actorId: readOptionalString(body.actorId) ?? auth?.actorUserId ?? undefined,
+    actorName: readOptionalString(body.actorName) ?? auth?.actorName ?? user?.name ?? user?.email ?? 'Pach agent',
+    source: readOptionalString(body.source) ?? 'pach-mcp',
+    severity: normalizeActivitySeverity(readOptionalString(body.severity)),
+    summary,
+    details: isObject(body.details) ? body.details : {},
+    metadata: {
+      ...(isObject(body.metadata) ? body.metadata : {}),
+      mcpSubjectId: auth?.subjectId,
+      mcpAuthKind: auth?.kind,
+    },
+  }).returning()
+
+  return {
+    ok: true,
+    event: serializeActivityEvent(event, organization),
   }
 }
 
@@ -1940,6 +2098,23 @@ function canAccessOrganization(req: AuthenticatedRequest, organizationId: string
     : Boolean(auth?.canAccessUnscoped || user?.canAccessUnscoped)
 }
 
+async function fallbackActivityOrganizationId() {
+  const [pachOrganization] = await getDb()
+    .select({ id: organizations.id })
+    .from(organizations)
+    .where(eq(organizations.project, 'pach'))
+    .orderBy(organizations.createdAt)
+    .limit(1)
+  if (pachOrganization) return pachOrganization.id
+
+  const [firstOrganization] = await getDb()
+    .select({ id: organizations.id })
+    .from(organizations)
+    .orderBy(organizations.createdAt)
+    .limit(1)
+  return firstOrganization?.id ?? null
+}
+
 function canAccessDocument(req: AuthenticatedRequest, document: typeof documents.$inferSelect) {
   return canAccessOrganization(req, document.organizationId)
 }
@@ -2437,15 +2612,38 @@ async function appendIssueActivity(
   const auth = req.mcpAuth
   const user = req.user
 
-  await getDb().insert(pmIssueActivity).values({
+  const [issue] = await getDb().select().from(pmIssues).where(eq(pmIssues.id, activity.issueId)).limit(1)
+  if (!issue) throw new Error('Issue not found')
+  if (!canAccessIssue(req, issue)) throw new Error('Not authorized for this issue')
+
+  const organizationId = issue.contextCompanyId ?? await fallbackActivityOrganizationId()
+  if (!organizationId) throw new Error('No organization available for issue activity')
+
+  await getDb().insert(activityEvents).values({
     id: randomUUID(),
-    issueId: activity.issueId,
+    organizationId,
+    occurredAt: now,
+    createdAt: now,
+    eventType: activity.type,
+    activityKind: issueActivityKind(activity.type, activity.metadata),
+    origin: 'pach_work',
+    subjectType: 'pm_issue',
+    subjectId: issue.id,
+    subjectLabel: issue.identifier,
+    actorType: auth?.actorUserId ? 'user' : 'agent',
     actorId: auth?.actorUserId && isUuid(auth.actorUserId) ? auth.actorUserId : undefined,
     actorName: auth?.actorName ?? user?.name ?? user?.email ?? 'Pach agent',
-    type: activity.type,
+    source: readMetadataString(activity.metadata, 'source') ?? 'pach-mcp',
+    severity: activity.type === 'agent_run_failed' || readMetadataString(activity.metadata, 'level') === 'error'
+      ? 'error'
+      : readMetadataString(activity.metadata, 'level') === 'warn' || readMetadataString(activity.metadata, 'level') === 'warning'
+        ? 'warning'
+        : readMetadataString(activity.metadata, 'level') === 'debug'
+          ? 'debug'
+          : 'info',
     summary: activity.summary,
-    metadata: activity.metadata,
-    createdAt: now,
+    details: {},
+    metadata: activity.metadata ?? {},
   })
 
   await getDb()
@@ -2514,6 +2712,20 @@ function readOptionalString(value: unknown) {
   return typeof value === 'string' && value.trim() ? value.trim() : null
 }
 
+function readOptionalDate(value: unknown) {
+  if (value == null || value === '') return null
+  if (value instanceof Date && !Number.isNaN(value.getTime())) return value
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    const date = new Date(value)
+    if (!Number.isNaN(date.getTime())) return date
+  }
+  if (typeof value === 'string' && value.trim()) {
+    const date = new Date(value)
+    if (!Number.isNaN(date.getTime())) return date
+  }
+  throw new Error('Date value must be an ISO timestamp or millisecond timestamp')
+}
+
 function readStringFilters(...values: unknown[]) {
   return values.flatMap((value) => {
     if (typeof value === 'string' && value.trim()) return [value.trim()]
@@ -2561,6 +2773,39 @@ function normalizeForFilter(value: string) {
 function readProgressLevel(metadata: Record<string, unknown>) {
   const level = metadata.level
   return level === 'debug' || level === 'info' || level === 'warn' || level === 'error' ? level : 'info'
+}
+
+function normalizeActivitySeverity(value: string | null) {
+  if (!value) return 'info'
+  const normalized = value.toLowerCase()
+  return normalized === 'warn' ? 'warning' : normalized
+}
+
+function normalizeActivityKind(value: string | null) {
+  if (!value) return 'operational'
+  const normalized = value.toLowerCase()
+  if (normalized === 'signal') return 'business_signal'
+  if (['progress', 'business_signal', 'operational', 'incident'].includes(normalized)) return normalized
+  throw new Error('activityKind must be one of progress, business_signal, operational, or incident.')
+}
+
+function normalizeActivityOrigin(value: string | null, fallback: 'pach_work' | 'organization_work' | 'organization_user_work') {
+  if (!value) return fallback
+  const normalized = value.toLowerCase()
+  if (normalized === 'pach_work' || normalized === 'organization_work' || normalized === 'organization_user_work') return normalized
+  throw new Error('origin must be pach_work, organization_work, or organization_user_work.')
+}
+
+function issueActivityKind(type: string, metadata?: Record<string, unknown>) {
+  if (type === 'completed') return 'progress'
+  if (type === 'agent_run_failed' || readMetadataString(metadata, 'level') === 'error') return 'incident'
+  return 'operational'
+}
+
+function readMetadataString(metadata: unknown, key: string) {
+  if (!metadata || typeof metadata !== 'object') return null
+  const value = (metadata as Record<string, unknown>)[key]
+  return typeof value === 'string' && value.trim() ? value.trim() : null
 }
 
 function ensureObject(value: unknown): Record<string, unknown> {
@@ -2663,6 +2908,32 @@ function serializeNullableRow<T extends Record<string, unknown>>(row: T | undefi
 function serializePublicUser(user: typeof users.$inferSelect) {
   const { passwordHash: _passwordHash, ...publicUser } = user
   return serializeRow(publicUser)
+}
+
+function serializeActivityEvent(event: typeof activityEvents.$inferSelect, organization?: typeof organizations.$inferSelect) {
+  return {
+    id: event.id,
+    organizationId: event.organizationId,
+    organizationName: organization?.name ?? null,
+    organizationProject: organization?.project ?? null,
+    occurredAt: event.occurredAt.toISOString(),
+    createdAt: event.createdAt.toISOString(),
+    eventType: event.eventType,
+    activityKind: event.activityKind,
+    origin: event.origin,
+    subjectType: event.subjectType,
+    subjectId: event.subjectId,
+    subject: event.subjectLabel,
+    subjectLabel: event.subjectLabel,
+    actorType: event.actorType,
+    actorId: event.actorId,
+    actorName: event.actorName,
+    source: event.source,
+    severity: event.severity,
+    summary: event.summary,
+    details: event.details ?? {},
+    metadata: event.metadata ?? {},
+  }
 }
 
 function displayUserName(user: typeof users.$inferSelect | undefined) {

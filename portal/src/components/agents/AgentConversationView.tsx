@@ -13,7 +13,7 @@ type AgentConversationViewProps = {
   issue: Schema['tables']['pm_issues']['row']
   run: Schema['tables']['agent_runs']['row'] | null
   progressReports: Schema['tables']['agent_run_progress_reports']['row'][]
-  legacyProgressActivity: Schema['tables']['pm_issue_activity']['row'][]
+  legacyProgressActivity: Schema['tables']['activity_events']['row'][]
   messages: Schema['tables']['agent_messages']['row'][]
   workers: Schema['tables']['agent_workers']['row'][]
   repositories: Schema['tables']['github_repositories']['row'][]
@@ -335,7 +335,7 @@ function buildAgentConversationStream({
   messages,
 }: {
   progressReports: Schema['tables']['agent_run_progress_reports']['row'][]
-  legacyProgressActivity: Schema['tables']['pm_issue_activity']['row'][]
+  legacyProgressActivity: Schema['tables']['activity_events']['row'][]
   messages: Schema['tables']['agent_messages']['row'][]
 }): AgentConversationStreamItemModel[] {
   const preferredFinalResultByRun = new Map<string, Schema['tables']['agent_run_progress_reports']['row']>()
@@ -379,9 +379,9 @@ function buildAgentConversationStream({
         id: `legacy-${entry.id}`,
         runId: readMetadataString(entry.metadata, 'runId') ?? undefined,
         role: 'agent',
-        phase: readMetadataString(entry.metadata, 'phase') ?? legacyProgressPhase(entry.type),
+        phase: readMetadataString(entry.metadata, 'phase') ?? legacyProgressPhase(entry.eventType),
         body: entry.summary,
-        level: entry.type === 'agent_run_failed' || readMetadataString(entry.metadata, 'level') === 'error' ? 'error' : 'info',
+        level: entry.eventType === 'agent_run_failed' || readMetadataString(entry.metadata, 'level') === 'error' ? 'error' : 'info',
         createdAt: entry.createdAt,
       })),
   ].sort((a, b) => a.createdAt - b.createdAt)
@@ -429,14 +429,14 @@ function normalizeMessageForDedupe(value: string) {
 }
 
 function shouldShowLegacyProgress(
-  entry: Schema['tables']['pm_issue_activity']['row'],
+  entry: Schema['tables']['activity_events']['row'],
   progressPhasesByRun: Map<string, Set<string>>,
   preferredFinalResultByRun: Map<string, Schema['tables']['agent_run_progress_reports']['row']>,
 ) {
   const runId = readMetadataString(entry.metadata, 'runId')
   if (!runId) return true
 
-  const phase = readMetadataString(entry.metadata, 'phase') ?? legacyProgressPhase(entry.type)
+  const phase = readMetadataString(entry.metadata, 'phase') ?? legacyProgressPhase(entry.eventType)
   const progressPhases = progressPhasesByRun.get(runId)
   if (!progressPhases) return true
   if (phase === 'completed' && preferredFinalResultByRun.has(runId)) return false

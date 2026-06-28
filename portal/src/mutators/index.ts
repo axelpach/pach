@@ -32,6 +32,24 @@ export const mutators = {
     },
   },
 
+  activity_events: {
+    async create(tx: Tx, args: { id: string; organizationId: string; occurredAt?: number; eventType: string; activityKind?: string; origin?: string; subjectType: string; subjectId?: string; subjectLabel?: string; actorType?: string; actorId?: string; actorName?: string; source?: string; severity?: string; summary: string; details?: Record<string, unknown>; metadata?: Record<string, unknown> }) {
+      const now = Date.now()
+      await tx.mutate.activity_events.insert({
+        occurredAt: now,
+        activityKind: 'operational',
+        origin: 'pach_work',
+        actorType: 'system',
+        source: 'pach_app',
+        severity: 'info',
+        details: {},
+        metadata: {},
+        ...args,
+        createdAt: now,
+      } as any)
+    },
+  },
+
   design_systems: {
     async create(tx: Tx, args: { id: string; organizationId: string; name: string; slug: string; tokens?: Record<string, unknown>; assets?: Record<string, unknown>; metadata?: Record<string, unknown> }) {
       const now = Date.now()
@@ -682,9 +700,36 @@ export const mutators = {
   },
 
   pm_issue_activity: {
-    async create(tx: Tx, args: { id: string; issueId: string; actorId?: string; actorName?: string; type: string; summary: string; metadata?: Record<string, unknown> }) {
+    async create(tx: Tx, args: { id: string; issueId: string; organizationId?: string; subjectLabel?: string; actorId?: string; actorName?: string; type: string; summary: string; metadata?: Record<string, unknown> }) {
       const now = Date.now()
-      await tx.mutate.pm_issue_activity.insert({ ...args, createdAt: now })
+      if (args.organizationId) {
+        await tx.mutate.activity_events.insert({
+          id: args.id,
+          organizationId: args.organizationId,
+          occurredAt: now,
+          createdAt: now,
+          eventType: args.type,
+          activityKind: issueActivityKind(args.type, args.metadata),
+          origin: 'pach_work',
+          subjectType: 'pm_issue',
+          subjectId: args.issueId,
+          subjectLabel: args.subjectLabel,
+          actorType: args.actorId ? 'user' : args.actorName?.toLowerCase().includes('agent') ? 'agent' : 'system',
+          actorId: args.actorId,
+          actorName: args.actorName,
+          source: 'pach_app',
+          severity: args.type === 'agent_run_failed' || args.metadata?.level === 'error'
+            ? 'error'
+            : args.metadata?.level === 'warn' || args.metadata?.level === 'warning'
+              ? 'warning'
+              : args.metadata?.level === 'debug'
+                ? 'debug'
+                : 'info',
+          summary: args.summary,
+          details: {},
+          metadata: args.metadata ?? {},
+        } as any)
+      }
       await tx.mutate.pm_issues.update({ id: args.issueId, lastActivityAt: now, updatedAt: now })
     },
   },
@@ -967,6 +1012,12 @@ export const mutators = {
       await tx.mutate.whatsapp_campaigns.delete({ id: args.id })
     },
   },
+}
+
+function issueActivityKind(type: string, metadata?: Record<string, unknown>) {
+  if (type === 'completed') return 'progress'
+  if (type === 'agent_run_failed' || metadata?.level === 'error') return 'incident'
+  return 'operational'
 }
 
 export type Mutators = typeof mutators

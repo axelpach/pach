@@ -1,7 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import { and, asc, desc, eq, lte } from 'drizzle-orm'
 import {
-  pmIssueActivity,
   pmIssues,
   pmTaskTriggerRuns,
   pmTaskTriggers,
@@ -9,6 +8,7 @@ import {
   type TaskTriggerSchedule,
 } from '../../../../db/schema.js'
 import { getDb } from '../../db.js'
+import { insertIssueActivityEvent } from '../../lib/activity-events.js'
 import { computeNextRunAt, getPeriodKey } from './schedule.js'
 
 export type TaskTriggerRunSummary = {
@@ -138,17 +138,21 @@ async function createIssueForTrigger(trigger: TriggerRow, now: Date): Promise<'c
         updatedAt: now,
       })
 
-      await tx.insert(pmIssueActivity).values({
-        id: randomUUID(),
+      await insertIssueActivityEvent(tx, {
         issueId,
+        organizationId: trigger.companyId,
+        subjectLabel: identifier,
         actorId: trigger.creatorId,
-        type: 'created',
+        eventType: 'created',
+        source: 'task_trigger_runner',
         summary: `Created issue ${identifier} from trigger ${trigger.name}`,
         metadata: {
+          source: 'task_trigger_runner',
           taskTriggerId: trigger.id,
           taskTriggerRunPeriod: periodKey,
           dueAt: dueAt.toISOString(),
         },
+        occurredAt: now,
         createdAt: now,
       })
 

@@ -10,6 +10,7 @@ import { WebSocket, WebSocketServer } from 'ws'
 import { and, eq, inArray } from 'drizzle-orm'
 import { getDb } from '../db.js'
 import { verifyToken } from '../lib/auth.js'
+import { insertIssueActivityEvent } from '../lib/activity-events.js'
 import {
   agentRunProgressReports,
   agentRunArtifacts,
@@ -18,7 +19,6 @@ import {
   agentWorkers,
   githubBranches,
   githubPullRequests,
-  pmIssueActivity,
   pmIssues,
 } from '../../../db/schema.js'
 
@@ -1183,23 +1183,28 @@ async function appendRunActivity(
   type: string,
   metadata: Record<string, unknown>,
 ) {
-  await getDb().insert(pmIssueActivity).values({
-    id: randomUUID(),
+  if (!run.issueId) return
+
+  const now = new Date()
+  await insertIssueActivityEvent(getDb(), {
     issueId: run.issueId,
+    actorType: 'agent',
     actorName: 'Pach agent',
-    type,
+    eventType: type,
+    source: 'agent-route',
     summary,
     metadata: {
       source: 'agent-route',
       runId: run.id,
       ...metadata,
     },
-    createdAt: new Date(),
+    occurredAt: now,
+    createdAt: now,
   })
 
   await getDb()
     .update(pmIssues)
-    .set({ lastActivityAt: new Date(), updatedAt: new Date() })
+    .set({ lastActivityAt: now, updatedAt: now })
     .where(eq(pmIssues.id, run.issueId))
 }
 

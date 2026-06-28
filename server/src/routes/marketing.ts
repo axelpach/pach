@@ -3,6 +3,7 @@ import { Router, type NextFunction, type Request, type Response } from 'express'
 import { and, desc, eq, inArray, isNull, sql } from 'drizzle-orm'
 import { getDb } from '../db.js'
 import {
+  activityEvents,
   designSystems,
   documents,
   mktAudienceMembers,
@@ -296,6 +297,8 @@ publicMarketingRouter.post('/organizations/:project/marketing/subscribe', asyncR
       })
       .returning())[0]
 
+  const isNewSubscriberSignal = !existingSubscription || existingSubscription.status !== 'subscribed'
+
   await recordEvent({
     organizationId: organization.id,
     contentItemId,
@@ -310,6 +313,38 @@ publicMarketingRouter.post('/organizations/:project/marketing/subscribe', asyncR
       publicationSlug: publication.slug,
     },
   })
+
+  if (isNewSubscriberSignal) {
+    const subscriberLabel = member.name ? `${member.name} <${member.email}>` : member.email
+    await db.insert(activityEvents).values({
+      organizationId: organization.id,
+      occurredAt: now,
+      createdAt: now,
+      eventType: 'subscriber_created',
+      activityKind: 'business_signal',
+      origin: 'pach_work',
+      subjectType: 'newsletter_subscriber',
+      subjectId: member.id,
+      subjectLabel: subscriberLabel,
+      actorType: 'external_user',
+      actorId: member.id,
+      actorName: member.name ?? member.email,
+      source,
+      severity: 'info',
+      summary: `${subscriberLabel} subscribed to ${publication.name}`,
+      details: {
+        publicationId: publication.id,
+        publicationSlug: publication.slug,
+        publicationName: publication.name,
+        pageUrl,
+      },
+      metadata: {
+        contentItemId,
+        distributionRunId,
+        subscriptionId: subscription.id,
+      },
+    })
+  }
 
   const confirmation = await sendSubscriptionConfirmationSafely({
     organization,
@@ -801,6 +836,44 @@ export async function sendNewsletterRun(runId: string, testOnly: boolean) {
       })
       .where(eq(mktDistributionRuns.id, run.id))
       .returning()
+
+  if (!testOnly) {
+    const label = run.name || run.subject || item.title
+    const eventType = status === 'sent' ? 'sent' : 'failed'
+    const severity = status === 'sent' ? (failed > 0 ? 'warning' : 'info') : 'error'
+    const recipientLabel = `${sent} recipient${sent === 1 ? '' : 's'}`
+    const failedLabel = failed > 0 ? ` (${failed} failed)` : ''
+
+    await db.insert(activityEvents).values({
+      organizationId: run.organizationId,
+      occurredAt: completedAt,
+      eventType,
+      activityKind: status === 'sent' ? 'progress' : 'incident',
+      origin: 'pach_work',
+      subjectType: 'marketing_broadcast',
+      subjectId: run.id,
+      subjectLabel: label,
+      actorType: 'agent',
+      actorName: 'marketing_agent',
+      source: 'marketing_sender',
+      severity,
+      summary: status === 'sent'
+        ? `Sent broadcast ${label} to ${recipientLabel}${failedLabel}`
+        : `Broadcast ${label} failed for ${failed} recipient${failed === 1 ? '' : 's'}`,
+      details: {
+        sent,
+        failed,
+        attempted: sendList.length,
+        errors,
+      },
+      metadata: {
+        channel: run.channel,
+        contentItemId: item.id,
+        publicationId: run.publicationId,
+        segmentId: run.segmentId,
+      },
+    })
+  }
 
   return { distributionRun: serializeDates(updated), metrics, errors }
 }

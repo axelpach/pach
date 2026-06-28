@@ -32,6 +32,7 @@ const SECTIONS: Array<{ id: SettingsSection; label: string }> = [
 ]
 
 const API_KEY_SCOPES = [
+  { value: 'activity:write', label: 'activity write' },
   { value: 'marketing:write', label: 'marketing write' },
   { value: 'docs:write', label: 'docs write' },
   { value: 'analytics:write', label: 'analytics write' },
@@ -313,7 +314,7 @@ function CreateApiKeyModal({
   onSubmit: (payload: { name: string; scopes: string[] }) => void
 }) {
   const [name, setName] = useState(() => organization?.project === 'ardia' ? 'Ardia website' : 'Connected app')
-  const [scopes, setScopes] = useState<string[]>(['marketing:write'])
+  const [scopes, setScopes] = useState<string[]>(['activity:write'])
 
   function toggleScope(scope: string) {
     setScopes((current) => current.includes(scope) ? current.filter((entry) => entry !== scope) : [...current, scope])
@@ -357,7 +358,7 @@ function CreateApiKeyModal({
 
           <div>
             <FieldLabel>scopes</FieldLabel>
-            <div className="grid gap-2 md:grid-cols-3">
+            <div className="grid gap-2 md:grid-cols-2">
               {API_KEY_SCOPES.map((scope) => {
                 const selected = scopes.includes(scope.value)
                 return (

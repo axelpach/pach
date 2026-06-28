@@ -13,6 +13,7 @@ type ScopedTable =
   | 'design_template_runs'
   | 'organizations'
   | 'organization_memberships'
+  | 'activity_events'
   | 'crm_companies'
   | 'crm_contacts'
   | 'crm_deal_contacts'
@@ -58,6 +59,7 @@ const ORG_COLUMN_BY_TABLE: Record<ScopedTable, string> = {
   design_template_runs: 'organization_id',
   organizations: 'id',
   organization_memberships: 'organization_id',
+  activity_events: 'organization_id',
   crm_companies: 'organization_id',
   crm_contacts: 'organization_id',
   crm_deal_contacts: 'organization_id',
@@ -102,6 +104,12 @@ export class AuthorizationError extends Error {
   }
 }
 
+function issueActivityKind(type: string, metadata?: Record<string, unknown>) {
+  if (type === 'completed') return 'progress'
+  if (type === 'agent_run_failed' || metadata?.level === 'error') return 'incident'
+  return 'operational'
+}
+
 export function isAuthorizationError(error: unknown): error is AuthorizationError {
   return error instanceof AuthorizationError
 }
@@ -143,6 +151,29 @@ export function createServerMutators(authData?: JWTPayload) {
     return {
       companyId: row?.company_id as string | null | undefined,
       ownerId: row?.owner_id as string | null | undefined,
+    }
+  }
+
+  async function readIssueActivityContext(tx: Tx, issueId: string): Promise<{ issueOrganizationId: string | null | undefined; activityOrganizationId: string | null | undefined; identifier: string | null | undefined }> {
+    const rows = await tx.dbTransaction.query(
+      `select
+        issue."context_company_id" as issue_organization_id,
+        coalesce(
+          issue."context_company_id",
+          (select "id" from "organizations" where "project" = 'pach' order by "created_at" asc limit 1),
+          (select "id" from "organizations" order by "created_at" asc limit 1)
+        ) as activity_organization_id,
+        issue."identifier" as identifier
+      from "pm_issues" issue
+      where issue."id" = $1
+      limit 1`,
+      [issueId],
+    )
+    const row = Array.from(rows)[0]
+    return {
+      issueOrganizationId: row?.issue_organization_id as string | null | undefined,
+      activityOrganizationId: row?.activity_organization_id as string | null | undefined,
+      identifier: row?.identifier as string | null | undefined,
     }
   }
 
@@ -226,6 +257,25 @@ export function createServerMutators(authData?: JWTPayload) {
       async delete(tx: Tx, args: { id: string }) {
         await requireExistingOrganizationAccess(tx, 'organization_memberships', args.id)
         await tx.mutate.organization_memberships.delete({ id: args.id })
+      },
+    },
+
+    activity_events: {
+      async create(tx: Tx, args: { id: string; organizationId: string; occurredAt?: number; eventType: string; activityKind?: string; origin?: string; subjectType: string; subjectId?: string; subjectLabel?: string; actorType?: string; actorId?: string; actorName?: string; source?: string; severity?: string; summary: string; details?: Record<string, unknown>; metadata?: Record<string, unknown> }) {
+        requireOrganizationAccess(args.organizationId)
+        const now = Date.now()
+        await tx.mutate.activity_events.insert({
+          occurredAt: now,
+          activityKind: 'operational',
+          origin: 'pach_work',
+          actorType: 'system',
+          source: 'pach_app',
+          severity: 'info',
+          details: {},
+          metadata: {},
+          ...args,
+          createdAt: now,
+        } as any)
       },
     },
 
@@ -1050,9 +1100,37 @@ export function createServerMutators(authData?: JWTPayload) {
 
     pm_issue_activity: {
       async create(tx: Tx, args: { id: string; issueId: string; actorId?: string; actorName?: string; type: string; summary: string; metadata?: Record<string, unknown> }) {
-        requireUnscopedAccess()
+        const issueContext = await readIssueActivityContext(tx, args.issueId)
+        if (issueContext.issueOrganizationId) requireOrganizationAccess(issueContext.issueOrganizationId)
+        else requireUnscopedAccess()
+        if (!issueContext.activityOrganizationId) throw new Error('No organization available for issue activity')
         const now = Date.now()
-        await tx.mutate.pm_issue_activity.insert({ ...args, createdAt: now })
+        await tx.mutate.activity_events.insert({
+          id: args.id,
+          organizationId: issueContext.activityOrganizationId,
+          occurredAt: now,
+          createdAt: now,
+          eventType: args.type,
+          activityKind: issueActivityKind(args.type, args.metadata),
+          origin: 'pach_work',
+          subjectType: 'pm_issue',
+          subjectId: args.issueId,
+          subjectLabel: issueContext.identifier ?? undefined,
+          actorType: args.actorId ? 'user' : (args.actorName?.toLowerCase().includes('agent') ? 'agent' : 'system'),
+          actorId: args.actorId,
+          actorName: args.actorName,
+          source: 'pach_app',
+          severity: args.type === 'agent_run_failed' || args.metadata?.level === 'error'
+            ? 'error'
+            : args.metadata?.level === 'warn' || args.metadata?.level === 'warning'
+              ? 'warning'
+              : args.metadata?.level === 'debug'
+                ? 'debug'
+                : 'info',
+          summary: args.summary,
+          details: {},
+          metadata: args.metadata ?? {},
+        } as any)
         await tx.mutate.pm_issues.update({ id: args.issueId, lastActivityAt: now, updatedAt: now })
       },
     },

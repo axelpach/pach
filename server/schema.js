@@ -128,6 +128,28 @@ const organizationMemberships = table('organization_memberships')
     updatedAt: number().from('updated_at'),
 })
     .primaryKey('id');
+const activityEvents = table('activity_events')
+    .columns({
+    id: string(),
+    organizationId: string().from('organization_id'),
+    occurredAt: number().from('occurred_at'),
+    createdAt: number().from('created_at'),
+    eventType: string().from('event_type'),
+    activityKind: string().from('activity_kind'),
+    origin: string(),
+    subjectType: string().from('subject_type'),
+    subjectId: string().optional().from('subject_id'),
+    subjectLabel: string().optional().from('subject_label'),
+    actorType: string().from('actor_type'),
+    actorId: string().optional().from('actor_id'),
+    actorName: string().optional().from('actor_name'),
+    source: string(),
+    severity: string(),
+    summary: string(),
+    details: json(),
+    metadata: json(),
+})
+    .primaryKey('id');
 const crmCompanies = table('crm_companies')
     .columns({
     id: string(),
@@ -1027,6 +1049,7 @@ export const schema = createSchema({
         users,
         organizations,
         organizationMemberships,
+        activityEvents,
         crmCompanies,
         crmContacts,
         crmDealContacts,
@@ -1111,6 +1134,7 @@ export const permissions = definePermissions(schema, () => {
         users: authenticatedReadOnly,
         organizations: readOnly([allowOrganization]),
         organization_memberships: readOnly([allowOrganizationMembership]),
+        activity_events: organizationScoped(),
         crm_companies: organizationScoped(),
         crm_contacts: organizationScoped(),
         crm_deal_contacts: organizationScoped(),

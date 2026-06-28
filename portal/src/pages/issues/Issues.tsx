@@ -798,13 +798,29 @@ export default function Issues() {
   }
 
   async function logActivity(issueId: string, summary: string, type = 'created') {
-    await z.mutate.pm_issue_activity.create({
+    const issue = scopedIssues.find((entry) => entry.id === issueId)
+    const organizationId =
+      issue?.contextCompanyId ??
+      companies.find((entry) => entry.project === 'pach')?.id ??
+      scopedCompanies[0]?.id
+    if (!issue || !organizationId) return
+
+    await z.mutate.activity_events.create({
       id: crypto.randomUUID(),
-      issueId,
+      organizationId,
+      eventType: type,
+      activityKind: issueActivityKind(type),
+      subjectType: 'pm_issue',
+      subjectId: issue.id,
+      subjectLabel: issue.identifier,
+      actorType: user ? 'user' : 'system',
       actorId: user?.id,
       actorName: user?.name ?? user?.email,
-      type,
+      source: 'pach_app',
+      severity: 'info',
       summary,
+      details: {},
+      metadata: {},
     })
   }
 
@@ -916,7 +932,7 @@ export default function Issues() {
 
     await z.mutate.pm_issues.update({ id: activeIssue.id, ...patch })
     if (summaryParts.length) {
-      await logActivity(activeIssue.id, summaryParts.join(' · '), 'updated')
+      await logActivity(activeIssue.id, summaryParts.join(' · '), issueEventTypeForStatus(targetStatus.type))
     }
   }
 
@@ -1040,7 +1056,7 @@ export default function Issues() {
     await logActivity(
       issueId,
       `moved from ${current?.name ?? '—'} to ${next.name}`,
-      'updated',
+      issueEventTypeForStatus(next.type),
     )
   }
 
@@ -2873,6 +2889,18 @@ function getStatusBucket(status?: Schema['tables']['pm_statuses']['row'] | null)
     type: status.type,
     position: status.position,
   }
+}
+
+function issueEventTypeForStatus(statusType?: string) {
+  if (statusType === 'completed') return 'completed'
+  if (statusType === 'canceled') return 'canceled'
+  return 'updated'
+}
+
+function issueActivityKind(type: string) {
+  if (type === 'completed') return 'progress'
+  if (type === 'agent_run_failed') return 'incident'
+  return 'operational'
 }
 
 function statusRank(statusType: string) {

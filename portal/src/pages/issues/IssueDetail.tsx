@@ -88,8 +88,8 @@ export default function IssueDetail() {
     z.query.agent_runs.where('issueId', issueId ?? '').orderBy('createdAt', 'desc'),
   )
   const [issueLabelLinks] = useQuery(z.query.pm_issue_labels.where('issueId', issueId ?? ''))
-  const [activity] = useQuery(
-    z.query.pm_issue_activity.where('issueId', issueId ?? '').orderBy('createdAt', 'asc'),
+  const [activityEvents] = useQuery(
+    z.query.activity_events.where('subjectId', issueId ?? '').orderBy('createdAt', 'asc'),
   )
 
   const accessibleOrganizationIds = new Set(user?.organizationIds ?? [])
@@ -134,6 +134,7 @@ export default function IssueDetail() {
     if (!activeConversation) return report.runId === activeRun?.id
     return conversationRunIds.has(report.runId)
   })
+  const activity = activityEvents.filter((entry) => entry.subjectType === 'pm_issue')
   const visibleActivity = activity.filter((entry) => !isRunScopedAgentActivity(entry))
   const legacyRunProgressActivity = activeRun
     ? activity
@@ -252,21 +253,35 @@ export default function IssueDetail() {
 
   async function logActivity(summary: string, type = 'updated', metadata?: Record<string, unknown>) {
     if (!issue) return
-    await z.mutate.pm_issue_activity.create({
+    const organizationId =
+      issue.contextCompanyId ??
+      companies.find((entry) => entry.project === 'pach')?.id ??
+      scopedCompanies[0]?.id
+    if (!organizationId) return
+
+    await z.mutate.activity_events.create({
       id: crypto.randomUUID(),
-      issueId: issue.id,
+      organizationId,
+      eventType: type,
+      activityKind: issueActivityKind(type, metadata),
+      subjectType: 'pm_issue',
+      subjectId: issue.id,
+      subjectLabel: issue.identifier,
+      actorType: user ? 'user' : 'system',
       actorId: user?.id,
       actorName: user?.name ?? user?.email,
-      type,
+      source: 'pach_app',
+      severity: issueActivitySeverity(type, metadata),
       summary,
-      metadata,
+      details: {},
+      metadata: metadata ?? {},
     })
   }
 
-  async function patchIssue(patch: Record<string, unknown>, summary?: string) {
+  async function patchIssue(patch: Record<string, unknown>, summary?: string, activityType = 'updated') {
     if (!issue) return
     await z.mutate.pm_issues.update({ id: issue.id, ...patch })
-    if (summary) await logActivity(summary)
+    if (summary) await logActivity(summary, activityType)
   }
 
   async function toggleLabel(labelId: string) {
@@ -735,6 +750,7 @@ export default function IssueDetail() {
                     await patchIssue(
                       patch,
                       `moved from ${status?.name ?? '—'} to ${newStatus?.name ?? '—'}`,
+                      issueEventTypeForStatus(newStatus?.type),
                     )
                   }}
                   options={workspaceStatuses.map((s) => ({ value: s.id, label: s.name.toLowerCase() }))}
@@ -933,7 +949,7 @@ function AgentSidebarCard({
 }: {
   run: Schema['tables']['agent_runs']['row'] | null
   progressReports: Schema['tables']['agent_run_progress_reports']['row'][]
-  legacyProgressActivity: Schema['tables']['pm_issue_activity']['row'][]
+  legacyProgressActivity: Schema['tables']['activity_events']['row'][]
   messages: Schema['tables']['agent_messages']['row'][]
   workers: Schema['tables']['agent_workers']['row'][]
   repositories: Schema['tables']['github_repositories']['row'][]
@@ -1135,7 +1151,7 @@ function AgentRunPanel({
   terminals: Schema['tables']['agent_terminals']['row'][]
   artifacts: Schema['tables']['agent_run_artifacts']['row'][]
   progressReports: Schema['tables']['agent_run_progress_reports']['row'][]
-  legacyProgressActivity: Schema['tables']['pm_issue_activity']['row'][]
+  legacyProgressActivity: Schema['tables']['activity_events']['row'][]
   messages: Schema['tables']['agent_messages']['row'][]
   workers: Schema['tables']['agent_workers']['row'][]
   repositories: Schema['tables']['github_repositories']['row'][]
@@ -2120,9 +2136,9 @@ function isTextEntryTarget(target: EventTarget | null) {
   return ['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName)
 }
 
-function isRunScopedAgentActivity(entry: Schema['tables']['pm_issue_activity']['row']) {
+function isRunScopedAgentActivity(entry: Schema['tables']['activity_events']['row']) {
   if (!readMetadataString(entry.metadata, 'runId')) return false
-  return ['agent_progress', 'agent_run_claimed', 'agent_run_completed', 'agent_run_failed', 'agent_run_canceled'].includes(entry.type)
+  return ['agent_progress', 'agent_run_claimed', 'agent_run_completed', 'agent_run_failed', 'agent_run_canceled'].includes(entry.eventType)
 }
 
 function legacyProgressPhase(type: string) {
@@ -2131,6 +2147,27 @@ function legacyProgressPhase(type: string) {
   if (type === 'agent_run_failed') return 'failed'
   if (type === 'agent_run_canceled') return 'canceled'
   return 'progress'
+}
+
+function issueActivitySeverity(type: string, metadata?: Record<string, unknown>) {
+  const level = readMetadataString(metadata, 'level')
+  if (type === 'agent_run_failed' || level === 'error') return 'error'
+  if (level === 'warn' || level === 'warning') return 'warning'
+  if (level === 'debug') return 'debug'
+  return 'info'
+}
+
+function issueActivityKind(type: string, metadata?: Record<string, unknown>) {
+  const level = readMetadataString(metadata, 'level')
+  if (type === 'completed') return 'progress'
+  if (type === 'agent_run_failed' || level === 'error') return 'incident'
+  return 'operational'
+}
+
+function issueEventTypeForStatus(statusType?: string) {
+  if (statusType === 'completed') return 'completed'
+  if (statusType === 'canceled') return 'canceled'
+  return 'updated'
 }
 
 function getWorkspaceStatuses(statuses: Schema['tables']['pm_statuses']['row'][]) {
@@ -2310,8 +2347,8 @@ function DateInput({ value, onChange }: { value?: number; onChange: (ms: number 
   )
 }
 
-function ActivityEntry({ entry }: { entry: Schema['tables']['pm_issue_activity']['row'] }) {
-  const isComment = entry.type === 'comment'
+function ActivityEntry({ entry }: { entry: Schema['tables']['activity_events']['row'] }) {
+  const isComment = entry.eventType === 'comment'
   if (isComment) {
     return (
       <div className="border border-edge/10 bg-pit-2/50 px-4 py-3">
@@ -2357,9 +2394,9 @@ function AgentMessageEntry({ message }: { message: Schema['tables']['agent_messa
   )
 }
 
-function LegacyAgentRunProgressReport({ entry }: { entry: Schema['tables']['pm_issue_activity']['row'] }) {
-  const phase = readMetadataString(entry.metadata, 'phase') ?? legacyProgressPhase(entry.type)
-  const level = entry.type === 'agent_run_failed' || readMetadataString(entry.metadata, 'level') === 'error' ? 'error' : 'info'
+function LegacyAgentRunProgressReport({ entry }: { entry: Schema['tables']['activity_events']['row'] }) {
+  const phase = readMetadataString(entry.metadata, 'phase') ?? legacyProgressPhase(entry.eventType)
+  const level = entry.eventType === 'agent_run_failed' || readMetadataString(entry.metadata, 'level') === 'error' ? 'error' : 'info'
 
   return (
     <AgentRunProgressShell

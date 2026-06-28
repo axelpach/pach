@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto'
 import { and, eq, inArray, isNull, or } from 'drizzle-orm'
 import { getDb } from '../db.js'
 import {
+  activityEvents,
   finAccounts,
   finCategories,
   finCategorizationRules,
@@ -422,6 +423,38 @@ export async function applyFinanceImport(importId: string) {
     })
     .where(eq(finImports.id, importId))
     .returning()
+
+  if (created > 0 || skipped > 0) {
+    const occurredAt = new Date()
+    await db.insert(activityEvents).values({
+      organizationId: importRow.organizationId,
+      occurredAt,
+      createdAt: occurredAt,
+      eventType: 'finance_movement_imported',
+      activityKind: 'operational',
+      origin: 'pach_work',
+      subjectType: 'finance_movement_import',
+      subjectId: importRow.id,
+      subjectLabel: importRow.fileName,
+      actorType: 'user',
+      actorId: importRow.createdByUserId,
+      source: 'finance_import',
+      severity: counts.needsReview > 0 ? 'warning' : 'info',
+      summary: `Imported ${created} finance movement${created === 1 ? '' : 's'} from ${importRow.fileName}`,
+      details: {
+        created,
+        skipped,
+        remainingReview: counts.needsReview,
+        duplicates: counts.duplicate,
+      },
+      metadata: {
+        importId: importRow.id,
+        batchId: importRow.batchId,
+        accountId: importRow.accountId,
+        sourceType: importRow.sourceType,
+      },
+    })
+  }
 
   return {
     import: updatedImport,

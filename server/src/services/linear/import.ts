@@ -1,8 +1,8 @@
 import { eq } from 'drizzle-orm'
 import type { InferSelectModel } from 'drizzle-orm'
 import type { getDb } from '../../db.js'
+import { insertIssueActivityEvent } from '../../lib/activity-events.js'
 import {
-  pmIssueActivity,
   pmIssueLabels,
   pmIssues,
   pmLabels,
@@ -743,14 +743,16 @@ export async function importLinearWorkspace(db: Db, options: ImportOptions = {})
       linearIssueIdToLocalIssue.set(linearIssue.id, createdIssue)
       if (!dryRun) {
         await db.insert(pmIssues).values(createdIssue)
-        await db.insert(pmIssueActivity).values({
-          id: crypto.randomUUID(),
+        await insertIssueActivityEvent(db, {
           issueId: createdIssue.id,
-          actorId: undefined,
+          organizationId: createdIssue.contextCompanyId,
+          subjectLabel: createdIssue.identifier,
           actorName: 'Linear Import',
-          type: 'imported',
+          eventType: 'imported',
+          source: 'linear_import',
           summary: `Imported from Linear issue ${linearIssue.identifier}`,
-          metadata: { linearIssueId: linearIssue.id },
+          metadata: { source: 'linear_import', linearIssueId: linearIssue.id },
+          occurredAt: updatedAt,
           createdAt: updatedAt,
         })
         summary.imported.activity.created += 1
