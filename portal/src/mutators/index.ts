@@ -531,6 +531,7 @@ export const mutators = {
       await tx.mutate.mkt_distribution_runs.insert({
         distributionType: 'broadcast',
         status: 'draft',
+        scheduledTimezone: 'America/Mexico_City',
         recipientFilter: {},
         metrics: {},
         metadata: {},

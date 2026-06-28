@@ -15,7 +15,7 @@ import {
   Users,
   X,
 } from 'lucide-react'
-import { useEffect, useMemo, useState, type ReactNode } from 'react'
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { Button, Metric, Panel, StatusPill, TermInput, TermTextarea } from '../../components/pach'
@@ -48,6 +48,11 @@ type PublicationEmailWrapper = {
   ctaLabel: string
   ctaUrl: string
 }
+type PublicationCadenceConfig = {
+  enabled: boolean
+  lookaheadDays: number
+  cooldownDays: number
+}
 
 type MarketingSection = 'content' | 'newsletters' | 'broadcasts' | 'ctas' | 'analytics'
 
@@ -60,6 +65,15 @@ const SECTIONS: Array<{ id: MarketingSection; label: string }> = [
 ]
 
 const CONTENT_CHANNELS = ['blog', 'newsletter'] as const
+const DEFAULT_MARKETING_TIMEZONE = 'America/Mexico_City'
+const MARKETING_TIMEZONES = [
+  { value: 'America/Mexico_City', label: 'Mexico City' },
+  { value: 'Europe/Madrid', label: 'Madrid' },
+] as const
+const MARKETING_TIMEZONE_OPTIONS: PachSelectOption[] = MARKETING_TIMEZONES.map((timezone) => ({
+  value: timezone.value,
+  label: timezone.label,
+}))
 
 export default function Marketing() {
   const z = useZero<Schema, Mutators>()
@@ -536,6 +550,8 @@ function NewslettersSection({
   const selectedPublicationFilterIds = subscriberFilters.publication ?? []
   const editingPublicationWrapper = publicationEmailWrapper(editingPublication)
   const editingPublicationThemeMode = publicationEmailThemeMode(editingPublication)
+  const editingPublicationCadence = publicationCadenceConfig(editingPublication)
+  const editingPublicationMetadata = readRecord(editingPublication?.metadata)
   const subscriberRows = useMemo(() => subscriptions
     .filter((subscription) => subscription.channel === 'newsletter' && subscription.status === 'subscribed')
     .filter((subscription) => selectedPublicationFilterIds.length === 0 || selectedPublicationFilterIds.includes(subscription.publicationId))
@@ -624,6 +640,20 @@ function NewslettersSection({
       metadata: {
         ...readRecord(editingPublication.metadata),
         emailThemeMode,
+      },
+    })
+  }
+
+  async function updatePublicationCadence(updates: Partial<PublicationCadenceConfig>) {
+    if (!editingPublication) return
+    const metadata = readRecord(editingPublication.metadata)
+    const current = publicationCadenceConfig(editingPublication)
+    const next = { ...current, ...updates }
+    await z.mutate.mkt_publications.update({
+      id: editingPublication.id,
+      metadata: {
+        ...metadata,
+        marketingCadence: publicationCadencePayload(next),
       },
     })
   }
@@ -878,6 +908,40 @@ function NewslettersSection({
               </div>
             </div>
 
+            <div className="border-t border-edge/12 pt-4">
+              <FieldLabel>cadence</FieldLabel>
+              <div className="space-y-3">
+                <EmailBinaryControl
+                  value={editingPublicationCadence.enabled}
+                  onChange={(enabled) => void updatePublicationCadence({ enabled })}
+                />
+                <div className="grid grid-cols-2 gap-2">
+                  <CommitInput
+                    label="lookahead days"
+                    type="number"
+                    value={String(editingPublicationCadence.lookaheadDays)}
+                    onCommit={(lookaheadDays) => updatePublicationCadence({ lookaheadDays: positiveInteger(lookaheadDays, 14) })}
+                  />
+                  <CommitInput
+                    label="cooldown days"
+                    type="number"
+                    value={String(editingPublicationCadence.cooldownDays)}
+                    onCommit={(cooldownDays) => updatePublicationCadence({ cooldownDays: positiveInteger(cooldownDays, 7) })}
+                  />
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  <div className="border border-edge/12 bg-rim px-3 py-2 font-mono">
+                    <div className="text-[10px] uppercase tracking-label text-fg-4">last issue</div>
+                    <div className="mt-1 truncate text-sm text-fg-2">{String(editingPublicationMetadata.marketingCadenceLastIssueIdentifier ?? '-')}</div>
+                  </div>
+                  <div className="border border-edge/12 bg-rim px-3 py-2 font-mono">
+                    <div className="text-[10px] uppercase tracking-label text-fg-4">last issue at</div>
+                    <div className="mt-1 truncate text-sm text-fg-2">{formatIsoDate(editingPublicationMetadata.marketingCadenceLastIssueAt)}</div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
             <div className="grid grid-cols-2 gap-2 pt-1">
               <div className="border border-edge/12 bg-rim px-3 py-2 font-mono">
                 <div className="text-[10px] uppercase tracking-label text-fg-4">subscribers</div>
@@ -1096,7 +1160,15 @@ function BroadcastsSection({
 }) {
   const navigate = useNavigate()
   const [createModalOpen, setCreateModalOpen] = useState(false)
-  const [runDraft, setRunDraft] = useState({ publicationId: '', contentItemId: '', senderProfileId: '', subject: '', preheader: '' })
+  const [runDraft, setRunDraft] = useState({
+    publicationId: '',
+    contentItemId: '',
+    senderProfileId: '',
+    subject: '',
+    preheader: '',
+    scheduledAt: '',
+    scheduledTimezone: DEFAULT_MARKETING_TIMEZONE,
+  })
   const [sendingId, setSendingId] = useState('')
   const newsletterRuns = runs.filter((run) => run.channel === 'newsletter')
   const contentOptions = contentItems
@@ -1113,6 +1185,8 @@ function BroadcastsSection({
       senderProfileId: '',
       subject: '',
       preheader: '',
+      scheduledAt: '',
+      scheduledTimezone: DEFAULT_MARKETING_TIMEZONE,
     })
     setCreateModalOpen(true)
   }
@@ -1120,6 +1194,8 @@ function BroadcastsSection({
   async function createRunFromModal() {
     if (!runDraft.publicationId || !runDraft.contentItemId) return
     const item = contentItems.find((entry) => entry.id === runDraft.contentItemId)
+    const scheduledTimezone = runDraft.scheduledTimezone || DEFAULT_MARKETING_TIMEZONE
+    const scheduledAt = dateTimeLocalToTimestamp(runDraft.scheduledAt, scheduledTimezone)
     const id = crypto.randomUUID()
     await z.mutate.mkt_distribution_runs.create({
       id,
@@ -1132,13 +1208,23 @@ function BroadcastsSection({
       name: runDraft.subject.trim() || item?.title || 'Newsletter broadcast',
       subject: runDraft.subject.trim() || item?.title || 'Newsletter broadcast',
       preheader: runDraft.preheader.trim() || undefined,
-      status: 'draft',
+      status: scheduledAt ? 'scheduled' : 'draft',
+      scheduledAt: scheduledAt ?? undefined,
+      scheduledTimezone,
       recipientFilter: { publicationId: runDraft.publicationId },
     })
     onSelectPublication(runDraft.publicationId)
     setCreateModalOpen(false)
-    setRunDraft({ publicationId: '', contentItemId: '', senderProfileId: '', subject: '', preheader: '' })
-    onFlash('broadcast created')
+    setRunDraft({
+      publicationId: '',
+      contentItemId: '',
+      senderProfileId: '',
+      subject: '',
+      preheader: '',
+      scheduledAt: '',
+      scheduledTimezone: DEFAULT_MARKETING_TIMEZONE,
+    })
+    onFlash(scheduledAt ? 'broadcast scheduled' : 'broadcast created')
     navigate(`/marketing/broadcasts/${id}`)
   }
 
@@ -1201,13 +1287,14 @@ function BroadcastsSection({
       </div>
       <Panel title="broadcasts">
         <div className="overflow-auto">
-          <table className="w-full min-w-[880px] text-left font-mono text-xs">
+          <table className="w-full min-w-[980px] text-left font-mono text-xs">
             <thead className="text-[10px] uppercase tracking-label text-fg-4">
               <tr className="border-b border-edge/12">
                 <th className="pb-2 pr-3 font-normal">name</th>
                 <th className="pb-2 pr-3 font-normal">content</th>
                 <th className="pb-2 pr-3 font-normal">publication</th>
                 <th className="pb-2 pr-3 font-normal">status</th>
+                <th className="pb-2 pr-3 font-normal">scheduled</th>
                 <th className="pb-2 pr-3 font-normal">metrics</th>
                 <th className="pb-2 font-normal">updated</th>
               </tr>
@@ -1227,6 +1314,7 @@ function BroadcastsSection({
                     <td className="max-w-[260px] truncate py-2.5 pr-3">{item?.title ?? '-'}</td>
                     <td className="py-2.5 pr-3">{publication?.name ?? '-'}</td>
                     <td className="py-2.5 pr-3"><StatusPill kind={statusKind(run.status)}>{run.status}</StatusPill></td>
+                    <td className="py-2.5 pr-3 text-fg-4">{formatScheduledDate(run.scheduledAt, run.scheduledTimezone)}</td>
                     <td className="py-2.5 pr-3 text-fg-4">sent {String(metrics.sent ?? 0)} · failed {String(metrics.failed ?? 0)}</td>
                     <td className="py-2.5 text-fg-4">{formatDate(run.updatedAt)}</td>
                   </tr>
@@ -1286,6 +1374,19 @@ function BroadcastsSection({
               <FieldLabel>preheader</FieldLabel>
               <TermInput value={runDraft.preheader} onChange={(event) => setRunDraft((draft) => ({ ...draft, preheader: event.target.value }))} />
             </label>
+            <label className="block md:col-span-2">
+              <FieldLabel>scheduled at</FieldLabel>
+              <TermInput type="datetime-local" value={runDraft.scheduledAt} onChange={(event) => setRunDraft((draft) => ({ ...draft, scheduledAt: event.target.value }))} />
+            </label>
+            <div className="md:col-span-2">
+              <FieldLabel>timezone</FieldLabel>
+              <PachSelect
+                value={runDraft.scheduledTimezone}
+                onChange={(scheduledTimezone) => setRunDraft((draft) => ({ ...draft, scheduledTimezone }))}
+                options={MARKETING_TIMEZONE_OPTIONS}
+                display={timezoneLabel(runDraft.scheduledTimezone)}
+              />
+            </div>
           </div>
         </MarketingCreateModal>
       ) : null}
@@ -1327,6 +1428,9 @@ function BroadcastDetailView({
   const [rendering, setRendering] = useState(false)
   const [renderError, setRenderError] = useState('')
   const [workspaceMode, setWorkspaceMode] = useState<'broadcast' | 'wrapper'>('broadcast')
+  const [scheduleTimezone, setScheduleTimezone] = useState(run.scheduledTimezone || DEFAULT_MARKETING_TIMEZONE)
+  const [scheduleDraft, setScheduleDraft] = useState(dateTimeLocalValue(run.scheduledAt, scheduleTimezone))
+  const scheduleInputRef = useRef<HTMLInputElement | null>(null)
 
   const item = contentItems.find((entry) => entry.id === run.contentItemId) ?? null
   const publication = publications.find((entry) => entry.id === run.publicationId) ?? null
@@ -1338,14 +1442,24 @@ function BroadcastDetailView({
   const sender = explicitSender ?? defaultSender ?? null
   const metrics = run.metrics as Record<string, unknown>
   const isDraft = run.status === 'draft'
+  const isScheduled = run.status === 'scheduled'
 
   useEffect(() => {
     setPreview(null)
     setRenderError('')
     setPreviewMode('desktop')
+    const nextTimezone = run.scheduledTimezone || DEFAULT_MARKETING_TIMEZONE
+    setScheduleTimezone(nextTimezone)
+    setScheduleDraft(dateTimeLocalValue(run.scheduledAt, nextTimezone))
     void renderPreview()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [run.id])
+
+  useEffect(() => {
+    const nextTimezone = run.scheduledTimezone || DEFAULT_MARKETING_TIMEZONE
+    setScheduleTimezone(nextTimezone)
+    setScheduleDraft(dateTimeLocalValue(run.scheduledAt, nextTimezone))
+  }, [run.scheduledAt, run.scheduledTimezone])
 
   async function renderPreview() {
     if (!item) {
@@ -1418,6 +1532,40 @@ function BroadcastDetailView({
         ...readRecord(publication.metadata),
         emailWrapper: emailWrapperPayload(next),
       },
+    })
+  }
+
+  async function scheduleRun() {
+    const scheduleValue = scheduleDraft || scheduleInputRef.current?.value || ''
+    const scheduledAt = dateTimeLocalToTimestamp(scheduleValue, scheduleTimezone)
+    if (!scheduledAt) {
+      setRenderError('Pick a valid schedule time')
+      return
+    }
+    setRenderError('')
+    setScheduleDraft(scheduleValue)
+    try {
+      const result = z.mutate.mkt_distribution_runs.update({
+        id: run.id,
+        status: 'scheduled',
+        scheduledAt,
+        scheduledTimezone: scheduleTimezone,
+        error: null,
+      })
+      await result.client
+    } catch (error) {
+      setRenderError(error instanceof Error ? error.message : String(error))
+    }
+  }
+
+  function unscheduleRun() {
+    setScheduleDraft('')
+    void z.mutate.mkt_distribution_runs.update({
+      id: run.id,
+      status: 'draft',
+      scheduledAt: null,
+      startedAt: null,
+      error: null,
     })
   }
 
@@ -1588,6 +1736,44 @@ function BroadcastDetailView({
             </div>
         </div>
 
+        <div className="space-y-3 border-b border-edge/12 px-4 py-4">
+          <FieldLabel>schedule</FieldLabel>
+          <div className="grid gap-2">
+            <label className="block">
+              <TermInput
+                ref={scheduleInputRef}
+                type="datetime-local"
+                value={scheduleDraft}
+                onChange={(event) => {
+                  setScheduleDraft(event.target.value)
+                  if (renderError) setRenderError('')
+                }}
+                onInput={(event) => {
+                  setScheduleDraft(event.currentTarget.value)
+                  if (renderError) setRenderError('')
+                }}
+              />
+            </label>
+            <PachSelect
+              value={scheduleTimezone}
+              onChange={setScheduleTimezone}
+              options={MARKETING_TIMEZONE_OPTIONS}
+              display={timezoneLabel(scheduleTimezone)}
+            />
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <Button onClick={() => void scheduleRun()} disabled={sending || run.status === 'sending' || run.status === 'sent'}>
+              schedule
+            </Button>
+            <Button onClick={unscheduleRun} disabled={sending || (!run.scheduledAt && !isScheduled) || run.status === 'sending' || run.status === 'sent'}>
+              unschedule
+            </Button>
+          </div>
+          <div className="font-mono text-[10px] uppercase tracking-label text-fg-4">
+            {run.scheduledAt ? `queued ${formatScheduledDate(run.scheduledAt, run.scheduledTimezone)}` : 'not scheduled'}
+          </div>
+        </div>
+
         <div className="border-b border-edge/12 px-4 py-4">
             <FieldLabel>send controls</FieldLabel>
             <div className="flex flex-wrap gap-2">
@@ -1597,7 +1783,7 @@ function BroadcastDetailView({
               <Button icon={<Mail className="h-3.5 w-3.5" />} onClick={() => onSend(true)} disabled={sending || !preview}>
                 test
               </Button>
-              <Button kind="primary" icon={<Send className="h-3.5 w-3.5" />} onClick={() => onSend(false)} disabled={sending || !preview}>
+              <Button kind="primary" icon={<Send className="h-3.5 w-3.5" />} onClick={() => onSend(false)} disabled={sending || !preview || run.status === 'sending'}>
                 send
               </Button>
             </div>
@@ -2078,11 +2264,13 @@ function CommitInput({
   value,
   onCommit,
   label,
+  type = 'text',
   compact = false,
 }: {
   value: string
   onCommit: (next: string) => void | Promise<void>
   label?: string
+  type?: string
   compact?: boolean
 }) {
   const [draft, setDraft] = useState(value)
@@ -2096,6 +2284,7 @@ function CommitInput({
     <label className="block">
       {label ? <FieldLabel>{label}</FieldLabel> : null}
       <input
+        type={type}
         value={draft}
         onChange={(event) => setDraft(event.target.value)}
         onBlur={() => void commit()}
@@ -2273,6 +2462,33 @@ function defaultEmailWrapper(): PublicationEmailWrapper {
   }
 }
 
+function defaultPublicationCadence(): PublicationCadenceConfig {
+  return {
+    enabled: false,
+    lookaheadDays: 14,
+    cooldownDays: 7,
+  }
+}
+
+function publicationCadenceConfig(publication: PublicationRow | null): PublicationCadenceConfig {
+  const metadata = readRecord(publication?.metadata)
+  const cadence = readRecord(metadata.marketingCadence)
+  const fallback = defaultPublicationCadence()
+  return {
+    enabled: cadence.enabled === true,
+    lookaheadDays: positiveInteger(cadence.lookaheadDays, fallback.lookaheadDays),
+    cooldownDays: positiveInteger(cadence.cooldownDays, fallback.cooldownDays),
+  }
+}
+
+function publicationCadencePayload(cadence: PublicationCadenceConfig) {
+  return {
+    enabled: cadence.enabled,
+    lookaheadDays: positiveInteger(cadence.lookaheadDays, 14),
+    cooldownDays: positiveInteger(cadence.cooldownDays, 7),
+  }
+}
+
 function defaultHeaderLogo() {
   return {
     enabled: true,
@@ -2384,6 +2600,114 @@ function eventKind(eventType: string): Parameters<typeof StatusPill>[0]['kind'] 
 function formatDate(value: number | null | undefined) {
   if (!value) return '-'
   return new Intl.DateTimeFormat(undefined, { month: 'short', day: '2-digit', hour: '2-digit', minute: '2-digit' }).format(new Date(value))
+}
+
+function formatScheduledDate(value: number | null | undefined, timezone: string | null | undefined) {
+  if (!value) return '-'
+  const resolvedTimezone = timezone || DEFAULT_MARKETING_TIMEZONE
+  const formatted = new Intl.DateTimeFormat(undefined, {
+    timeZone: resolvedTimezone,
+    month: 'short',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+  }).format(new Date(value))
+  return `${formatted} · ${timezoneLabel(resolvedTimezone)}`
+}
+
+function timezoneLabel(value: string | null | undefined) {
+  return MARKETING_TIMEZONES.find((timezone) => timezone.value === value)?.label ?? value ?? 'timezone'
+}
+
+function formatIsoDate(value: unknown) {
+  if (typeof value !== 'string' || !value) return '-'
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return '-'
+  return formatDate(date.getTime())
+}
+
+function dateTimeLocalValue(value: number | null | undefined, timezone = DEFAULT_MARKETING_TIMEZONE) {
+  if (!value) return ''
+  const parts = getZonedParts(new Date(value), timezone)
+  return `${parts.year}-${pad2(parts.month)}-${pad2(parts.day)}T${pad2(parts.hour)}:${pad2(parts.minute)}`
+}
+
+function dateTimeLocalToTimestamp(value: string, timezone = DEFAULT_MARKETING_TIMEZONE) {
+  if (!value) return null
+  const parts = parseDateTimeLocal(value)
+  if (!parts) return null
+  const timestamp = zonedTimeToUtc(parts.year, parts.month - 1, parts.day, parts.hour, parts.minute, timezone).getTime()
+  return Number.isNaN(timestamp) ? null : timestamp
+}
+
+function parseDateTimeLocal(value: string) {
+  const match = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})$/.exec(value)
+  if (!match) return null
+  const [, yearRaw, monthRaw, dayRaw, hourRaw, minuteRaw] = match
+  const year = Number(yearRaw)
+  const month = Number(monthRaw)
+  const day = Number(dayRaw)
+  const hour = Number(hourRaw)
+  const minute = Number(minuteRaw)
+  if (!Number.isInteger(year) || !Number.isInteger(month) || !Number.isInteger(day) || !Number.isInteger(hour) || !Number.isInteger(minute)) return null
+  if (month < 1 || month > 12 || day < 1 || day > 31 || hour < 0 || hour > 23 || minute < 0 || minute > 59) return null
+  return { year, month, day, hour, minute }
+}
+
+type ZonedParts = {
+  year: number
+  month: number
+  day: number
+  hour: number
+  minute: number
+  second: number
+}
+
+function getZonedParts(value: Date, timezone: string): ZonedParts {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: timezone || DEFAULT_MARKETING_TIMEZONE,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: false,
+    hourCycle: 'h23',
+  }).formatToParts(value)
+
+  const lookup = new Map(parts.map((part) => [part.type, part.value]))
+  return {
+    year: Number(lookup.get('year')),
+    month: Number(lookup.get('month')),
+    day: Number(lookup.get('day')),
+    hour: Number(lookup.get('hour')),
+    minute: Number(lookup.get('minute')),
+    second: Number(lookup.get('second')),
+  }
+}
+
+function zonedTimeToUtc(year: number, month: number, day: number, hour: number, minute: number, timezone: string) {
+  let utc = new Date(Date.UTC(year, month, day, hour, minute, 0, 0))
+
+  for (let i = 0; i < 2; i += 1) {
+    const parts = getZonedParts(utc, timezone)
+    const actual = Date.UTC(parts.year, parts.month - 1, parts.day, parts.hour, parts.minute, parts.second, 0)
+    const desired = Date.UTC(year, month, day, hour, minute, 0, 0)
+    utc = new Date(utc.getTime() - (actual - desired))
+  }
+
+  return utc
+}
+
+function pad2(value: number) {
+  return String(value).padStart(2, '0')
+}
+
+function positiveInteger(value: unknown, fallback: number) {
+  const number = typeof value === 'number' ? value : Number(value)
+  if (!Number.isFinite(number) || number <= 0) return fallback
+  return Math.trunc(number)
 }
 
 function uniqueSlug(input: string, existing: Array<{ slug: string }>) {

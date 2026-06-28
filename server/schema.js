@@ -560,6 +560,7 @@ const mktDistributionRuns = table('mkt_distribution_runs')
     preheader: string().optional(),
     status: string(),
     scheduledAt: number().optional().from('scheduled_at'),
+    scheduledTimezone: string().from('scheduled_timezone'),
     startedAt: number().optional().from('started_at'),
     completedAt: number().optional().from('completed_at'),
     provider: string().optional(),

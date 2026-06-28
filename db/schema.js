@@ -674,6 +674,7 @@ export const mktDistributionRuns = pgTable('mkt_distribution_runs', {
     preheader: text('preheader'),
     status: text('status').notNull().default('draft'),
     scheduledAt: timestamp('scheduled_at', { withTimezone: true }),
+    scheduledTimezone: text('scheduled_timezone').notNull().default('America/Mexico_City'),
     startedAt: timestamp('started_at', { withTimezone: true }),
     completedAt: timestamp('completed_at', { withTimezone: true }),
     provider: text('provider'),

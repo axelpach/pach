@@ -689,7 +689,7 @@ router.post('/distribution-runs/:id/render', asyncRoute(async (req, res) => {
   }
 }))
 
-async function sendNewsletterRun(runId: string, testOnly: boolean) {
+export async function sendNewsletterRun(runId: string, testOnly: boolean) {
   const db = getDb()
   const [run] = await db.select().from(mktDistributionRuns).where(eq(mktDistributionRuns.id, runId)).limit(1)
   if (!run) throw new MarketingInputError('Distribution run not found', 404)
