@@ -951,59 +951,66 @@ function ActivityDetail({
   const summary = event.summary.trim()
 
   return (
-    <aside className="absolute inset-y-0 right-0 z-40 flex w-full max-w-[460px] flex-col border-l border-edge/18 bg-pit-2 shadow-terminal-overlay md:w-[430px] md:max-w-none">
-      <div className="flex items-center justify-between border-b border-edge/12 px-5 py-3">
-        <div className="flex min-w-0 items-center gap-2 font-mono text-xs">
-          <span className="inline-flex items-center gap-1.5 border border-edge/25 bg-accent-fill/5 px-2 py-0.5 text-[10px] uppercase tracking-label text-accent">
-            detail
-          </span>
-          <span className={`truncate text-[10px] uppercase tracking-label ${activityEventToneClass(event)}`}>{activityEventLabel(event)}</span>
+    <>
+      <div
+        className="absolute inset-0 z-30"
+        onClick={onClose}
+        aria-hidden="true"
+      />
+      <aside className="absolute inset-y-0 right-0 z-40 flex w-full max-w-[460px] flex-col border-l border-edge/18 bg-pit-2 shadow-terminal-overlay md:w-[430px] md:max-w-none">
+        <div className="flex items-center justify-between border-b border-edge/12 px-5 py-3">
+          <div className="flex min-w-0 items-center gap-2 font-mono text-xs">
+            <span className="inline-flex items-center gap-1.5 border border-edge/25 bg-accent-fill/5 px-2 py-0.5 text-[10px] uppercase tracking-label text-accent">
+              detail
+            </span>
+            <span className={`truncate text-[10px] uppercase tracking-label ${activityEventToneClass(event)}`}>{activityEventLabel(event)}</span>
+          </div>
+          <button onClick={onClose} className="text-fg-4 transition hover:text-fg-1" title="close" aria-label="close detail">
+            <X className="h-4 w-4" />
+          </button>
         </div>
-        <button onClick={onClose} className="text-fg-4 transition hover:text-fg-1" title="close" aria-label="close detail">
-          <X className="h-4 w-4" />
-        </button>
-      </div>
 
-      <div className="min-h-0 flex-1 overflow-auto px-5 py-5">
-        <div className="border-b border-edge/12 pb-5">
-          <div className="mb-4 flex items-start justify-between gap-3">
-            <div className="min-w-0">
-              <div className="flex flex-wrap items-center gap-2 font-mono">
-                <SeverityMark severity={event.severity} />
-                <span className="min-w-0 truncate text-xs text-accent/80 tabular-nums">{context.subjectMeta}</span>
-                <span className={`min-w-0 truncate text-[10px] uppercase tracking-label ${activityEventToneClass(event)}`}>
-                  {activityEventLabel(event)}
-                </span>
+        <div className="min-h-0 flex-1 overflow-auto px-5 py-5">
+          <div className="border-b border-edge/12 pb-5">
+            <div className="mb-4 flex items-start justify-between gap-3">
+              <div className="min-w-0">
+                <div className="flex flex-wrap items-center gap-2 font-mono">
+                  <SeverityMark severity={event.severity} />
+                  <span className="min-w-0 truncate text-xs text-accent/80 tabular-nums">{context.subjectMeta}</span>
+                  <span className={`min-w-0 truncate text-[10px] uppercase tracking-label ${activityEventToneClass(event)}`}>
+                    {activityEventLabel(event)}
+                  </span>
+                </div>
+                <h2 className="mt-3 text-xl font-semibold leading-tight text-fg-1">{context.subjectLabel}</h2>
+                {summary && summary !== context.subjectLabel ? (
+                  <p className="mt-2 text-sm leading-relaxed text-fg-3">{summary}</p>
+                ) : null}
               </div>
-              <h2 className="mt-3 text-xl font-semibold leading-tight text-fg-1">{context.subjectLabel}</h2>
-              {summary && summary !== context.subjectLabel ? (
-                <p className="mt-2 text-sm leading-relaxed text-fg-3">{summary}</p>
-              ) : null}
+              <Button
+                kind="primary"
+                icon={<Plus className="h-3.5 w-3.5" />}
+                onClick={onCreateIssue}
+                disabled={creatingIssue}
+                className="px-2.5 py-1.5 text-[10px]"
+              >
+                issue
+              </Button>
             </div>
-            <Button
-              kind="primary"
-              icon={<Plus className="h-3.5 w-3.5" />}
-              onClick={onCreateIssue}
-              disabled={creatingIssue}
-              className="px-2.5 py-1.5 text-[10px]"
-            >
-              issue
-            </Button>
+            <div className="grid grid-cols-2 gap-3">
+              <DetailFact label="kind" value={event.activityKind} />
+              <DetailFact label="origin" value={activityOriginLabel(event.origin)} />
+              <DetailFact label="occurred" value={formatDateTime(event.occurredAt)} />
+              <DetailFact label="actor" value={context.actorLabel} />
+              <DetailFact label="organization" value={organization?.name ?? event.organizationId} />
+            </div>
           </div>
-          <div className="grid grid-cols-2 gap-3">
-            <DetailFact label="kind" value={event.activityKind} />
-            <DetailFact label="origin" value={activityOriginLabel(event.origin)} />
-            <DetailFact label="occurred" value={formatDateTime(event.occurredAt)} />
-            <DetailFact label="actor" value={context.actorLabel} />
-            <DetailFact label="organization" value={organization?.name ?? event.organizationId} />
-          </div>
+
+          {contextFields.length > 0 ? <ContextFields fields={contextFields} /> : null}
+
+          <TechnicalDetails fields={technicalFields} details={event.details} metadata={event.metadata} />
         </div>
-
-        {contextFields.length > 0 ? <ContextFields fields={contextFields} /> : null}
-
-        <TechnicalDetails fields={technicalFields} details={event.details} metadata={event.metadata} />
-      </div>
-    </aside>
+      </aside>
+    </>
   )
 }
 
