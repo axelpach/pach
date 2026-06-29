@@ -58,6 +58,23 @@ type PendingAgentInputMedia = {
   dimensions: { width: number; height: number } | null
 }
 
+type DeveloperRepository = Pick<
+  Schema['tables']['github_repositories']['row'],
+  'id' | 'projectKey' | 'fullName' | 'defaultBranch' | 'active'
+>
+
+type OrganizationRepositoryLink = Pick<
+  Schema['tables']['organization_repositories']['row'],
+  'id' | 'organizationId' | 'repositoryId' | 'role' | 'isDefault' | 'active'
+>
+
+type OrganizationGithubSettings = {
+  organizationId: string
+  repositories: DeveloperRepository[]
+  organizationRepositories: OrganizationRepositoryLink[]
+  error: string | null
+}
+
 export default function IssueDetail() {
   const { issueId } = useParams<{ issueId: string }>()
   const navigate = useNavigate()
@@ -67,6 +84,8 @@ export default function IssueDetail() {
   const [bootstrappingRunId, setBootstrappingRunId] = useState<string | null>(null)
   const [agentActionMessage, setAgentActionMessage] = useState<string | null>(null)
   const [cancelingRunId, setCancelingRunId] = useState<string | null>(null)
+  const [selectedRepositoryId, setSelectedRepositoryId] = useState('')
+  const [organizationGithubSettings, setOrganizationGithubSettings] = useState<OrganizationGithubSettings | null>(null)
   const agentFullViewOpen = searchParams.get('agent') === 'full'
 
   const [allIssues] = useQuery(z.query.pm_issues.orderBy('updatedAt', 'desc'))
@@ -78,7 +97,7 @@ export default function IssueDetail() {
   const [statuses] = useQuery(z.query.pm_statuses.orderBy('position', 'asc'))
   const [labels] = useQuery(z.query.pm_labels.orderBy('name', 'asc'))
   const [workers] = useQuery(z.query.agent_workers.orderBy('name', 'asc'))
-  const [repositories] = useQuery(z.query.github_repositories.orderBy('fullName', 'asc'))
+  const [zeroRepositories] = useQuery(z.query.github_repositories.orderBy('fullName', 'asc'))
   const [agentRuns] = useQuery(
     z.query.agent_runs.where('issueId', issueId ?? '').orderBy('createdAt', 'desc'),
   )
@@ -182,15 +201,27 @@ export default function IssueDetail() {
   const [organizationRepositoryLinks] = useQuery(
     z.query.organization_repositories.where('organizationId', issue?.contextCompanyId ?? '').orderBy('updatedAt', 'desc'),
   )
-  const activeRepositoryLinks = organizationRepositoryLinks.filter((link) => link.active)
+  const restGithubSettingsReady =
+    Boolean(issue?.contextCompanyId) &&
+    organizationGithubSettings?.organizationId === issue?.contextCompanyId &&
+    !organizationGithubSettings.error
+  const organizationRepositorySource = restGithubSettingsReady
+    ? organizationGithubSettings.organizationRepositories
+    : organizationRepositoryLinks
+  const repositorySource = restGithubSettingsReady ? organizationGithubSettings.repositories : zeroRepositories
+  const activeRepositoryLinks = organizationRepositorySource.filter((link) => link.active)
   const linkedRepositories = activeRepositoryLinks
     .map((link) => ({
       link,
-      repository: repositories.find((repository) => repository.id === link.repositoryId && repository.active),
+      repository: repositorySource.find((repository) => repository.id === link.repositoryId && repository.active),
     }))
-    .filter((entry): entry is { link: Schema['tables']['organization_repositories']['row']; repository: Schema['tables']['github_repositories']['row'] } => Boolean(entry.repository))
+    .filter((entry): entry is { link: OrganizationRepositoryLink; repository: DeveloperRepository } => Boolean(entry.repository))
     .toSorted((a, b) => Number(b.link.isDefault) - Number(a.link.isDefault) || a.repository.fullName.localeCompare(b.repository.fullName))
   const developerRepositories = linkedRepositories.map((entry) => entry.repository)
+  const defaultDeveloperRepositoryId =
+    linkedRepositories.find((entry) => entry.link.isDefault)?.repository.id ??
+    developerRepositories[0]?.id ??
+    ''
 
   const workspaceStatuses = getWorkspaceStatuses(statuses)
   const issueIsDone = Boolean(issue?.completedAt || status?.type === 'completed')
@@ -231,6 +262,59 @@ export default function IssueDetail() {
     if (titleFocused) return
     setTitleDraft(issue.title)
   }, [issue?.id, issue?.title, titleFocused])
+
+  useEffect(() => {
+    if (developerRepositories.length === 0) {
+      if (selectedRepositoryId) setSelectedRepositoryId('')
+      return
+    }
+
+    if (selectedRepositoryId && developerRepositories.some((repository) => repository.id === selectedRepositoryId)) return
+    setSelectedRepositoryId(defaultDeveloperRepositoryId)
+  }, [defaultDeveloperRepositoryId, developerRepositories, selectedRepositoryId])
+
+  useEffect(() => {
+    const organizationId = issue?.contextCompanyId
+    if (!organizationId) {
+      setOrganizationGithubSettings(null)
+      return
+    }
+
+    let canceled = false
+    setOrganizationGithubSettings((current) => current?.organizationId === organizationId ? current : null)
+
+    async function loadOrganizationGithubSettings() {
+      try {
+        const response = await authFetch(`${config.apiUrl}/github/settings?organizationId=${encodeURIComponent(organizationId)}`)
+        const payload = await response.json().catch(() => ({}))
+        if (!response.ok) {
+          throw new Error(readString(payload.message) ?? readString(payload.error) ?? 'Could not load organization repositories.')
+        }
+        if (canceled) return
+
+        setOrganizationGithubSettings({
+          organizationId,
+          repositories: normalizeDeveloperRepositories(payload.repositories),
+          organizationRepositories: normalizeOrganizationRepositoryLinks(payload.organizationRepositories),
+          error: null,
+        })
+      } catch (error) {
+        if (canceled) return
+        setOrganizationGithubSettings({
+          organizationId,
+          repositories: [],
+          organizationRepositories: [],
+          error: error instanceof Error ? error.message : 'Could not load organization repositories.',
+        })
+      }
+    }
+
+    void loadOrganizationGithubSettings()
+
+    return () => {
+      canceled = true
+    }
+  }, [issue?.contextCompanyId])
 
   useEffect(() => {
     if (!issue) return
@@ -293,7 +377,12 @@ export default function IssueDetail() {
   }
 
   function selectDeveloperRepository() {
-    return linkedRepositories.find((entry) => entry.link.isDefault)?.repository ?? developerRepositories[0] ?? null
+    return (
+      developerRepositories.find((repository) => repository.id === selectedRepositoryId) ??
+      linkedRepositories.find((entry) => entry.link.isDefault)?.repository ??
+      developerRepositories[0] ??
+      null
+    )
   }
 
   async function toggleLabel(labelId: string) {
@@ -396,7 +485,8 @@ export default function IssueDetail() {
     if (!trimmed) return
 
     const repo =
-      repositories.find((entry) => entry.id === activeRun.repositoryId) ??
+      developerRepositories.find((entry) => entry.id === activeRun.repositoryId) ??
+      zeroRepositories.find((entry) => entry.id === activeRun.repositoryId) ??
       selectDeveloperRepository()
     if (!repo) {
       setAgentActionMessage('connect a GitHub repository in settings first')
@@ -656,6 +746,8 @@ export default function IssueDetail() {
             messages={activeMessages}
             workers={workers}
             repositories={developerRepositories}
+            selectedRepositoryId={selectedRepositoryId}
+            onSelectedRepositoryIdChange={setSelectedRepositoryId}
             allowCreateRun={!issueIsDone}
             onCreateRun={createAgentRun}
             onSendFeedback={sendAgentFeedback}
@@ -739,6 +831,8 @@ export default function IssueDetail() {
               legacyProgressActivity={legacyRunProgressActivity}
               workers={workers}
               repositories={developerRepositories}
+              selectedRepositoryId={selectedRepositoryId}
+              onSelectedRepositoryIdChange={setSelectedRepositoryId}
               allowCreateRun={!issueIsDone}
               onCreateRun={createAgentRun}
               onCancelRun={cancelAgentRun}
@@ -953,6 +1047,8 @@ function AgentSidebarCard({
   legacyProgressActivity,
   workers,
   repositories,
+  selectedRepositoryId,
+  onSelectedRepositoryIdChange,
   allowCreateRun,
   onCreateRun,
   onCancelRun,
@@ -963,7 +1059,9 @@ function AgentSidebarCard({
   progressReports: Schema['tables']['agent_run_progress_reports']['row'][]
   legacyProgressActivity: Schema['tables']['activity_events']['row'][]
   workers: Schema['tables']['agent_workers']['row'][]
-  repositories: Schema['tables']['github_repositories']['row'][]
+  repositories: DeveloperRepository[]
+  selectedRepositoryId: string
+  onSelectedRepositoryIdChange: (next: string) => void
   allowCreateRun: boolean
   onCreateRun: () => void | Promise<void>
   onCancelRun: () => void | Promise<void>
@@ -1048,6 +1146,15 @@ function AgentSidebarCard({
         </Link>
       ) : null}
 
+      {!run && repositories.length > 1 ? (
+        <RepositorySelector
+          repositories={repositories}
+          selectedRepositoryId={selectedRepositoryId}
+          onChange={onSelectedRepositoryIdChange}
+          className="mb-3"
+        />
+      ) : null}
+
       {!run ? (
         <div className="space-y-1.5 font-mono text-xs text-fg-4">
           <div>// no active agent run</div>
@@ -1091,6 +1198,41 @@ function AgentSidebarCard({
           )}
         </div>
       )}
+    </div>
+  )
+}
+
+function RepositorySelector({
+  repositories,
+  selectedRepositoryId,
+  onChange,
+  className = '',
+}: {
+  repositories: DeveloperRepository[]
+  selectedRepositoryId: string
+  onChange: (next: string) => void
+  className?: string
+}) {
+  const selectedRepository =
+    repositories.find((repository) => repository.id === selectedRepositoryId) ??
+    repositories[0] ??
+    null
+
+  if (!selectedRepository) return null
+
+  return (
+    <div className={className}>
+      <div className="mb-1 font-mono text-[10px] uppercase tracking-label text-fg-4">repository</div>
+      <PachSelect
+        value={selectedRepository.id}
+        onChange={onChange}
+        options={repositories.map((repository) => ({
+          value: repository.id,
+          label: repository.fullName,
+        }))}
+        display={selectedRepository.fullName}
+        popupWidth="260"
+      />
     </div>
   )
 }
@@ -1161,7 +1303,7 @@ function AgentRunPanel({
   legacyProgressActivity: Schema['tables']['activity_events']['row'][]
   messages: Schema['tables']['agent_messages']['row'][]
   workers: Schema['tables']['agent_workers']['row'][]
-  repositories: Schema['tables']['github_repositories']['row'][]
+  repositories: DeveloperRepository[]
   authToken: string | null
   defaultGoal: string
   onCreateRun: () => void | Promise<void>
@@ -2538,6 +2680,50 @@ function formatBytes(value: number) {
   if (value < 1024) return `${value} b`
   if (value < 1024 * 1024) return `${(value / 1024).toFixed(1)} kb`
   return `${(value / (1024 * 1024)).toFixed(1)} mb`
+}
+
+function normalizeDeveloperRepositories(value: unknown): DeveloperRepository[] {
+  if (!Array.isArray(value)) return []
+  return value
+    .map((entry) => {
+      if (!entry || typeof entry !== 'object') return null
+      const raw = entry as Record<string, unknown>
+      const id = readString(raw.id)
+      const projectKey = readString(raw.projectKey)
+      const fullName = readString(raw.fullName)
+      const defaultBranch = readString(raw.defaultBranch)
+      if (!id || !projectKey || !fullName || !defaultBranch) return null
+      return {
+        id,
+        projectKey,
+        fullName,
+        defaultBranch,
+        active: raw.active !== false,
+      }
+    })
+    .filter((entry): entry is DeveloperRepository => Boolean(entry))
+}
+
+function normalizeOrganizationRepositoryLinks(value: unknown): OrganizationRepositoryLink[] {
+  if (!Array.isArray(value)) return []
+  return value
+    .map((entry) => {
+      if (!entry || typeof entry !== 'object') return null
+      const raw = entry as Record<string, unknown>
+      const id = readString(raw.id)
+      const organizationId = readString(raw.organizationId)
+      const repositoryId = readString(raw.repositoryId)
+      if (!id || !organizationId || !repositoryId) return null
+      return {
+        id,
+        organizationId,
+        repositoryId,
+        role: readString(raw.role) ?? 'primary',
+        isDefault: raw.isDefault === true,
+        active: raw.active !== false,
+      }
+    })
+    .filter((entry): entry is OrganizationRepositoryLink => Boolean(entry))
 }
 
 function readString(value: unknown) {

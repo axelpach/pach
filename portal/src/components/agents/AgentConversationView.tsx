@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type DragEvent } from 'react'
 import { Link } from 'react-router-dom'
 import { FileImage, MessageSquare, Paperclip, Send, TerminalSquare, X } from 'lucide-react'
 import type { Schema } from '../../zero-schema'
+import { PachSelect } from '../PachSelect'
 
 type PendingAgentInputMedia = {
   id: string
@@ -10,6 +11,11 @@ type PendingAgentInputMedia = {
   dimensions: { width: number; height: number } | null
 }
 
+type AgentRepository = Pick<
+  Schema['tables']['github_repositories']['row'],
+  'id' | 'projectKey' | 'fullName' | 'defaultBranch' | 'active'
+>
+
 type AgentConversationViewProps = {
   issue: Schema['tables']['pm_issues']['row']
   run: Schema['tables']['agent_runs']['row'] | null
@@ -17,7 +23,9 @@ type AgentConversationViewProps = {
   legacyProgressActivity: Schema['tables']['activity_events']['row'][]
   messages: Schema['tables']['agent_messages']['row'][]
   workers: Schema['tables']['agent_workers']['row'][]
-  repositories: Schema['tables']['github_repositories']['row'][]
+  repositories: AgentRepository[]
+  selectedRepositoryId: string
+  onSelectedRepositoryIdChange: (next: string) => void
   allowCreateRun?: boolean
   onCreateRun: () => void | Promise<void>
   onSendFeedback: (feedback: string, inputMedia?: PendingAgentInputMedia[]) => void | Promise<void>
@@ -45,6 +53,8 @@ export function AgentConversationView({
   messages,
   workers,
   repositories,
+  selectedRepositoryId,
+  onSelectedRepositoryIdChange,
   allowCreateRun = true,
   onCreateRun,
   onSendFeedback,
@@ -178,6 +188,14 @@ export function AgentConversationView({
 
             {!run && streamItems.length === 0 ? (
               <div className="border border-edge/12 bg-accent-fill/[0.025] p-4 font-mono text-xs text-fg-4">
+                {repositories.length > 1 ? (
+                  <RepositorySelector
+                    repositories={repositories}
+                    selectedRepositoryId={selectedRepositoryId}
+                    onChange={onSelectedRepositoryIdChange}
+                    className="mb-3 max-w-sm"
+                  />
+                ) : null}
                 <div>// no agent conversation yet</div>
                 <div className="mt-1">
                   {onlineWorkers.length} online worker{onlineWorkers.length === 1 ? '' : 's'} · {repositories.length} repo
@@ -323,6 +341,41 @@ function AgentConversationRunHeader({ run }: { run: Schema['tables']['agent_runs
         <span className="uppercase tracking-label text-fg-4">worker</span>
         <span className="truncate text-fg-2">{run.workerId ?? 'waiting for claim'}</span>
       </div>
+    </div>
+  )
+}
+
+function RepositorySelector({
+  repositories,
+  selectedRepositoryId,
+  onChange,
+  className = '',
+}: {
+  repositories: AgentRepository[]
+  selectedRepositoryId: string
+  onChange: (next: string) => void
+  className?: string
+}) {
+  const selectedRepository =
+    repositories.find((repository) => repository.id === selectedRepositoryId) ??
+    repositories[0] ??
+    null
+
+  if (!selectedRepository) return null
+
+  return (
+    <div className={className}>
+      <div className="mb-1 font-mono text-[10px] uppercase tracking-label text-fg-4">repository</div>
+      <PachSelect
+        value={selectedRepository.id}
+        onChange={onChange}
+        options={repositories.map((repository) => ({
+          value: repository.id,
+          label: repository.fullName,
+        }))}
+        display={selectedRepository.fullName}
+        popupWidth="280"
+      />
     </div>
   )
 }
