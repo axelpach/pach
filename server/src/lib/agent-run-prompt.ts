@@ -3,6 +3,10 @@ export type AgentRunPromptRecord = {
   issueId?: string | null
   subjectType?: string | null
   subjectId?: string | null
+  repoFullName?: string | null
+  baseBranch?: string | null
+  branchName?: string | null
+  workspacePath?: string | null
   metadata?: Record<string, unknown> | null
 }
 
@@ -12,13 +16,19 @@ export function buildGeneralMcpPrompt(run: AgentRunPromptRecord) {
   const feedback = readMetadataString(run.metadata, 'feedback')
   const parentRunId = readMetadataString(run.metadata, 'parentRunId')
   const attachments = formatInputMediaPrompt(run.metadata)
+  const executionMode = readMetadataString(run.metadata, 'executionMode')
+  const codeWorktree = executionMode === 'code_worktree'
   return [
-    'You are Pach general MCP issue worker.',
+    codeWorktree ? 'You are Pach engineering issue worker.' : 'You are Pach general MCP issue worker.',
     '',
     'Use Pach MCP tools for Pach state. You may call Pach MCP tools directly and repeatedly as needed.',
     'For this worker, Codex is running with full local trust. Still act conservatively: do not send external messages, publish content, push code, open pull requests, or perform irreversible external actions unless the issue explicitly asks for it.',
     `Issue id: ${run.issueId}`,
     `Agent run id: ${run.id}`,
+    codeWorktree && run.repoFullName ? `Repository: ${run.repoFullName}` : null,
+    codeWorktree && run.baseBranch ? `Base branch: ${run.baseBranch}` : null,
+    codeWorktree && run.branchName ? `Working branch: ${run.branchName}` : null,
+    codeWorktree && run.workspacePath ? `Workspace path: ${run.workspacePath}` : null,
     parentRunId ? `Parent run id: ${parentRunId}` : null,
     feedback ? `User feedback: ${feedback}` : null,
     attachments,
@@ -28,9 +38,15 @@ export function buildGeneralMcpPrompt(run: AgentRunPromptRecord) {
       ? '1. Continue from the previous session if available, and use the user feedback above as the latest instruction.'
       : '1. Read the issue with pach.issue.get using the issue id above.',
     '2. Report progress with pach.progress.report and include the agent run id.',
-    '3. Do the requested analysis or light Pach-state work that can be done through MCP.',
-    '4. Put the final result in pach.progress.report with phase "final_result".',
-    '5. If you update issue fields, use pach.issue.update and explain the change in activitySummary.',
+    codeWorktree
+      ? '3. Inspect and edit the repository in the current working directory. Run the relevant checks you can run locally.'
+      : '3. Do the requested analysis or light Pach-state work that can be done through MCP.',
+    codeWorktree
+      ? '4. Leave code changes in the working tree for Pach to push/create the draft PR. Do not push or open a PR yourself unless the issue explicitly asks for it.'
+      : '4. Put the final result in pach.progress.report with phase "final_result".',
+    codeWorktree
+      ? '5. Put the final result in pach.progress.report with phase "final_result", including changed files and checks run.'
+      : '5. If you update issue fields, use pach.issue.update and explain the change in activitySummary.',
     '',
     'Keep the final result concise and useful inside the Pach run progress stream.',
   ].filter((line): line is string => Boolean(line)).join('\n')

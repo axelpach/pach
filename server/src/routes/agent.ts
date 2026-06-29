@@ -11,6 +11,7 @@ import { and, eq, inArray } from 'drizzle-orm'
 import { getDb } from '../db.js'
 import { verifyToken } from '../lib/auth.js'
 import { insertIssueActivityEvent } from '../lib/activity-events.js'
+import { readGithubTokenForRepository } from '../lib/github-credentials.js'
 import {
   agentRunProgressReports,
   agentRunArtifacts,
@@ -408,7 +409,7 @@ router.post('/runs/:id/prepare-repo', async (req, res) => {
     const windows = terminals
       .sort((a, b) => a.sortOrder - b.sortOrder)
       .map((terminal) => sanitizeTmuxName(terminal.tmuxWindow, 'tmux window'))
-    const githubToken = readGithubToken()
+    const githubToken = await readGithubTokenForRepository(run.repositoryId)
 
     const startedAt = new Date()
     await db
@@ -509,7 +510,7 @@ router.post('/runs/:id/plan-work', async (req, res) => {
     const { run: initialRun, worker } = await readRunWorker(id)
     const terminals = await db.select().from(agentTerminals).where(eq(agentTerminals.runId, initialRun.id))
     const agentTerminal = findAgentTerminal(terminals)
-    const githubToken = readGithubToken()
+    const githubToken = await readGithubTokenForRepository(initialRun.repositoryId)
 
     let run = initialRun
     if (!run.tmuxSession) {
@@ -875,15 +876,16 @@ router.post('/runs/:id/create-draft-pr', async (req, res) => {
   const { id } = req.params
 
   try {
-    const githubToken = readGithubToken()
-    if (!githubToken) throw new Error('Missing PACH_AGENT_GITHUB_TOKEN or GITHUB_TOKEN')
-
     const db = getDb()
     const { run, worker } = await readRunWorker(id)
+    const githubToken = await readGithubTokenForRepository(run.repositoryId)
+    if (!githubToken) throw new Error('No GitHub token available for this repository connection')
     if (!run.repositoryId) throw new Error('Agent run has no repositoryId')
     if (!run.workspacePath) throw new Error('Agent run has no prepared workspacePath')
 
-    const [issue] = await db.select().from(pmIssues).where(eq(pmIssues.id, run.issueId))
+    const [issue] = run.issueId
+      ? await db.select().from(pmIssues).where(eq(pmIssues.id, run.issueId))
+      : []
     const [branch] = await db.select().from(githubBranches).where(eq(githubBranches.agentRunId, run.id))
     const title = readOptionalString((req.body as Record<string, unknown> | undefined)?.title) ?? issue?.title ?? run.branchName
     const body = buildPullRequestBody({ run, issue })
@@ -963,12 +965,11 @@ router.post('/runs/:id/sync-pull-request', async (req, res) => {
   const { id } = req.params
 
   try {
-    const githubToken = readGithubToken()
-    if (!githubToken) throw new Error('Missing PACH_AGENT_GITHUB_TOKEN or GITHUB_TOKEN')
-
     const db = getDb()
     const [run] = await db.select().from(agentRuns).where(eq(agentRuns.id, id))
     if (!run) throw new Error('Agent run not found')
+    const githubToken = await readGithubTokenForRepository(run.repositoryId)
+    if (!githubToken) throw new Error('No GitHub token available for this repository connection')
     if (!run.repositoryId) throw new Error('Agent run has no repositoryId')
 
     const [branch] = await db.select().from(githubBranches).where(eq(githubBranches.agentRunId, run.id))
@@ -2026,10 +2027,6 @@ function readSshPrivateKey() {
   if (normalized.includes('PRIVATE KEY')) return normalized
 
   return decodeSshPrivateKey(normalized)
-}
-
-function readGithubToken() {
-  return process.env.PACH_AGENT_GITHUB_TOKEN?.trim() || process.env.GITHUB_TOKEN?.trim() || null
 }
 
 function decodeSshPrivateKey(value: string) {

@@ -49,6 +49,7 @@ export default {
     pm_saved_views: { row: { select: ['true'], insert: ['true'], update: ['true'], delete: ['true'] } },
     agent_workers: { row: { select: ['true'], insert: ['true'], update: ['true'], delete: ['true'] } },
     github_repositories: { row: { select: ['true'], insert: ['true'], update: ['true'], delete: ['true'] } },
+    organization_repositories: { row: { select: ['true'], insert: ['true'], update: ['true'], delete: ['true'] } },
     agent_runs: { row: { select: ['true'], insert: ['true'], update: ['true'], delete: ['true'] } },
     agent_terminals: { row: { select: ['true'], insert: ['true'], update: ['true'], delete: ['true'] } },
     agent_run_artifacts: { row: { select: ['true'], insert: ['true'], update: ['true'], delete: ['true'] } },

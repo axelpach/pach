@@ -130,6 +130,32 @@ export const mcpTokens = pgTable('mcp_tokens', {
     revokedAtIdx: index('mcp_tokens_revoked_at_idx').on(table.revokedAt),
     expiresAtIdx: index('mcp_tokens_expires_at_idx').on(table.expiresAt),
 }));
+export const githubConnections = pgTable('github_connections', {
+    id: uuid('id').primaryKey().defaultRandom(),
+    name: text('name').notNull(),
+    /** github for now; leaves room for other git providers later. */
+    provider: text('provider').notNull().default('github'),
+    providerAccountLogin: text('provider_account_login'),
+    ownerUserId: uuid('owner_user_id').references(() => users.id),
+    /** fine_grained_pat | classic_pat | github_app */
+    credentialKind: text('credential_kind').notNull().default('fine_grained_pat'),
+    credentialLabel: text('credential_label'),
+    credentialLast4: text('credential_last4'),
+    encryptedCredential: text('encrypted_credential').notNull(),
+    scopes: jsonb('scopes').$type().notNull().default([]),
+    /** active | revoked | error */
+    status: text('status').notNull().default('active'),
+    statusMessage: text('status_message'),
+    lastSyncedAt: timestamp('last_synced_at', { withTimezone: true }),
+    lastUsedAt: timestamp('last_used_at', { withTimezone: true }),
+    metadata: jsonb('metadata').$type().notNull().default({}),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+}, (table) => ({
+    providerAccountIdx: index('github_connections_provider_account_idx').on(table.provider, table.providerAccountLogin),
+    ownerUserIdIdx: index('github_connections_owner_user_idx').on(table.ownerUserId),
+    statusIdx: index('github_connections_status_idx').on(table.status),
+}));
 /* ─────────────────────────── DECKS ─────────────────────────── */
 export const decks = pgTable('decks', {
     id: uuid('id').primaryKey().defaultRandom(),
@@ -946,17 +972,43 @@ export const agentWorkers = pgTable('agent_workers', {
 });
 export const githubRepositories = pgTable('github_repositories', {
     id: uuid('id').primaryKey().defaultRandom(),
+    connectionId: uuid('connection_id').references(() => githubConnections.id),
+    githubId: text('github_id'),
+    nodeId: text('node_id'),
     projectKey: text('project_key').notNull(),
     owner: text('owner').notNull(),
     name: text('name').notNull(),
     fullName: text('full_name').notNull().unique(),
     defaultBranch: text('default_branch').notNull().default('main'),
+    htmlUrl: text('html_url'),
+    isPrivate: boolean('private').notNull().default(false),
+    permissions: jsonb('permissions').$type().notNull().default({}),
     localPathTemplate: text('local_path_template'),
     active: boolean('active').notNull().default(true),
     metadata: jsonb('metadata').$type().notNull().default({}),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
-});
+}, (table) => ({
+    connectionIdIdx: index('github_repositories_connection_idx').on(table.connectionId),
+    githubIdIdx: index('github_repositories_github_id_idx').on(table.githubId),
+    activeIdx: index('github_repositories_active_idx').on(table.active),
+}));
+export const organizationRepositories = pgTable('organization_repositories', {
+    id: uuid('id').primaryKey().defaultRandom(),
+    organizationId: uuid('organization_id').notNull().references(() => organizations.id),
+    repositoryId: uuid('repository_id').notNull().references(() => githubRepositories.id),
+    /** primary | engineering | marketing | docs | automation */
+    role: text('role').notNull().default('primary'),
+    isDefault: boolean('is_default').notNull().default(false),
+    active: boolean('active').notNull().default(true),
+    metadata: jsonb('metadata').$type().notNull().default({}),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+}, (table) => ({
+    organizationRepositoryIdx: uniqueIndex('organization_repositories_organization_repository_idx').on(table.organizationId, table.repositoryId),
+    organizationIdIdx: index('organization_repositories_organization_idx').on(table.organizationId),
+    repositoryIdIdx: index('organization_repositories_repository_idx').on(table.repositoryId),
+}));
 export const agentConversations = pgTable('agent_conversations', {
     id: uuid('id').primaryKey().defaultRandom(),
     issueId: uuid('issue_id').references(() => pmIssues.id),

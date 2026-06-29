@@ -1,5 +1,5 @@
 import { useQuery, useZero } from '@rocicorp/zero/react'
-import { Building2, Check, Copy, KeyRound, Plus, Settings2, Trash2 } from 'lucide-react'
+import { Building2, Check, Copy, Github, GitBranch, KeyRound, Link2, Plus, RefreshCw, Settings2, Trash2, Unlink } from 'lucide-react'
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { Button, Panel, StatusPill, TermInput } from '../../components/pach'
@@ -25,9 +25,55 @@ type OrganizationApiKey = {
   updatedAt: number
 }
 
-type SettingsSection = 'api-keys'
+type GithubConnection = {
+  id: string
+  name: string
+  provider: string
+  providerAccountLogin: string | null
+  credentialKind: string
+  credentialLabel: string | null
+  credentialLast4: string | null
+  scopes: string[]
+  status: string
+  statusMessage: string | null
+  lastSyncedAt: number | null
+  lastUsedAt: number | null
+  createdAt: number
+  updatedAt: number
+}
+
+type GithubRepository = {
+  id: string
+  connectionId: string | null
+  githubId: string | null
+  owner: string
+  name: string
+  fullName: string
+  defaultBranch: string
+  htmlUrl: string | null
+  isPrivate: boolean
+  permissions: Record<string, unknown>
+  active: boolean
+  createdAt: number
+  updatedAt: number
+}
+
+type OrganizationRepository = {
+  id: string
+  organizationId: string
+  repositoryId: string
+  role: string
+  isDefault: boolean
+  active: boolean
+  metadata: Record<string, unknown>
+  createdAt: number
+  updatedAt: number
+}
+
+type SettingsSection = 'api-keys' | 'repositories'
 
 const SECTIONS: Array<{ id: SettingsSection; label: string }> = [
+  { id: 'repositories', label: 'repositories' },
   { id: 'api-keys', label: 'api keys' },
 ]
 
@@ -46,8 +92,13 @@ export default function SettingsPage() {
   const [organizations] = useQuery(z.query.organizations.orderBy('name', 'asc'))
   const [organizationId, setOrganizationId] = useState('')
   const [apiKeys, setApiKeys] = useState<OrganizationApiKey[]>([])
+  const [githubConnections, setGithubConnections] = useState<GithubConnection[]>([])
+  const [githubRepositories, setGithubRepositories] = useState<GithubRepository[]>([])
+  const [organizationRepositories, setOrganizationRepositories] = useState<OrganizationRepository[]>([])
   const [loadingKeys, setLoadingKeys] = useState(false)
+  const [loadingGithub, setLoadingGithub] = useState(false)
   const [createModalOpen, setCreateModalOpen] = useState(false)
+  const [connectGithubOpen, setConnectGithubOpen] = useState(false)
   const [generatedSecret, setGeneratedSecret] = useState('')
   const [message, setMessage] = useState('')
 
@@ -65,7 +116,7 @@ export default function SettingsPage() {
 
   useEffect(() => {
     if (section) return
-    navigate('/settings/api-keys', { replace: true })
+    navigate('/settings/repositories', { replace: true })
   }, [navigate, section])
 
   useEffect(() => {
@@ -77,9 +128,13 @@ export default function SettingsPage() {
   useEffect(() => {
     if (!organizationId) {
       setApiKeys([])
+      setGithubConnections([])
+      setGithubRepositories([])
+      setOrganizationRepositories([])
       return
     }
     void loadApiKeys(organizationId)
+    void loadGithubSettings(organizationId)
   }, [organizationId])
 
   async function loadApiKeys(nextOrganizationId = organizationId) {
@@ -94,6 +149,23 @@ export default function SettingsPage() {
       flash('api keys could not be loaded')
     } finally {
       setLoadingKeys(false)
+    }
+  }
+
+  async function loadGithubSettings(nextOrganizationId = organizationId) {
+    if (!nextOrganizationId) return
+    setLoadingGithub(true)
+    try {
+      const response = await authFetch(`${config.apiUrl}/github/settings?organizationId=${encodeURIComponent(nextOrganizationId)}`)
+      const payload = await readJson(response)
+      setGithubConnections(Array.isArray(payload.connections) ? payload.connections : [])
+      setGithubRepositories(Array.isArray(payload.repositories) ? payload.repositories : [])
+      setOrganizationRepositories(Array.isArray(payload.organizationRepositories) ? payload.organizationRepositories : [])
+    } catch (error) {
+      console.error('GitHub settings load failed', error)
+      flash('github settings could not be loaded')
+    } finally {
+      setLoadingGithub(false)
     }
   }
 
@@ -116,6 +188,54 @@ export default function SettingsPage() {
     await readJson(response)
     await loadApiKeys()
     flash('api key revoked')
+  }
+
+  async function connectGithub(payload: { name: string; token: string; credentialKind: string }) {
+    if (!organizationId) return
+    const response = await authFetch(`${config.apiUrl}/github/connections`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ organizationId, ...payload }),
+    })
+    await readJson(response)
+    setConnectGithubOpen(false)
+    await loadGithubSettings()
+    flash('github connection synced')
+  }
+
+  async function syncGithubConnection(connection: GithubConnection) {
+    const response = await authFetch(`${config.apiUrl}/github/connections/${connection.id}/sync`, {
+      method: 'POST',
+    })
+    await readJson(response)
+    await loadGithubSettings()
+    flash('github repositories synced')
+  }
+
+  async function linkGithubRepository(repository: GithubRepository, isDefault = false) {
+    if (!organizationId) return
+    const response = await authFetch(`${config.apiUrl}/github/organization-repositories`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        organizationId,
+        repositoryId: repository.id,
+        role: 'primary',
+        isDefault,
+      }),
+    })
+    await readJson(response)
+    await loadGithubSettings()
+    flash('repository linked')
+  }
+
+  async function unlinkGithubRepository(link: OrganizationRepository) {
+    const response = await authFetch(`${config.apiUrl}/github/organization-repositories/${link.id}`, {
+      method: 'DELETE',
+    })
+    await readJson(response)
+    await loadGithubSettings()
+    flash('repository unlinked')
   }
 
   async function copySecret(secret: string) {
@@ -203,6 +323,20 @@ export default function SettingsPage() {
           </Panel>
         ) : null}
 
+        {section === 'repositories' ? (
+          <RepositoriesSection
+            connections={githubConnections}
+            repositories={githubRepositories}
+            organizationRepositories={organizationRepositories}
+            loading={loadingGithub}
+            organization={organization}
+            onConnect={() => setConnectGithubOpen(true)}
+            onSync={(connection) => void syncGithubConnection(connection)}
+            onLink={(repository, isDefault) => void linkGithubRepository(repository, isDefault)}
+            onUnlink={(link) => void unlinkGithubRepository(link)}
+          />
+        ) : null}
+
         {section === 'api-keys' ? (
           <ApiKeysSection
             apiKeys={apiKeys}
@@ -221,6 +355,178 @@ export default function SettingsPage() {
           onSubmit={(payload) => void createApiKey(payload)}
         />
       ) : null}
+
+      {connectGithubOpen ? (
+        <ConnectGithubModal
+          organization={organization}
+          onClose={() => setConnectGithubOpen(false)}
+          onSubmit={(payload) => void connectGithub(payload)}
+        />
+      ) : null}
+    </div>
+  )
+}
+
+function RepositoriesSection({
+  connections,
+  repositories,
+  organizationRepositories,
+  loading,
+  organization,
+  onConnect,
+  onSync,
+  onLink,
+  onUnlink,
+}: {
+  connections: GithubConnection[]
+  repositories: GithubRepository[]
+  organizationRepositories: OrganizationRepository[]
+  loading: boolean
+  organization: OrganizationRow | null
+  onConnect: () => void
+  onSync: (connection: GithubConnection) => void
+  onLink: (repository: GithubRepository, isDefault: boolean) => void
+  onUnlink: (link: OrganizationRepository) => void
+}) {
+  const activeLinks = organizationRepositories.filter((link) => link.active)
+  const linkByRepositoryId = new Map(activeLinks.map((link) => [link.repositoryId, link]))
+  const connectionById = new Map(connections.map((connection) => [connection.id, connection]))
+
+  return (
+    <div className="space-y-4">
+      <div className="flex flex-col gap-3 border-b border-edge/15 pb-3 md:flex-row md:items-end md:justify-between">
+        <div>
+          <div className="font-mono text-[10px] uppercase tracking-label text-fg-4">connections</div>
+          <h1 className="mt-1 font-mono text-2xl font-bold lowercase text-fg-1">repositories</h1>
+        </div>
+        <Button kind="primary" icon={<Github className="h-3.5 w-3.5" />} onClick={onConnect} disabled={!organization}>
+          connect github
+        </Button>
+      </div>
+
+      <Panel title="github connections">
+        <div className="mb-4 border border-edge/12 bg-rim px-3 py-2 font-mono text-xs text-fg-3">
+          Paste a GitHub token once, sync accessible repositories, then link the repos this organization should use for development work.
+        </div>
+
+        {connections.length > 0 ? (
+          <div className="grid gap-2 md:grid-cols-2">
+            {connections.map((connection) => (
+              <div key={connection.id} className="border border-edge/12 bg-rim px-3 py-3">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <div className="truncate font-mono text-sm text-fg-1">{connection.name}</div>
+                    <div className="mt-1 font-mono text-[11px] text-fg-4">
+                      {connection.providerAccountLogin ?? 'github'} · token ending {connection.credentialLast4 ?? '----'}
+                    </div>
+                  </div>
+                  <StatusPill kind={connection.status === 'active' ? 'ok' : 'idle'}>{connection.status}</StatusPill>
+                </div>
+                <div className="mt-3 flex items-center justify-between gap-2">
+                  <div className="font-mono text-[11px] text-fg-4">synced {formatDate(connection.lastSyncedAt)}</div>
+                  <Button
+                    className="px-2 py-1 text-[10px]"
+                    icon={<RefreshCw className="h-3 w-3" />}
+                    onClick={() => onSync(connection)}
+                  >
+                    sync
+                  </Button>
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <div className="border border-dashed border-edge/15 py-8 text-center font-mono text-sm text-fg-4">
+            {loading ? 'loading github connections' : 'no github connections'}
+          </div>
+        )}
+      </Panel>
+
+      <Panel title="organization repositories">
+        <div className="overflow-auto">
+          <table className="w-full min-w-[900px] text-left font-mono text-xs">
+            <thead className="text-[10px] uppercase tracking-label text-fg-4">
+              <tr className="border-b border-edge/12">
+                <th className="pb-2 pr-3 font-normal">repository</th>
+                <th className="pb-2 pr-3 font-normal">connection</th>
+                <th className="pb-2 pr-3 font-normal">branch</th>
+                <th className="pb-2 pr-3 font-normal">visibility</th>
+                <th className="pb-2 pr-3 font-normal">status</th>
+                <th className="pb-2 font-normal">action</th>
+              </tr>
+            </thead>
+            <tbody>
+              {repositories.map((repository) => {
+                const link = linkByRepositoryId.get(repository.id)
+                const connection = repository.connectionId ? connectionById.get(repository.connectionId) : null
+                return (
+                  <tr key={repository.id} className="border-b border-edge/8 text-fg-2">
+                    <td className="max-w-[260px] py-2.5 pr-3">
+                      <div className="flex min-w-0 items-center gap-2">
+                        <Github className="h-3.5 w-3.5 shrink-0 text-fg-4" />
+                        <span className="truncate text-fg-1">{repository.fullName}</span>
+                      </div>
+                    </td>
+                    <td className="py-2.5 pr-3 text-fg-4">{connection?.providerAccountLogin ?? '-'}</td>
+                    <td className="py-2.5 pr-3">
+                      <span className="inline-flex items-center gap-1.5 text-fg-3">
+                        <GitBranch className="h-3 w-3" />
+                        {repository.defaultBranch}
+                      </span>
+                    </td>
+                    <td className="py-2.5 pr-3 text-fg-4">{repository.isPrivate ? 'private' : 'public'}</td>
+                    <td className="py-2.5 pr-3">
+                      {link ? (
+                        <StatusPill kind={link.isDefault ? 'ok' : 'idle'}>{link.isDefault ? 'default' : 'linked'}</StatusPill>
+                      ) : (
+                        <StatusPill kind="idle">not linked</StatusPill>
+                      )}
+                    </td>
+                    <td className="py-2.5">
+                      <div className="flex items-center gap-2">
+                        {link ? (
+                          <>
+                            {!link.isDefault ? (
+                              <Button
+                                className="px-2 py-1 text-[10px]"
+                                icon={<Check className="h-3 w-3" />}
+                                onClick={() => onLink(repository, true)}
+                              >
+                                default
+                              </Button>
+                            ) : null}
+                            <Button
+                              kind="danger"
+                              className="px-2 py-1 text-[10px]"
+                              icon={<Unlink className="h-3 w-3" />}
+                              onClick={() => onUnlink(link)}
+                            >
+                              unlink
+                            </Button>
+                          </>
+                        ) : (
+                          <Button
+                            className="px-2 py-1 text-[10px]"
+                            icon={<Link2 className="h-3 w-3" />}
+                            onClick={() => onLink(repository, activeLinks.length === 0)}
+                          >
+                            link
+                          </Button>
+                        )}
+                      </div>
+                    </td>
+                  </tr>
+                )
+              })}
+            </tbody>
+          </table>
+        </div>
+        {repositories.length === 0 ? (
+          <div className="border border-dashed border-edge/15 py-8 text-center font-mono text-sm text-fg-4">
+            {loading ? 'loading repositories' : connections.length ? 'no repositories synced yet' : 'connect github to sync repositories'}
+          </div>
+        ) : null}
+      </Panel>
     </div>
   )
 }
@@ -394,6 +700,99 @@ function CreateApiKeyModal({
             disabled={!name.trim() || scopes.length === 0}
           >
             generate
+          </Button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function ConnectGithubModal({
+  organization,
+  onClose,
+  onSubmit,
+}: {
+  organization: OrganizationRow | null
+  onClose: () => void
+  onSubmit: (payload: { name: string; token: string; credentialKind: string }) => void
+}) {
+  const [name, setName] = useState(() => organization ? `${organization.name} GitHub` : 'GitHub connection')
+  const [token, setToken] = useState('')
+  const [credentialKind, setCredentialKind] = useState('fine_grained_pat')
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-start justify-center bg-overlay/70 px-4 pt-[10vh] backdrop-blur-sm"
+      onClick={onClose}
+    >
+      <div
+        className="w-full max-w-xl border border-edge/20 bg-pit-2 shadow-terminal-overlay"
+        onClick={(event) => event.stopPropagation()}
+      >
+        <div className="flex items-center justify-between border-b border-edge/12 px-5 py-3">
+          <div className="flex items-center gap-2 font-mono text-xs">
+            <span className="inline-flex items-center gap-1.5 border border-edge/25 bg-accent-fill/5 px-2 py-0.5 font-mono text-[10px] uppercase tracking-label text-accent">
+              settings
+            </span>
+            <span className="text-fg-4">›</span>
+            <span className="text-fg-2 lowercase">github</span>
+          </div>
+          <button
+            onClick={onClose}
+            className="font-mono text-xs uppercase tracking-label text-fg-4 transition hover:text-fg-1"
+            title="close"
+          >
+            [esc]
+          </button>
+        </div>
+
+        <div className="border-b border-edge/12 px-5 py-4">
+          <h2 className="font-mono text-2xl font-bold lowercase text-fg-1">connect github</h2>
+        </div>
+
+        <div className="space-y-4 px-5 py-5">
+          <label className="block">
+            <FieldLabel>name</FieldLabel>
+            <TermInput autoFocus value={name} onChange={(event) => setName(event.target.value)} />
+          </label>
+
+          <label className="block">
+            <FieldLabel>token</FieldLabel>
+            <TermInput
+              type="password"
+              value={token}
+              onChange={(event) => setToken(event.target.value)}
+              placeholder="github_pat_..."
+              spellCheck={false}
+            />
+          </label>
+
+          <label className="block">
+            <FieldLabel>credential kind</FieldLabel>
+            <select
+              value={credentialKind}
+              onChange={(event) => setCredentialKind(event.target.value)}
+              className="w-full border border-edge/15 bg-rim px-3 py-2 font-mono text-sm text-fg-1 outline-none transition-colors focus:border-accent focus:shadow-glow-xs"
+            >
+              <option value="fine_grained_pat">fine-grained pat</option>
+              <option value="classic_pat">classic pat</option>
+            </select>
+          </label>
+
+          <div className="border border-edge/12 bg-rim px-3 py-2 font-mono text-xs text-fg-3">
+            Use a token that can read repository metadata and push to the repositories the agent should work in. Pach stores it encrypted at rest.
+          </div>
+        </div>
+
+        <div className="flex items-center justify-end gap-2 border-t border-edge/12 px-5 py-3">
+          <Button onClick={onClose}>cancel</Button>
+          <Button
+            kind="primary"
+            icon={<Github className="h-3.5 w-3.5" />}
+            onClick={() => onSubmit({ name: name.trim(), token: token.trim(), credentialKind })}
+            disabled={!name.trim() || !token.trim()}
+          >
+            connect
           </Button>
         </div>
       </div>

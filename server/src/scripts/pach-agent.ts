@@ -18,7 +18,11 @@ type AgentRunRecord = {
   issueId?: string | null
   subjectType?: string
   subjectId?: string | null
+  repositoryId?: string | null
+  repoFullName?: string
+  baseBranch?: string
   branchName: string
+  workspacePath?: string | null
   metadata?: Record<string, unknown>
   executionPrompt?: string | null
 }
@@ -150,6 +154,8 @@ async function executeSmokeRun(worker: WorkerRecord, run: AgentRunRecord) {
 async function executeGeneralMcpRun(worker: WorkerRecord, run: AgentRunRecord) {
   console.log(`[${new Date().toISOString()}] claimed general MCP run ${run.id} for ${run.subjectType ?? 'issue'} ${run.subjectId ?? run.issueId ?? run.id}`)
 
+  let codexCwd: string | undefined
+
   await reportRunProgress(worker, run, {
     phase: 'codex_start',
     message: `starting Codex general MCP handler on ${worker.name}`,
@@ -161,9 +167,33 @@ async function executeGeneralMcpRun(worker: WorkerRecord, run: AgentRunRecord) {
   })
 
   try {
+    if (readMetadataString(run.metadata, 'executionMode') === 'code_worktree') {
+      await reportRunProgress(worker, run, {
+        phase: 'repo_prepare',
+        status: 'bootstrapping',
+        message: `preparing ${run.repoFullName ?? 'repository'} worktree`,
+        metadata: {
+          repoFullName: run.repoFullName,
+          branchName: run.branchName,
+        },
+      })
+
+      const prepared = await prepareCodeWorktree(run)
+      codexCwd = prepared.workspacePath
+      run.workspacePath = prepared.workspacePath
+
+      await reportRunProgress(worker, run, {
+        phase: 'repo_prepared',
+        status: 'running',
+        message: `repo ready: ${run.branchName}`,
+        workspacePath: prepared.workspacePath,
+        metadata: prepared,
+      })
+    }
+
     const prompt = run.executionPrompt?.trim() || buildGeneralMcpPrompt(run)
     const startedAt = Date.now()
-    const { stdout, stderr } = await runCodexExec(prompt, run.metadata, worker, run)
+    const { stdout, stderr } = await runCodexExec(prompt, run.metadata, worker, run, codexCwd)
     const durationMs = Date.now() - startedAt
     const finalMessage = summarizeCodexOutput(stdout) || `Codex completed general MCP run ${run.id}`
     const codexSessionId = readCodexSessionId(stdout, stderr) ?? readMetadataString(run.metadata, 'codexSessionId')
@@ -233,6 +263,7 @@ async function runCodexExec(
   metadata: Record<string, unknown> | undefined,
   worker: WorkerRecord,
   run: AgentRunRecord,
+  cwd?: string,
 ): Promise<CommandResult> {
   return new Promise((resolve, reject) => {
     let stdout = ''
@@ -246,6 +277,7 @@ async function runCodexExec(
     console.log(`[${new Date().toISOString()}] starting: ${codexCommand} ${args.slice(0, -1).join(' ')} <prompt>`)
 
     const child = spawn(codexCommand, args, {
+      cwd,
       env: {
         ...process.env,
         PACH_MCP_TOKEN: agentToken,
@@ -353,6 +385,146 @@ async function checkCancelState(worker: WorkerRecord, run: AgentRunRecord) {
   })
 }
 
+async function prepareCodeWorktree(run: AgentRunRecord) {
+  if (!run.repoFullName) throw new Error('Code worktree run is missing repoFullName')
+
+  const repo = parseRepoFullName(run.repoFullName)
+  const home = process.env.HOME || '/tmp'
+  const repoRoot = process.env.PACH_AGENT_REPO_CACHE_ROOT || `${home}/workspaces/repos`
+  const workspaceRoot = process.env.PACH_AGENT_WORKSPACE_ROOT || `${home}/workspaces/issues`
+  const repoCachePath = `${repoRoot}/${repo.owner}/${repo.name}`
+  const workspacePath = run.workspacePath || `${workspaceRoot}/${run.id}/${repo.name}`
+  const baseBranch = run.baseBranch || 'main'
+  const branchName = run.branchName
+  const githubToken = process.env.PACH_AGENT_GITHUB_TOKEN?.trim() || process.env.GITHUB_TOKEN?.trim() || ''
+
+  const result = await runShellCommand(buildPrepareCodeWorktreeCommand({
+    repoFullName: run.repoFullName,
+    repoCachePath,
+    workspacePath,
+    baseBranch,
+    branchName,
+    githubToken,
+  }), { timeoutMs: 180_000 })
+
+  return {
+    repoCachePath,
+    workspacePath,
+    branchName,
+    baseBranch,
+    stdout: truncateText(result.stdout, 8_000),
+    stderr: truncateText(result.stderr, 4_000),
+  }
+}
+
+function buildPrepareCodeWorktreeCommand({
+  repoFullName,
+  repoCachePath,
+  workspacePath,
+  baseBranch,
+  branchName,
+  githubToken,
+}: {
+  repoFullName: string
+  repoCachePath: string
+  workspacePath: string
+  baseBranch: string
+  branchName: string
+  githubToken: string
+}) {
+  const repoUrl = `https://github.com/${repoFullName}.git`
+  const repoCache = shellQuote(repoCachePath)
+  const repoParent = shellQuote(parentDir(repoCachePath))
+  const workspace = shellQuote(workspacePath)
+  const workspaceParent = shellQuote(parentDir(workspacePath))
+  const remote = shellQuote(repoUrl)
+  const base = shellQuote(baseBranch)
+  const branch = shellQuote(branchName)
+  const remoteBranchRef = shellQuote(`refs/remotes/origin/${branchName}`)
+  const localBranchRef = shellQuote(`refs/heads/${branchName}`)
+  const remoteBranch = shellQuote(`origin/${branchName}`)
+  const remoteBase = shellQuote(`origin/${baseBranch}`)
+  const authSetup = githubToken
+    ? [
+        `PACH_GITHUB_TOKEN=${shellQuote(githubToken)}`,
+        'export PACH_GITHUB_TOKEN',
+        'ASKPASS="$(mktemp)"',
+        'cat > "$ASKPASS" <<\'PACH_ASKPASS\'',
+        '#!/bin/sh',
+        'case "$1" in',
+        '  *Username*) printf "%s\\n" "x-access-token" ;;',
+        '  *) printf "%s\\n" "$PACH_GITHUB_TOKEN" ;;',
+        'esac',
+        'PACH_ASKPASS',
+        'chmod 700 "$ASKPASS"',
+        'export GIT_ASKPASS="$ASKPASS"',
+        'export GIT_TERMINAL_PROMPT=0',
+      ]
+    : ['export GIT_TERMINAL_PROMPT=0']
+
+  return [
+    'set -eu',
+    'command -v git >/dev/null 2>&1 || { echo "missing git"; exit 42; }',
+    ...authSetup,
+    'cleanup() { [ -n "${ASKPASS:-}" ] && rm -f "$ASKPASS"; }',
+    'trap cleanup EXIT',
+    `mkdir -p ${repoParent} ${workspaceParent}`,
+    `if [ ! -d ${repoCache}/.git ]; then git clone ${remote} ${repoCache}; fi`,
+    `git -C ${repoCache} remote set-url origin ${remote}`,
+    `git -C ${repoCache} fetch origin --prune`,
+    `git -C ${repoCache} fetch origin ${base}`,
+    `if git -C ${repoCache} ls-remote --exit-code --heads origin ${branch} >/dev/null 2>&1; then git -C ${repoCache} fetch origin ${branch}; fi`,
+    `if [ -e ${workspace} ] && [ ! -d ${workspace}/.git ] && [ ! -f ${workspace}/.git ]; then if [ "$(find ${workspace} -mindepth 1 -maxdepth 1 | wc -l | tr -d ' ')" -gt 0 ]; then echo "workspace exists and is not empty: ${workspacePath}"; exit 43; fi; rmdir ${workspace} 2>/dev/null || true; fi`,
+    `if [ -d ${workspace}/.git ] || [ -f ${workspace}/.git ]; then git -C ${workspace} fetch origin --prune; git -C ${workspace} checkout ${branch}; else if git -C ${repoCache} show-ref --verify --quiet ${remoteBranchRef}; then git -C ${repoCache} branch --track ${branch} ${remoteBranch} 2>/dev/null || true; elif ! git -C ${repoCache} show-ref --verify --quiet ${localBranchRef}; then git -C ${repoCache} branch ${branch} ${remoteBase}; fi; git -C ${repoCache} worktree add ${workspace} ${branch}; fi`,
+    `git -C ${workspace} status --short --branch`,
+  ].join('\n')
+}
+
+function runShellCommand(script: string, options: { timeoutMs: number }): Promise<CommandResult> {
+  return new Promise((resolve, reject) => {
+    let stdout = ''
+    let stderr = ''
+    let timedOut = false
+    const child = spawn('bash', ['-lc', script], {
+      env: process.env,
+      stdio: ['ignore', 'pipe', 'pipe'],
+    })
+    const timeout = setTimeout(() => {
+      timedOut = true
+      child.kill('SIGTERM')
+      setTimeout(() => child.kill('SIGKILL'), 5_000).unref()
+    }, options.timeoutMs)
+    timeout.unref()
+
+    child.stdout?.on('data', (chunk: Buffer) => {
+      const text = chunk.toString()
+      stdout += text
+      process.stdout.write(text)
+    })
+    child.stderr?.on('data', (chunk: Buffer) => {
+      const text = chunk.toString()
+      stderr += text
+      process.stderr.write(text)
+    })
+    child.on('error', (error) => {
+      clearTimeout(timeout)
+      reject(Object.assign(error, { stdout, stderr }))
+    })
+    child.on('close', (code, signal) => {
+      clearTimeout(timeout)
+      if (timedOut) {
+        reject(Object.assign(new Error(`Shell command timed out after ${options.timeoutMs}ms`), { stdout, stderr, signal }))
+        return
+      }
+      if (code && code !== 0) {
+        reject(Object.assign(new Error(`Shell command exited with code ${code}`), { stdout, stderr, code, signal }))
+        return
+      }
+      resolve({ stdout, stderr })
+    })
+  })
+}
+
 function buildCodexExecArgs(prompt: string, metadata?: Record<string, unknown>) {
   const sessionId = readMetadataString(metadata, 'codexSessionId')
   const args = sessionId ? ['exec', 'resume'] : ['exec']
@@ -368,7 +540,9 @@ async function reportRunProgress(
   progress: {
     phase: string
     message: string
+    status?: string
     percent?: number
+    workspacePath?: string
     metadata?: Record<string, unknown>
   },
 ) {
@@ -384,13 +558,19 @@ function buildGeneralMcpPrompt(run: AgentRunRecord) {
   const feedback = readMetadataString(run.metadata, 'feedback')
   const parentRunId = readMetadataString(run.metadata, 'parentRunId')
   const attachments = formatInputMediaPrompt(run.metadata)
+  const executionMode = readMetadataString(run.metadata, 'executionMode')
+  const codeWorktree = executionMode === 'code_worktree'
   return [
-    'You are Pach general MCP issue worker.',
+    codeWorktree ? 'You are Pach engineering issue worker.' : 'You are Pach general MCP issue worker.',
     '',
     'Use Pach MCP tools for Pach state. You may call Pach MCP tools directly and repeatedly as needed.',
     'For this worker, Codex is running with full local trust. Still act conservatively: do not send external messages, publish content, push code, open pull requests, or perform irreversible external actions unless the issue explicitly asks for it.',
     `Issue id: ${run.issueId}`,
     `Agent run id: ${run.id}`,
+    codeWorktree && run.repoFullName ? `Repository: ${run.repoFullName}` : null,
+    codeWorktree && run.baseBranch ? `Base branch: ${run.baseBranch}` : null,
+    codeWorktree && run.branchName ? `Working branch: ${run.branchName}` : null,
+    codeWorktree && run.workspacePath ? `Workspace path: ${run.workspacePath}` : null,
     parentRunId ? `Parent run id: ${parentRunId}` : null,
     feedback ? `User feedback: ${feedback}` : null,
     attachments,
@@ -400,9 +580,15 @@ function buildGeneralMcpPrompt(run: AgentRunRecord) {
       ? '1. Continue from the previous session if available, and use the user feedback above as the latest instruction.'
       : '1. Read the issue with pach.issue.get using the issue id above.',
     '2. Report progress with pach.progress.report and include the agent run id.',
-    '3. Do the requested analysis or light Pach-state work that can be done through MCP.',
-    '4. Put the final result in pach.progress.report with phase "final_result".',
-    '5. If you update issue fields, use pach.issue.update and explain the change in activitySummary.',
+    codeWorktree
+      ? '3. Inspect and edit the repository in the current working directory. Run the relevant checks you can run locally.'
+      : '3. Do the requested analysis or light Pach-state work that can be done through MCP.',
+    codeWorktree
+      ? '4. Leave code changes in the working tree for Pach to push/create the draft PR. Do not push or open a PR yourself unless the issue explicitly asks for it.'
+      : '4. Put the final result in pach.progress.report with phase "final_result".',
+    codeWorktree
+      ? '5. Put the final result in pach.progress.report with phase "final_result", including changed files and checks run.'
+      : '5. If you update issue fields, use pach.issue.update and explain the change in activitySummary.',
     '',
     'Keep the final result concise and useful inside the Pach run progress stream.',
   ].filter((line): line is string => Boolean(line)).join('\n')
@@ -493,6 +679,22 @@ function readMetadataString(metadata: unknown, key: string) {
   if (!metadata || typeof metadata !== 'object') return null
   const value = (metadata as Record<string, unknown>)[key]
   return typeof value === 'string' && value.trim() ? value.trim() : null
+}
+
+function parseRepoFullName(value: string) {
+  const [owner, name] = value.split('/')
+  if (!owner || !name) throw new Error(`Invalid GitHub repository full name: ${value}`)
+  return { owner, name }
+}
+
+function parentDir(value: string) {
+  const normalized = value.replace(/\/+$/, '')
+  const index = normalized.lastIndexOf('/')
+  return index <= 0 ? '/' : normalized.slice(0, index)
+}
+
+function shellQuote(value: string) {
+  return `'${value.replace(/'/g, `'\\''`)}'`
 }
 
 function formatInputMediaPrompt(metadata: unknown) {

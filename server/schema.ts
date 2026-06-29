@@ -859,14 +859,34 @@ const agentWorkers = table('agent_workers')
 const githubRepositories = table('github_repositories')
   .columns({
     id: string(),
+    connectionId: string().optional().from('connection_id'),
+    githubId: string().optional().from('github_id'),
+    nodeId: string().optional().from('node_id'),
     projectKey: string().from('project_key'),
     owner: string(),
     name: string(),
     fullName: string().from('full_name'),
     defaultBranch: string().from('default_branch'),
+    htmlUrl: string().optional().from('html_url'),
+    isPrivate: boolean().from('private'),
+    permissions: json<Record<string, unknown>>(),
     localPathTemplate: string().optional().from('local_path_template'),
     active: boolean(),
     metadata: json(),
+    createdAt: number().from('created_at'),
+    updatedAt: number().from('updated_at'),
+  })
+  .primaryKey('id')
+
+const organizationRepositories = table('organization_repositories')
+  .columns({
+    id: string(),
+    organizationId: string().from('organization_id'),
+    repositoryId: string().from('repository_id'),
+    role: string(),
+    isDefault: boolean().from('is_default'),
+    active: boolean(),
+    metadata: json<Record<string, unknown>>(),
     createdAt: number().from('created_at'),
     updatedAt: number().from('updated_at'),
   })
@@ -1173,6 +1193,7 @@ export const schema = createSchema({
     pmTaskTriggerRuns,
     agentWorkers,
     githubRepositories,
+    organizationRepositories,
     agentConversations,
     agentRuns,
     agentMessages,
@@ -1305,6 +1326,7 @@ export const permissions = definePermissions<AuthData, Schema>(schema, () => {
     pm_task_trigger_runs: unscopedOnly,
     agent_workers: unscopedOnly,
     github_repositories: unscopedOnly,
+    organization_repositories: organizationScoped<'organization_repositories'>(),
     agent_conversations: unscopedOnly,
     agent_runs: unscopedOnly,
     agent_messages: unscopedOnly,

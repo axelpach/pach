@@ -1308,11 +1308,13 @@ export function createServerMutators(authData?: JWTPayload) {
     },
 
     github_repositories: {
-      async create(tx: Tx, args: { id: string; projectKey: string; owner: string; name: string; fullName: string; defaultBranch?: string; localPathTemplate?: string; active?: boolean; metadata?: Record<string, unknown> }) {
+      async create(tx: Tx, args: { id: string; connectionId?: string; githubId?: string; nodeId?: string; projectKey: string; owner: string; name: string; fullName: string; defaultBranch?: string; htmlUrl?: string; isPrivate?: boolean; permissions?: Record<string, unknown>; localPathTemplate?: string; active?: boolean; metadata?: Record<string, unknown> }) {
         requireUnscopedAccess()
         const now = Date.now()
         await tx.mutate.github_repositories.insert({
           defaultBranch: 'main',
+          isPrivate: false,
+          permissions: {},
           active: true,
           metadata: {},
           ...args,
@@ -1320,7 +1322,7 @@ export function createServerMutators(authData?: JWTPayload) {
           updatedAt: now,
         })
       },
-      async update(tx: Tx, args: { id: string; projectKey?: string; owner?: string; name?: string; fullName?: string; defaultBranch?: string; localPathTemplate?: string | null; active?: boolean; metadata?: Record<string, unknown> }) {
+      async update(tx: Tx, args: { id: string; connectionId?: string | null; githubId?: string | null; nodeId?: string | null; projectKey?: string; owner?: string; name?: string; fullName?: string; defaultBranch?: string; htmlUrl?: string | null; isPrivate?: boolean; permissions?: Record<string, unknown>; localPathTemplate?: string | null; active?: boolean; metadata?: Record<string, unknown> }) {
         requireUnscopedAccess()
         const { id, ...updates } = args
         await tx.mutate.github_repositories.update({ id, ...updates, updatedAt: Date.now() })

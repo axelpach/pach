@@ -44,7 +44,7 @@ const OUTER_NAV_ITEMS: readonly OuterNavItem[] = [
   { label: 'Finance', path: '/finance/dashboard' },
   { label: 'WhatsApp', path: '/whatsapp/templates', requiresWhatsApp: true },
   { label: 'Design', path: '/design' },
-  { label: 'Settings', path: '/settings/api-keys' },
+  { label: 'Settings', path: '/settings/repositories' },
 ]
 
 type ThemeMode = 'dark' | 'light'
@@ -220,7 +220,7 @@ const MOBILE_NAV_ITEMS: Array<{
   { to: '/finance/dashboard', label: 'finance', icon: CircleDollarSign },
   { to: '/whatsapp/templates', label: 'whatsapp', icon: MessageCircleMore, requiresWhatsApp: true },
   { to: '/design', label: 'design', icon: Palette },
-  { to: '/settings/api-keys', label: 'settings', icon: Settings2 },
+  { to: '/settings/repositories', label: 'settings', icon: Settings2 },
 ]
 
 function MobileHeader({ onMenuClick }: { onMenuClick: () => void }) {

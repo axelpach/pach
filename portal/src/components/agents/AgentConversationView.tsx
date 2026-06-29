@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type DragEvent } from 'react'
+import { Link } from 'react-router-dom'
 import { FileImage, MessageSquare, Paperclip, Send, TerminalSquare, X } from 'lucide-react'
 import type { Schema } from '../../zero-schema'
 
@@ -19,7 +20,6 @@ type AgentConversationViewProps = {
   repositories: Schema['tables']['github_repositories']['row'][]
   allowCreateRun?: boolean
   onCreateRun: () => void | Promise<void>
-  onSeedRepositories: () => void | Promise<void>
   onSendFeedback: (feedback: string, inputMedia?: PendingAgentInputMedia[]) => void | Promise<void>
   onCancelRun: () => void | Promise<void>
   canceling: boolean
@@ -47,7 +47,6 @@ export function AgentConversationView({
   repositories,
   allowCreateRun = true,
   onCreateRun,
-  onSeedRepositories,
   onSendFeedback,
   onCancelRun,
   canceling,
@@ -169,15 +168,12 @@ export function AgentConversationView({
         <div className="min-h-0 flex-1 overflow-y-auto px-4 py-5 md:px-8 [&::-webkit-scrollbar]:hidden" style={{ scrollbarWidth: 'none' }}>
           <div className="mx-auto max-w-5xl space-y-4">
             {repositories.length === 0 ? (
-              <button
-                type="button"
-                onClick={() => {
-                  void onSeedRepositories()
-                }}
-                className="w-full border border-edge/18 bg-accent-fill/4 px-3 py-2 text-left font-mono text-xs text-fg-2 transition hover:border-accent hover:text-accent"
+              <Link
+                to="/settings/repositories"
+                className="block w-full border border-edge/18 bg-accent-fill/4 px-3 py-2 text-left font-mono text-xs text-fg-2 transition hover:border-accent hover:text-accent"
               >
-                seed default GitHub repos
-              </button>
+                connect a GitHub repository in settings
+              </Link>
             ) : null}
 
             {!run && streamItems.length === 0 ? (

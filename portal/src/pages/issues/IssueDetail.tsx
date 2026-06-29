@@ -43,11 +43,6 @@ const PRIORITY_OPTIONS = [
 
 const ESTIMATE_OPTIONS = [1, 2, 4, 8, 16]
 
-const DEFAULT_REPOSITORIES = [
-  { projectKey: 'pach', owner: 'axelpach', name: 'pach', fullName: 'axelpach/pach', defaultBranch: 'main' },
-  { projectKey: 'ardia', owner: 'axelpach', name: 'ardia', fullName: 'axelpach/ardia', defaultBranch: 'main' },
-] as const
-
 const DEFAULT_TERMINALS = [
   { name: 'agent', role: 'agent', tmuxWindow: 'agent', sortOrder: 0 },
   { name: 'portal', role: 'app', tmuxWindow: 'portal', sortOrder: 1 },
@@ -83,7 +78,7 @@ export default function IssueDetail() {
   const [statuses] = useQuery(z.query.pm_statuses.orderBy('position', 'asc'))
   const [labels] = useQuery(z.query.pm_labels.orderBy('name', 'asc'))
   const [workers] = useQuery(z.query.agent_workers.orderBy('name', 'asc'))
-  const [repositories] = useQuery(z.query.github_repositories.orderBy('projectKey', 'asc'))
+  const [repositories] = useQuery(z.query.github_repositories.orderBy('fullName', 'asc'))
   const [agentRuns] = useQuery(
     z.query.agent_runs.where('issueId', issueId ?? '').orderBy('createdAt', 'desc'),
   )
@@ -184,6 +179,18 @@ export default function IssueDetail() {
   const company = issue?.contextCompanyId
     ? scopedCompanies.find((c) => c.id === issue.contextCompanyId) ?? null
     : null
+  const [organizationRepositoryLinks] = useQuery(
+    z.query.organization_repositories.where('organizationId', issue?.contextCompanyId ?? '').orderBy('updatedAt', 'desc'),
+  )
+  const activeRepositoryLinks = organizationRepositoryLinks.filter((link) => link.active)
+  const linkedRepositories = activeRepositoryLinks
+    .map((link) => ({
+      link,
+      repository: repositories.find((repository) => repository.id === link.repositoryId && repository.active),
+    }))
+    .filter((entry): entry is { link: Schema['tables']['organization_repositories']['row']; repository: Schema['tables']['github_repositories']['row'] } => Boolean(entry.repository))
+    .toSorted((a, b) => Number(b.link.isDefault) - Number(a.link.isDefault) || a.repository.fullName.localeCompare(b.repository.fullName))
+  const developerRepositories = linkedRepositories.map((entry) => entry.repository)
 
   const workspaceStatuses = getWorkspaceStatuses(statuses)
   const issueIsDone = Boolean(issue?.completedAt || status?.type === 'completed')
@@ -285,6 +292,10 @@ export default function IssueDetail() {
     if (summary) await logActivity(summary, activityType)
   }
 
+  function selectDeveloperRepository() {
+    return linkedRepositories.find((entry) => entry.link.isDefault)?.repository ?? developerRepositories[0] ?? null
+  }
+
   async function toggleLabel(labelId: string) {
     if (!issue) return
     const existing = currentLabels.find((entry) => entry.label.id === labelId)
@@ -302,25 +313,14 @@ export default function IssueDetail() {
     }
   }
 
-  async function seedDefaultRepositories() {
-    for (const repo of DEFAULT_REPOSITORIES) {
-      if (repositories.some((existing) => existing.fullName === repo.fullName)) continue
-      await z.mutate.github_repositories.create({
-        id: crypto.randomUUID(),
-        ...repo,
-      })
-    }
-  }
-
   async function createAgentRun() {
     if (!issue) return
 
-    const projectKey = company?.project ?? 'pach'
-    const repo =
-      repositories.find((entry) => entry.projectKey === projectKey && entry.active) ??
-      repositories.find((entry) => entry.projectKey === 'pach' && entry.active) ??
-      repositories.find((entry) => entry.active)
-    if (!repo) return
+    const repo = selectDeveloperRepository()
+    if (!repo) {
+      setAgentActionMessage('connect a GitHub repository in settings first')
+      return
+    }
 
     const runId = crypto.randomUUID()
     const conversationId = crypto.randomUUID()
@@ -351,10 +351,22 @@ export default function IssueDetail() {
       metadata: {
         executionClass: 'general',
         handler: 'general-mcp',
+        intent: 'engineering',
+        executionMode: 'code_worktree',
         requiredCapabilities: ['codex.local', 'pach-mcp'],
         queuedVia: 'issue_detail',
         conversationId,
       },
+    })
+
+    await z.mutate.github_branches.create({
+      id: crypto.randomUUID(),
+      repositoryId: repo.id,
+      agentRunId: runId,
+      issueId: issue.id,
+      name: branchName,
+      baseBranch: repo.defaultBranch,
+      status: 'planned',
     })
 
     await z.mutate.agent_messages.create({
@@ -383,20 +395,19 @@ export default function IssueDetail() {
     const trimmed = feedback.trim()
     if (!trimmed) return
 
-    const projectKey = company?.project ?? activeRun.projectKey ?? 'pach'
     const repo =
       repositories.find((entry) => entry.id === activeRun.repositoryId) ??
-      repositories.find((entry) => entry.projectKey === projectKey && entry.active) ??
-      repositories.find((entry) => entry.projectKey === 'pach' && entry.active) ??
-      repositories.find((entry) => entry.active)
-    if (!repo) return
+      selectDeveloperRepository()
+    if (!repo) {
+      setAgentActionMessage('connect a GitHub repository in settings first')
+      return
+    }
 
     const conversationId = activeRun.conversationId ?? activeConversation?.id ?? crypto.randomUUID()
     const conversationExists = agentConversations.some((conversation) => conversation.id === conversationId)
     const runId = crypto.randomUUID()
     const messageId = crypto.randomUUID()
-    const issueKey = issue.identifier.toLowerCase()
-    const branchName = `agent/${repo.projectKey}-${issueKey}-feedback-${Date.now()}`
+    const branchName = activeRun.branchName || `agent/${repo.projectKey}-${issue.identifier.toLowerCase()}-${slugify(issue.title)}`
     const codexSessionId = readRunCodexSessionId(activeRun.metadata)
     const hasInputMedia = inputMedia.length > 0
 
@@ -425,7 +436,7 @@ export default function IssueDetail() {
       repositoryId: repo.id,
       projectKey: repo.projectKey,
       repoFullName: repo.fullName,
-      baseBranch: repo.defaultBranch,
+      baseBranch: activeRun.baseBranch ?? repo.defaultBranch,
       branchName,
       status: hasInputMedia ? 'reserved' : 'queued',
       statusMessage: hasInputMedia
@@ -434,6 +445,8 @@ export default function IssueDetail() {
       metadata: {
         executionClass: 'general',
         handler: 'general-mcp',
+        intent: 'engineering',
+        executionMode: 'code_worktree',
         requiredCapabilities: ['codex.local', 'pach-mcp'],
         queuedVia: 'agent_feedback',
         conversationId,
@@ -642,10 +655,9 @@ export default function IssueDetail() {
             legacyProgressActivity={legacyRunProgressActivity}
             messages={activeMessages}
             workers={workers}
-            repositories={repositories}
+            repositories={developerRepositories}
             allowCreateRun={!issueIsDone}
             onCreateRun={createAgentRun}
-            onSeedRepositories={seedDefaultRepositories}
             onSendFeedback={sendAgentFeedback}
             onCancelRun={cancelAgentRun}
             canceling={cancelingRunId === activeRun?.id}
@@ -726,10 +738,9 @@ export default function IssueDetail() {
               progressReports={activeProgressReports}
               legacyProgressActivity={legacyRunProgressActivity}
               workers={workers}
-              repositories={repositories}
+              repositories={developerRepositories}
               allowCreateRun={!issueIsDone}
               onCreateRun={createAgentRun}
-              onSeedRepositories={seedDefaultRepositories}
               onCancelRun={cancelAgentRun}
               canceling={cancelingRunId === activeRun?.id}
               onOpenFullView={openAgentFullView}
@@ -944,7 +955,6 @@ function AgentSidebarCard({
   repositories,
   allowCreateRun,
   onCreateRun,
-  onSeedRepositories,
   onCancelRun,
   canceling,
   onOpenFullView,
@@ -956,7 +966,6 @@ function AgentSidebarCard({
   repositories: Schema['tables']['github_repositories']['row'][]
   allowCreateRun: boolean
   onCreateRun: () => void | Promise<void>
-  onSeedRepositories: () => void | Promise<void>
   onCancelRun: () => void | Promise<void>
   canceling: boolean
   onOpenFullView: () => void
@@ -1031,15 +1040,12 @@ function AgentSidebarCard({
       </div>
 
       {repositories.length === 0 ? (
-        <button
-          type="button"
-          onClick={() => {
-            void onSeedRepositories()
-          }}
-          className="mb-3 w-full border border-edge/18 bg-accent-fill/4 px-3 py-2 text-left font-mono text-xs text-fg-2 transition hover:border-accent hover:text-accent"
+        <Link
+          to="/settings/repositories"
+          className="mb-3 block w-full border border-edge/18 bg-accent-fill/4 px-3 py-2 text-left font-mono text-xs text-fg-2 transition hover:border-accent hover:text-accent"
         >
-          seed default GitHub repos
-        </button>
+          connect a GitHub repository in settings
+        </Link>
       ) : null}
 
       {!run ? (
@@ -1140,7 +1146,6 @@ function AgentRunPanel({
   repositories,
   authToken,
   defaultGoal,
-  onSeedRepositories,
   onCreateRun,
   onSendFeedback,
   onBootstrapRun,
@@ -1159,7 +1164,6 @@ function AgentRunPanel({
   repositories: Schema['tables']['github_repositories']['row'][]
   authToken: string | null
   defaultGoal: string
-  onSeedRepositories: () => void | Promise<void>
   onCreateRun: () => void | Promise<void>
   onSendFeedback: (feedback: string, inputMedia?: PendingAgentInputMedia[]) => void | Promise<void>
   onBootstrapRun: () => void | Promise<void>
@@ -1568,14 +1572,12 @@ function AgentRunPanel({
       </div>
 
       {repositories.length === 0 ? (
-        <button
-          onClick={() => {
-            void onSeedRepositories()
-          }}
-          className="mb-3 w-full border border-edge/18 bg-accent-fill/4 px-3 py-2 text-left font-mono text-xs text-fg-2 transition hover:border-accent hover:text-accent"
+        <Link
+          to="/settings/repositories"
+          className="mb-3 block w-full border border-edge/18 bg-accent-fill/4 px-3 py-2 text-left font-mono text-xs text-fg-2 transition hover:border-accent hover:text-accent"
         >
-          seed default GitHub repos
-        </button>
+          connect a GitHub repository in settings
+        </Link>
       ) : null}
 
       {!run ? (

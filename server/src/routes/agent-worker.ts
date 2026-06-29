@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto'
 import { Router } from 'express'
 import type { Request } from 'express'
 import { and, desc, eq, inArray, isNull, or } from 'drizzle-orm'
-import { agentRunProgressReports, agentRuns, agentWorkers, mcpTokens, pmIssues } from '../../../db/schema.js'
+import { agentRunProgressReports, agentRuns, agentWorkers, githubBranches, mcpTokens, pmIssues } from '../../../db/schema.js'
 import { getDb } from '../db.js'
 import { buildGeneralMcpPrompt } from '../lib/agent-run-prompt.js'
 import { insertIssueActivityEvent } from '../lib/activity-events.js'
@@ -217,6 +217,7 @@ router.post('/runs/:id/progress', async (req: AgentWorkerRequest, res) => {
     const status = readOptionalString(body.status)
     const phase = readOptionalString(body.phase)
     const percent = readOptionalPercent(body.percent)
+    const workspacePath = readOptionalString(body.workspacePath)
     const metadata = isObject(body.metadata) ? body.metadata : {}
     const { run } = await readOwnedRun(readRouteParam(req.params.id, 'id'), workerId)
     const now = new Date()
@@ -235,6 +236,7 @@ router.post('/runs/:id/progress', async (req: AgentWorkerRequest, res) => {
       .set({
         status: status ?? run.status,
         statusMessage: message,
+        workspacePath: workspacePath ?? run.workspacePath,
         metadata: nextMetadata,
         updatedAt: now,
       })
@@ -248,6 +250,13 @@ router.post('/runs/:id/progress', async (req: AgentWorkerRequest, res) => {
       percent,
       metadata,
     })
+
+    if (phase === 'repo_prepared') {
+      await getDb()
+        .update(githubBranches)
+        .set({ status: 'created', updatedAt: now })
+        .where(eq(githubBranches.agentRunId, run.id))
+    }
 
     res.json({ ok: true, run: updated })
   } catch (error) {
