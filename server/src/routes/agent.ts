@@ -307,7 +307,6 @@ router.post('/runs/:id/follow-up', async (req, res) => {
 
     const now = new Date()
     const conversationId = parentRun.conversationId ?? randomUUID()
-    const runId = randomUUID()
     const messageId = randomUUID()
     const codexSessionId = readRunCodexSessionId(parentRun.metadata)
 
@@ -330,46 +329,41 @@ router.post('/runs/:id/follow-up', async (req, res) => {
         .where(eq(agentConversations.id, conversationId))
     }
 
-    const [run] = await db.insert(agentRuns).values({
-      id: runId,
-      conversationId,
-      parentRunId: parentRun.id,
-      issueId: issue.id,
-      subjectType: 'issue',
-      subjectId: issue.id,
-      workerId: parentRun.workerId ?? undefined,
-      repositoryId: parentRun.repositoryId,
-      projectKey: parentRun.projectKey,
-      repoFullName: parentRun.repoFullName,
-      baseBranch: parentRun.baseBranch,
-      branchName: parentRun.branchName,
-      workspacePath: parentRun.workspacePath ?? undefined,
-      agentKind: parentRun.agentKind,
-      status: 'queued',
-      statusMessage: parentRun.workerId ? 'queued for same agent worker' : 'queued for agent worker',
-      metadata: {
-        executionClass: 'general',
-        handler: 'general-mcp',
-        intent: 'engineering',
-        executionMode: 'code_worktree',
-        requiredCapabilities: ['codex.local', 'pach-mcp'],
-        queuedVia: 'agent_feedback',
+    const runMetadata = parentRun.metadata ?? {}
+    const followUpCount = readMetadataNumber(runMetadata, 'followUpCount') + 1
+    const [run] = await db
+      .update(agentRuns)
+      .set({
         conversationId,
-        parentRunId: parentRun.id,
-        feedbackMessageId: messageId,
-        feedback,
-        pendingInputMediaCount: 0,
-        codexSessionId,
-        preferredWorkerId: parentRun.workerId,
-      },
-      createdAt: now,
-      updatedAt: now,
-    }).returning()
+        status: 'queued',
+        statusMessage: parentRun.workerId ? 'queued for same agent worker' : 'queued for agent worker',
+        completedAt: null,
+        metadata: {
+          ...runMetadata,
+          executionClass: 'general',
+          handler: 'general-mcp',
+          intent: 'engineering',
+          executionMode: 'code_worktree',
+          requiredCapabilities: ['codex.local', 'pach-mcp'],
+          queuedVia: 'agent_feedback',
+          conversationId,
+          feedbackMessageId: messageId,
+          feedback,
+          pendingInputMediaCount: 0,
+          codexSessionId,
+          preferredWorkerId: parentRun.workerId,
+          followUpCount,
+          lastFollowUpAt: now.toISOString(),
+        },
+        updatedAt: now,
+      })
+      .where(eq(agentRuns.id, parentRun.id))
+      .returning()
 
     const [message] = await db.insert(agentMessages).values({
       id: messageId,
       conversationId,
-      runId,
+      runId: run.id,
       role: 'user',
       body: feedback,
       metadata: {
@@ -385,7 +379,7 @@ router.post('/runs/:id/follow-up', async (req, res) => {
       .where(eq(pmIssues.id, issue.id))
 
     await appendRunActivity(run, 'queued agent follow-up from feedback', 'agent_run_created', {
-      runId,
+      runId: run.id,
       conversationId,
       parentRunId: parentRun.id,
       workerId: parentRun.workerId,
@@ -1035,7 +1029,7 @@ router.post('/runs/:id/create-draft-pr', async (req, res) => {
       branchName: run.branchName,
       token: githubToken,
     })
-    const pr = existingPr ?? await createGithubDraftPullRequest({
+    const pr = existingPr ?? await createGithubPullRequest({
       repoFullName: run.repoFullName,
       branchName: run.branchName,
       baseBranch: run.baseBranch,
@@ -1062,11 +1056,11 @@ router.post('/runs/:id/create-draft-pr', async (req, res) => {
       .update(agentRuns)
       .set({
         status: 'pr_ready',
-        statusMessage: `draft PR ready: #${saved.number}`,
+        statusMessage: `PR ready: #${saved.number}`,
         metadata: {
           ...(run.metadata ?? {}),
           workflowPhase: 'pr_ready',
-          draftPrCreatedAt: now.toISOString(),
+          pullRequestCreatedAt: now.toISOString(),
         },
         updatedAt: now,
       })
@@ -1084,7 +1078,7 @@ router.post('/runs/:id/create-draft-pr', async (req, res) => {
     res.status(502).json({
       ok: false,
       runId: id,
-      error: error instanceof Error ? error.message : 'Unknown draft PR creation error',
+      error: error instanceof Error ? error.message : 'Unknown PR creation error',
     })
   }
 })
@@ -1503,6 +1497,12 @@ function readMetadataString(metadata: unknown, key: string) {
   return typeof value === 'string' && value.trim() ? value : null
 }
 
+function readMetadataNumber(metadata: unknown, key: string) {
+  if (!metadata || typeof metadata !== 'object') return 0
+  const value = (metadata as Record<string, unknown>)[key]
+  return typeof value === 'number' && Number.isFinite(value) ? value : 0
+}
+
 function readRunCodexSessionId(metadata: unknown) {
   const topLevel = readMetadataString(metadata, 'codexSessionId')
   if (topLevel) return topLevel
@@ -1840,7 +1840,7 @@ async function fetchGithubPullRequestForBranch({
   return prs[0] ?? null
 }
 
-async function createGithubDraftPullRequest({
+async function createGithubPullRequest({
   repoFullName,
   branchName,
   baseBranch,
@@ -1868,13 +1868,13 @@ async function createGithubDraftPullRequest({
       body,
       head: branchName,
       base: baseBranch,
-      draft: true,
+      draft: false,
     }),
   })
 
   if (!response.ok) {
     const responseBody = await response.text()
-    throw new Error(`GitHub draft PR creation failed: ${response.status} ${responseBody.slice(0, 240)}`)
+    throw new Error(`GitHub PR creation failed: ${response.status} ${responseBody.slice(0, 240)}`)
   }
 
   return (await response.json()) as GithubPullRequestResponse

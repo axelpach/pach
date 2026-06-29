@@ -23,7 +23,7 @@ export function buildGeneralMcpPrompt(run: AgentRunPromptRecord) {
     '',
     'Use Pach MCP tools for Pach state. You may call Pach MCP tools directly and repeatedly as needed.',
     codeWorktree
-      ? 'For this worker, Codex is running with full local trust. Still act conservatively: do not send external messages, publish content, or perform irreversible external actions. Pach owns GitHub finalization for this run: leave the working branch ready for Pach to commit, push, and open the draft PR.'
+      ? 'For this worker, Codex is running with full local trust. Still act conservatively: do not send external messages, publish content, or perform irreversible external actions. Pach owns GitHub finalization for this run: leave the working branch ready for Pach to commit, push, and open the pull request.'
       : 'For this worker, Codex is running with full local trust. Still act conservatively: do not send external messages, publish content, push code, open pull requests, or perform irreversible external actions unless the issue explicitly asks for it.',
     `Issue id: ${run.issueId}`,
     `Agent run id: ${run.id}`,
@@ -49,7 +49,7 @@ export function buildGeneralMcpPrompt(run: AgentRunPromptRecord) {
       ? '4. Inspect and edit the repository in the current working directory. Run the relevant checks you can run locally.'
       : '4. Put the final result in pach.progress.report with phase "final_result".',
     codeWorktree
-      ? '5. When the implementation is ready, leave the branch ready for a draft PR. Put the final result in pach.progress.report with phase "final_result", including changed files, checks run, and metadata.readyForPr=true when Pach should open the PR.'
+      ? '5. When the implementation is ready, leave the branch ready for a pull request. Put the final result in pach.progress.report with phase "final_result", including changed files, checks run, and metadata.readyForPr=true when Pach should open the PR.'
       : '5. If you update issue fields, use pach.issue.update and explain the change in activitySummary.',
     codeWorktree
       ? '6. Do not merge anything. Do not push directly yourself; Pach will finalize the branch through the connected repository token.'

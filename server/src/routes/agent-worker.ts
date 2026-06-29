@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto'
 import { Router } from 'express'
 import type { Request } from 'express'
 import { and, desc, eq, inArray, isNull, or } from 'drizzle-orm'
-import { agentRunProgressReports, agentRuns, agentWorkers, githubBranches, mcpTokens, pmIssues } from '../../../db/schema.js'
+import { agentRunProgressReports, agentRuns, agentWorkers, githubBranches, githubPullRequests, mcpTokens, pmIssues } from '../../../db/schema.js'
 import { getDb } from '../db.js'
 import { buildGeneralMcpPrompt } from '../lib/agent-run-prompt.js'
 import { insertIssueActivityEvent } from '../lib/activity-events.js'
@@ -318,6 +318,94 @@ router.post('/runs/:id/github-token', async (req: AgentWorkerRequest, res) => {
   }
 })
 
+router.post('/runs/:id/pull-request', async (req: AgentWorkerRequest, res) => {
+  try {
+    requireCapability(req, 'agent.run.progress')
+
+    const body = ensureObject(req.body ?? {})
+    const workerId = readRequiredString(body.workerId, 'workerId')
+    const pr = ensureObject(body.pullRequest)
+    const { run } = await readOwnedRun(readRouteParam(req.params.id, 'id'), workerId)
+    if (!run.repositoryId) throw new Error('Agent run has no repositoryId')
+
+    const now = new Date()
+    const [branch] = await getDb()
+      .select()
+      .from(githubBranches)
+      .where(eq(githubBranches.agentRunId, run.id))
+      .limit(1)
+
+    const number = readRequiredNumber(pr.number, 'pullRequest.number')
+    const githubIdValue = pr.id ?? pr.githubId
+    const values = {
+      repositoryId: run.repositoryId,
+      branchId: branch?.id,
+      agentRunId: run.id,
+      issueId: run.issueId,
+      githubId: githubIdValue == null ? undefined : String(githubIdValue),
+      number,
+      url: readRequiredString(pr.html_url ?? pr.url, 'pullRequest.url'),
+      title: readRequiredString(pr.title, 'pullRequest.title'),
+      state: readOptionalString(pr.state) ?? 'open',
+      isDraft: readOptionalBoolean(pr.draft ?? pr.isDraft, false),
+      mergeable: readOptionalBoolean(pr.mergeable, undefined),
+      headSha: readOptionalString(readNestedObject(pr.head)?.sha ?? pr.headSha),
+      baseBranch: readOptionalString(readNestedObject(pr.base)?.ref ?? pr.baseBranch) ?? run.baseBranch,
+      checksStatus: 'unknown',
+      githubCreatedAt: readOptionalDate(pr.created_at ?? pr.githubCreatedAt),
+      githubUpdatedAt: readOptionalDate(pr.updated_at ?? pr.githubUpdatedAt),
+      updatedAt: now,
+    }
+
+    const [existing] = await getDb()
+      .select()
+      .from(githubPullRequests)
+      .where(and(eq(githubPullRequests.repositoryId, run.repositoryId), eq(githubPullRequests.number, number)))
+      .limit(1)
+
+    const [saved] = existing
+      ? await getDb().update(githubPullRequests).set(values).where(eq(githubPullRequests.id, existing.id)).returning()
+      : await getDb().insert(githubPullRequests).values({ ...values, createdAt: now }).returning()
+
+    if (branch) {
+      await getDb()
+        .update(githubBranches)
+        .set({ status: saved.state === 'merged' ? 'merged' : 'pr_opened', lastCommitSha: saved.headSha, updatedAt: now })
+        .where(eq(githubBranches.id, branch.id))
+    }
+
+    await getDb()
+      .update(agentRuns)
+      .set({
+        statusMessage: `PR ready: #${saved.number}`,
+        metadata: {
+          ...(run.metadata ?? {}),
+          workflowPhase: 'pr_ready',
+          pullRequestCreatedAt: now.toISOString(),
+          pullRequestNumber: saved.number,
+          pullRequestUrl: saved.url,
+        },
+        updatedAt: now,
+      })
+      .where(eq(agentRuns.id, run.id))
+
+    await appendRunProgressReport(run, {
+      workerId,
+      phase: 'pull_request_ready',
+      message: `PR ready: #${saved.number}`,
+      metadata: {
+        pullRequestId: saved.id,
+        pullRequestNumber: saved.number,
+        pullRequestUrl: saved.url,
+      },
+    })
+
+    res.status(201).json({ ok: true, pullRequest: saved })
+  } catch (error) {
+    res.status(500).json({ ok: false, error: error instanceof Error ? error.message : 'Pull request registration failed' })
+  }
+})
+
 router.post('/runs/:id/complete', async (req: AgentWorkerRequest, res) => {
   try {
     requireCapability(req, 'agent.run.complete')
@@ -591,6 +679,12 @@ function readRequiredString(value: unknown, field: string) {
   return value.trim()
 }
 
+function readRequiredNumber(value: unknown, field: string) {
+  const parsed = typeof value === 'number' ? value : typeof value === 'string' ? Number(value) : NaN
+  if (!Number.isFinite(parsed)) throw new Error(`Missing ${field}`)
+  return parsed
+}
+
 function readRouteParam(value: string | string[] | undefined, field: string) {
   const candidate = Array.isArray(value) ? value[0] : value
   return readRequiredString(candidate, field)
@@ -598,6 +692,21 @@ function readRouteParam(value: string | string[] | undefined, field: string) {
 
 function readOptionalString(value: unknown) {
   return typeof value === 'string' && value.trim() ? value.trim() : undefined
+}
+
+function readOptionalBoolean(value: unknown, fallback?: boolean) {
+  return typeof value === 'boolean' ? value : fallback
+}
+
+function readNestedObject(value: unknown) {
+  return isObject(value) ? value : undefined
+}
+
+function readOptionalDate(value: unknown) {
+  if (value instanceof Date && !Number.isNaN(value.getTime())) return value
+  if (typeof value !== 'string' && typeof value !== 'number') return undefined
+  const date = new Date(value)
+  return Number.isNaN(date.getTime()) ? undefined : date
 }
 
 function readPositiveInteger(value: unknown, fallback: number, min: number, max: number) {

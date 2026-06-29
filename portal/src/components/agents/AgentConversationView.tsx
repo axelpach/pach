@@ -407,8 +407,8 @@ function AgentConversationRunHeader({
               }}
               disabled={prBusy || !run.workspacePath}
               className="inline-flex h-6 w-6 shrink-0 items-center justify-center border border-edge/18 bg-accent-fill/6 text-accent transition hover:border-accent disabled:cursor-not-allowed disabled:opacity-40"
-              title={run.workspacePath ? 'commit branch and open a draft PR' : 'waiting for worker workspace'}
-              aria-label="create draft PR"
+              title={run.workspacePath ? 'commit branch and open a PR' : 'waiting for worker workspace'}
+              aria-label="create PR"
             >
               <GitPullRequest className="h-3.5 w-3.5" />
             </button>

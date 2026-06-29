@@ -37,6 +37,25 @@ type GithubCredentialHandoff = {
   source?: string | null
 }
 
+type GithubPullRequestResponse = {
+  id: number
+  number: number
+  html_url: string
+  title: string
+  state: string
+  draft?: boolean
+  mergeable?: boolean | null
+  merged_at?: string | null
+  created_at?: string | null
+  updated_at?: string | null
+  head?: {
+    sha?: string
+  }
+  base?: {
+    ref?: string
+  }
+}
+
 const apiUrl = readEnv('PACH_API_URL', 'http://localhost:3002').replace(/\/$/, '')
 const agentToken = process.env.PACH_AGENT_TOKEN || process.env.PACH_MCP_TOKEN
 const workerName = readEnv('PACH_AGENT_WORKER_NAME', hostname())
@@ -202,6 +221,8 @@ async function executeGeneralMcpRun(worker: WorkerRecord, run: AgentRunRecord) {
     const durationMs = Date.now() - startedAt
     const finalMessage = summarizeCodexOutput(stdout) || `Codex completed general MCP run ${run.id}`
     const codexSessionId = readCodexSessionId(stdout, stderr) ?? readMetadataString(run.metadata, 'codexSessionId')
+    let pullRequest: GithubPullRequestResponse | null = null
+    let pullRequestError: string | null = null
 
     await reportRunProgress(worker, run, {
       phase: 'final_result',
@@ -215,6 +236,27 @@ async function executeGeneralMcpRun(worker: WorkerRecord, run: AgentRunRecord) {
       },
     })
 
+    if (readMetadataString(run.metadata, 'executionMode') === 'code_worktree') {
+      try {
+        pullRequest = await finalizeRunPullRequest(worker, run, finalMessage)
+      } catch (error) {
+        pullRequestError = error instanceof Error ? error.message : String(error)
+        await reportRunProgress(worker, run, {
+          phase: 'pull_request_failed',
+          status: 'completed',
+          message: `PR creation failed: ${pullRequestError}`,
+          metadata: {
+            pullRequestError,
+          },
+        }).catch((progressError) => {
+          console.error(
+            `[${new Date().toISOString()}] failed to report PR creation failure for run ${run.id}:`,
+            progressError instanceof Error ? progressError.message : progressError,
+          )
+        })
+      }
+    }
+
     await postJson(`/agent-worker/runs/${run.id}/complete`, {
       workerId: worker.id,
       status: 'completed',
@@ -223,6 +265,15 @@ async function executeGeneralMcpRun(worker: WorkerRecord, run: AgentRunRecord) {
         handler: 'general-mcp',
         durationMs,
         codexSessionId,
+        pullRequest: pullRequest ? {
+          id: pullRequest.id,
+          number: pullRequest.number,
+          url: pullRequest.html_url,
+          title: pullRequest.title,
+          state: pullRequest.state,
+          draft: Boolean(pullRequest.draft),
+        } : undefined,
+        pullRequestError,
         stdout: truncateText(stdout, 20_000),
         stderr: truncateText(stderr, 10_000),
       },
@@ -465,6 +516,170 @@ async function readGithubCredentialForRun(worker: WorkerRecord, run: AgentRunRec
   }
 }
 
+async function finalizeRunPullRequest(worker: WorkerRecord, run: AgentRunRecord, finalMessage: string) {
+  if (!run.repoFullName) throw new Error('Cannot create PR without repoFullName')
+  if (!run.workspacePath) throw new Error('Cannot create PR without prepared workspacePath')
+
+  const githubCredential = await readGithubCredentialForRun(worker, run)
+  if (!githubCredential.token) throw new Error(`No GitHub token available for ${run.repoFullName}`)
+
+  await reportRunProgress(worker, run, {
+    phase: 'pull_request_prepare',
+    status: 'running',
+    message: `preparing PR for ${run.branchName}`,
+    metadata: {
+      repoFullName: run.repoFullName,
+      branchName: run.branchName,
+      githubCredentialSource: githubCredential.source,
+    },
+  })
+
+  const title = titleFromBranchName(run.branchName)
+  let pushResult: CommandResult | null = null
+
+  try {
+    pushResult = await runShellCommand(buildFinalizePullRequestBranchCommand({
+      workspacePath: run.workspacePath,
+      branchName: run.branchName,
+      baseBranch: run.baseBranch || 'main',
+      commitMessage: title,
+      githubToken: githubCredential.token,
+    }), { timeoutMs: 180_000 })
+  } catch (error) {
+    if (readShellExitCode(error) !== 44) throw error
+
+    const existing = await fetchGithubPullRequestForBranch({
+      repoFullName: run.repoFullName,
+      branchName: run.branchName,
+      token: githubCredential.token,
+    })
+    if (existing) {
+      await registerPullRequest(worker, run, existing)
+      return existing
+    }
+
+    await reportRunProgress(worker, run, {
+      phase: 'pull_request_skipped',
+      status: 'completed',
+      message: 'No branch changes found for PR creation.',
+      metadata: {
+        branchName: run.branchName,
+        stdout: truncateText(readErrorStdout(error), 8_000),
+        stderr: truncateText(readErrorStderr(error), 4_000),
+      },
+    })
+    return null
+  }
+
+  const existing = await fetchGithubPullRequestForBranch({
+    repoFullName: run.repoFullName,
+    branchName: run.branchName,
+    token: githubCredential.token,
+  })
+  const pullRequest = existing ?? await createGithubPullRequest({
+    repoFullName: run.repoFullName,
+    branchName: run.branchName,
+    baseBranch: run.baseBranch || 'main',
+    title,
+    body: buildPullRequestBody({ run, finalMessage }),
+    token: githubCredential.token,
+  })
+
+  await registerPullRequest(worker, run, pullRequest)
+  await reportRunProgress(worker, run, {
+    phase: 'pull_request_ready',
+    status: 'completed',
+    message: `PR ready: #${pullRequest.number}`,
+    metadata: {
+      pullRequestNumber: pullRequest.number,
+      pullRequestUrl: pullRequest.html_url,
+      stdout: truncateText(pushResult?.stdout, 8_000),
+      stderr: truncateText(pushResult?.stderr, 4_000),
+    },
+  })
+
+  return pullRequest
+}
+
+async function registerPullRequest(worker: WorkerRecord, run: AgentRunRecord, pullRequest: GithubPullRequestResponse) {
+  await postJson(`/agent-worker/runs/${run.id}/pull-request`, {
+    workerId: worker.id,
+    pullRequest,
+  })
+}
+
+async function fetchGithubPullRequestForBranch({
+  repoFullName,
+  branchName,
+  token,
+}: {
+  repoFullName: string
+  branchName: string
+  token: string
+}) {
+  const { owner } = parseRepoFullName(repoFullName)
+  const url = new URL(`https://api.github.com/repos/${repoFullName}/pulls`)
+  url.searchParams.set('state', 'all')
+  url.searchParams.set('head', `${owner}:${branchName}`)
+  url.searchParams.set('per_page', '1')
+
+  const response = await fetch(url, {
+    headers: githubApiHeaders(token),
+  })
+
+  if (!response.ok) {
+    const body = await response.text()
+    throw new Error(`GitHub PR lookup failed: ${response.status} ${body.slice(0, 240)}`)
+  }
+
+  const prs = (await response.json()) as GithubPullRequestResponse[]
+  return prs[0] ?? null
+}
+
+async function createGithubPullRequest({
+  repoFullName,
+  branchName,
+  baseBranch,
+  title,
+  body,
+  token,
+}: {
+  repoFullName: string
+  branchName: string
+  baseBranch: string
+  title: string
+  body: string
+  token: string
+}) {
+  const response = await fetch(`https://api.github.com/repos/${repoFullName}/pulls`, {
+    method: 'POST',
+    headers: githubApiHeaders(token),
+    body: JSON.stringify({
+      title,
+      body,
+      head: branchName,
+      base: baseBranch,
+      draft: false,
+    }),
+  })
+
+  if (!response.ok) {
+    const responseBody = await response.text()
+    throw new Error(`GitHub PR creation failed: ${response.status} ${responseBody.slice(0, 240)}`)
+  }
+
+  return (await response.json()) as GithubPullRequestResponse
+}
+
+function githubApiHeaders(token: string) {
+  return {
+    Authorization: `Bearer ${token}`,
+    Accept: 'application/vnd.github+json',
+    'Content-Type': 'application/json',
+    'X-GitHub-Api-Version': '2022-11-28',
+  }
+}
+
 function readLocalGithubToken() {
   return process.env.PACH_AGENT_GITHUB_TOKEN?.trim() || process.env.GITHUB_TOKEN?.trim() || ''
 }
@@ -530,6 +745,84 @@ function buildPrepareCodeWorktreeCommand({
     `if [ -d ${workspace}/.git ] || [ -f ${workspace}/.git ]; then git -C ${workspace} fetch origin --prune; git -C ${workspace} checkout ${branch}; else if git -C ${repoCache} show-ref --verify --quiet ${remoteBranchRef}; then git -C ${repoCache} branch --track ${branch} ${remoteBranch} 2>/dev/null || true; elif ! git -C ${repoCache} show-ref --verify --quiet ${localBranchRef}; then git -C ${repoCache} branch ${branch} ${remoteBase}; fi; git -C ${repoCache} worktree add ${workspace} ${branch}; fi`,
     `git -C ${workspace} status --short --branch`,
   ].join('\n')
+}
+
+function buildFinalizePullRequestBranchCommand({
+  workspacePath,
+  branchName,
+  baseBranch,
+  commitMessage,
+  githubToken,
+}: {
+  workspacePath: string
+  branchName: string
+  baseBranch: string
+  commitMessage: string
+  githubToken: string
+}) {
+  const workspace = shellQuote(workspacePath)
+  const branch = shellQuote(branchName)
+  const base = shellQuote(baseBranch)
+  const remoteBase = shellQuote(`origin/${baseBranch}`)
+  const message = shellQuote(commitMessage)
+  return [
+    'set -eu',
+    'command -v git >/dev/null 2>&1 || { echo "missing git"; exit 42; }',
+    `PACH_GITHUB_TOKEN=${shellQuote(githubToken)}`,
+    'export PACH_GITHUB_TOKEN',
+    'ASKPASS="$(mktemp)"',
+    'cat > "$ASKPASS" <<\'PACH_ASKPASS\'',
+    '#!/bin/sh',
+    'case "$1" in',
+    '  *Username*) printf "%s\\n" "x-access-token" ;;',
+    '  *) printf "%s\\n" "$PACH_GITHUB_TOKEN" ;;',
+    'esac',
+    'PACH_ASKPASS',
+    'chmod 700 "$ASKPASS"',
+    'export GIT_ASKPASS="$ASKPASS"',
+    'export GIT_TERMINAL_PROMPT=0',
+    'cleanup() { rm -f "$ASKPASS"; }',
+    'trap cleanup EXIT',
+    `git -C ${workspace} checkout ${branch}`,
+    `git -C ${workspace} fetch origin --prune`,
+    `git -C ${workspace} fetch origin ${base}`,
+    `git -C ${workspace} config user.name "Pach Agent"`,
+    `git -C ${workspace} config user.email "agent@pach.world"`,
+    `git -C ${workspace} add -A`,
+    `if ! git -C ${workspace} diff --cached --quiet; then git -C ${workspace} commit -m ${message}; fi`,
+    `if [ "$(git -C ${workspace} rev-list --count ${remoteBase}..HEAD)" -eq 0 ]; then echo "PACH_NO_CHANGES_FOR_PR"; exit 44; fi`,
+    `git -C ${workspace} push -u origin ${branch}`,
+    `printf "head_sha=%s\\n" "$(git -C ${workspace} rev-parse HEAD)"`,
+    `git -C ${workspace} status --short --branch`,
+  ].join('\n')
+}
+
+function titleFromBranchName(branchName: string) {
+  const name = branchName.split('/').at(-1) || branchName
+  return name
+    .replace(/^[a-z]+-\w+-\d+-/i, '')
+    .replace(/[-_]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .replace(/^\w/, (letter) => letter.toUpperCase()) || branchName
+}
+
+function buildPullRequestBody({
+  run,
+  finalMessage,
+}: {
+  run: AgentRunRecord
+  finalMessage: string
+}) {
+  return [
+    run.issueId ? `Pach issue id: ${run.issueId}` : null,
+    `Pach agent run id: ${run.id}`,
+    '',
+    'Agent result:',
+    finalMessage,
+    '',
+    'Created by Pach agent workflow.',
+  ].filter((line): line is string => line !== null).join('\n')
 }
 
 function runShellCommand(script: string, options: { timeoutMs: number }): Promise<CommandResult> {
@@ -617,7 +910,7 @@ function buildGeneralMcpPrompt(run: AgentRunRecord) {
     '',
     'Use Pach MCP tools for Pach state. You may call Pach MCP tools directly and repeatedly as needed.',
     codeWorktree
-      ? 'For this worker, Codex is running with full local trust. Still act conservatively: do not send external messages, publish content, or perform irreversible external actions. Pach owns GitHub finalization for this run: leave the working branch ready for Pach to commit, push, and open the draft PR.'
+      ? 'For this worker, Codex is running with full local trust. Still act conservatively: do not send external messages, publish content, or perform irreversible external actions. Pach owns GitHub finalization for this run: leave the working branch ready for Pach to commit, push, and open the pull request.'
       : 'For this worker, Codex is running with full local trust. Still act conservatively: do not send external messages, publish content, push code, open pull requests, or perform irreversible external actions unless the issue explicitly asks for it.',
     `Issue id: ${run.issueId}`,
     `Agent run id: ${run.id}`,
@@ -643,7 +936,7 @@ function buildGeneralMcpPrompt(run: AgentRunRecord) {
       ? '4. Inspect and edit the repository in the current working directory. Run the relevant checks you can run locally.'
       : '4. Put the final result in pach.progress.report with phase "final_result".',
     codeWorktree
-      ? '5. When the implementation is ready, leave the branch ready for a draft PR. Put the final result in pach.progress.report with phase "final_result", including changed files, checks run, and metadata.readyForPr=true when Pach should open the PR.'
+      ? '5. When the implementation is ready, leave the branch ready for a pull request. Put the final result in pach.progress.report with phase "final_result", including changed files, checks run, and metadata.readyForPr=true when Pach should open the PR.'
       : '5. If you update issue fields, use pach.issue.update and explain the change in activitySummary.',
     codeWorktree
       ? '6. Do not merge anything. Do not push directly yourself; Pach will finalize the branch through the connected repository token.'
@@ -832,6 +1125,24 @@ function readExecErrorOutput(error: unknown) {
     code: details.code,
     signal: details.signal,
   }
+}
+
+function readShellExitCode(error: unknown) {
+  if (!error || typeof error !== 'object') return null
+  const code = (error as { code?: unknown }).code
+  return typeof code === 'number' ? code : null
+}
+
+function readErrorStdout(error: unknown) {
+  if (!error || typeof error !== 'object') return ''
+  const stdout = (error as { stdout?: unknown }).stdout
+  return typeof stdout === 'string' ? stdout : ''
+}
+
+function readErrorStderr(error: unknown) {
+  if (!error || typeof error !== 'object') return ''
+  const stderr = (error as { stderr?: unknown }).stderr
+  return typeof stderr === 'string' ? stderr : ''
 }
 
 function readExecCanceled(error: unknown) {

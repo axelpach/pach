@@ -544,11 +544,11 @@ export default function IssueDetail() {
       })
       const payload = await response.json().catch(() => ({}))
       if (!response.ok) {
-        throw new Error(readString(payload.error) ?? readString(payload.message) ?? 'Failed to create draft PR')
+        throw new Error(readString(payload.error) ?? readString(payload.message) ?? 'Failed to create PR')
       }
-      setAgentActionMessage(payload.pullRequest ? `draft PR ready: #${payload.pullRequest.number}` : 'draft PR created')
+      setAgentActionMessage(payload.pullRequest ? `PR ready: #${payload.pullRequest.number}` : 'PR created')
     } catch (error) {
-      setAgentActionMessage(error instanceof Error ? error.message : 'Failed to create draft PR')
+      setAgentActionMessage(error instanceof Error ? error.message : 'Failed to create PR')
     } finally {
       setPrActionBusy(false)
     }
@@ -1218,8 +1218,8 @@ function AgentSidebarCard({
                 }}
                 disabled={prBusy || !run.workspacePath}
                 className="inline-flex h-8 w-8 shrink-0 items-center justify-center border border-edge/18 bg-accent-fill/6 text-accent transition hover:border-accent disabled:cursor-not-allowed disabled:opacity-40"
-                title={run.workspacePath ? 'commit branch and open a draft PR' : 'waiting for worker workspace'}
-                aria-label="create draft PR"
+                title={run.workspacePath ? 'commit branch and open a PR' : 'waiting for worker workspace'}
+                aria-label="create PR"
               >
                 <GitPullRequest className="h-3.5 w-3.5" />
               </button>
@@ -1700,11 +1700,11 @@ function AgentRunPanel({
         body: JSON.stringify({ title: agentGoal.split('\n')[0]?.replace(/^Issue:\s*/i, '').trim() || run.branchName }),
       })
       const payload = await res.json().catch(() => ({}))
-      if (!res.ok) throw new Error(payload.error ?? 'Failed to create draft PR')
-      setGoalMessage(payload.pullRequest ? `draft PR ready: #${payload.pullRequest.number}` : 'draft PR created')
+      if (!res.ok) throw new Error(payload.error ?? 'Failed to create PR')
+      setGoalMessage(payload.pullRequest ? `PR ready: #${payload.pullRequest.number}` : 'PR created')
       setTerminalOutput(payload.stdout ?? '')
     } catch (error) {
-      setGoalMessage(error instanceof Error ? error.message : 'Failed to create draft PR')
+      setGoalMessage(error instanceof Error ? error.message : 'Failed to create PR')
     } finally {
       setPrBusy(false)
     }
@@ -2051,7 +2051,7 @@ function AgentRunPanel({
                   className="border border-edge/18 bg-pit-3 px-2.5 py-1.5 font-mono text-[10px] uppercase tracking-label text-fg-3 transition hover:border-accent hover:text-accent disabled:cursor-wait disabled:opacity-40"
                   title="commit, push, and create or sync a draft GitHub PR"
                 >
-                  {prBusy ? 'creating...' : 'create draft pr'}
+                  {prBusy ? 'creating...' : 'create pr'}
                 </button>
               </div>
             </div>
@@ -2300,7 +2300,7 @@ function buildDefaultAgentGoal({
     company ? `Organization/context: ${company.name}` : null,
     issue.description ? `Description:\n${issue.description}` : null,
     '',
-    'Please implement this issue, run the relevant checks, and prepare the branch for a draft PR.',
+    'Please implement this issue, run the relevant checks, and prepare the branch for a PR.',
   ]
     .filter((line): line is string => Boolean(line))
     .join('\n')
