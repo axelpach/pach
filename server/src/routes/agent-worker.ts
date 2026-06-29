@@ -6,6 +6,7 @@ import { agentRunProgressReports, agentRuns, agentWorkers, githubBranches, mcpTo
 import { getDb } from '../db.js'
 import { buildGeneralMcpPrompt } from '../lib/agent-run-prompt.js'
 import { insertIssueActivityEvent } from '../lib/activity-events.js'
+import { readGithubCredentialForRepository } from '../lib/github-credentials.js'
 import { hashMcpToken, hasMcpCapability, type McpAuthContext, type McpCapability } from '../lib/mcp-token.js'
 
 const router = Router()
@@ -285,6 +286,38 @@ router.post('/runs/:id/cancel-state', async (req: AgentWorkerRequest, res) => {
   }
 })
 
+router.post('/runs/:id/github-token', async (req: AgentWorkerRequest, res) => {
+  try {
+    requireCapability(req, 'agent.run.claim')
+
+    const body = ensureObject(req.body ?? {})
+    const workerId = readRequiredString(body.workerId, 'workerId')
+    const { run } = await readOwnedRun(readRouteParam(req.params.id, 'id'), workerId)
+
+    if (!isActiveRunStatus(run.status)) {
+      res.status(409).json({ ok: false, error: 'Agent run is not active.' })
+      return
+    }
+
+    if (!run.repositoryId) {
+      res.json({ ok: true, token: null, source: 'none' })
+      return
+    }
+
+    const credential = await readGithubCredentialForRepository(run.repositoryId)
+
+    res.json({
+      ok: true,
+      token: credential.token,
+      source: credential.source,
+      repositoryId: run.repositoryId,
+      repoFullName: run.repoFullName,
+    })
+  } catch (error) {
+    res.status(500).json({ ok: false, error: error instanceof Error ? error.message : 'GitHub credential handoff failed' })
+  }
+})
+
 router.post('/runs/:id/complete', async (req: AgentWorkerRequest, res) => {
   try {
     requireCapability(req, 'agent.run.complete')
@@ -521,6 +554,10 @@ function hasAllCapabilities(workerCapabilities: string[], requiredCapabilities: 
   if (requiredCapabilities.length === 0) return true
   if (workerCapabilities.includes('*')) return true
   return requiredCapabilities.every((capability) => workerCapabilities.includes(capability))
+}
+
+function isActiveRunStatus(status: string) {
+  return ACTIVE_RUN_STATUSES.includes(status as typeof ACTIVE_RUN_STATUSES[number])
 }
 
 function hasCapacity(

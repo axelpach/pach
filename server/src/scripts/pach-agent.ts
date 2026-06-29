@@ -32,6 +32,11 @@ type CancelState = {
   reason?: string
 }
 
+type GithubCredentialHandoff = {
+  token?: string | null
+  source?: string | null
+}
+
 const apiUrl = readEnv('PACH_API_URL', 'http://localhost:3002').replace(/\/$/, '')
 const agentToken = process.env.PACH_AGENT_TOKEN || process.env.PACH_MCP_TOKEN
 const workerName = readEnv('PACH_AGENT_WORKER_NAME', hostname())
@@ -178,7 +183,7 @@ async function executeGeneralMcpRun(worker: WorkerRecord, run: AgentRunRecord) {
         },
       })
 
-      const prepared = await prepareCodeWorktree(run)
+      const prepared = await prepareCodeWorktree(worker, run)
       codexCwd = prepared.workspacePath
       run.workspacePath = prepared.workspacePath
 
@@ -385,7 +390,7 @@ async function checkCancelState(worker: WorkerRecord, run: AgentRunRecord) {
   })
 }
 
-async function prepareCodeWorktree(run: AgentRunRecord) {
+async function prepareCodeWorktree(worker: WorkerRecord, run: AgentRunRecord) {
   if (!run.repoFullName) throw new Error('Code worktree run is missing repoFullName')
 
   const repo = parseRepoFullName(run.repoFullName)
@@ -396,7 +401,7 @@ async function prepareCodeWorktree(run: AgentRunRecord) {
   const workspacePath = run.workspacePath || `${workspaceRoot}/${run.id}/${repo.name}`
   const baseBranch = run.baseBranch || 'main'
   const branchName = run.branchName
-  const githubToken = process.env.PACH_AGENT_GITHUB_TOKEN?.trim() || process.env.GITHUB_TOKEN?.trim() || ''
+  const githubCredential = await readGithubCredentialForRun(worker, run)
 
   const result = await runShellCommand(buildPrepareCodeWorktreeCommand({
     repoFullName: run.repoFullName,
@@ -404,7 +409,7 @@ async function prepareCodeWorktree(run: AgentRunRecord) {
     workspacePath,
     baseBranch,
     branchName,
-    githubToken,
+    githubToken: githubCredential.token,
   }), { timeoutMs: 180_000 })
 
   return {
@@ -412,9 +417,56 @@ async function prepareCodeWorktree(run: AgentRunRecord) {
     workspacePath,
     branchName,
     baseBranch,
+    githubCredentialSource: githubCredential.source,
+    githubCredentialHandoffError: githubCredential.handoffError,
     stdout: truncateText(result.stdout, 8_000),
     stderr: truncateText(result.stderr, 4_000),
   }
+}
+
+async function readGithubCredentialForRun(worker: WorkerRecord, run: AgentRunRecord): Promise<{
+  token: string
+  source: string
+  handoffError?: string
+}> {
+  let handoffError: string | undefined
+
+  try {
+    const payload = await postJson<GithubCredentialHandoff>(`/agent-worker/runs/${run.id}/github-token`, {
+      workerId: worker.id,
+    })
+    const token = typeof payload.token === 'string' ? payload.token.trim() : ''
+    if (token) {
+      return {
+        token,
+        source: payload.source?.trim() || 'server_handoff',
+      }
+    }
+  } catch (error) {
+    handoffError = error instanceof Error ? error.message : String(error)
+  }
+
+  const localToken = readLocalGithubToken()
+  if (localToken) {
+    return {
+      token: localToken,
+      source: handoffError ? 'local_env_after_handoff_error' : 'local_env',
+      handoffError,
+    }
+  }
+
+  if (handoffError) {
+    throw new Error(`Could not fetch GitHub credentials for ${run.repoFullName ?? run.id}: ${handoffError}`)
+  }
+
+  return {
+    token: '',
+    source: 'none',
+  }
+}
+
+function readLocalGithubToken() {
+  return process.env.PACH_AGENT_GITHUB_TOKEN?.trim() || process.env.GITHUB_TOKEN?.trim() || ''
 }
 
 function buildPrepareCodeWorktreeCommand({
