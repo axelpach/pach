@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type DragEvent } from 'react'
 import { Link } from 'react-router-dom'
-import { FileImage, MessageSquare, Paperclip, Send, TerminalSquare, X } from 'lucide-react'
+import { FileImage, GitPullRequest, MessageSquare, Paperclip, Send, TerminalSquare, X } from 'lucide-react'
 import type { Schema } from '../../zero-schema'
 import { PachSelect } from '../PachSelect'
 
@@ -19,6 +19,7 @@ type AgentRepository = Pick<
 type AgentConversationViewProps = {
   issue: Schema['tables']['pm_issues']['row']
   run: Schema['tables']['agent_runs']['row'] | null
+  pullRequest: Schema['tables']['github_pull_requests']['row'] | null
   progressReports: Schema['tables']['agent_run_progress_reports']['row'][]
   legacyProgressActivity: Schema['tables']['activity_events']['row'][]
   messages: Schema['tables']['agent_messages']['row'][]
@@ -26,11 +27,17 @@ type AgentConversationViewProps = {
   repositories: AgentRepository[]
   selectedRepositoryId: string
   onSelectedRepositoryIdChange: (next: string) => void
+  branchNameDraft: string
+  branchNameIsValid: boolean
+  onBranchNameDraftChange: (next: string) => void
   allowCreateRun?: boolean
+  actionMessage: string | null
   onCreateRun: () => void | Promise<void>
   onSendFeedback: (feedback: string, inputMedia?: PendingAgentInputMedia[]) => void | Promise<void>
+  onCreateDraftPullRequest: () => void | Promise<void>
   onCancelRun: () => void | Promise<void>
   canceling: boolean
+  prBusy: boolean
   onClose: () => void
 }
 
@@ -48,6 +55,7 @@ type AgentConversationStreamItemModel = {
 export function AgentConversationView({
   issue,
   run,
+  pullRequest,
   progressReports,
   legacyProgressActivity,
   messages,
@@ -55,11 +63,17 @@ export function AgentConversationView({
   repositories,
   selectedRepositoryId,
   onSelectedRepositoryIdChange,
+  branchNameDraft,
+  branchNameIsValid,
+  onBranchNameDraftChange,
   allowCreateRun = true,
+  actionMessage,
   onCreateRun,
   onSendFeedback,
+  onCreateDraftPullRequest,
   onCancelRun,
   canceling,
+  prBusy,
   onClose,
 }: AgentConversationViewProps) {
   const [feedbackDraft, setFeedbackDraft] = useState('')
@@ -70,7 +84,7 @@ export function AgentConversationView({
   const conversationEndRef = useRef<HTMLDivElement | null>(null)
   const feedbackFileInputRef = useRef<HTMLInputElement | null>(null)
   const onlineWorkers = workers.filter((worker) => worker.status !== 'offline')
-  const canCreateRun = allowCreateRun && repositories.length > 0 && !run
+  const canCreateRun = allowCreateRun && repositories.length > 0 && branchNameIsValid && !run
   const canCancelRun = Boolean(run && !['completed', 'failed', 'canceled'].includes(run.status))
   const runIsWorking = isRunWorking(run)
   const streamItems = buildAgentConversationStream({ progressReports, legacyProgressActivity, messages })
@@ -195,6 +209,16 @@ export function AgentConversationView({
                     onChange={onSelectedRepositoryIdChange}
                     className="mb-3 max-w-sm"
                   />
+                ) : repositories.length === 1 ? (
+                  <ReadonlyRepositoryField repository={repositories[0]} className="mb-3 max-w-sm" />
+                ) : null}
+                {repositories.length > 0 ? (
+                  <BranchNameInput
+                    value={branchNameDraft}
+                    valid={branchNameIsValid}
+                    onChange={onBranchNameDraftChange}
+                    className="mb-3 max-w-sm"
+                  />
                 ) : null}
                 <div>// no agent conversation yet</div>
                 <div className="mt-1">
@@ -205,7 +229,13 @@ export function AgentConversationView({
             ) : null}
 
             {run ? (
-              <AgentConversationRunHeader run={run} />
+              <AgentConversationRunHeader
+                run={run}
+                pullRequest={pullRequest}
+                prBusy={prBusy}
+                actionMessage={actionMessage}
+                onCreateDraftPullRequest={onCreateDraftPullRequest}
+              />
             ) : null}
 
             <div className="space-y-3">
@@ -325,23 +355,96 @@ export function AgentConversationView({
   )
 }
 
-function AgentConversationRunHeader({ run }: { run: Schema['tables']['agent_runs']['row'] }) {
-  const handler = readMetadataString(run.metadata, 'handler') ?? readMetadataString(run.metadata, 'executionClass') ?? 'agent'
+function AgentConversationRunHeader({
+  run,
+  pullRequest,
+  prBusy,
+  actionMessage,
+  onCreateDraftPullRequest,
+}: {
+  run: Schema['tables']['agent_runs']['row']
+  pullRequest: Schema['tables']['github_pull_requests']['row'] | null
+  prBusy: boolean
+  actionMessage: string | null
+  onCreateDraftPullRequest: () => void | Promise<void>
+}) {
   return (
-    <div className="grid gap-2 border border-edge/12 bg-accent-fill/[0.025] p-3 font-mono text-xs md:grid-cols-3">
-      <div className="flex items-center justify-between gap-3">
-        <span className="uppercase tracking-label text-fg-4">status</span>
-        <span className={run.status === 'failed' ? 'text-fail' : 'text-accent'}>{run.status}</span>
+    <div className="space-y-2">
+      <div className="grid gap-2 border border-edge/12 bg-accent-fill/[0.025] p-3 font-mono text-xs md:grid-cols-5">
+        <div className="flex min-w-0 items-center justify-between gap-3">
+          <span className="uppercase tracking-label text-fg-4">status</span>
+          <span className={run.status === 'failed' ? 'text-fail' : 'text-accent'}>{run.status}</span>
+        </div>
+        <div className="flex min-w-0 items-center justify-between gap-3">
+          <span className="uppercase tracking-label text-fg-4">repo</span>
+          <span className="min-w-0 truncate text-fg-2">{run.repoFullName}</span>
+        </div>
+        <div className="flex min-w-0 items-center justify-between gap-3">
+          <span className="uppercase tracking-label text-fg-4">branch</span>
+          <span className="min-w-0 truncate text-fg-2">{run.branchName}</span>
+        </div>
+        <div className="flex min-w-0 items-center justify-between gap-3">
+          <span className="uppercase tracking-label text-fg-4">worker</span>
+          <span className="min-w-0 truncate text-fg-2">{run.workerId ?? 'waiting for claim'}</span>
+        </div>
+        <div className="flex min-w-0 items-center justify-between gap-3">
+          <span className="uppercase tracking-label text-fg-4">pr</span>
+          {pullRequest ? (
+            <a
+              href={pullRequest.url}
+              target="_blank"
+              rel="noreferrer"
+              className="inline-flex min-w-0 items-center gap-1.5 truncate text-accent hover:underline"
+            >
+              <GitPullRequest className="h-3.5 w-3.5 shrink-0" />
+              <span className="truncate">#{pullRequest.number}</span>
+            </a>
+          ) : (
+            <button
+              type="button"
+              onClick={() => {
+                void onCreateDraftPullRequest()
+              }}
+              disabled={prBusy || !run.workspacePath}
+              className="inline-flex h-6 w-6 shrink-0 items-center justify-center border border-edge/18 bg-accent-fill/6 text-accent transition hover:border-accent disabled:cursor-not-allowed disabled:opacity-40"
+              title={run.workspacePath ? 'commit branch and open a draft PR' : 'waiting for worker workspace'}
+              aria-label="create draft PR"
+            >
+              <GitPullRequest className="h-3.5 w-3.5" />
+            </button>
+          )}
+        </div>
       </div>
-      <div className="flex items-center justify-between gap-3">
-        <span className="uppercase tracking-label text-fg-4">handler</span>
-        <span className="truncate text-fg-2">{handler}</span>
-      </div>
-      <div className="flex items-center justify-between gap-3">
-        <span className="uppercase tracking-label text-fg-4">worker</span>
-        <span className="truncate text-fg-2">{run.workerId ?? 'waiting for claim'}</span>
-      </div>
+      {actionMessage ? (
+        <div className="border border-edge/12 bg-pit-3 px-3 py-2 font-mono text-xs text-fg-3">{actionMessage}</div>
+      ) : null}
     </div>
+  )
+}
+
+function BranchNameInput({
+  value,
+  valid,
+  onChange,
+  className = '',
+}: {
+  value: string
+  valid: boolean
+  onChange: (next: string) => void
+  className?: string
+}) {
+  return (
+    <label className={`block ${className}`}>
+      <div className="mb-1 font-mono text-[10px] uppercase tracking-label text-fg-4">branch</div>
+      <input
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        spellCheck={false}
+        className={`h-8 w-full border bg-transparent px-2 font-mono text-xs outline-none transition ${
+          valid ? 'border-edge/18 text-fg-2 focus:border-accent' : 'border-fail/40 text-fail focus:border-fail'
+        }`}
+      />
+    </label>
   )
 }
 
@@ -376,6 +479,23 @@ function RepositorySelector({
         display={selectedRepository.fullName}
         popupWidth="280"
       />
+    </div>
+  )
+}
+
+function ReadonlyRepositoryField({
+  repository,
+  className = '',
+}: {
+  repository: AgentRepository
+  className?: string
+}) {
+  return (
+    <div className={className}>
+      <div className="mb-1 font-mono text-[10px] uppercase tracking-label text-fg-4">repository</div>
+      <div className="flex h-8 min-w-0 items-center border border-transparent bg-transparent px-2 font-mono text-xs text-fg-2">
+        <span className="truncate">{repository.fullName}</span>
+      </div>
     </div>
   )
 }

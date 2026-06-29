@@ -15,6 +15,8 @@ import { readGithubTokenForRepository } from '../lib/github-credentials.js'
 import {
   agentRunProgressReports,
   agentRunArtifacts,
+  agentConversations,
+  agentMessages,
   agentRuns,
   agentTerminals,
   agentWorkers,
@@ -269,6 +271,132 @@ router.post('/runs/:id/cancel', async (req, res) => {
     res.json({ ok: true, run: updated, cancelRequested: !cancelsImmediately })
   } catch (error) {
     res.status(500).json({ ok: false, error: error instanceof Error ? error.message : 'Run cancellation failed' })
+  }
+})
+
+router.post('/runs/:id/follow-up', async (req, res) => {
+  const { id } = req.params
+
+  try {
+    const feedback = readOptionalString(req.body?.feedback)
+    if (!feedback) {
+      res.status(400).json({ ok: false, error: 'feedback is required' })
+      return
+    }
+
+    const db = getDb()
+    const [parentRun] = await db.select().from(agentRuns).where(eq(agentRuns.id, id)).limit(1)
+    if (!parentRun) {
+      res.status(404).json({ ok: false, error: 'Agent run not found' })
+      return
+    }
+    if (!parentRun.issueId) {
+      res.status(400).json({ ok: false, error: 'Agent run is not linked to an issue' })
+      return
+    }
+    if (!parentRun.repositoryId) {
+      res.status(400).json({ ok: false, error: 'Agent run is not linked to a repository' })
+      return
+    }
+
+    const [issue] = await db.select().from(pmIssues).where(eq(pmIssues.id, parentRun.issueId)).limit(1)
+    if (!issue) {
+      res.status(404).json({ ok: false, error: 'Issue not found' })
+      return
+    }
+
+    const now = new Date()
+    const conversationId = parentRun.conversationId ?? randomUUID()
+    const runId = randomUUID()
+    const messageId = randomUUID()
+    const codexSessionId = readRunCodexSessionId(parentRun.metadata)
+
+    if (!parentRun.conversationId) {
+      await db.insert(agentConversations).values({
+        id: conversationId,
+        issueId: issue.id,
+        title: issue.title,
+        status: 'open',
+        metadata: {
+          source: 'follow_up_fallback',
+        },
+        createdAt: now,
+        updatedAt: now,
+      })
+    } else {
+      await db
+        .update(agentConversations)
+        .set({ status: 'open', updatedAt: now })
+        .where(eq(agentConversations.id, conversationId))
+    }
+
+    const [run] = await db.insert(agentRuns).values({
+      id: runId,
+      conversationId,
+      parentRunId: parentRun.id,
+      issueId: issue.id,
+      subjectType: 'issue',
+      subjectId: issue.id,
+      workerId: parentRun.workerId ?? undefined,
+      repositoryId: parentRun.repositoryId,
+      projectKey: parentRun.projectKey,
+      repoFullName: parentRun.repoFullName,
+      baseBranch: parentRun.baseBranch,
+      branchName: parentRun.branchName,
+      workspacePath: parentRun.workspacePath ?? undefined,
+      agentKind: parentRun.agentKind,
+      status: 'queued',
+      statusMessage: parentRun.workerId ? 'queued for same agent worker' : 'queued for agent worker',
+      metadata: {
+        executionClass: 'general',
+        handler: 'general-mcp',
+        intent: 'engineering',
+        executionMode: 'code_worktree',
+        requiredCapabilities: ['codex.local', 'pach-mcp'],
+        queuedVia: 'agent_feedback',
+        conversationId,
+        parentRunId: parentRun.id,
+        feedbackMessageId: messageId,
+        feedback,
+        pendingInputMediaCount: 0,
+        codexSessionId,
+        preferredWorkerId: parentRun.workerId,
+      },
+      createdAt: now,
+      updatedAt: now,
+    }).returning()
+
+    const [message] = await db.insert(agentMessages).values({
+      id: messageId,
+      conversationId,
+      runId,
+      role: 'user',
+      body: feedback,
+      metadata: {
+        source: 'agent_feedback',
+        parentRunId: parentRun.id,
+      },
+      createdAt: now,
+    }).returning()
+
+    await db
+      .update(pmIssues)
+      .set({ lastActivityAt: now, updatedAt: now })
+      .where(eq(pmIssues.id, issue.id))
+
+    await appendRunActivity(run, 'queued agent follow-up from feedback', 'agent_run_created', {
+      runId,
+      conversationId,
+      parentRunId: parentRun.id,
+      workerId: parentRun.workerId,
+      codexSessionId,
+      inputMediaCount: 0,
+    })
+
+    res.status(201).json({ ok: true, run, message })
+  } catch (error) {
+    console.error('Agent follow-up failed', error)
+    res.status(500).json({ ok: false, error: error instanceof Error ? error.message : 'Failed to queue follow-up' })
   }
 })
 
@@ -1373,6 +1501,14 @@ function readMetadataString(metadata: unknown, key: string) {
   if (!metadata || typeof metadata !== 'object') return null
   const value = (metadata as Record<string, unknown>)[key]
   return typeof value === 'string' && value.trim() ? value : null
+}
+
+function readRunCodexSessionId(metadata: unknown) {
+  const topLevel = readMetadataString(metadata, 'codexSessionId')
+  if (topLevel) return topLevel
+  if (!metadata || typeof metadata !== 'object') return null
+  const completion = (metadata as Record<string, unknown>).completion
+  return readMetadataString(completion, 'codexSessionId')
 }
 
 async function runWorkerHealthCheck({ host, port, user }: { host: string; port: number; user: string }) {

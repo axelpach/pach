@@ -16,6 +16,7 @@ import {
   Circle,
   FileImage,
   FolderKanban,
+  GitPullRequest,
   Maximize2,
   Paperclip,
   Plus,
@@ -84,7 +85,10 @@ export default function IssueDetail() {
   const [bootstrappingRunId, setBootstrappingRunId] = useState<string | null>(null)
   const [agentActionMessage, setAgentActionMessage] = useState<string | null>(null)
   const [cancelingRunId, setCancelingRunId] = useState<string | null>(null)
+  const [prActionBusy, setPrActionBusy] = useState(false)
   const [selectedRepositoryId, setSelectedRepositoryId] = useState('')
+  const [branchNameDraft, setBranchNameDraft] = useState('')
+  const [branchNameTouched, setBranchNameTouched] = useState(false)
   const [organizationGithubSettings, setOrganizationGithubSettings] = useState<OrganizationGithubSettings | null>(null)
   const agentFullViewOpen = searchParams.get('agent') === 'full'
 
@@ -122,6 +126,7 @@ export default function IssueDetail() {
   const [activePullRequests] = useQuery(
     z.query.github_pull_requests.where('agentRunId', activeRun?.id ?? '').orderBy('updatedAt', 'desc'),
   )
+  const activePullRequest = activePullRequests[0] ?? null
   const [activeArtifacts] = useQuery(
     z.query.agent_run_artifacts.where('runId', activeRun?.id ?? '').orderBy('createdAt', 'desc'),
   )
@@ -222,6 +227,16 @@ export default function IssueDetail() {
     linkedRepositories.find((entry) => entry.link.isDefault)?.repository.id ??
     developerRepositories[0]?.id ??
     ''
+  const selectedDeveloperRepository =
+    developerRepositories.find((repository) => repository.id === selectedRepositoryId) ??
+    linkedRepositories.find((entry) => entry.link.isDefault)?.repository ??
+    developerRepositories[0] ??
+    null
+  const defaultBranchName = issue && selectedDeveloperRepository
+    ? buildDefaultAgentBranchName(issue, selectedDeveloperRepository)
+    : ''
+  const normalizedBranchNameDraft = normalizeBranchName(branchNameDraft)
+  const branchNameIsValid = isValidBranchName(normalizedBranchNameDraft)
 
   const workspaceStatuses = getWorkspaceStatuses(statuses)
   const issueIsDone = Boolean(issue?.completedAt || status?.type === 'completed')
@@ -264,6 +279,10 @@ export default function IssueDetail() {
   }, [issue?.id, issue?.title, titleFocused])
 
   useEffect(() => {
+    setBranchNameTouched(false)
+  }, [issue?.id])
+
+  useEffect(() => {
     if (developerRepositories.length === 0) {
       if (selectedRepositoryId) setSelectedRepositoryId('')
       return
@@ -272,6 +291,16 @@ export default function IssueDetail() {
     if (selectedRepositoryId && developerRepositories.some((repository) => repository.id === selectedRepositoryId)) return
     setSelectedRepositoryId(defaultDeveloperRepositoryId)
   }, [defaultDeveloperRepositoryId, developerRepositories, selectedRepositoryId])
+
+  useEffect(() => {
+    if (activeRun) return
+    if (!defaultBranchName) {
+      if (!branchNameTouched && branchNameDraft) setBranchNameDraft('')
+      return
+    }
+    if (branchNameTouched && branchNameDraft.trim()) return
+    if (branchNameDraft !== defaultBranchName) setBranchNameDraft(defaultBranchName)
+  }, [activeRun?.id, branchNameDraft, branchNameTouched, defaultBranchName])
 
   useEffect(() => {
     const organizationId = issue?.contextCompanyId
@@ -414,8 +443,12 @@ export default function IssueDetail() {
     const runId = crypto.randomUUID()
     const conversationId = crypto.randomUUID()
     const messageId = crypto.randomUUID()
-    const issueKey = issue.identifier.toLowerCase()
-    const branchName = `agent/${repo.projectKey}-${issueKey}-${slugify(issue.title)}`
+    const branchName = normalizeBranchName(branchNameDraft || buildDefaultAgentBranchName(issue, repo))
+    if (!isValidBranchName(branchName)) {
+      setAgentActionMessage('enter a valid branch name')
+      return
+    }
+    setBranchNameDraft(branchName)
 
     await z.mutate.agent_conversations.create({
       id: conversationId,
@@ -483,125 +516,41 @@ export default function IssueDetail() {
     if (!issue || !activeRun) return
     const trimmed = feedback.trim()
     if (!trimmed) return
-
-    const repo =
-      developerRepositories.find((entry) => entry.id === activeRun.repositoryId) ??
-      zeroRepositories.find((entry) => entry.id === activeRun.repositoryId) ??
-      selectDeveloperRepository()
-    if (!repo) {
-      setAgentActionMessage('connect a GitHub repository in settings first')
-      return
+    if (inputMedia.length > 0) {
+      throw new Error('Follow-up attachments are not supported for server-queued runs yet.')
     }
 
-    const conversationId = activeRun.conversationId ?? activeConversation?.id ?? crypto.randomUUID()
-    const conversationExists = agentConversations.some((conversation) => conversation.id === conversationId)
-    const runId = crypto.randomUUID()
-    const messageId = crypto.randomUUID()
-    const branchName = activeRun.branchName || `agent/${repo.projectKey}-${issue.identifier.toLowerCase()}-${slugify(issue.title)}`
-    const codexSessionId = readRunCodexSessionId(activeRun.metadata)
-    const hasInputMedia = inputMedia.length > 0
-
-    if (!conversationExists) {
-      await z.mutate.agent_conversations.create({
-        id: conversationId,
-        issueId: issue.id,
-        title: issue.title,
-        metadata: {
-          source: 'feedback_fallback',
-        },
-      })
-    } else {
-      await z.mutate.agent_conversations.update({
-        id: conversationId,
-        status: 'open',
-      })
+    const response = await authFetch(`${config.apiUrl}/agent/runs/${activeRun.id}/follow-up`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ feedback: trimmed }),
+    })
+    const payload = await response.json().catch(() => ({}))
+    if (!response.ok) {
+      throw new Error(readString(payload.error) ?? readString(payload.message) ?? 'Failed to queue follow-up')
     }
-
-    await z.mutate.agent_runs.create({
-      id: runId,
-      conversationId,
-      parentRunId: activeRun.id,
-      issueId: issue.id,
-      workerId: activeRun.workerId ?? undefined,
-      repositoryId: repo.id,
-      projectKey: repo.projectKey,
-      repoFullName: repo.fullName,
-      baseBranch: activeRun.baseBranch ?? repo.defaultBranch,
-      branchName,
-      status: hasInputMedia ? 'reserved' : 'queued',
-      statusMessage: hasInputMedia
-        ? 'uploading input media'
-        : activeRun.workerId ? 'queued for same agent worker' : 'queued for agent worker',
-      metadata: {
-        executionClass: 'general',
-        handler: 'general-mcp',
-        intent: 'engineering',
-        executionMode: 'code_worktree',
-        requiredCapabilities: ['codex.local', 'pach-mcp'],
-        queuedVia: 'agent_feedback',
-        conversationId,
-        parentRunId: activeRun.id,
-        feedbackMessageId: messageId,
-        feedback: trimmed,
-        pendingInputMediaCount: inputMedia.length,
-        codexSessionId,
-        preferredWorkerId: activeRun.workerId,
-      },
-    })
-
-    await z.mutate.agent_messages.create({
-      id: messageId,
-      conversationId,
-      runId,
-      role: 'user',
-      body: trimmed,
-      metadata: {
-        source: 'agent_feedback',
-        parentRunId: activeRun.id,
-      },
-    })
-
-    if (hasInputMedia) {
-      await uploadAgentInputMedia(runId, messageId, inputMedia)
-      await z.mutate.agent_runs.update({
-        id: runId,
-        status: 'queued',
-        statusMessage: activeRun.workerId ? 'queued for same agent worker' : 'queued for agent worker',
-      })
-    }
-
-    await logActivity('queued agent follow-up from feedback', 'agent_run_created', {
-      runId,
-      conversationId,
-      parentRunId: activeRun.id,
-      workerId: activeRun.workerId,
-      codexSessionId,
-      inputMediaCount: inputMedia.length,
-    })
   }
 
-  async function uploadAgentInputMedia(agentRunId: string, messageId: string, mediaItems: PendingAgentInputMedia[]) {
-    for (const item of mediaItems) {
-      const contentBase64 = await readFileAsBase64(item.file)
-      const response = await authFetch(`${config.apiUrl}/media/agent-run-input/upload`, {
+  async function createDraftPullRequestForActiveRun() {
+    if (!activeRun) return
+    setPrActionBusy(true)
+    setAgentActionMessage(null)
+
+    try {
+      const response = await authFetch(`${config.apiUrl}/agent/runs/${activeRun.id}/create-draft-pr`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({
-          runId: agentRunId,
-          messageId,
-          name: item.name,
-          fileName: item.file.name,
-          mimeType: item.file.type || 'application/octet-stream',
-          contentBase64,
-          width: item.dimensions?.width,
-          height: item.dimensions?.height,
-          kind: item.file.type.startsWith('image/') ? 'screenshot' : 'file',
-        }),
+        body: JSON.stringify({ title: issue?.title ?? activeRun.branchName }),
       })
+      const payload = await response.json().catch(() => ({}))
       if (!response.ok) {
-        const payload = await response.json().catch(() => ({}))
-        throw new Error(readString(payload.message) ?? readString(payload.error) ?? `could not upload ${item.name}`)
+        throw new Error(readString(payload.error) ?? readString(payload.message) ?? 'Failed to create draft PR')
       }
+      setAgentActionMessage(payload.pullRequest ? `draft PR ready: #${payload.pullRequest.number}` : 'draft PR created')
+    } catch (error) {
+      setAgentActionMessage(error instanceof Error ? error.message : 'Failed to create draft PR')
+    } finally {
+      setPrActionBusy(false)
     }
   }
 
@@ -741,6 +690,7 @@ export default function IssueDetail() {
           <AgentConversationView
             issue={issue}
             run={activeRun}
+            pullRequest={activePullRequest}
             progressReports={conversationProgressReports}
             legacyProgressActivity={legacyRunProgressActivity}
             messages={activeMessages}
@@ -748,11 +698,20 @@ export default function IssueDetail() {
             repositories={developerRepositories}
             selectedRepositoryId={selectedRepositoryId}
             onSelectedRepositoryIdChange={setSelectedRepositoryId}
+            branchNameDraft={branchNameDraft}
+            branchNameIsValid={branchNameIsValid}
+            onBranchNameDraftChange={(next) => {
+              setBranchNameTouched(true)
+              setBranchNameDraft(next)
+            }}
             allowCreateRun={!issueIsDone}
+            actionMessage={agentActionMessage}
             onCreateRun={createAgentRun}
             onSendFeedback={sendAgentFeedback}
+            onCreateDraftPullRequest={createDraftPullRequestForActiveRun}
             onCancelRun={cancelAgentRun}
             canceling={cancelingRunId === activeRun?.id}
+            prBusy={prActionBusy}
             onClose={closeAgentFullView}
           />
         ) : (
@@ -827,16 +786,26 @@ export default function IssueDetail() {
           <aside className="w-full md:w-[300px] shrink-0 border-t md:border-t-0 md:border-l border-edge/12 bg-pit/60 backdrop-blur-sm md:overflow-auto">
             <AgentSidebarCard
               run={activeRun}
+              pullRequest={activePullRequest}
               progressReports={activeProgressReports}
               legacyProgressActivity={legacyRunProgressActivity}
               workers={workers}
               repositories={developerRepositories}
               selectedRepositoryId={selectedRepositoryId}
               onSelectedRepositoryIdChange={setSelectedRepositoryId}
+              branchNameDraft={branchNameDraft}
+              branchNameIsValid={branchNameIsValid}
+              onBranchNameDraftChange={(next) => {
+                setBranchNameTouched(true)
+                setBranchNameDraft(next)
+              }}
               allowCreateRun={!issueIsDone}
+              actionMessage={agentActionMessage}
               onCreateRun={createAgentRun}
+              onCreateDraftPullRequest={createDraftPullRequestForActiveRun}
               onCancelRun={cancelAgentRun}
               canceling={cancelingRunId === activeRun?.id}
+              prBusy={prActionBusy}
               onOpenFullView={openAgentFullView}
             />
 
@@ -1043,33 +1012,47 @@ function NotFound({ onBack }: { onBack: () => void }) {
 
 function AgentSidebarCard({
   run,
+  pullRequest,
   progressReports,
   legacyProgressActivity,
   workers,
   repositories,
   selectedRepositoryId,
   onSelectedRepositoryIdChange,
+  branchNameDraft,
+  branchNameIsValid,
+  onBranchNameDraftChange,
   allowCreateRun,
+  actionMessage,
   onCreateRun,
+  onCreateDraftPullRequest,
   onCancelRun,
   canceling,
+  prBusy,
   onOpenFullView,
 }: {
   run: Schema['tables']['agent_runs']['row'] | null
+  pullRequest: Schema['tables']['github_pull_requests']['row'] | null
   progressReports: Schema['tables']['agent_run_progress_reports']['row'][]
   legacyProgressActivity: Schema['tables']['activity_events']['row'][]
   workers: Schema['tables']['agent_workers']['row'][]
   repositories: DeveloperRepository[]
   selectedRepositoryId: string
   onSelectedRepositoryIdChange: (next: string) => void
+  branchNameDraft: string
+  branchNameIsValid: boolean
+  onBranchNameDraftChange: (next: string) => void
   allowCreateRun: boolean
+  actionMessage: string | null
   onCreateRun: () => void | Promise<void>
+  onCreateDraftPullRequest: () => void | Promise<void>
   onCancelRun: () => void | Promise<void>
   canceling: boolean
+  prBusy: boolean
   onOpenFullView: () => void
 }) {
   const onlineWorkers = workers.filter((worker) => worker.status !== 'offline')
-  const canCreateRun = allowCreateRun && repositories.length > 0 && !run
+  const canCreateRun = allowCreateRun && repositories.length > 0 && branchNameIsValid && !run
   const runIsActive = Boolean(run && !['completed', 'failed', 'canceled'].includes(run.status))
   const runIsFinal = Boolean(run && ['completed', 'failed', 'canceled'].includes(run.status))
   const canCancelRun = Boolean(run && !runIsFinal)
@@ -1153,6 +1136,17 @@ function AgentSidebarCard({
           onChange={onSelectedRepositoryIdChange}
           className="mb-3"
         />
+      ) : !run && repositories.length === 1 ? (
+        <ReadonlyRepositoryField repository={repositories[0]} className="mb-3" />
+      ) : null}
+
+      {!run && repositories.length > 0 ? (
+        <BranchNameInput
+          value={branchNameDraft}
+          valid={branchNameIsValid}
+          onChange={onBranchNameDraftChange}
+          className="mb-3"
+        />
       ) : null}
 
       {!run ? (
@@ -1166,17 +1160,25 @@ function AgentSidebarCard({
       ) : (
         <div className="space-y-3">
           <div className="space-y-1 font-mono text-xs">
-            <div className="flex items-center justify-between gap-3">
+            <div className="flex min-w-0 items-center justify-between gap-3">
               <span className="uppercase tracking-label text-fg-4">status</span>
               <span className={run.status === 'failed' ? 'text-fail' : 'text-accent'}>{run.status}</span>
             </div>
-            <div className="flex items-center justify-between gap-3">
+            <div className="flex min-w-0 items-center justify-between gap-3">
               <span className="uppercase tracking-label text-fg-4">handler</span>
-              <span className="truncate text-fg-2">{handler}</span>
+              <span className="min-w-0 truncate text-fg-2">{handler}</span>
             </div>
-            <div className="flex items-center justify-between gap-3">
+            <div className="flex min-w-0 items-center justify-between gap-3">
               <span className="uppercase tracking-label text-fg-4">worker</span>
-              <span className="truncate text-fg-2">{run.workerId ?? 'waiting for claim'}</span>
+              <span className="min-w-0 truncate text-fg-2">{run.workerId ?? 'waiting for claim'}</span>
+            </div>
+            <div className="flex min-w-0 items-center justify-between gap-3">
+              <span className="uppercase tracking-label text-fg-4">repo</span>
+              <span className="min-w-0 truncate text-fg-2">{run.repoFullName}</span>
+            </div>
+            <div className="flex min-w-0 items-center justify-between gap-3">
+              <span className="uppercase tracking-label text-fg-4">branch</span>
+              <span className="min-w-0 truncate text-fg-2">{run.branchName}</span>
             </div>
           </div>
 
@@ -1196,6 +1198,38 @@ function AgentSidebarCard({
               // waiting for progress
             </div>
           )}
+
+          <div className="flex items-center gap-2">
+            {pullRequest ? (
+              <a
+                href={pullRequest.url}
+                target="_blank"
+                rel="noreferrer"
+                className="inline-flex min-w-0 items-center gap-1.5 border border-edge/18 bg-accent-fill/4 px-2.5 py-2 font-mono text-xs text-accent hover:border-accent"
+              >
+                <GitPullRequest className="h-3.5 w-3.5 shrink-0" />
+                <span className="truncate">#{pullRequest.number}</span>
+              </a>
+            ) : (
+              <button
+                type="button"
+                onClick={() => {
+                  void onCreateDraftPullRequest()
+                }}
+                disabled={prBusy || !run.workspacePath}
+                className="inline-flex h-8 w-8 shrink-0 items-center justify-center border border-edge/18 bg-accent-fill/6 text-accent transition hover:border-accent disabled:cursor-not-allowed disabled:opacity-40"
+                title={run.workspacePath ? 'commit branch and open a draft PR' : 'waiting for worker workspace'}
+                aria-label="create draft PR"
+              >
+                <GitPullRequest className="h-3.5 w-3.5" />
+              </button>
+            )}
+          </div>
+          {actionMessage ? (
+            <div className="border border-edge/12 bg-pit-3 px-2.5 py-2 font-mono text-xs text-fg-3">
+              {actionMessage}
+            </div>
+          ) : null}
         </div>
       )}
     </div>
@@ -1234,6 +1268,49 @@ function RepositorySelector({
         popupWidth="260"
       />
     </div>
+  )
+}
+
+function ReadonlyRepositoryField({
+  repository,
+  className = '',
+}: {
+  repository: DeveloperRepository
+  className?: string
+}) {
+  return (
+    <div className={className}>
+      <div className="mb-1 font-mono text-[10px] uppercase tracking-label text-fg-4">repository</div>
+      <div className="flex h-8 min-w-0 items-center border border-transparent bg-transparent px-2 font-mono text-xs text-fg-2">
+        <span className="truncate">{repository.fullName}</span>
+      </div>
+    </div>
+  )
+}
+
+function BranchNameInput({
+  value,
+  valid,
+  onChange,
+  className = '',
+}: {
+  value: string
+  valid: boolean
+  onChange: (next: string) => void
+  className?: string
+}) {
+  return (
+    <label className={`block ${className}`}>
+      <div className="mb-1 font-mono text-[10px] uppercase tracking-label text-fg-4">branch</div>
+      <input
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        spellCheck={false}
+        className={`h-8 w-full border bg-transparent px-2 font-mono text-xs outline-none transition ${
+          valid ? 'border-edge/18 text-fg-2 focus:border-accent' : 'border-fail/40 text-fail focus:border-fail'
+        }`}
+      />
+    </label>
   )
 }
 
@@ -1628,24 +1705,6 @@ function AgentRunPanel({
       setTerminalOutput(payload.stdout ?? '')
     } catch (error) {
       setGoalMessage(error instanceof Error ? error.message : 'Failed to create draft PR')
-    } finally {
-      setPrBusy(false)
-    }
-  }
-
-  async function syncPullRequest() {
-    if (!run) return
-    setPrBusy(true)
-
-    try {
-      const res = await authFetch(`${config.apiUrl}/agent/runs/${run.id}/sync-pull-request`, {
-        method: 'POST',
-      })
-      const payload = await res.json().catch(() => ({}))
-      if (!res.ok) throw new Error(payload.error ?? 'Failed to sync pull request')
-      setGoalMessage(payload.pullRequest ? 'pull request synced' : 'no pull request found for branch yet')
-    } catch (error) {
-      setGoalMessage(error instanceof Error ? error.message : 'Failed to sync pull request')
     } finally {
       setPrBusy(false)
     }
@@ -2145,31 +2204,16 @@ function AgentRunPanel({
           </div>
           ) : null}
 
-          {showLegacyAgentControls ? (
-          <div className="flex items-center gap-2">
-            {pullRequest ? (
-              <a
-                href={pullRequest.url}
-                target="_blank"
-                rel="noreferrer"
-                className="min-w-0 flex-1 truncate border border-edge/18 bg-accent-fill/4 px-2.5 py-2 font-mono text-xs text-accent hover:border-accent"
-              >
-                PR #{pullRequest.number} · {pullRequest.isDraft ? 'draft' : pullRequest.state}
-              </a>
-            ) : (
-              <div className="min-w-0 flex-1 font-mono text-xs text-fg-4">// no pull request yet</div>
-            )}
-            <button
-              onClick={() => {
-                void syncPullRequest()
-              }}
-              disabled={prBusy}
-              className="shrink-0 border border-edge/18 bg-pit-3 px-2.5 py-2 font-mono text-[10px] uppercase tracking-label text-fg-3 transition hover:border-accent hover:text-accent disabled:cursor-wait disabled:opacity-40"
-              title="check GitHub for a PR matching this branch"
-            >
-              {prBusy ? 'syncing...' : 'sync pr'}
-            </button>
-          </div>
+          {showLegacyAgentControls && pullRequest ? (
+          <a
+            href={pullRequest.url}
+            target="_blank"
+            rel="noreferrer"
+            className="inline-flex w-fit min-w-0 items-center gap-1.5 border border-edge/18 bg-accent-fill/4 px-2.5 py-2 font-mono text-xs text-accent hover:border-accent"
+          >
+            <GitPullRequest className="h-3.5 w-3.5 shrink-0" />
+            <span className="truncate">#{pullRequest.number}</span>
+          </a>
           ) : null}
 
           {showLegacyAgentControls ? (
@@ -2268,14 +2312,6 @@ function readMetadataString(metadata: unknown, key: string) {
   return typeof value === 'string' && value.trim() ? value : null
 }
 
-function readRunCodexSessionId(metadata: unknown) {
-  const topLevel = readMetadataString(metadata, 'codexSessionId')
-  if (topLevel) return topLevel
-  if (!metadata || typeof metadata !== 'object') return null
-  const completion = (metadata as Record<string, unknown>).completion
-  return readMetadataString(completion, 'codexSessionId')
-}
-
 function isTextEntryTarget(target: EventTarget | null) {
   if (!(target instanceof HTMLElement)) return false
   if (target.isContentEditable) return true
@@ -2339,6 +2375,28 @@ function statusRank(statusType: string) {
   if (statusType === 'completed') return 5
   if (statusType === 'canceled') return 6
   return 99
+}
+
+function buildDefaultAgentBranchName(issue: Schema['tables']['pm_issues']['row'], repository: DeveloperRepository) {
+  return `agent/${repository.projectKey}-${issue.identifier.toLowerCase()}-${slugify(issue.title)}`
+}
+
+function normalizeBranchName(value: string) {
+  return value
+    .trim()
+    .replace(/\s+/g, '-')
+    .replace(/\/+/g, '/')
+    .replace(/^\/+|\/+$/g, '')
+}
+
+function isValidBranchName(value: string) {
+  if (!value) return false
+  if (value === '@') return false
+  if (value.endsWith('.')) return false
+  if (value.includes('..')) return false
+  if (value.includes('@{')) return false
+  if (/[~^:?*[\]\\\s]/.test(value)) return false
+  return value.split('/').every((part) => part && !part.startsWith('.') && !part.endsWith('.lock'))
 }
 
 function slugify(value: string) {
