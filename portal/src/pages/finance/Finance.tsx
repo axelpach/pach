@@ -207,6 +207,39 @@ function financeForecastScenarioStorageKey(userId: string, organizationId: strin
   return `pach:finance:forecast-scenario:${userId}:${organizationId}:${currencyCode}`
 }
 
+function financeCategoryFiltersStorageKey(userId: string, organizationId: string) {
+  return `pach:finance:category-filters:${userId}:${organizationId}`
+}
+
+function readStoredActiveFilters(storageKey: string): ActiveFilters {
+  if (typeof window === 'undefined') return {}
+
+  try {
+    const raw = window.localStorage.getItem(storageKey)
+    if (!raw) return {}
+    const parsed: unknown = JSON.parse(raw)
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {}
+
+    return Object.fromEntries(
+      Object.entries(parsed as Record<string, unknown>)
+        .filter((entry): entry is [string, string[]] => Array.isArray(entry[1]) && entry[1].every((value) => typeof value === 'string')),
+    )
+  } catch {
+    return {}
+  }
+}
+
+function writeStoredActiveFilters(storageKey: string, filters: ActiveFilters) {
+  if (typeof window === 'undefined') return
+
+  try {
+    if (Object.keys(filters).length === 0) window.localStorage.removeItem(storageKey)
+    else window.localStorage.setItem(storageKey, JSON.stringify(filters))
+  } catch {
+    // Ignore local persistence failures; filters still work for the current session.
+  }
+}
+
 function readForecastScenarioInputs(storageKey: string): ForecastScenarioInputs | null {
   if (typeof window === 'undefined') return null
 
@@ -299,6 +332,7 @@ export default function Finance() {
   const [activeFilters, setActiveFilters] = useState<ActiveFilters>({})
   const [dashboardFilters, setDashboardFilters] = useState<ActiveFilters>({})
   const [categoryFilters, setCategoryFilters] = useState<ActiveFilters>({})
+  const [categoryFiltersHydratedKey, setCategoryFiltersHydratedKey] = useState<string | null>(null)
   const [reviewStatusFilter, setReviewStatusFilter] = useState<ReviewStatusFilter>('all')
   const [search, setSearch] = useState('')
   const [movementSortDirection, setMovementSortDirection] = useState<MovementSortDirection>('desc')
@@ -526,6 +560,9 @@ export default function Finance() {
   const forecastCurrencyCode = dashboardReportingCurrencyCode
   const forecastScenarioStorageKey = user && selectedOrganizationId
     ? financeForecastScenarioStorageKey(user.id, selectedOrganizationId, forecastCurrencyCode)
+    : null
+  const categoryFiltersStorageKey = user && selectedOrganizationId
+    ? financeCategoryFiltersStorageKey(user.id, selectedOrganizationId)
     : null
   const forecastBalanceMovements = scopedMovements
     .filter((movement) => movement.status !== 'ignored')
@@ -852,6 +889,22 @@ export default function Finance() {
     if (!organizationStorageKey || !selectedOrganizationId) return
     localStorage.setItem(organizationStorageKey, selectedOrganizationId)
   }, [organizationStorageKey, selectedOrganizationId])
+
+  useEffect(() => {
+    if (!categoryFiltersStorageKey) {
+      setCategoryFilters({})
+      setCategoryFiltersHydratedKey(null)
+      return
+    }
+
+    setCategoryFilters(readStoredActiveFilters(categoryFiltersStorageKey))
+    setCategoryFiltersHydratedKey(categoryFiltersStorageKey)
+  }, [categoryFiltersStorageKey])
+
+  useEffect(() => {
+    if (!categoryFiltersStorageKey || categoryFiltersHydratedKey !== categoryFiltersStorageKey) return
+    writeStoredActiveFilters(categoryFiltersStorageKey, categoryFilters)
+  }, [categoryFilters, categoryFiltersHydratedKey, categoryFiltersStorageKey])
 
   useEffect(() => {
     const targetCurrencies = CURRENCIES.filter((currencyCode) => currencyCode !== dashboardReportingCurrencyCode)
@@ -1762,6 +1815,7 @@ export default function Finance() {
                 setOrganizationId(next)
                 setActiveFilters({})
                 setDashboardFilters({})
+                setCategoryFilters({})
                 if (organizationStorageKey) localStorage.setItem(organizationStorageKey, next)
               }}
               options={organizationOptions}
@@ -1840,6 +1894,7 @@ export default function Finance() {
                   setOrganizationId(next)
                   setActiveFilters({})
                   setDashboardFilters({})
+                  setCategoryFilters({})
                   if (organizationStorageKey) localStorage.setItem(organizationStorageKey, next)
                 }}
                 options={organizationOptions}
