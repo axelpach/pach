@@ -47,6 +47,10 @@ const PRIORITY_GROUPS = [
 const ESTIMATES = [1, 2, 4, 8, 16]
 const ACTIVE_AGENT_RUN_STATUSES = new Set<string>(['queued', 'reserved', 'bootstrapping', 'running', 'needs_human', 'pr_ready'])
 
+function isActiveAgentRun(run: Schema['tables']['agent_runs']['row']) {
+  return Boolean(run.issueId && ACTIVE_AGENT_RUN_STATUSES.has(run.status))
+}
+
 const STATUS_BUCKETS = [
   { key: 'backlog', label: 'backlog', type: 'backlog' },
   { key: 'todo', label: 'todo', type: 'unstarted' },
@@ -335,7 +339,7 @@ export default function Issues() {
   const labelMap = new Map(scopedLabels.map((entry) => [entry.id, entry]))
   const activeAgentRunIssueIds = new Set(
     agentRuns
-      .filter((run) => ACTIVE_AGENT_RUN_STATUSES.has(run.status) && run.workerId)
+      .filter(isActiveAgentRun)
       .map((run) => run.issueId),
   )
   const labelsByIssue = new Map<string, Schema['tables']['pm_labels']['row'][]>()
@@ -2201,8 +2205,8 @@ function DropIndicator({ position }: { position: 'top' | 'bottom' }) {
 function AgentRunDot() {
   return (
     <>
-      <span className="absolute h-2.5 w-2.5 animate-ping rounded-full bg-accent opacity-40" />
-      <span className="h-2 w-2 rounded-full bg-accent shadow-glow-sm" />
+      <span className="absolute h-3.5 w-3.5 animate-ping rounded-full bg-emerald-400/45" />
+      <span className="h-2.5 w-2.5 rounded-full border border-emerald-200/70 bg-emerald-400 shadow-[0_0_12px_rgba(52,211,153,0.65)]" />
     </>
   )
 }
@@ -2347,8 +2351,8 @@ function IssueRow({
       {hasActiveAgentRun ? (
         <div
           className="relative flex h-5 w-5 shrink-0 items-center justify-center"
-          title="active VPS agent run"
-          aria-label="active VPS agent run"
+          title="active agent run"
+          aria-label="active agent run"
         >
           <AgentRunDot />
         </div>
