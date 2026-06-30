@@ -25,6 +25,7 @@ import Campaigns from './pages/whatsapp/Campaigns'
 import CampaignDetail from './pages/whatsapp/CampaignDetail'
 import { Scanlines, LiveClock } from './components/pach'
 import { SearchPalette } from './components/SearchPalette'
+import { GlobalIssueComposer, requestGlobalIssueComposer } from './pages/issues/IssueComposer'
 
 const HOME_PATH = '/issues'
 const WHATSAPP_PROJECTS = new Set(['ardia', 'ardia-mkt'])
@@ -364,12 +365,12 @@ function AppShell() {
       if (isTextEntryTarget(event.target)) return
 
       event.preventDefault()
-      navigate('/issues', { state: { openIssueComposerAt: Date.now() } })
+      requestGlobalIssueComposer()
     }
 
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [navigate])
+  }, [])
 
   useEffect(() => {
     function handleKeyDown(event: KeyboardEvent) {
@@ -450,6 +451,7 @@ function AppShell() {
           </div>
         </div>
       </div>
+      <GlobalIssueComposer />
     </div>
   )
 }

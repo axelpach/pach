@@ -35,6 +35,7 @@ import { useAuth } from '../../lib/auth'
 import { useTrackerContext } from './IssuesLayout'
 import { IconTooltip } from '../../components/IconTooltip'
 import { DeleteViewModal } from '../../components/DeleteViewModal'
+import { requestGlobalIssueComposer } from './IssueComposer'
 
 const PRIORITY_GROUPS = [
   { value: 1, label: 'urgent', accent: 'text-amber' },
@@ -44,7 +45,6 @@ const PRIORITY_GROUPS = [
   { value: 0, label: 'unprioritized', accent: 'text-fg-3' },
 ] as const
 
-const ESTIMATES = [1, 2, 4, 8, 16]
 const ACTIVE_AGENT_RUN_STATUSES = new Set<string>(['queued', 'reserved', 'bootstrapping', 'running', 'needs_human', 'pr_ready'])
 
 function isActiveAgentRun(run: Schema['tables']['agent_runs']['row']) {
@@ -127,12 +127,6 @@ const DEFAULT_VISIBLE_FIELDS: RowField[] = [
   'updated',
 ]
 
-type Foundation = {
-  defaultTeamId: string
-  defaultStatusId: string
-  defaultProjectId?: string
-}
-
 type DeveloperRepository = Pick<
   Schema['tables']['github_repositories']['row'],
   'id' | 'projectKey' | 'fullName' | 'defaultBranch' | 'active'
@@ -149,10 +143,6 @@ type RowShortcutRequest = {
   nonce: number
 }
 
-type IssueRouteState = {
-  openIssueComposerAt?: number
-}
-
 type IssueViewState = {
   filters: ActiveFilters
   collapsedPriorities: number[]
@@ -166,7 +156,7 @@ export default function Issues() {
   const { user } = useAuth()
   const location = useLocation()
   const navigate = useNavigate()
-  const { section, setSection, composerRequestId } = useTrackerContext()
+  const { section, setSection } = useTrackerContext()
 
   const [companies] = useQuery(z.query.organizations.orderBy('name', 'asc'))
   const [users] = useQuery(z.query.users.orderBy('email', 'asc'))
@@ -203,18 +193,6 @@ export default function Issues() {
   const isManualSort = sortConfig.field === 'manual'
 
   const [activeFilters, setActiveFilters] = useState<ActiveFilters>(() => initialStoredView.filters)
-  const [composerOpen, setComposerOpen] = useState(false)
-  const [composerTitle, setComposerTitle] = useState('')
-  const [composerDescription, setComposerDescription] = useState('')
-  const [composerCompanyId, setComposerCompanyId] = useState('')
-  const [composerTeamId, setComposerTeamId] = useState('')
-  const [composerProjectId, setComposerProjectId] = useState('')
-  const [composerStatusId, setComposerStatusId] = useState('')
-  const [composerAssigneeId, setComposerAssigneeId] = useState('')
-  const [composerPriority, setComposerPriority] = useState<number>(2)
-  const [composerEstimate, setComposerEstimate] = useState<number>(4)
-  const [composerCreateMore, setComposerCreateMore] = useState(false)
-  const [creatingIssue, setCreatingIssue] = useState(false)
   const [creatingAgentRunIssueId, setCreatingAgentRunIssueId] = useState<string | null>(null)
   const [collapsedPriorities, setCollapsedPriorities] = useState<Set<number>>(() => new Set(initialStoredView.collapsedPriorities))
   const [collapsedStatuses, setCollapsedStatuses] = useState<Set<string>>(() => new Set(initialStoredView.collapsedStatuses))
@@ -375,62 +353,9 @@ export default function Issues() {
   }
   const workspaceStatuses = getWorkspaceStatuses(statuses)
 
-  const contextCompanies = scopedCompanies
   const selectedTeam = section.kind === 'team' ? teams.find((team) => team.id === section.teamId) ?? null : null
   const selectedTeamIssues = selectedTeam ? scopedIssues.filter((issue) => issue.teamId === selectedTeam.id) : []
   const selectedTeamProjects = selectedTeam ? projects.filter((project) => project.teamId === selectedTeam.id) : []
-
-  const selectedComposerTeam = teams.find((team) => team.id === composerTeamId) ?? teams[0] ?? null
-  const composerProjects = selectedComposerTeam
-    ? projects.filter((project) => project.teamId === selectedComposerTeam.id)
-    : []
-  const defaultComposerStatusId =
-    workspaceStatuses.find((status) => status.type !== 'completed' && status.type !== 'canceled')?.id ??
-    workspaceStatuses[0]?.id ??
-    ''
-
-  useEffect(() => {
-    if (!teams.length) return
-    if (composerTeamId && teams.some((team) => team.id === composerTeamId)) return
-    setComposerTeamId(teams[0].id)
-  }, [composerTeamId, teams])
-
-  useEffect(() => {
-    // optional project — keep blank if user hasn't picked one; only clear when invalid
-    if (!composerProjectId) return
-    if (composerProjects.some((project) => project.id === composerProjectId)) return
-    setComposerProjectId('')
-  }, [composerProjectId, composerProjects])
-
-  useEffect(() => {
-    if (!composerStatusId && defaultComposerStatusId) {
-      setComposerStatusId(defaultComposerStatusId)
-      return
-    }
-    if (composerStatusId && workspaceStatuses.some((s) => s.id === composerStatusId)) return
-    setComposerStatusId(defaultComposerStatusId)
-  }, [composerStatusId, workspaceStatuses, defaultComposerStatusId])
-
-  useEffect(() => {
-    if (!composerCompanyId && !canAccessUnscoped && contextCompanies.length === 1) {
-      setComposerCompanyId(contextCompanies[0].id)
-      return
-    }
-    // organization context is optional only for users who can access unscoped content.
-    if (!composerCompanyId) return
-    if (contextCompanies.some((company) => company.id === composerCompanyId)) return
-    setComposerCompanyId('')
-  }, [canAccessUnscoped, composerCompanyId, contextCompanies])
-
-  useEffect(() => {
-    if (!composerAssigneeId && user?.id) {
-      setComposerAssigneeId(user.id)
-      return
-    }
-    if (composerAssigneeId && !assignableUsers.some((u) => u.id === composerAssigneeId)) {
-      setComposerAssigneeId(user?.id ?? '')
-    }
-  }, [assignableUsers, composerAssigneeId, user])
 
   function openSaveViewModal() {
     if (!user) return
@@ -558,25 +483,8 @@ export default function Issues() {
     }
   }, [storageKey, section.kind, activeFilters, collapsedPriorities, collapsedStatuses, sortConfig, visibleFields])
 
-  const lastComposerRequestRef = useRef(composerRequestId)
-  useEffect(() => {
-    if (composerRequestId === lastComposerRequestRef.current) return
-    lastComposerRequestRef.current = composerRequestId
-    setComposerOpen(true)
-  }, [composerRequestId])
-
-  const issueRouteState = location.state as IssueRouteState | null
-  const openIssueComposerAt =
-    typeof issueRouteState?.openIssueComposerAt === 'number' ? issueRouteState.openIssueComposerAt : null
-  useEffect(() => {
-    if (!openIssueComposerAt) return
-    setComposerOpen(true)
-    navigate(`${location.pathname}${location.search}`, { replace: true, state: null })
-  }, [location.pathname, location.search, navigate, openIssueComposerAt])
-
   useEffect(() => {
     function handleKeyDown(event: KeyboardEvent) {
-      if (composerOpen) return
       if (event.key !== 'c' || event.ctrlKey || event.metaKey || event.altKey) return
 
       const target = event.target
@@ -590,12 +498,12 @@ export default function Issues() {
       }
 
       event.preventDefault()
-      setComposerOpen(true)
+      requestGlobalIssueComposer()
     }
 
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [composerOpen])
+  }, [])
 
   useEffect(() => {
     function handleKeyDown(event: KeyboardEvent) {
@@ -626,19 +534,6 @@ export default function Issues() {
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
   }, [hoveredIssueId])
-
-  useEffect(() => {
-    if (!composerOpen) return
-
-    function handleEscape(event: KeyboardEvent) {
-      if (event.key !== 'Escape') return
-      event.preventDefault()
-      setComposerOpen(false)
-    }
-
-    window.addEventListener('keydown', handleEscape)
-    return () => window.removeEventListener('keydown', handleEscape)
-  }, [composerOpen])
 
   useEffect(() => {
     if (!projectModal) return
@@ -756,7 +651,7 @@ export default function Issues() {
       icon: Building2,
       options: [
         ...(canAccessUnscoped ? [{ value: '__none', label: 'no organization' }] : []),
-        ...contextCompanies.map((c) => ({ value: c.id, label: c.name })),
+        ...scopedCompanies.map((c) => ({ value: c.id, label: c.name })),
       ],
     },
     {
@@ -847,14 +742,6 @@ export default function Issues() {
       .sort(compareIssuesForBucketOrder)
     const maxSortOrder = bucket[bucket.length - 1]?.sortOrder ?? 0
     return maxSortOrder + SORT_ORDER_STEP
-  }
-
-  function getTopSortOrder(priority: number, statusId: string, excludeIssueId?: string) {
-    const bucket = scopedIssues
-      .filter((issue) => issue.priority === priority && issue.statusId === statusId && issue.id !== excludeIssueId)
-      .sort(compareIssuesForBucketOrder)
-    const minSortOrder = bucket[0]?.sortOrder
-    return minSortOrder == null ? SORT_ORDER_BASE : minSortOrder - SORT_ORDER_STEP
   }
 
   async function logActivity(
@@ -1230,121 +1117,6 @@ export default function Issues() {
     )
   }
 
-  async function ensureWorkspaceFoundation(): Promise<Foundation> {
-    const defaultStatusId =
-      workspaceStatuses.find((status) => status.type !== 'completed' && status.type !== 'canceled')?.id ??
-      workspaceStatuses[0]?.id
-    const existingTeam = teams[0]
-    if (existingTeam && defaultStatusId) {
-      const defaultProjectId = projects.find((project) => project.teamId === existingTeam.id)?.id
-      return {
-        defaultTeamId: existingTeam.id,
-        defaultStatusId,
-        defaultProjectId,
-      }
-    }
-
-    const teamId = existingTeam?.id ?? crypto.randomUUID()
-    const statusDefs = [
-      { id: crypto.randomUUID(), name: 'Todo', key: 'todo', type: 'unstarted', color: '#94a3b8' },
-      { id: crypto.randomUUID(), name: 'In Progress', key: 'in_progress', type: 'started', color: '#fbbf24' },
-      { id: crypto.randomUUID(), name: 'In Review', key: 'in_review', type: 'review', color: '#38bdf8' },
-      { id: crypto.randomUUID(), name: 'Blocked', key: 'blocked', type: 'blocked', color: '#f87171' },
-      { id: crypto.randomUUID(), name: 'Canceled', key: 'canceled', type: 'canceled', color: '#6b7280' },
-      { id: crypto.randomUUID(), name: 'Done', key: 'done', type: 'completed', color: '#4ade80' },
-    ]
-    const projectId = crypto.randomUUID()
-
-    if (!existingTeam) {
-      await z.mutate.pm_teams.create({
-        id: teamId,
-        key: 'PAC',
-        name: 'Pach',
-        description: 'Default workspace team',
-        color: '#00ff88',
-      })
-    }
-
-    for (const [index, status] of statusDefs.entries()) {
-      await z.mutate.pm_statuses.create({
-        id: status.id,
-        name: status.name,
-        key: status.key,
-        type: status.type,
-        color: status.color,
-        position: index,
-      })
-    }
-
-    await z.mutate.pm_projects.create({
-      id: projectId,
-      teamId,
-      name: 'Core',
-      slug: 'core',
-      description: 'Core workspace roadmap',
-    })
-
-    return {
-      defaultTeamId: teamId,
-      defaultStatusId: statusDefs[0].id,
-      defaultProjectId: projectId,
-    }
-  }
-
-  async function createIssue() {
-    if (!composerTitle.trim() || !user) return
-    if (!composerCompanyId && !canAccessUnscoped) return
-
-    setCreatingIssue(true)
-    try {
-      const foundation = await ensureWorkspaceFoundation()
-      const teamId = composerTeamId || foundation.defaultTeamId
-      const team = teams.find((entry) => entry.id === teamId) ?? {
-        id: foundation.defaultTeamId,
-        key: 'PAC',
-        name: 'Pach',
-      }
-
-      const statusId =
-        composerStatusId ||
-        workspaceStatuses.find((status) => status.type !== 'completed' && status.type !== 'canceled')?.id ||
-        defaultComposerStatusId ||
-        foundation.defaultStatusId
-
-      const nextNumber =
-        scopedIssues.filter((issue) => issue.teamId === teamId).reduce((max, issue) => Math.max(max, issue.number), 0) + 1
-
-      const issueId = crypto.randomUUID()
-      await z.mutate.pm_issues.create({
-        id: issueId,
-        contextCompanyId: composerCompanyId || undefined,
-        teamId,
-        projectId: composerProjectId || undefined,
-        statusId,
-        assigneeId: composerAssigneeId || user.id,
-        creatorId: user.id,
-        identifier: `${team.key}-${nextNumber}`,
-        number: nextNumber,
-        title: composerTitle.trim(),
-        description: composerDescription.trim() || undefined,
-        priority: composerPriority,
-        estimate: composerEstimate,
-        sortOrder: getTopSortOrder(composerPriority, statusId),
-      })
-
-      await logActivity(issueId, `Created issue ${team.key}-${nextNumber}`)
-      setComposerTitle('')
-      setComposerDescription('')
-      if (composerCreateMore) {
-        // keep the modal open for quick successive creation
-      } else {
-        setComposerOpen(false)
-      }
-    } finally {
-      setCreatingIssue(false)
-    }
-  }
-
   return (
     <>
     <div className="flex h-full min-h-0 flex-col">
@@ -1586,46 +1358,11 @@ export default function Issues() {
                     ? 'try another team or search term, or create a new issue to seed the tracker.'
                     : 'you do not need to initialize a whole workspace first. create one issue and we can refine from there.'}
                   actionLabel="create issue"
-                  onAction={() => setComposerOpen(true)}
+                  onAction={requestGlobalIssueComposer}
                 />
               )}
             </div>
     </div>
-
-    {composerOpen && (
-      <IssueComposerModal
-        title={composerTitle}
-        onTitleChange={setComposerTitle}
-        description={composerDescription}
-        onDescriptionChange={setComposerDescription}
-        companyId={composerCompanyId}
-        onCompanyChange={setComposerCompanyId}
-        teamId={composerTeamId}
-        onTeamChange={setComposerTeamId}
-        projectId={composerProjectId}
-        onProjectChange={setComposerProjectId}
-        statusId={composerStatusId}
-        onStatusChange={setComposerStatusId}
-        assigneeId={composerAssigneeId}
-        onAssigneeChange={setComposerAssigneeId}
-        priority={composerPriority}
-        onPriorityChange={setComposerPriority}
-        estimate={composerEstimate}
-        onEstimateChange={setComposerEstimate}
-        createMore={composerCreateMore}
-        onCreateMoreChange={setComposerCreateMore}
-        companies={contextCompanies}
-        teams={teams}
-        projects={composerProjects}
-        statuses={workspaceStatuses}
-        users={assignableUsers}
-        team={selectedComposerTeam}
-        creating={creatingIssue}
-        organizationRequired={!canAccessUnscoped}
-        onClose={() => setComposerOpen(false)}
-        onCreate={createIssue}
-      />
-    )}
 
     {projectModal && (
       <ProjectModal
@@ -1771,323 +1508,6 @@ function EmptyState({
         ) : null}
       </div>
     </div>
-  )
-}
-
-function IssueComposerModal({
-  title,
-  onTitleChange,
-  description,
-  onDescriptionChange,
-  companyId,
-  onCompanyChange,
-  teamId,
-  onTeamChange,
-  projectId,
-  onProjectChange,
-  statusId,
-  onStatusChange,
-  assigneeId,
-  onAssigneeChange,
-  priority,
-  onPriorityChange,
-  estimate,
-  onEstimateChange,
-  createMore,
-  onCreateMoreChange,
-  companies,
-  teams,
-  projects,
-  statuses,
-  users,
-  team,
-  creating,
-  organizationRequired,
-  onClose,
-  onCreate,
-}: {
-  title: string
-  onTitleChange: (value: string) => void
-  description: string
-  onDescriptionChange: (value: string) => void
-  companyId: string
-  onCompanyChange: (value: string) => void
-  teamId: string
-  onTeamChange: (value: string) => void
-  projectId: string
-  onProjectChange: (value: string) => void
-  statusId: string
-  onStatusChange: (value: string) => void
-  assigneeId: string
-  onAssigneeChange: (value: string) => void
-  priority: number
-  onPriorityChange: (value: number) => void
-  estimate: number
-  onEstimateChange: (value: number) => void
-  createMore: boolean
-  onCreateMoreChange: (value: boolean) => void
-  companies: Schema['tables']['organizations']['row'][]
-  teams: Schema['tables']['pm_teams']['row'][]
-  projects: Schema['tables']['pm_projects']['row'][]
-  statuses: Schema['tables']['pm_statuses']['row'][]
-  users: Schema['tables']['users']['row'][]
-  team: Schema['tables']['pm_teams']['row'] | null
-  creating: boolean
-  organizationRequired: boolean
-  onClose: () => void
-  onCreate: () => void
-}) {
-  const currentStatus = statuses.find((s) => s.id === statusId)
-  const currentProject = projects.find((p) => p.id === projectId)
-  const currentCompany = companies.find((c) => c.id === companyId)
-  const currentAssignee = users.find((u) => u.id === assigneeId)
-  const descriptionRef = useRef<HTMLTextAreaElement>(null)
-
-  useEffect(() => {
-    const textarea = descriptionRef.current
-    if (!textarea) return
-
-    const resizeDescription = () => {
-      const maxHeight = Math.max(160, Math.floor(window.innerHeight * 0.45))
-      textarea.style.height = 'auto'
-      textarea.style.height = `${Math.min(textarea.scrollHeight, maxHeight)}px`
-      textarea.style.overflowY = textarea.scrollHeight > maxHeight ? 'auto' : 'hidden'
-    }
-
-    resizeDescription()
-    window.addEventListener('resize', resizeDescription)
-    return () => window.removeEventListener('resize', resizeDescription)
-  }, [description])
-
-  function handleKeyDown(event: React.KeyboardEvent) {
-    if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') {
-      event.preventDefault()
-      if (title.trim() && (!organizationRequired || companyId) && !creating) onCreate()
-    }
-  }
-
-  return (
-    <div
-      className="fixed inset-0 z-50 flex items-start justify-center bg-overlay/70 px-4 pt-[10vh] backdrop-blur-sm"
-      onClick={onClose}
-    >
-      <div
-        className="max-h-[calc(100vh-5rem)] w-full max-w-2xl overflow-y-auto border border-edge/20 bg-pit-2 shadow-terminal-overlay"
-        onClick={(event) => event.stopPropagation()}
-        onKeyDown={handleKeyDown}
-      >
-        {/* breadcrumb header */}
-        <div className="flex items-center justify-between border-b border-edge/12 px-5 py-3">
-          <div className="flex items-center gap-2 font-mono text-xs">
-            <PachSelect
-              variant="button"
-              value={teamId}
-              onChange={onTeamChange}
-              options={teams.map((t) => ({ value: t.id, label: t.name.toLowerCase() }))}
-              trigger={
-                <span className="inline-flex items-center gap-1.5 border border-edge/25 bg-accent-fill/5 px-2 py-0.5 font-mono text-[10px] uppercase tracking-label text-accent">
-                  {team?.key ?? 'team'}
-                </span>
-              }
-              triggerTitle="change team"
-              triggerClassName="inline-flex p-0 border-0 bg-transparent transition hover:opacity-80"
-              popupWidth="200px"
-            />
-            <span className="text-fg-4">›</span>
-            <span className="text-fg-2 lowercase">new issue</span>
-          </div>
-          <button
-            onClick={onClose}
-            className="font-mono text-xs uppercase tracking-label text-fg-4 hover:text-fg-1 transition"
-            title="close"
-          >
-            [esc]
-          </button>
-        </div>
-
-        {/* title + description */}
-        <div className="px-5 pt-4">
-          <input
-            autoFocus
-            value={title}
-            onChange={(event) => onTitleChange(event.target.value)}
-            placeholder="issue title"
-            className="w-full bg-transparent font-mono text-lg text-fg-1 outline-none placeholder:text-fg-4 px-0 py-1"
-          />
-          <textarea
-            ref={descriptionRef}
-            value={description}
-            onChange={(event) => onDescriptionChange(event.target.value)}
-            placeholder="add description…"
-            rows={4}
-            className="w-full resize-none bg-transparent px-0 py-2 font-mono text-sm leading-relaxed text-fg-2 outline-none placeholder:text-fg-4"
-          />
-        </div>
-
-        {/* pill row */}
-        <div className="flex flex-wrap items-center gap-2 px-5 py-3">
-          <PachSelect
-            variant="button"
-            value={statusId}
-            onChange={onStatusChange}
-            options={statuses.map((s) => ({
-              value: s.id,
-              label: s.name.toLowerCase(),
-              icon: <StatusIcon statusType={s.type} />,
-            }))}
-            trigger={
-              <ComposerPill
-                icon={<StatusIcon statusType={currentStatus?.type ?? 'backlog'} />}
-                label={currentStatus?.name?.toLowerCase() ?? 'status'}
-              />
-            }
-            triggerTitle="status"
-            triggerClassName="transition"
-            popupWidth="200px"
-          />
-
-          <PachSelect
-            variant="button"
-            value={String(priority)}
-            onChange={(next) => onPriorityChange(Number(next))}
-            options={[1, 2, 3, 4, 0].map((p) => ({
-              value: String(p),
-              label: PRIORITY_META[p].label,
-              icon: <PriorityIcon priority={p} />,
-            }))}
-            trigger={
-              <ComposerPill
-                icon={<PriorityIcon priority={priority} />}
-                label={PRIORITY_META[priority]?.label ?? 'priority'}
-              />
-            }
-            triggerTitle="priority"
-            triggerClassName="transition"
-            popupWidth="180px"
-          />
-
-          <PachSelect
-            variant="button"
-            value={assigneeId}
-            onChange={onAssigneeChange}
-            options={users.map((u) => ({ value: u.id, label: (u.name ?? u.email).toLowerCase() }))}
-            trigger={
-              <ComposerPill
-                icon={<span className="font-mono text-[10px] text-fg-3">@</span>}
-                label={(currentAssignee?.name ?? currentAssignee?.email)?.toLowerCase() ?? 'assignee'}
-              />
-            }
-            triggerTitle="assignee"
-            triggerClassName="transition"
-            popupWidth="220px"
-          />
-
-          <PachSelect
-            variant="button"
-            value={projectId}
-            onChange={onProjectChange}
-            options={[
-              { value: '', label: 'no project' },
-              ...projects.map((p) => ({
-                value: p.id,
-                label: p.name.toLowerCase(),
-                icon: <FolderKanban className="h-3 w-3" />,
-              })),
-            ]}
-            trigger={
-              <ComposerPill
-                icon={<FolderKanban className="h-3 w-3" />}
-                label={currentProject?.name?.toLowerCase() ?? 'project'}
-              />
-            }
-            triggerTitle="project"
-            triggerClassName="transition"
-            popupWidth="220px"
-          />
-
-          <PachSelect
-            variant="button"
-            value={String(estimate)}
-            onChange={(next) => onEstimateChange(Number(next))}
-            options={ESTIMATES.map((n) => ({ value: String(n), label: `${n} pts` }))}
-            trigger={
-              <ComposerPill
-                icon={<span className="font-mono text-[10px] text-fg-3">#</span>}
-                label={`${estimate} pts`}
-              />
-            }
-            triggerTitle="estimate"
-            triggerClassName="transition"
-            popupWidth="160px"
-          />
-
-          <PachSelect
-            variant="button"
-            value={companyId}
-            onChange={onCompanyChange}
-            options={[
-              { value: '', label: 'no organization' },
-              ...companies.map((c) => ({ value: c.id, label: c.name })),
-            ]}
-            trigger={
-              <ComposerPill
-                icon={<Building2 className="h-3 w-3" />}
-                label={currentCompany?.name?.toLowerCase() ?? 'organization'}
-              />
-            }
-            triggerTitle="organization context"
-            triggerClassName="transition"
-            popupWidth="220px"
-          />
-        </div>
-
-        {/* footer */}
-        <div className="flex items-center justify-between border-t border-edge/12 px-5 py-3">
-          <button
-            onClick={onClose}
-            className="px-2 py-1.5 font-mono text-xs uppercase tracking-label text-fg-3 transition hover:text-fg-1"
-          >
-            [cancel]
-          </button>
-          <div className="flex items-center gap-4">
-            <button
-              type="button"
-              onClick={() => onCreateMoreChange(!createMore)}
-              className="inline-flex items-center gap-2 font-mono text-[10px] uppercase tracking-label text-fg-3 hover:text-fg-1 transition"
-              title="keep modal open after creating"
-            >
-              <span
-                className={`flex h-3.5 w-3.5 items-center justify-center border transition ${
-                  createMore
-                    ? 'border-accent bg-accent-fill/20'
-                    : 'border-edge/25'
-                }`}
-              >
-                {createMore ? <span className="text-accent text-[10px] leading-none">×</span> : null}
-              </span>
-              create more
-            </button>
-            <button
-              onClick={onCreate}
-              disabled={!title.trim() || (organizationRequired && !companyId) || creating}
-              className="inline-flex items-center gap-2 border border-edge/30 bg-accent-fill/8 px-3 py-1.5 font-mono text-xs uppercase tracking-label text-accent transition hover:bg-accent-fill/16 hover:shadow-glow-xs disabled:opacity-40 disabled:hover:bg-accent-fill/8 disabled:hover:shadow-none"
-            >
-              <Plus className="h-3.5 w-3.5" />
-              {creating ? 'creating…' : 'create issue'}
-            </button>
-          </div>
-        </div>
-      </div>
-    </div>
-  )
-}
-
-function ComposerPill({ icon, label }: { icon: React.ReactNode; label: string }) {
-  return (
-    <span className="inline-flex items-center gap-1.5 border border-edge/20 bg-pit-3 px-2.5 py-1 font-mono text-[11px] lowercase text-fg-2 hover:border-edge/40 hover:bg-accent-fill/4 hover:text-fg-1 transition">
-      <span className="flex h-3.5 w-3.5 items-center justify-center">{icon}</span>
-      <span className="truncate max-w-[160px]">{label}</span>
-    </span>
   )
 }
 
