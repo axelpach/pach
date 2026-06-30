@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { AlertTriangle, ArrowDown, ArrowUp, ArrowUpDown, BookmarkPlus, Bot, Building2, CheckCircle2, Check, ChevronDown, ChevronRight, Circle, FolderKanban, GripVertical, Plus, Save, Settings2, Tag, Trash2 } from 'lucide-react'
+import { AlertTriangle, ArrowDown, ArrowUp, ArrowUpDown, BookmarkPlus, Bot, Building2, CheckCircle2, Check, ChevronDown, ChevronRight, Circle, FolderKanban, GripVertical, Plus, Save, Settings2, Trash2 } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import {
   DndContext,
@@ -2271,6 +2271,7 @@ function IssueRow({
     currentShortcut?.control === 'labels'
       ? currentShortcut.nonce
       : undefined
+  const hasIssueLabels = issueLabels.length > 0
 
   return (
     <div
@@ -2403,9 +2404,9 @@ function IssueRow({
           />
         </div>
       )}
-      {(shows('labels') || labelsOpenSignal != null) && (
+      {((shows('labels') && hasIssueLabels) || labelsOpenSignal != null) && (
         <div
-          className={`hidden md:block shrink-0 ${shows('labels') ? '' : 'w-0 overflow-visible'}`}
+          className={`hidden md:block shrink-0 ${shows('labels') && hasIssueLabels ? '' : 'w-0 overflow-visible'}`}
           onClick={(event) => event.stopPropagation()}
         >
           <LabelMenu
@@ -2413,7 +2414,7 @@ function IssueRow({
             selectedIds={new Set(issueLabels.map((l) => l.id))}
             onToggle={(labelId) => onToggleLabel(issue.id, labelId)}
             trigger={
-              issueLabels.length > 0 ? (
+              hasIssueLabels ? (
                 <span className="inline-flex items-center gap-1">
                   {issueLabels.slice(0, 3).map((label) => (
                     <LabelChip key={label.id} label={label} />
@@ -2423,15 +2424,13 @@ function IssueRow({
                   )}
                 </span>
               ) : (
-                <span className="inline-flex h-5 w-5 items-center justify-center border border-edge/15 bg-pit-3 text-fg-4 transition group-hover:border-edge/25 group-hover:text-fg-2">
-                  <Tag className="h-3 w-3" strokeWidth={1.7} />
-                </span>
+                <span aria-hidden className="block h-0 w-0 overflow-hidden" />
               )
             }
             triggerClassName={
-              issueLabels.length > 0
+              hasIssueLabels
                 ? 'inline-flex items-center gap-1 p-0 border-0 bg-transparent transition hover:opacity-80'
-                : 'inline-flex h-5 w-5 items-center justify-center border-0 bg-transparent p-0 opacity-0 transition hover:opacity-100 focus:opacity-100 group-hover:opacity-100'
+                : 'block h-0 w-0 overflow-hidden border-0 bg-transparent p-0 opacity-0'
             }
             triggerTitle="edit labels"
             triggerAriaLabel={`edit labels for ${issue.identifier}`}
