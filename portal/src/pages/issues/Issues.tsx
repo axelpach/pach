@@ -2205,8 +2205,8 @@ function DropIndicator({ position }: { position: 'top' | 'bottom' }) {
 function AgentRunDot() {
   return (
     <>
-      <span className="absolute h-3.5 w-3.5 animate-ping rounded-full bg-emerald-400/45" />
-      <span className="h-2.5 w-2.5 rounded-full border border-emerald-200/70 bg-emerald-400 shadow-[0_0_12px_rgba(52,211,153,0.65)]" />
+      <span className="absolute h-2.5 w-2.5 animate-ping rounded-full bg-accent opacity-40" />
+      <span className="h-2 w-2 rounded-full bg-accent shadow-[0_0_12px_rgba(0,255,136,0.95)]" />
     </>
   )
 }
@@ -2351,8 +2351,8 @@ function IssueRow({
       {hasActiveAgentRun ? (
         <div
           className="relative flex h-5 w-5 shrink-0 items-center justify-center"
-          title="active agent run"
-          aria-label="active agent run"
+          title="active VPS agent run"
+          aria-label="active VPS agent run"
         >
           <AgentRunDot />
         </div>
