@@ -303,7 +303,11 @@ router.post('/runs/:id/github-token', async (req: AgentWorkerRequest, res) => {
     const workerId = readRequiredString(body.workerId, 'workerId')
     const { run } = await readOwnedRun(readRouteParam(req.params.id, 'id'), workerId)
 
-    if (!isActiveRunStatus(run.status)) {
+    // The manual PR button can mark the run pr_ready while the same worker is
+    // still in its post-Codex finalization path. Let the assigned worker finish
+    // reconciling the branch/PR instead of surfacing a false credential failure.
+    const manualPrAlreadyStarted = run.status === 'pr_ready'
+    if (!isActiveRunStatus(run.status) && !manualPrAlreadyStarted) {
       res.status(409).json({ ok: false, error: 'Agent run is not active.' })
       return
     }
