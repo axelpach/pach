@@ -379,7 +379,7 @@ export default function IssuesLayout() {
     } catch {
       // ignore quota / serialization errors
     }
-  }, [sidebarStorageKey, teamsSectionCollapsed, collapsedTeams])
+  }, [sidebarStorageKey, section, teamsSectionCollapsed, collapsedTeams])
 
   const context: TrackerContext = { section, setSection, composerRequestId, requestComposer }
 
