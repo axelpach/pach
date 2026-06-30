@@ -1701,6 +1701,23 @@ function IssueComposerModal({
   const currentProject = projects.find((p) => p.id === projectId)
   const currentCompany = companies.find((c) => c.id === companyId)
   const currentAssignee = users.find((u) => u.id === assigneeId)
+  const descriptionRef = useRef<HTMLTextAreaElement>(null)
+
+  useEffect(() => {
+    const textarea = descriptionRef.current
+    if (!textarea) return
+
+    const resizeDescription = () => {
+      const maxHeight = Math.max(160, Math.floor(window.innerHeight * 0.45))
+      textarea.style.height = 'auto'
+      textarea.style.height = `${Math.min(textarea.scrollHeight, maxHeight)}px`
+      textarea.style.overflowY = textarea.scrollHeight > maxHeight ? 'auto' : 'hidden'
+    }
+
+    resizeDescription()
+    window.addEventListener('resize', resizeDescription)
+    return () => window.removeEventListener('resize', resizeDescription)
+  }, [description])
 
   function handleKeyDown(event: React.KeyboardEvent) {
     if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') {
@@ -1715,7 +1732,7 @@ function IssueComposerModal({
       onClick={onClose}
     >
       <div
-        className="w-full max-w-2xl border border-edge/20 bg-pit-2 shadow-terminal-overlay"
+        className="max-h-[calc(100vh-5rem)] w-full max-w-2xl overflow-y-auto border border-edge/20 bg-pit-2 shadow-terminal-overlay"
         onClick={(event) => event.stopPropagation()}
         onKeyDown={handleKeyDown}
       >
@@ -1758,11 +1775,12 @@ function IssueComposerModal({
             className="w-full bg-transparent font-mono text-lg text-fg-1 outline-none placeholder:text-fg-4 px-0 py-1"
           />
           <textarea
+            ref={descriptionRef}
             value={description}
             onChange={(event) => onDescriptionChange(event.target.value)}
             placeholder="add description…"
             rows={4}
-            className="w-full resize-none bg-transparent font-mono text-sm leading-relaxed text-fg-2 outline-none placeholder:text-fg-4 px-0 py-2"
+            className="w-full resize-none bg-transparent px-0 py-2 font-mono text-sm leading-relaxed text-fg-2 outline-none placeholder:text-fg-4"
           />
         </div>
 
