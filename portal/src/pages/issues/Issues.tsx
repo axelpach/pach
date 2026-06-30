@@ -35,6 +35,7 @@ import { useAuth } from '../../lib/auth'
 import { useTrackerContext } from './IssuesLayout'
 import { IconTooltip } from '../../components/IconTooltip'
 import { DeleteViewModal } from '../../components/DeleteViewModal'
+import { RichEditor } from '../../components/rich-editor/RichEditor'
 
 const PRIORITY_GROUPS = [
   { value: 1, label: 'urgent', accent: 'text-amber' },
@@ -174,6 +175,7 @@ export default function Issues() {
   const [projects] = useQuery(z.query.pm_projects.orderBy('name', 'asc'))
   const [statuses] = useQuery(z.query.pm_statuses.orderBy('position', 'asc'))
   const [issues] = useQuery(z.query.pm_issues.orderBy('updatedAt', 'desc'))
+  const [documents] = useQuery(z.query.documents.orderBy('updatedAt', 'desc'))
   const [labels] = useQuery(z.query.pm_labels.orderBy('name', 'asc'))
   const [issueLabels] = useQuery(z.query.pm_issue_labels)
   const [agentRuns] = useQuery(z.query.agent_runs.orderBy('createdAt', 'desc'))
@@ -204,6 +206,7 @@ export default function Issues() {
 
   const [activeFilters, setActiveFilters] = useState<ActiveFilters>(() => initialStoredView.filters)
   const [composerOpen, setComposerOpen] = useState(false)
+  const [composerIssueId, setComposerIssueId] = useState(() => crypto.randomUUID())
   const [composerTitle, setComposerTitle] = useState('')
   const [composerDescription, setComposerDescription] = useState('')
   const [composerCompanyId, setComposerCompanyId] = useState('')
@@ -1314,7 +1317,7 @@ export default function Issues() {
       const nextNumber =
         scopedIssues.filter((issue) => issue.teamId === teamId).reduce((max, issue) => Math.max(max, issue.number), 0) + 1
 
-      const issueId = crypto.randomUUID()
+      const issueId = composerIssueId
       await z.mutate.pm_issues.create({
         id: issueId,
         contextCompanyId: composerCompanyId || undefined,
@@ -1333,6 +1336,7 @@ export default function Issues() {
       })
 
       await logActivity(issueId, `Created issue ${team.key}-${nextNumber}`)
+      setComposerIssueId(crypto.randomUUID())
       setComposerTitle('')
       setComposerDescription('')
       if (composerCreateMore) {
@@ -1596,6 +1600,7 @@ export default function Issues() {
       <IssueComposerModal
         title={composerTitle}
         onTitleChange={setComposerTitle}
+        issueId={composerIssueId}
         description={composerDescription}
         onDescriptionChange={setComposerDescription}
         companyId={composerCompanyId}
@@ -1619,9 +1624,13 @@ export default function Issues() {
         projects={composerProjects}
         statuses={workspaceStatuses}
         users={assignableUsers}
+        documents={documents}
+        issues={scopedIssues}
         team={selectedComposerTeam}
         creating={creatingIssue}
         organizationRequired={!canAccessUnscoped}
+        onOpenDocument={(id) => navigate(`/docs/${id}`)}
+        onOpenIssue={(id) => navigate(`/issues/${id}`)}
         onClose={() => setComposerOpen(false)}
         onCreate={createIssue}
       />
@@ -1777,6 +1786,7 @@ function EmptyState({
 function IssueComposerModal({
   title,
   onTitleChange,
+  issueId,
   description,
   onDescriptionChange,
   companyId,
@@ -1800,14 +1810,19 @@ function IssueComposerModal({
   projects,
   statuses,
   users,
+  documents,
+  issues,
   team,
   creating,
   organizationRequired,
+  onOpenDocument,
+  onOpenIssue,
   onClose,
   onCreate,
 }: {
   title: string
   onTitleChange: (value: string) => void
+  issueId: string
   description: string
   onDescriptionChange: (value: string) => void
   companyId: string
@@ -1831,9 +1846,13 @@ function IssueComposerModal({
   projects: Schema['tables']['pm_projects']['row'][]
   statuses: Schema['tables']['pm_statuses']['row'][]
   users: Schema['tables']['users']['row'][]
+  documents: Schema['tables']['documents']['row'][]
+  issues: Schema['tables']['pm_issues']['row'][]
   team: Schema['tables']['pm_teams']['row'] | null
   creating: boolean
   organizationRequired: boolean
+  onOpenDocument: (id: string) => void
+  onOpenIssue: (id: string) => void
   onClose: () => void
   onCreate: () => void
 }) {
@@ -1841,23 +1860,6 @@ function IssueComposerModal({
   const currentProject = projects.find((p) => p.id === projectId)
   const currentCompany = companies.find((c) => c.id === companyId)
   const currentAssignee = users.find((u) => u.id === assigneeId)
-  const descriptionRef = useRef<HTMLTextAreaElement>(null)
-
-  useEffect(() => {
-    const textarea = descriptionRef.current
-    if (!textarea) return
-
-    const resizeDescription = () => {
-      const maxHeight = Math.max(160, Math.floor(window.innerHeight * 0.45))
-      textarea.style.height = 'auto'
-      textarea.style.height = `${Math.min(textarea.scrollHeight, maxHeight)}px`
-      textarea.style.overflowY = textarea.scrollHeight > maxHeight ? 'auto' : 'hidden'
-    }
-
-    resizeDescription()
-    window.addEventListener('resize', resizeDescription)
-    return () => window.removeEventListener('resize', resizeDescription)
-  }, [description])
 
   function handleKeyDown(event: React.KeyboardEvent) {
     if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') {
@@ -1914,13 +1916,19 @@ function IssueComposerModal({
             placeholder="issue title"
             className="w-full bg-transparent font-mono text-lg text-fg-1 outline-none placeholder:text-fg-4 px-0 py-1"
           />
-          <textarea
-            ref={descriptionRef}
+          <RichEditor
+            key={issueId}
+            owner={{ type: 'issue', id: issueId }}
             value={description}
-            onChange={(event) => onDescriptionChange(event.target.value)}
-            placeholder="add description…"
-            rows={4}
-            className="w-full resize-none bg-transparent px-0 py-2 font-mono text-sm leading-relaxed text-fg-2 outline-none placeholder:text-fg-4"
+            documents={documents}
+            issues={issues}
+            organizationId={companyId || null}
+            onChange={onDescriptionChange}
+            onOpenDocument={onOpenDocument}
+            onOpenIssue={onOpenIssue}
+            placeholder="add description..."
+            className="min-h-[12rem] text-sm"
+            wrapperClassName="relative mt-2"
           />
         </div>
 
