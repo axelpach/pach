@@ -573,6 +573,9 @@ export default function Finance() {
   const categoryDetailBarTrend = dashboardConversionRates
     ? buildCategorySpendBarTrend(categoryDetailMovements, scopedCategories, dashboardReportingCurrencyCode, dashboardConversionRates)
     : null
+  const categoryDetailBreakdown = dashboardConversionRates
+    ? buildCategoryBreakdown(categoryDetailMovements, scopedCategories, dashboardReportingCurrencyCode, dashboardConversionRates)
+    : null
   const categoryDetailName = selectedFinanceCategoryId === UNCATEGORIZED_VALUE
     ? 'uncategorized'
     : selectedFinanceCategory?.name ?? (selectedFinanceCategoryId ? 'category' : 'all categories')
@@ -1959,8 +1962,8 @@ export default function Finance() {
               />
             </div>
 
-            <div className="mt-5 grid gap-4 xl:h-[calc(100vh-19rem)] xl:min-h-[380px] xl:max-h-[560px] xl:grid-cols-[minmax(0,1.15fr)_minmax(360px,0.85fr)]">
-              <section className="flex min-h-0 flex-col border border-edge/12 bg-pit-2 xl:h-full">
+            <div className="mt-5 grid gap-4 xl:grid-cols-[minmax(0,1.15fr)_minmax(360px,0.85fr)]">
+              <section className="flex min-h-[420px] flex-col border border-edge/12 bg-pit-2">
                 <div className="flex items-center justify-between border-b border-edge/12 px-4 py-3 font-mono">
                   <div>
                     <div className="text-[10px] uppercase tracking-label text-fg-4">evolution</div>
@@ -1986,11 +1989,6 @@ export default function Finance() {
                           onCategoryClick={(categoryId) => navigate(pathForCategory(categoryId))}
                         />
                       </div>
-                      <div className="mt-3 flex justify-between gap-3 overflow-hidden font-mono text-[10px] uppercase tracking-label text-fg-4">
-                        {categoryDetailBarTrend.points.map((point) => (
-                          <span key={point.id} className="truncate">{point.shortLabel}</span>
-                        ))}
-                      </div>
                       {categoryDetailBarTrend.missingCurrencies.length > 0 ? (
                         <div className="mt-3 border-t border-edge/8 pt-2 font-mono text-[10px] uppercase tracking-label text-fail">
                           missing {categoryDetailBarTrend.missingCurrencies.join(', ')}
@@ -2001,60 +1999,111 @@ export default function Finance() {
                 </div>
               </section>
 
-              <section className="flex min-h-0 flex-col border border-edge/12 bg-pit-2 xl:h-full">
+              <section className="flex min-h-[420px] flex-col border border-edge/12 bg-pit-2">
                 <div className="flex items-center justify-between border-b border-edge/12 px-4 py-3 font-mono">
                   <div>
-                    <div className="text-[10px] uppercase tracking-label text-fg-4">movements</div>
-                    <div className="mt-1 text-sm lowercase text-fg-1">category ledger</div>
+                    <div className="text-[10px] uppercase tracking-label text-fg-4">expenses</div>
+                    <div className="mt-1 text-sm lowercase text-fg-1">spend by category</div>
                   </div>
-                  <span className="text-[10px] uppercase tracking-label text-fg-4">{categoryDetailMovements.length}</span>
+                  <ChartPie className="h-4 w-4 text-accent" />
                 </div>
-                <div className="min-h-0 flex-1 overflow-auto overscroll-contain">
-                  {categoryDetailMovements.length === 0 ? (
-                    <div className="flex min-h-72 items-center justify-center px-4 font-mono text-sm text-fg-4">
-                      // no movements for this category
+                <div className="grid min-h-0 flex-1 gap-5 overflow-y-auto overflow-x-hidden p-4">
+                  {!dashboardConversionRates ? (
+                    <div className="flex min-h-72 items-center justify-center border border-dashed border-edge/12 font-mono text-sm text-fg-4">
+                      // loading fx rates...
+                    </div>
+                  ) : !categoryDetailBreakdown || categoryDetailBreakdown.entries.length === 0 ? (
+                    <div className="flex min-h-72 items-center justify-center border border-dashed border-edge/12 font-mono text-sm text-fg-4">
+                      {categoryDetailBreakdown?.missingCurrencies.length ? `// no converted spend · missing ${categoryDetailBreakdown.missingCurrencies.join(', ')}` : '// no spend to chart'}
                     </div>
                   ) : (
-                    categoryDetailMovements.map((movement) => {
-                      const account = scopedAccounts.find((entry) => entry.id === movement.accountId)
-                      const category = scopedCategories.find((entry) => entry.id === movement.categoryId)
-                      return (
-                        <div key={movement.id} className="grid grid-cols-[minmax(0,1fr)_auto] gap-3 border-b border-edge/8 px-4 py-3 font-mono text-xs last:border-b-0">
-                          <div className="min-w-0">
-                            <div className="flex min-w-0 items-center gap-2">
-                              <span className="shrink-0 text-[10px] uppercase tracking-label text-fg-4">{formatZeroDate(movement.transactionDate)}</span>
-                              {isMeaningfulTransactionTime(movement.transactionTime) ? (
-                                <span className="shrink-0 text-[10px] text-fg-4">{formatTransactionTime(movement.transactionTime)}</span>
-                              ) : null}
-                            </div>
-                            <div className="mt-1 truncate text-fg-1" title={movement.merchantName || movement.description}>
-                              {movement.merchantName || movement.description}
-                            </div>
-                            <div className="mt-0.5 truncate text-[10px] text-fg-4">
-                              {account?.name ?? 'unknown account'}
-                              {movement.merchantName ? ` · ${movement.description}` : ''}
-                            </div>
-                            {!categoryDetailIsFiltered ? (
-                              <button
-                                type="button"
-                                onClick={() => navigate(pathForCategory(movement.categoryId ?? UNCATEGORIZED_VALUE))}
-                                className="mt-1 inline-flex items-center gap-1.5 text-[10px] uppercase tracking-label text-fg-3 transition hover:text-accent"
-                              >
-                                <span className="h-2 w-2" style={{ backgroundColor: categoryBreakdown?.entries.find((entry) => entry.id === (movement.categoryId ?? UNCATEGORIZED_VALUE))?.color ?? CATEGORY_CHART_COLORS[0] }} />
-                                {category?.name ?? 'uncategorized'}
-                              </button>
-                            ) : null}
+                    <>
+                      <div className="flex flex-col items-center justify-center gap-2">
+                        <CategoryPieChart
+                          slices={categoryDetailBreakdown.entries}
+                          onSliceClick={(slice) => navigate(pathForCategory(slice.id))}
+                        />
+                        <div className="font-mono text-[10px] uppercase tracking-label text-fg-4">{categoryDetailBreakdown.currencyCode}</div>
+                      </div>
+                      <div className="grid content-center gap-2">
+                        {categoryDetailBreakdown.entries.map((entry) => (
+                          <button
+                            key={entry.id}
+                            type="button"
+                            onClick={() => navigate(pathForCategory(entry.id))}
+                            className="grid min-w-0 grid-cols-[12px_minmax(0,1fr)_auto_auto] items-center gap-2 text-left font-mono text-xs transition hover:text-accent"
+                          >
+                            <span className="h-3 w-3" style={{ backgroundColor: entry.color }} />
+                            <span className="truncate text-fg-2">{entry.name}</span>
+                            <span className="text-fg-4">{entry.percent.toFixed(1)}%</span>
+                            <span className="text-fail">{formatMoney(-entry.amountMinor, entry.currencyCode)}</span>
+                          </button>
+                        ))}
+                        {categoryDetailBreakdown.missingCurrencies.length > 0 ? (
+                          <div className="mt-2 border-t border-edge/8 pt-2 font-mono text-[10px] uppercase tracking-label text-fail">
+                            missing {categoryDetailBreakdown.missingCurrencies.join(', ')}
                           </div>
-                          <div className="whitespace-nowrap text-right tabular-nums text-fail">
-                            {formatMoney(movement.amountMinor, movement.currencyCode)}
-                          </div>
-                        </div>
-                      )
-                    })
+                        ) : null}
+                      </div>
+                    </>
                   )}
                 </div>
               </section>
             </div>
+
+            <section className="mt-4 flex min-h-[420px] flex-col border border-edge/12 bg-pit-2">
+              <div className="flex items-center justify-between border-b border-edge/12 px-4 py-3 font-mono">
+                <div>
+                  <div className="text-[10px] uppercase tracking-label text-fg-4">movements</div>
+                  <div className="mt-1 text-sm lowercase text-fg-1">category ledger</div>
+                </div>
+                <span className="text-[10px] uppercase tracking-label text-fg-4">{categoryDetailMovements.length}</span>
+              </div>
+              <div className="min-h-0 flex-1 overflow-auto overscroll-contain">
+                {categoryDetailMovements.length === 0 ? (
+                  <div className="flex min-h-72 items-center justify-center px-4 font-mono text-sm text-fg-4">
+                    // no movements for this category
+                  </div>
+                ) : (
+                  categoryDetailMovements.map((movement) => {
+                    const account = scopedAccounts.find((entry) => entry.id === movement.accountId)
+                    const category = scopedCategories.find((entry) => entry.id === movement.categoryId)
+                    return (
+                      <div key={movement.id} className="grid grid-cols-[minmax(0,1fr)_auto] gap-3 border-b border-edge/8 px-4 py-3 font-mono text-xs last:border-b-0">
+                        <div className="min-w-0">
+                          <div className="flex min-w-0 items-center gap-2">
+                            <span className="shrink-0 text-[10px] uppercase tracking-label text-fg-4">{formatZeroDate(movement.transactionDate)}</span>
+                            {isMeaningfulTransactionTime(movement.transactionTime) ? (
+                              <span className="shrink-0 text-[10px] text-fg-4">{formatTransactionTime(movement.transactionTime)}</span>
+                            ) : null}
+                          </div>
+                          <div className="mt-1 truncate text-fg-1" title={movement.merchantName || movement.description}>
+                            {movement.merchantName || movement.description}
+                          </div>
+                          <div className="mt-0.5 truncate text-[10px] text-fg-4">
+                            {account?.name ?? 'unknown account'}
+                            {movement.merchantName ? ` · ${movement.description}` : ''}
+                          </div>
+                          {!categoryDetailIsFiltered ? (
+                            <button
+                              type="button"
+                              onClick={() => navigate(pathForCategory(movement.categoryId ?? UNCATEGORIZED_VALUE))}
+                              className="mt-1 inline-flex items-center gap-1.5 text-[10px] uppercase tracking-label text-fg-3 transition hover:text-accent"
+                            >
+                              <span className="h-2 w-2" style={{ backgroundColor: categoryBreakdown?.entries.find((entry) => entry.id === (movement.categoryId ?? UNCATEGORIZED_VALUE))?.color ?? CATEGORY_CHART_COLORS[0] }} />
+                              {category?.name ?? 'uncategorized'}
+                            </button>
+                          ) : null}
+                        </div>
+                        <div className="whitespace-nowrap text-right tabular-nums text-fail">
+                          {formatMoney(movement.amountMinor, movement.currencyCode)}
+                        </div>
+                      </div>
+                    )
+                  })
+                )}
+              </div>
+            </section>
           </div>
         </div>
       ) : tab === 'dashboard' ? (
@@ -4511,13 +4560,16 @@ function CategorySpendBarChart({
   const wrapperRef = useRef<HTMLDivElement | null>(null)
   const maxValue = Math.max(...points.map((point) => point.totalAmountMinor), 1)
   const chartWidth = 720
-  const chartHeight = 220
-  const padTop = 18
-  const padBottom = 22
-  const padX = 12
+  const chartHeight = 260
+  const padTop = 34
+  const padBottom = 34
+  const padLeft = 58
+  const padRight = 12
   const plotHeight = chartHeight - padTop - padBottom
   const gap = 8
-  const barWidth = Math.max(10, (chartWidth - padX * 2 - gap * Math.max(points.length - 1, 0)) / Math.max(points.length, 1))
+  const plotWidth = chartWidth - padLeft - padRight
+  const barWidth = Math.max(10, (plotWidth - gap * Math.max(points.length - 1, 0)) / Math.max(points.length, 1))
+  const yAxisTicks = [0.25, 0.5, 0.75, 1]
 
   function moveTooltip(event: MouseEvent<SVGElement>, point: CategorySpendBarPoint, segment?: CategorySpendBarSegment) {
     const rect = wrapperRef.current?.getBoundingClientRect()
@@ -4536,22 +4588,36 @@ function CategorySpendBarChart({
       onMouseLeave={() => setHovered(null)}
     >
       <svg viewBox={`0 0 ${chartWidth} ${chartHeight}`} preserveAspectRatio="none" className="block h-full w-full" role="img" aria-label="Monthly spend by category">
-        {[0.25, 0.5, 0.75, 1].map((ratio) => (
-          <line
-            key={ratio}
-            x1={padX}
-            x2={chartWidth - padX}
-            y1={padTop + (1 - ratio) * plotHeight}
-            y2={padTop + (1 - ratio) * plotHeight}
-            stroke="rgb(var(--edge-rgb) / 0.12)"
-            strokeDasharray="2 5"
-            vectorEffect="non-scaling-stroke"
-          />
-        ))}
+        {yAxisTicks.map((ratio) => {
+          const y = padTop + (1 - ratio) * plotHeight
+          return (
+            <g key={ratio}>
+              <line
+                x1={padLeft}
+                x2={chartWidth - padRight}
+                y1={y}
+                y2={y}
+                stroke="rgb(var(--edge-rgb) / 0.12)"
+                strokeDasharray="2 5"
+                vectorEffect="non-scaling-stroke"
+              />
+              <text
+                x={padLeft - 8}
+                y={y + 3}
+                textAnchor="end"
+                className="fill-[rgb(var(--fg-4-rgb))] font-mono text-[9px] uppercase tracking-label"
+              >
+                {formatChartAxisMoney(Math.round(maxValue * ratio), currencyCode)}
+              </text>
+            </g>
+          )
+        })}
         {points.map((point, index) => {
-          const x = padX + index * (barWidth + gap)
+          const x = padLeft + index * (barWidth + gap)
           let yCursor = padTop + plotHeight
           const visibleSegments = point.segments.filter((segment) => segment.amountMinor > 0)
+          const totalHeight = (point.totalAmountMinor / maxValue) * plotHeight
+          const totalLabelY = Math.max(12, padTop + plotHeight - totalHeight - 6)
           return (
             <g key={point.id}>
               <rect
@@ -4580,6 +4646,24 @@ function CategorySpendBarChart({
                   />
                 )
               })}
+              {point.totalAmountMinor > 0 ? (
+                <text
+                  x={x + barWidth / 2}
+                  y={totalLabelY}
+                  textAnchor="middle"
+                  className="fill-[rgb(var(--fg-2-rgb))] font-mono text-[9px] tabular-nums"
+                >
+                  {formatChartAxisMoney(point.totalAmountMinor, currencyCode)}
+                </text>
+              ) : null}
+              <text
+                x={x + barWidth / 2}
+                y={chartHeight - 9}
+                textAnchor="middle"
+                className="fill-[rgb(var(--fg-4-rgb))] font-mono text-[9px] uppercase tracking-label"
+              >
+                {point.shortLabel}
+              </text>
             </g>
           )
         })}
@@ -4944,6 +5028,15 @@ function formatMoney(amountMinor: number, currencyCode: string) {
   return new Intl.NumberFormat('en-US', {
     style: 'currency',
     currency: currencyCode,
+  }).format(amountMinor / 100)
+}
+
+function formatChartAxisMoney(amountMinor: number, currencyCode: string) {
+  return new Intl.NumberFormat('en-US', {
+    style: 'currency',
+    currency: currencyCode,
+    notation: 'compact',
+    maximumFractionDigits: 1,
   }).format(amountMinor / 100)
 }
 
