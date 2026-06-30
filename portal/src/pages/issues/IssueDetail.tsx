@@ -1065,7 +1065,6 @@ function AgentSidebarCard({
       : latestProgress && 'summary' in latestProgress
         ? latestProgress.summary
         : run?.statusMessage ?? null
-  const handler = readMetadataString(run?.metadata, 'handler') ?? 'general-mcp'
 
   return (
     <div className="border-b border-edge/10 px-5 py-4">
@@ -1161,18 +1160,6 @@ function AgentSidebarCard({
         <div className="space-y-3">
           <div className="space-y-1 font-mono text-xs">
             <div className="flex min-w-0 items-center justify-between gap-3">
-              <span className="uppercase tracking-label text-fg-4">status</span>
-              <span className={run.status === 'failed' ? 'text-fail' : 'text-accent'}>{run.status}</span>
-            </div>
-            <div className="flex min-w-0 items-center justify-between gap-3">
-              <span className="uppercase tracking-label text-fg-4">handler</span>
-              <span className="min-w-0 truncate text-fg-2">{handler}</span>
-            </div>
-            <div className="flex min-w-0 items-center justify-between gap-3">
-              <span className="uppercase tracking-label text-fg-4">worker</span>
-              <span className="min-w-0 truncate text-fg-2">{run.workerId ?? 'waiting for claim'}</span>
-            </div>
-            <div className="flex min-w-0 items-center justify-between gap-3">
               <span className="uppercase tracking-label text-fg-4">repo</span>
               <span className="min-w-0 truncate text-fg-2">{run.repoFullName}</span>
             </div>
@@ -1205,10 +1192,12 @@ function AgentSidebarCard({
                 href={pullRequest.url}
                 target="_blank"
                 rel="noreferrer"
-                className="inline-flex min-w-0 items-center gap-1.5 border border-edge/18 bg-accent-fill/4 px-2.5 py-2 font-mono text-xs text-accent hover:border-accent"
+                className={`inline-flex min-w-0 items-center gap-1.5 border px-2.5 py-2 font-mono text-xs transition hover:border-accent ${pullRequestToneClasses(pullRequest)}`}
+                title={`PR ${formatPullRequestState(pullRequest)} #${pullRequest.number}`}
               >
                 <GitPullRequest className="h-3.5 w-3.5 shrink-0" />
                 <span className="truncate">#{pullRequest.number}</span>
+                <span className="text-[10px] uppercase tracking-label">{formatPullRequestState(pullRequest)}</span>
               </a>
             ) : (
               <button
@@ -2732,6 +2721,21 @@ function readImageDimensions(file: File) {
     }
     image.src = url
   })
+}
+
+function formatPullRequestState(pullRequest: Schema['tables']['github_pull_requests']['row']) {
+  if (pullRequest.state === 'merged') return 'merged'
+  if (pullRequest.state === 'closed') return 'closed'
+  if (pullRequest.isDraft) return 'draft'
+  return 'open'
+}
+
+function pullRequestToneClasses(pullRequest: Schema['tables']['github_pull_requests']['row']) {
+  const state = formatPullRequestState(pullRequest)
+  if (state === 'merged') return 'border-accent/50 bg-accent-fill/12 text-accent shadow-glow-xs'
+  if (state === 'closed') return 'border-fail/35 bg-fail/8 text-fail'
+  if (state === 'draft') return 'border-edge/24 bg-pit-3 text-fg-3'
+  return 'border-accent/35 bg-accent-fill/8 text-accent'
 }
 
 function formatBytes(value: number) {

@@ -153,6 +153,14 @@ export function AgentConversationView({
               </div>
             </div>
             <div className="flex items-center gap-2">
+              {run ? (
+                <PullRequestChip
+                  pullRequest={pullRequest}
+                  busy={prBusy}
+                  workspaceReady={Boolean(run.workspacePath)}
+                  onCreateDraftPullRequest={onCreateDraftPullRequest}
+                />
+              ) : null}
               {!run && allowCreateRun ? (
                 <button
                   type="button"
@@ -231,10 +239,7 @@ export function AgentConversationView({
             {run ? (
               <AgentConversationRunHeader
                 run={run}
-                pullRequest={pullRequest}
-                prBusy={prBusy}
                 actionMessage={actionMessage}
-                onCreateDraftPullRequest={onCreateDraftPullRequest}
               />
             ) : null}
 
@@ -357,20 +362,14 @@ export function AgentConversationView({
 
 function AgentConversationRunHeader({
   run,
-  pullRequest,
-  prBusy,
   actionMessage,
-  onCreateDraftPullRequest,
 }: {
   run: Schema['tables']['agent_runs']['row']
-  pullRequest: Schema['tables']['github_pull_requests']['row'] | null
-  prBusy: boolean
   actionMessage: string | null
-  onCreateDraftPullRequest: () => void | Promise<void>
 }) {
   return (
     <div className="space-y-2">
-      <div className="grid gap-2 border border-edge/12 bg-accent-fill/[0.025] p-3 font-mono text-xs md:grid-cols-5">
+      <div className="grid gap-2 border border-edge/12 bg-accent-fill/[0.025] p-3 font-mono text-xs md:grid-cols-4">
         <div className="flex min-w-0 items-center justify-between gap-3">
           <span className="uppercase tracking-label text-fg-4">status</span>
           <span className={run.status === 'failed' ? 'text-fail' : 'text-accent'}>{run.status}</span>
@@ -387,38 +386,54 @@ function AgentConversationRunHeader({
           <span className="uppercase tracking-label text-fg-4">worker</span>
           <span className="min-w-0 truncate text-fg-2">{run.workerId ?? 'waiting for claim'}</span>
         </div>
-        <div className="flex min-w-0 items-center justify-between gap-3">
-          <span className="uppercase tracking-label text-fg-4">pr</span>
-          {pullRequest ? (
-            <a
-              href={pullRequest.url}
-              target="_blank"
-              rel="noreferrer"
-              className="inline-flex min-w-0 items-center gap-1.5 truncate text-accent hover:underline"
-            >
-              <GitPullRequest className="h-3.5 w-3.5 shrink-0" />
-              <span className="truncate">#{pullRequest.number}</span>
-            </a>
-          ) : (
-            <button
-              type="button"
-              onClick={() => {
-                void onCreateDraftPullRequest()
-              }}
-              disabled={prBusy || !run.workspacePath}
-              className="inline-flex h-6 w-6 shrink-0 items-center justify-center border border-edge/18 bg-accent-fill/6 text-accent transition hover:border-accent disabled:cursor-not-allowed disabled:opacity-40"
-              title={run.workspacePath ? 'commit branch and open a PR' : 'waiting for worker workspace'}
-              aria-label="create PR"
-            >
-              <GitPullRequest className="h-3.5 w-3.5" />
-            </button>
-          )}
-        </div>
       </div>
       {actionMessage ? (
         <div className="border border-edge/12 bg-pit-3 px-3 py-2 font-mono text-xs text-fg-3">{actionMessage}</div>
       ) : null}
     </div>
+  )
+}
+
+function PullRequestChip({
+  pullRequest,
+  busy,
+  workspaceReady,
+  onCreateDraftPullRequest,
+}: {
+  pullRequest: Schema['tables']['github_pull_requests']['row'] | null
+  busy: boolean
+  workspaceReady: boolean
+  onCreateDraftPullRequest: () => void | Promise<void>
+}) {
+  if (pullRequest) {
+    return (
+      <a
+        href={pullRequest.url}
+        target="_blank"
+        rel="noreferrer"
+        className={`inline-flex h-8 min-w-0 items-center gap-1.5 border px-2.5 font-mono text-[10px] uppercase tracking-label transition hover:border-accent ${pullRequestToneClasses(pullRequest)}`}
+        title={`PR ${formatPullRequestState(pullRequest)} #${pullRequest.number}`}
+      >
+        <GitPullRequest className="h-3.5 w-3.5 shrink-0" />
+        <span className="truncate">#{pullRequest.number}</span>
+        <span className="hidden text-[9px] sm:inline">{formatPullRequestState(pullRequest)}</span>
+      </a>
+    )
+  }
+
+  return (
+    <button
+      type="button"
+      onClick={() => {
+        void onCreateDraftPullRequest()
+      }}
+      disabled={busy || !workspaceReady}
+      className="inline-flex h-8 w-8 shrink-0 items-center justify-center border border-edge/18 bg-accent-fill/6 text-accent transition hover:border-accent disabled:cursor-not-allowed disabled:opacity-40"
+      title={workspaceReady ? 'commit branch and open a PR' : 'waiting for worker workspace'}
+      aria-label="create PR"
+    >
+      <GitPullRequest className="h-3.5 w-3.5" />
+    </button>
   )
 }
 
@@ -698,6 +713,21 @@ function readImageDimensions(file: File) {
     }
     image.src = url
   })
+}
+
+function formatPullRequestState(pullRequest: Schema['tables']['github_pull_requests']['row']) {
+  if (pullRequest.state === 'merged') return 'merged'
+  if (pullRequest.state === 'closed') return 'closed'
+  if (pullRequest.isDraft) return 'draft'
+  return 'open'
+}
+
+function pullRequestToneClasses(pullRequest: Schema['tables']['github_pull_requests']['row']) {
+  const state = formatPullRequestState(pullRequest)
+  if (state === 'merged') return 'border-accent/50 bg-accent-fill/12 text-accent shadow-glow-xs'
+  if (state === 'closed') return 'border-fail/35 bg-fail/8 text-fail'
+  if (state === 'draft') return 'border-edge/24 bg-pit-3 text-fg-3'
+  return 'border-accent/35 bg-accent-fill/8 text-accent'
 }
 
 function formatBytes(value: number) {

@@ -12,6 +12,7 @@ import { getDb } from '../db.js'
 import { verifyToken } from '../lib/auth.js'
 import { insertIssueActivityEvent } from '../lib/activity-events.js'
 import { readGithubTokenForRepository } from '../lib/github-credentials.js'
+import { finalizeAgentRunPullRequest } from '../lib/agent-pr-finalizer.js'
 import {
   agentRunProgressReports,
   agentRunArtifacts,
@@ -998,81 +999,20 @@ router.post('/runs/:id/create-draft-pr', async (req, res) => {
   const { id } = req.params
 
   try {
-    const db = getDb()
-    const { run, worker } = await readRunWorker(id)
-    const githubToken = await readGithubTokenForRepository(run.repositoryId)
-    if (!githubToken) throw new Error('No GitHub token available for this repository connection')
-    if (!run.repositoryId) throw new Error('Agent run has no repositoryId')
-    if (!run.workspacePath) throw new Error('Agent run has no prepared workspacePath')
-
-    const [issue] = run.issueId
-      ? await db.select().from(pmIssues).where(eq(pmIssues.id, run.issueId))
-      : []
-    const [branch] = await db.select().from(githubBranches).where(eq(githubBranches.agentRunId, run.id))
-    const title = readOptionalString((req.body as Record<string, unknown> | undefined)?.title) ?? issue?.title ?? run.branchName
-    const body = buildPullRequestBody({ run, issue })
-    const now = new Date()
-
-    const pushResult = await runSshCommand(
-      { host: worker.sshHost, port: worker.sshPort, user: worker.sshUser },
-      buildFinalizeBranchCommand({
-        workspacePath: normalizeWorkspacePath(run.workspacePath, worker.sshUser),
-        branchName: run.branchName,
-        commitMessage: title,
-        githubToken,
-      }),
-      { timeout: 180_000, maxBuffer: 2_000_000 },
-    )
-
-    const existingPr = await fetchGithubPullRequestForBranch({
-      repoFullName: run.repoFullName,
-      branchName: run.branchName,
-      token: githubToken,
-    })
-    const pr = existingPr ?? await createGithubPullRequest({
-      repoFullName: run.repoFullName,
-      branchName: run.branchName,
-      baseBranch: run.baseBranch,
+    const title = readOptionalString((req.body as Record<string, unknown> | undefined)?.title)
+    const result = await finalizeAgentRunPullRequest({
+      runId: id,
       title,
-      body,
-      token: githubToken,
+      activitySource: 'agent-route',
     })
-
-    const saved = await upsertPullRequest({
-      run,
-      branchId: branch?.id,
-      pr,
-      now,
-    })
-
-    if (branch) {
-      await db
-        .update(githubBranches)
-        .set({ status: saved.state === 'merged' ? 'merged' : 'pr_opened', updatedAt: now })
-        .where(eq(githubBranches.id, branch.id))
-    }
-
-    await db
-      .update(agentRuns)
-      .set({
-        status: 'pr_ready',
-        statusMessage: `PR ready: #${saved.number}`,
-        metadata: {
-          ...(run.metadata ?? {}),
-          workflowPhase: 'pr_ready',
-          pullRequestCreatedAt: now.toISOString(),
-        },
-        updatedAt: now,
-      })
-      .where(eq(agentRuns.id, run.id))
 
     res.json({
       ok: true,
-      runId: run.id,
-      pullRequest: saved,
-      stdout: pushResult.stdout,
-      stderr: pushResult.stderr,
-      keyFingerprint: pushResult.keyFingerprint,
+      runId: result.run.id,
+      pullRequest: result.pullRequest,
+      stdout: result.stdout,
+      stderr: result.stderr,
+      keyFingerprint: result.keyFingerprint,
     })
   } catch (error) {
     res.status(502).json({

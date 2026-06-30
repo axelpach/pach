@@ -19,6 +19,7 @@ import designRoute from './routes/design.js'
 import apiKeysRoute from './routes/api-keys.js'
 import activityRoute from './routes/activity.js'
 import githubRoute from './routes/github.js'
+import githubWebhookRoute from './routes/github-webhooks.js'
 import { requireAuth, requireUnscopedAccess } from './middleware/auth.js'
 import { startTaskTriggerRunner } from './services/task-triggers/runner.js'
 import { startMarketingAutomationRunner } from './services/marketing-automation/runner.js'
@@ -28,6 +29,7 @@ const PORT = process.env.PORT || 3001
 const JSON_BODY_LIMIT = '75mb'
 
 app.use(cors())
+app.use('/github/webhooks', githubWebhookRoute)
 app.use(express.json({ limit: JSON_BODY_LIMIT }))
 
 app.get('/health', (_req, res) => res.json({ ok: true }))

@@ -1,5 +1,5 @@
 import { Router, type Request } from 'express'
-import { and, desc, eq } from 'drizzle-orm'
+import { and, desc, eq, inArray } from 'drizzle-orm'
 import {
   githubConnections,
   githubRepositories,
@@ -29,6 +29,18 @@ type GithubRepositoryResponse = {
 
 type GithubUserResponse = {
   login?: string
+}
+
+type GithubWebhookResponse = {
+  id: number
+  active?: boolean
+  events?: string[]
+  config?: {
+    url?: string
+    content_type?: string
+  }
+  created_at?: string
+  updated_at?: string
 }
 
 router.get('/settings', async (req, res) => {
@@ -147,11 +159,13 @@ router.post('/connections/:connectionId/sync', async (req, res) => {
     if (!token) throw new ValidationError('GitHub connection is not active.')
 
     const repositories = await syncRepositoriesForConnection(connection.id, token)
+    const webhooks = await ensurePullRequestWebhooksForLinkedConnection(connection.id)
     const [updated] = await getDb().select().from(githubConnections).where(eq(githubConnections.id, connection.id)).limit(1)
 
     res.json({
       connection: updated ? serializeConnection(updated) : serializeConnection(connection),
       repositories: repositories.map(serializeRepository),
+      webhooks,
     })
   } catch (error) {
     handleRouteError(res, error, 'GITHUB_CONNECTION_SYNC_FAILED', 'Could not sync GitHub repositories.')
@@ -219,7 +233,12 @@ router.post('/organization-repositories', async (req, res) => {
         })
         .returning()
 
-    res.status(existing ? 200 : 201).json({ organizationRepository: serializeOrganizationRepository(link) })
+    const webhook = await ensurePullRequestWebhookForRepository(repository)
+
+    res.status(existing ? 200 : 201).json({
+      organizationRepository: serializeOrganizationRepository(link),
+      webhook,
+    })
   } catch (error) {
     handleRouteError(res, error, 'ORGANIZATION_REPOSITORY_LINK_FAILED', 'Could not link repository.')
   }
@@ -357,8 +376,215 @@ function githubHeaders(token: string) {
   return {
     Authorization: `Bearer ${token}`,
     Accept: 'application/vnd.github+json',
+    'Content-Type': 'application/json',
     'X-GitHub-Api-Version': '2022-11-28',
   }
+}
+
+async function ensurePullRequestWebhookForRepository(repository: typeof githubRepositories.$inferSelect) {
+  const now = new Date()
+  const webhookUrl = githubWebhookUrl()
+
+  if (!webhookUrl) {
+    return saveRepositoryWebhookStatus(repository, {
+      status: 'not_configured',
+      message: 'Set PACH_PUBLIC_API_URL or PACH_API_URL to install GitHub webhooks.',
+      checkedAt: now.toISOString(),
+    })
+  }
+
+  if (!repository.connectionId) {
+    return saveRepositoryWebhookStatus(repository, {
+      status: 'missing_connection',
+      url: webhookUrl,
+      message: 'Repository has no GitHub connection.',
+      checkedAt: now.toISOString(),
+    })
+  }
+
+  try {
+    const token = await readGithubTokenForConnection(repository.connectionId)
+    if (!token) {
+      return saveRepositoryWebhookStatus(repository, {
+        status: 'missing_token',
+        url: webhookUrl,
+        message: 'GitHub connection is not active.',
+        checkedAt: now.toISOString(),
+      })
+    }
+
+    const existing = await findPullRequestWebhook({
+      repoFullName: repository.fullName,
+      webhookUrl,
+      token,
+    })
+    const hook = existing ?? await createPullRequestWebhook({
+      repoFullName: repository.fullName,
+      webhookUrl,
+      token,
+    })
+
+    return saveRepositoryWebhookStatus(repository, {
+      status: 'active',
+      hookId: hook.id,
+      url: webhookUrl,
+      events: hook.events ?? ['pull_request'],
+      active: hook.active ?? true,
+      message: existing ? 'Webhook already installed.' : 'Webhook installed.',
+      checkedAt: now.toISOString(),
+      updatedAt: hook.updated_at,
+      createdAt: hook.created_at,
+    })
+  } catch (error) {
+    return saveRepositoryWebhookStatus(repository, {
+      status: 'error',
+      url: webhookUrl,
+      message: error instanceof Error ? error.message : 'GitHub webhook install failed.',
+      checkedAt: now.toISOString(),
+    })
+  }
+}
+
+async function ensurePullRequestWebhooksForLinkedConnection(connectionId: string) {
+  const db = getDb()
+  const repositories = await db
+    .select()
+    .from(githubRepositories)
+    .where(and(eq(githubRepositories.connectionId, connectionId), eq(githubRepositories.active, true)))
+  const repositoryIds = repositories.map((repository) => repository.id)
+  if (repositoryIds.length === 0) return []
+
+  const links = await db
+    .select()
+    .from(organizationRepositories)
+    .where(and(eq(organizationRepositories.active, true), inArray(organizationRepositories.repositoryId, repositoryIds)))
+  const linkedRepositoryIds = new Set(links.map((link) => link.repositoryId))
+  const results = []
+
+  for (const repository of repositories) {
+    if (!linkedRepositoryIds.has(repository.id)) continue
+    results.push({
+      repositoryId: repository.id,
+      fullName: repository.fullName,
+      webhook: await ensurePullRequestWebhookForRepository(repository),
+    })
+  }
+
+  return results
+}
+
+async function findPullRequestWebhook({
+  repoFullName,
+  webhookUrl,
+  token,
+}: {
+  repoFullName: string
+  webhookUrl: string
+  token: string
+}) {
+  const hooks = await fetchGithubWebhooks(repoFullName, token)
+  return hooks.find((hook) => {
+    const urlMatches = normalizeComparableUrl(hook.config?.url) === normalizeComparableUrl(webhookUrl)
+    const events = hook.events ?? []
+    return urlMatches && (events.includes('pull_request') || events.includes('*'))
+  }) ?? null
+}
+
+async function fetchGithubWebhooks(repoFullName: string, token: string) {
+  const hooks: GithubWebhookResponse[] = []
+  for (let page = 1; page <= 5; page += 1) {
+    const url = new URL(`https://api.github.com/repos/${repoFullName}/hooks`)
+    url.searchParams.set('per_page', '100')
+    url.searchParams.set('page', String(page))
+    const response = await fetch(url, { headers: githubHeaders(token) })
+    const pageItems = await readGithubResponse<GithubWebhookResponse[]>(response, 'GitHub webhook lookup failed')
+    hooks.push(...pageItems)
+    if (pageItems.length < 100) break
+  }
+  return hooks
+}
+
+async function createPullRequestWebhook({
+  repoFullName,
+  webhookUrl,
+  token,
+}: {
+  repoFullName: string
+  webhookUrl: string
+  token: string
+}) {
+  const secret = readGithubWebhookSecret()
+  if (!secret) {
+    throw new ValidationError('Set GITHUB_WEBHOOK_SECRET or PACH_GITHUB_WEBHOOK_SECRET before linking repositories.')
+  }
+
+  const response = await fetch(`https://api.github.com/repos/${repoFullName}/hooks`, {
+    method: 'POST',
+    headers: githubHeaders(token),
+    body: JSON.stringify({
+      name: 'web',
+      active: true,
+      events: ['pull_request'],
+      config: {
+        url: webhookUrl,
+        content_type: 'json',
+        insecure_ssl: '0',
+        secret,
+      },
+    }),
+  })
+
+  return readGithubResponse<GithubWebhookResponse>(response, 'GitHub webhook creation failed')
+}
+
+async function saveRepositoryWebhookStatus(
+  repository: typeof githubRepositories.$inferSelect,
+  webhook: Record<string, unknown>,
+) {
+  const db = getDb()
+  const [updated] = await db
+    .update(githubRepositories)
+    .set({
+      metadata: {
+        ...(repository.metadata ?? {}),
+        webhook,
+      },
+      updatedAt: new Date(),
+    })
+    .where(eq(githubRepositories.id, repository.id))
+    .returning()
+
+  return updated?.metadata && typeof updated.metadata === 'object'
+    ? (updated.metadata as Record<string, unknown>).webhook ?? webhook
+    : webhook
+}
+
+function githubWebhookUrl() {
+  const base = normalizePublicBaseUrl(
+    process.env.PACH_PUBLIC_API_URL ||
+    process.env.NEXT_PUBLIC_PACH_API_URL ||
+    process.env.PACH_API_URL ||
+    process.env.API_PUBLIC_URL ||
+    process.env.PUBLIC_API_URL ||
+    'https://api.pach.world',
+  )
+  return `${base}/github/webhooks`
+}
+
+function readGithubWebhookSecret() {
+  return process.env.GITHUB_WEBHOOK_SECRET?.trim() || process.env.PACH_GITHUB_WEBHOOK_SECRET?.trim() || null
+}
+
+function normalizePublicBaseUrl(value: string) {
+  const trimmed = value.trim().replace(/\/+$/, '')
+  if (!trimmed) return ''
+  if (/^https?:\/\//i.test(trimmed)) return trimmed
+  if (/^(localhost|127\.0\.0\.1|\[::1])(?::\d+)?(?:\/|$)/i.test(trimmed)) return `http://${trimmed}`
+  return `https://${trimmed}`
+}
+
+function normalizeComparableUrl(value: string | undefined) {
+  return value?.trim().replace(/\/+$/, '').toLowerCase() ?? ''
 }
 
 async function readGithubResponse<T>(response: Response, context: string) {
@@ -413,10 +639,17 @@ function serializeRepository(repository: typeof githubRepositories.$inferSelect)
     htmlUrl: repository.htmlUrl,
     isPrivate: repository.isPrivate,
     permissions: repository.permissions ?? {},
+    webhook: readRepositoryWebhookMetadata(repository.metadata),
     active: repository.active,
     createdAt: repository.createdAt.getTime(),
     updatedAt: repository.updatedAt.getTime(),
   }
+}
+
+function readRepositoryWebhookMetadata(metadata: unknown) {
+  if (!metadata || typeof metadata !== 'object' || Array.isArray(metadata)) return null
+  const webhook = (metadata as Record<string, unknown>).webhook
+  return webhook && typeof webhook === 'object' && !Array.isArray(webhook) ? webhook : null
 }
 
 function serializeOrganizationRepository(link: typeof organizationRepositories.$inferSelect) {

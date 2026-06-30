@@ -65,7 +65,7 @@ export function buildAgentRunSpec(run: AgentRunPromptRecord): AgentRunSpec {
       : undefined,
     finalization: {
       commitAndPush: codeWorktree,
-      openPullRequest: codeWorktree,
+      openPullRequest: false,
       pullRequestDraft: false,
     },
   }
@@ -84,7 +84,7 @@ export function buildGeneralMcpPrompt(run: AgentRunPromptRecord) {
     '',
     'Use Pach MCP tools for Pach state. You may call Pach MCP tools directly and repeatedly as needed.',
     codeWorktree
-      ? 'For this worker, Codex is running with full local trust. Still act conservatively: do not send external messages, publish content, merge pull requests, or perform irreversible external actions. You may commit on the working branch and create a ready-for-review pull request pointing at the base branch when you believe the work is successfully done.'
+      ? 'For this worker, Codex is running with full local trust. Still act conservatively: do not send external messages, publish content, merge pull requests, or perform irreversible external actions. When you believe the work is successfully done, ask Pach to finalize the branch and create a ready-for-review pull request by calling pach.github.pull_request.create with this agent run id.'
       : 'For this worker, Codex is running with full local trust. Still act conservatively: do not send external messages, publish content, push code, open pull requests, or perform irreversible external actions unless the issue explicitly asks for it.',
     `Issue id: ${run.issueId}`,
     `Agent run id: ${run.id}`,
@@ -92,7 +92,7 @@ export function buildGeneralMcpPrompt(run: AgentRunPromptRecord) {
     codeWorktree && run.baseBranch ? `Base branch: ${run.baseBranch}` : null,
     codeWorktree && run.branchName ? `Working branch: ${run.branchName}` : null,
     codeWorktree && run.workspacePath ? `Workspace path: ${run.workspacePath}` : null,
-    codeWorktree ? `Server run policy: commitAndPush=${runSpec.finalization.commitAndPush}; openPullRequest=${runSpec.finalization.openPullRequest}; pullRequestDraft=${runSpec.finalization.pullRequestDraft}.` : null,
+    codeWorktree ? 'PR finalization tool: pach.github.pull_request.create. Use it when the branch is ready for a pull request.' : null,
     parentRunId ? `Parent run id: ${parentRunId}` : null,
     feedback ? `User feedback: ${feedback}` : null,
     attachments,
@@ -111,10 +111,10 @@ export function buildGeneralMcpPrompt(run: AgentRunPromptRecord) {
       ? '4. Inspect and edit the repository in the current working directory. Run the relevant checks you can run locally.'
       : '4. Put the final result in pach.progress.report with phase "final_result".',
     codeWorktree
-      ? '5. When the implementation is ready, follow the server policy above: commit on the working branch and open or update a ready-for-review pull request when appropriate. Put the final result in pach.progress.report with phase "final_result", including changed files, checks run, PR status or URL when available, and metadata.readyForPr=true when the branch is ready for PR finalization.'
+      ? '5. When the implementation is ready, call pach.github.pull_request.create with the agent run id to let Pach commit/push the working branch and open or update a ready-for-review pull request with server-held GitHub credentials. Then put the final result in pach.progress.report with phase "final_result", including changed files, checks run, and the PR URL/status when available.'
       : '5. If you update issue fields, use pach.issue.update and explain the change in activitySummary.',
     codeWorktree
-      ? '6. Never merge a pull request. You may commit on this branch and open or update a pull request pointing at the base branch when the work is successful; otherwise leave the branch ready for Pach finalization.'
+      ? '6. Never merge a pull request. Do not use raw GitHub credentials or gh directly; Pach owns PR finalization through pach.github.pull_request.create.'
       : null,
     '',
     'Keep the final result concise and useful inside the Pach run progress stream.',

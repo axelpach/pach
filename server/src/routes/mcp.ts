@@ -38,6 +38,7 @@ import {
   type McpCapability,
 } from '../lib/mcp-token.js'
 import { getFallbackDesignSystemForOrganization, mergeDesignSystemWithFallback } from '../design-systems/fallback.js'
+import { finalizeAgentRunPullRequest } from '../lib/agent-pr-finalizer.js'
 
 const router = Router()
 const SIGNED_READ_SECONDS = 60 * 60
@@ -645,6 +646,19 @@ const tools: ToolDefinition[] = [
       },
     },
   },
+  {
+    name: 'pach.github.pull_request.create',
+    description: 'Finalize the working branch for an agent run using Pach-held GitHub credentials, then create or reuse a ready-for-review GitHub pull request.',
+    inputSchema: {
+      type: 'object',
+      additionalProperties: false,
+      required: ['runId'],
+      properties: {
+        runId: { type: 'string', description: 'Agent run id whose prepared workspace/branch should be finalized.' },
+        title: { type: 'string', description: 'Optional PR title. Defaults to the linked issue title or branch name.' },
+      },
+    },
+  },
 ]
 
 router.get('/', (_req, res) => {
@@ -794,7 +808,7 @@ async function handleJsonRpcRequest(req: AuthenticatedRequest, raw: unknown) {
             'Use Pach tools to read and update Pach state for authorized work only.',
             'Report progress before and after meaningful steps so the Pach web app can show live agent status.',
             DOCUMENT_FORMAT_INSTRUCTIONS,
-            'Ask for approval before irreversible external actions such as sending messages, publishing, or pushing PRs.',
+            'Do not send external messages, publish content, or merge pull requests. For code runs, use pach.github.pull_request.create only when the run instructions ask Pach to finalize a branch.',
           ].join(' '),
         })
 
@@ -890,6 +904,9 @@ async function callTool(req: AuthenticatedRequest, params: unknown) {
       case 'pach.progress.report':
         requireMcpCapability(req, 'pach.progress.report')
         return toolResult(await reportProgress(req, args))
+      case 'pach.github.pull_request.create':
+        requireMcpCapability(req, 'pach.progress.report')
+        return toolResult(await createGithubPullRequestForRun(req, args))
       default:
         return toolError(`Unknown tool: ${name}`)
     }
@@ -2057,6 +2074,41 @@ async function reportProgress(req: AuthenticatedRequest, args: unknown) {
     phase,
     message,
     percent,
+  }
+}
+
+async function createGithubPullRequestForRun(req: AuthenticatedRequest, args: unknown) {
+  const body = ensureObject(args)
+  const runId = readRequiredString(body, 'runId')
+  const title = readOptionalString(body.title) ?? undefined
+
+  const [run] = await getDb().select().from(agentRuns).where(eq(agentRuns.id, runId)).limit(1)
+  if (!run) throw new Error('Agent run not found')
+  if (run.issueId) {
+    await readAccessibleIssue(req, run.issueId)
+  } else if (!canAccessOrganization(req, null)) {
+    throw new Error('Not authorized for this agent run')
+  }
+
+  const result = await finalizeAgentRunPullRequest({
+    runId: run.id,
+    title,
+    activitySource: 'pach-mcp',
+  })
+
+  return {
+    ok: true,
+    runId: result.run.id,
+    pullRequest: {
+      id: result.pullRequest.id,
+      number: result.pullRequest.number,
+      url: result.pullRequest.url,
+      title: result.pullRequest.title,
+      state: result.pullRequest.state,
+      isDraft: result.pullRequest.isDraft,
+    },
+    stdout: truncateText(result.stdout, 8_000),
+    stderr: truncateText(result.stderr, 4_000),
   }
 }
 

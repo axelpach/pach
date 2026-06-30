@@ -53,6 +53,7 @@ type GithubRepository = {
   htmlUrl: string | null
   isPrivate: boolean
   permissions: Record<string, unknown>
+  webhook: Record<string, unknown> | null
   active: boolean
   createdAt: number
   updatedAt: number
@@ -224,9 +225,10 @@ export default function SettingsPage() {
         isDefault,
       }),
     })
-    await readJson(response)
+    const payload = await readJson(response)
     await loadGithubSettings()
-    flash('repository linked')
+    const webhookStatus = readWebhookStatus(payload.webhook)
+    flash(webhookStatus === 'active' ? 'repository linked · webhook active' : 'repository linked · webhook pending')
   }
 
   async function unlinkGithubRepository(link: OrganizationRepository) {
@@ -477,7 +479,10 @@ function RepositoriesSection({
                     <td className="py-2.5 pr-3 text-fg-4">{repository.isPrivate ? 'private' : 'public'}</td>
                     <td className="py-2.5 pr-3">
                       {link ? (
-                        <StatusPill kind={link.isDefault ? 'ok' : 'idle'}>{link.isDefault ? 'default' : 'linked'}</StatusPill>
+                        <div className="flex flex-wrap items-center gap-1.5">
+                          <StatusPill kind={link.isDefault ? 'ok' : 'idle'}>{link.isDefault ? 'default' : 'linked'}</StatusPill>
+                          <RepositoryWebhookPill repository={repository} />
+                        </div>
                       ) : (
                         <StatusPill kind="idle">not linked</StatusPill>
                       )}
@@ -780,7 +785,7 @@ function ConnectGithubModal({
           </label>
 
           <div className="border border-edge/12 bg-rim px-3 py-2 font-mono text-xs text-fg-3">
-            Use a token that can read repository metadata and push to the repositories the agent should work in. Pach stores it encrypted at rest.
+            Use a token with repository metadata, contents, pull requests, and webhooks access for the repos the agent should work in. Pach stores it encrypted at rest.
           </div>
         </div>
 
@@ -831,6 +836,38 @@ function sectionFromPath(pathname: string): SettingsSection | null {
 
 function FieldLabel({ children }: { children: ReactNode }) {
   return <div className="mb-1.5 font-mono text-[10px] uppercase tracking-label text-fg-4">{children}</div>
+}
+
+function RepositoryWebhookPill({ repository }: { repository: GithubRepository }) {
+  const status = readWebhookStatus(repository.webhook)
+  const message = readWebhookMessage(repository.webhook)
+  const label =
+    status === 'active'
+      ? 'webhook'
+      : status === 'error'
+        ? 'webhook error'
+        : status === 'not_configured'
+          ? 'webhook config'
+          : 'webhook pending'
+  const kind = status === 'active' ? 'ok' : status === 'error' || status === 'not_configured' ? 'warn' : 'idle'
+
+  return (
+    <span title={message ?? label}>
+      <StatusPill kind={kind}>{label}</StatusPill>
+    </span>
+  )
+}
+
+function readWebhookStatus(value: unknown) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null
+  const status = (value as Record<string, unknown>).status
+  return typeof status === 'string' ? status : null
+}
+
+function readWebhookMessage(value: unknown) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null
+  const message = (value as Record<string, unknown>).message
+  return typeof message === 'string' && message.trim() ? message.trim() : null
 }
 
 function formatDate(value: number | null | undefined) {
