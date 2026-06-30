@@ -6,6 +6,7 @@ import type { Schema } from '../../zero-schema'
 import type { Mutators } from '../../mutators'
 import { useAuth } from '../../lib/auth'
 import { PachSelect } from '../../components/PachSelect'
+import { requestGlobalIssueComposer } from './IssueComposer'
 
 export type TrackerSection =
   | { kind: 'all' }
@@ -15,7 +16,6 @@ export type TrackerSection =
 export type TrackerContext = {
   section: TrackerSection
   setSection: (section: TrackerSection) => void
-  composerRequestId: number
   requestComposer: () => void
 }
 
@@ -73,7 +73,6 @@ export default function IssuesLayout() {
   const [deletingTeam, setDeletingTeam] = useState(false)
   const [replacementTeamId, setReplacementTeamId] = useState('')
   const [teamDeleteStep, setTeamDeleteStep] = useState(false)
-  const [composerRequestId, setComposerRequestId] = useState(0)
   const [mobileTrackerOpen, setMobileTrackerOpen] = useState(false)
   const suppressNextViewUrlSyncRef = useRef(false)
   const replacementTeams = useMemo(
@@ -107,8 +106,7 @@ export default function IssuesLayout() {
   }
 
   function requestComposer() {
-    navigate('/issues', { state: { openIssueComposerAt: Date.now() } })
-    setComposerRequestId((id) => id + 1)
+    requestGlobalIssueComposer()
   }
 
   function toggleTeam(teamId: string) {
@@ -381,7 +379,7 @@ export default function IssuesLayout() {
     }
   }, [sidebarStorageKey, section, teamsSectionCollapsed, collapsedTeams])
 
-  const context: TrackerContext = { section, setSection, composerRequestId, requestComposer }
+  const context: TrackerContext = { section, setSection, requestComposer }
 
   return (
     <div className="flex-1 min-h-0 overflow-hidden text-fg-1">
