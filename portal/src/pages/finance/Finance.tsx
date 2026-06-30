@@ -5681,7 +5681,6 @@ function buildCategoryBreakdown(
       color: CATEGORY_CHART_COLORS[0],
     }))
     .sort((a, b) => b.amountMinor - a.amountMinor)
-    .slice(0, 9)
     .map((entry, index) => ({
       ...entry,
       color: CATEGORY_CHART_COLORS[index % CATEGORY_CHART_COLORS.length],
