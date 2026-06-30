@@ -729,17 +729,17 @@ export default function Issues() {
     },
     {
       field: 'agent',
-      label: 'agent',
+      label: 'agent run',
       icon: Bot,
       options: [
         {
           value: 'assigned',
-          label: 'assigned to vps',
+          label: 'active agent run',
           icon: <AgentRunDot />,
         },
         {
           value: 'unassigned',
-          label: 'no vps agent',
+          label: 'no active agent run',
           icon: <span className="h-2 w-2 rounded-full border border-edge/25" />,
         },
       ],
