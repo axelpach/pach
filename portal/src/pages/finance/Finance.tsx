@@ -1830,7 +1830,7 @@ export default function Finance() {
           />
           <FinanceSidebarButton
             active={tab === 'category'}
-            label="categories"
+            label="expenses"
             meta={categoryBreakdown?.entries.length ? String(categoryBreakdown.entries.length) : undefined}
             onClick={() => navigate(pathForCategories())}
           />
@@ -1901,7 +1901,7 @@ export default function Finance() {
               onClick={() => navigate(pathForCategories())}
               className={`border px-2 py-2 text-center transition ${tab === 'category' ? 'border-edge/45 bg-accent-fill/8 text-accent' : 'border-edge/12 text-fg-3'}`}
             >
-              cats
+              expenses
             </button>
             <button
               type="button"
