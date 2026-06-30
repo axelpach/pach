@@ -107,7 +107,7 @@ export default function IssuesLayout() {
   }
 
   function requestComposer() {
-    if (location.pathname !== '/issues') navigate('/issues')
+    navigate('/issues', { state: { openIssueComposerAt: Date.now() } })
     setComposerRequestId((id) => id + 1)
   }
 
@@ -422,13 +422,13 @@ export default function IssuesLayout() {
             <button
               onClick={requestComposer}
               className="flex w-full items-center justify-between gap-2 border border-edge/30 bg-accent-fill/8 px-3 py-1.5 font-mono text-[10px] uppercase tracking-label text-accent transition hover:bg-accent-fill/16 hover:shadow-glow-xs"
-              title="create issue (c)"
+              title="create issue (shift+c)"
             >
               <span className="inline-flex items-center gap-1.5">
                 <Plus className="h-3 w-3" />
                 create issue
               </span>
-              <span className="text-fg-4 normal-case tracking-normal">c</span>
+              <span className="text-fg-4 normal-case tracking-normal">shift+c</span>
             </button>
           </div>
 
