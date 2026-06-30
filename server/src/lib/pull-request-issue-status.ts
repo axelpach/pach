@@ -69,7 +69,7 @@ export async function syncIssueStatusForPullRequest({
 
   await insertIssueActivityEvent(db, {
     issueId: issue.id,
-    eventType: 'status_changed',
+    eventType: targetType === 'completed' ? 'completed' : 'status_changed',
     actorName: 'Pach GitHub',
     source,
     summary: targetType === 'completed'
