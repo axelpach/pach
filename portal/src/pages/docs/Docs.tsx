@@ -14,7 +14,7 @@ import {
   Trash2,
   X,
 } from 'lucide-react'
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { PachSelect, type PachSelectOption } from '../../components/PachSelect'
 import { RichEditor } from '../../components/rich-editor/RichEditor'
@@ -34,6 +34,16 @@ type DocumentTreeNode = {
 const NO_ORGANIZATION = '__none__'
 const DOCS_ORGANIZATION_STORAGE_KEY = 'pach.docs.organizationFilter'
 
+function resizeTextareaToContent(textarea: HTMLTextAreaElement | null) {
+  if (!textarea) return
+  textarea.style.height = 'auto'
+  textarea.style.height = `${textarea.scrollHeight}px`
+}
+
+function normalizeTitleDraft(value: string) {
+  return value.replace(/[\r\n]+/g, ' ')
+}
+
 export default function Docs() {
   const z = useZero<Schema, Mutators>()
   const navigate = useNavigate()
@@ -52,6 +62,7 @@ export default function Docs() {
   const [creatingMarketingContent, setCreatingMarketingContent] = useState(false)
   const [marketingContentStatus, setMarketingContentStatus] = useState<{ kind: 'ok' | 'fail'; message: string } | null>(null)
   const [documentActionStatus, setDocumentActionStatus] = useState<{ kind: 'ok' | 'fail'; message: string } | null>(null)
+  const titleTextareaRef = useRef<HTMLTextAreaElement | null>(null)
 
   const [documents] = useQuery(z.query.documents.orderBy('updatedAt', 'desc'))
   const [documentSnapshots] = useQuery(z.query.document_snapshots.orderBy('createdAt', 'desc'))
@@ -175,6 +186,10 @@ export default function Docs() {
     setBodyDraft(selectedSnapshot.body)
     setDocumentActionStatus(null)
   }, [selectedSnapshot?.id])
+
+  useEffect(() => {
+    resizeTextareaToContent(titleTextareaRef.current)
+  }, [titleDraft, selectedDocument?.id, selectedSnapshot?.id])
 
   useEffect(() => {
     if (!selectedSnapshotId) return
@@ -616,16 +631,28 @@ export default function Docs() {
               </button>
             </div>
 
-            <input
+            <textarea
+              ref={titleTextareaRef}
               value={titleDraft}
-              onChange={(event) => setTitleDraft(event.target.value)}
+              rows={1}
+              onChange={(event) => {
+                const nextTitle = normalizeTitleDraft(event.currentTarget.value)
+                event.currentTarget.value = nextTitle
+                setTitleDraft(nextTitle)
+                resizeTextareaToContent(event.currentTarget)
+              }}
+              onKeyDown={(event) => {
+                if (event.key !== 'Enter') return
+                event.preventDefault()
+                event.currentTarget.blur()
+              }}
               onBlur={() => {
                 if (!selectedDocument) return
                 if (selectedSnapshot) void saveSnapshotVersion(selectedDocument, selectedSnapshot, titleDraft, bodyDraft)
                 else void saveLiveDocument(selectedDocument, titleDraft, bodyDraft)
               }}
               placeholder="Untitled"
-              className="w-full bg-transparent font-mono text-3xl font-bold leading-tight text-fg-1 outline-none placeholder:text-fg-4 md:text-4xl"
+              className="block min-h-[2.5rem] w-full resize-none overflow-hidden bg-transparent font-mono text-3xl font-bold leading-tight text-fg-1 outline-none [overflow-wrap:anywhere] placeholder:text-fg-4 md:text-4xl"
             />
 
             <RichEditor
