@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { AlertTriangle, ArrowDown, ArrowUp, ArrowUpDown, BookmarkPlus, Bot, Building2, CheckCircle2, Check, ChevronDown, ChevronRight, Circle, FolderKanban, GripVertical, Plus, Save, Settings2, Trash2 } from 'lucide-react'
+import { AlertTriangle, ArrowDown, ArrowUp, ArrowUpDown, BookmarkPlus, Bot, Building2, CheckCircle2, Check, ChevronDown, ChevronRight, Circle, FolderKanban, GripVertical, Plus, Save, Settings2, TerminalSquare, Trash2 } from 'lucide-react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import {
   DndContext,
@@ -133,6 +133,16 @@ type Foundation = {
   defaultProjectId?: string
 }
 
+type DeveloperRepository = Pick<
+  Schema['tables']['github_repositories']['row'],
+  'id' | 'projectKey' | 'fullName' | 'defaultBranch' | 'active'
+>
+
+type OrganizationRepositoryLink = Pick<
+  Schema['tables']['organization_repositories']['row'],
+  'id' | 'organizationId' | 'repositoryId' | 'role' | 'isDefault' | 'active'
+>
+
 type RowShortcutRequest = {
   issueId: string
   control: 'status' | 'labels'
@@ -167,6 +177,8 @@ export default function Issues() {
   const [labels] = useQuery(z.query.pm_labels.orderBy('name', 'asc'))
   const [issueLabels] = useQuery(z.query.pm_issue_labels)
   const [agentRuns] = useQuery(z.query.agent_runs.orderBy('createdAt', 'desc'))
+  const [repositories] = useQuery(z.query.github_repositories.orderBy('fullName', 'asc'))
+  const [organizationRepositoryLinks] = useQuery(z.query.organization_repositories.orderBy('updatedAt', 'desc'))
   const [savedViews] = useQuery(z.query.pm_saved_views.orderBy('position', 'asc'))
   const accessibleOrganizationIds = useMemo(() => new Set(user?.organizationIds ?? []), [user?.organizationIds])
   const canAccessUnscoped = user?.canAccessUnscoped ?? false
@@ -203,6 +215,7 @@ export default function Issues() {
   const [composerEstimate, setComposerEstimate] = useState<number>(4)
   const [composerCreateMore, setComposerCreateMore] = useState(false)
   const [creatingIssue, setCreatingIssue] = useState(false)
+  const [creatingAgentRunIssueId, setCreatingAgentRunIssueId] = useState<string | null>(null)
   const [collapsedPriorities, setCollapsedPriorities] = useState<Set<number>>(() => new Set(initialStoredView.collapsedPriorities))
   const [collapsedStatuses, setCollapsedStatuses] = useState<Set<string>>(() => new Set(initialStoredView.collapsedStatuses))
   const [hoveredIssueId, setHoveredIssueId] = useState<string | null>(null)
@@ -348,6 +361,10 @@ export default function Issues() {
       .filter(isActiveAgentRun)
       .map((run) => run.issueId),
   )
+  const agentRunIssueIds = new Set(agentRuns.map((run) => run.issueId).filter((id): id is string => Boolean(id)))
+  const activeRepositories = repositories.filter((repository) => repository.active)
+  const repositoryById = new Map(activeRepositories.map((repository) => [repository.id, repository]))
+  const activeOrganizationRepositoryLinks = organizationRepositoryLinks.filter((link) => link.active)
   const labelsByIssue = new Map<string, Schema['tables']['pm_labels']['row'][]>()
   for (const link of issueLabels) {
     const label = labelMap.get(link.labelId)
@@ -840,7 +857,12 @@ export default function Issues() {
     return minSortOrder == null ? SORT_ORDER_BASE : minSortOrder - SORT_ORDER_STEP
   }
 
-  async function logActivity(issueId: string, summary: string, type = 'created') {
+  async function logActivity(
+    issueId: string,
+    summary: string,
+    type = 'created',
+    metadata: Record<string, unknown> = {},
+  ) {
     const issue = scopedIssues.find((entry) => entry.id === issueId)
     const organizationId =
       issue?.contextCompanyId ??
@@ -863,8 +885,103 @@ export default function Issues() {
       severity: 'info',
       summary,
       details: {},
-      metadata: {},
+      metadata,
     })
+  }
+
+  function selectDeveloperRepositoryForIssue(issue: Schema['tables']['pm_issues']['row']): DeveloperRepository | null {
+    const linkedRepositories = activeOrganizationRepositoryLinks
+      .filter((link) => link.organizationId === issue.contextCompanyId)
+      .map((link) => ({
+        link,
+        repository: repositoryById.get(link.repositoryId),
+      }))
+      .filter((entry): entry is { link: OrganizationRepositoryLink; repository: DeveloperRepository } => Boolean(entry.repository))
+      .toSorted((a, b) => Number(b.link.isDefault) - Number(a.link.isDefault) || a.repository.fullName.localeCompare(b.repository.fullName))
+
+    return linkedRepositories[0]?.repository ?? null
+  }
+
+  async function createAgentRunForIssue(issueId: string) {
+    const issue = scopedIssues.find((entry) => entry.id === issueId)
+    if (!issue || creatingAgentRunIssueId) return
+
+    const repo = selectDeveloperRepositoryForIssue(issue)
+    if (!repo) return
+
+    const runId = crypto.randomUUID()
+    const conversationId = crypto.randomUUID()
+    const messageId = crypto.randomUUID()
+    const branchName = normalizeBranchName(buildDefaultAgentBranchName(issue, repo))
+    if (!isValidBranchName(branchName)) return
+
+    setCreatingAgentRunIssueId(issue.id)
+    try {
+      await z.mutate.agent_conversations.create({
+        id: conversationId,
+        issueId: issue.id,
+        title: issue.title,
+        metadata: {
+          source: 'issue_list',
+        },
+      })
+
+      await z.mutate.agent_runs.create({
+        id: runId,
+        conversationId,
+        issueId: issue.id,
+        repositoryId: repo.id,
+        projectKey: repo.projectKey,
+        repoFullName: repo.fullName,
+        baseBranch: repo.defaultBranch,
+        branchName,
+        status: 'queued',
+        statusMessage: 'queued for agent worker',
+        metadata: {
+          executionClass: 'general',
+          handler: 'general-mcp',
+          intent: 'engineering',
+          executionMode: 'code_worktree',
+          requiredCapabilities: ['codex.local', 'pach-mcp'],
+          queuedVia: 'issue_list',
+          conversationId,
+        },
+      })
+
+      await z.mutate.github_branches.create({
+        id: crypto.randomUUID(),
+        repositoryId: repo.id,
+        agentRunId: runId,
+        issueId: issue.id,
+        name: branchName,
+        baseBranch: repo.defaultBranch,
+        status: 'planned',
+      })
+
+      await z.mutate.agent_messages.create({
+        id: messageId,
+        conversationId,
+        runId,
+        role: 'user',
+        body: `Go solve ${issue.identifier}: ${issue.title}`,
+        metadata: {
+          source: 'go_solve',
+        },
+      })
+
+      await logActivity(issue.id, 'queued general MCP agent run', 'agent_run_created', {
+        runId,
+        conversationId,
+        repository: repo.fullName,
+        executionClass: 'general',
+        handler: 'general-mcp',
+        requiredCapabilities: ['codex.local', 'pach-mcp'],
+      })
+    } catch (error) {
+      console.error('Failed to queue agent run from issue list', error)
+    } finally {
+      setCreatingAgentRunIssueId((current) => (current === issue.id ? null : current))
+    }
   }
 
   const [activeDragId, setActiveDragId] = useState<string | null>(null)
@@ -1391,6 +1508,9 @@ export default function Issues() {
                                           (!l.companyId || l.companyId === issue.contextCompanyId),
                                         )}
                                         hasActiveAgentRun={activeAgentRunIssueIds.has(issue.id)}
+                                        hasAgentRun={agentRunIssueIds.has(issue.id)}
+                                        canCreateAgentRun={Boolean(selectDeveloperRepositoryForIssue(issue))}
+                                        creatingAgentRun={creatingAgentRunIssueId === issue.id}
                                         visibleFields={visibleFields}
                                         shortcutRequest={rowShortcutRequest}
                                         draggable={isManualSort}
@@ -1407,6 +1527,7 @@ export default function Issues() {
                                         onAssigneeChange={changeIssueAssignee}
                                         onPriorityChange={changeIssuePriority}
                                         onToggleLabel={toggleIssueLabel}
+                                        onCreateAgentRun={createAgentRunForIssue}
                                       />
                                     ))}
                                   </div>
@@ -1438,6 +1559,9 @@ export default function Issues() {
                         issueLabels={labelsByIssue.get(activeDragIssue.id) ?? []}
                         availableLabels={[]}
                         hasActiveAgentRun={activeAgentRunIssueIds.has(activeDragIssue.id)}
+                        hasAgentRun={agentRunIssueIds.has(activeDragIssue.id)}
+                        canCreateAgentRun={false}
+                        creatingAgentRun={false}
                         visibleFields={visibleFields}
                         shortcutRequest={null}
                         draggable={isManualSort}
@@ -1449,6 +1573,7 @@ export default function Issues() {
                         onAssigneeChange={() => {}}
                         onPriorityChange={() => {}}
                         onToggleLabel={() => {}}
+                        onCreateAgentRun={() => {}}
                       />
                     </div>
                   ) : null}
@@ -2258,6 +2383,9 @@ function IssueRow({
   issueLabels,
   availableLabels,
   hasActiveAgentRun,
+  hasAgentRun,
+  canCreateAgentRun,
+  creatingAgentRun,
   visibleFields,
   shortcutRequest,
   onStatusChange,
@@ -2267,6 +2395,7 @@ function IssueRow({
   onAssigneeChange,
   onPriorityChange,
   onToggleLabel,
+  onCreateAgentRun,
   onHoverChange,
   dragHandleProps,
 }: {
@@ -2283,6 +2412,9 @@ function IssueRow({
   issueLabels: Schema['tables']['pm_labels']['row'][]
   availableLabels: Schema['tables']['pm_labels']['row'][]
   hasActiveAgentRun: boolean
+  hasAgentRun: boolean
+  canCreateAgentRun: boolean
+  creatingAgentRun: boolean
   visibleFields: Set<RowField>
   shortcutRequest?: RowShortcutRequest | null
   draggable?: boolean
@@ -2294,6 +2426,7 @@ function IssueRow({
   onAssigneeChange: (issueId: string, nextAssigneeId: string) => void | Promise<void>
   onPriorityChange: (issueId: string, nextPriority: string) => void | Promise<void>
   onToggleLabel: (issueId: string, labelId: string) => void | Promise<void>
+  onCreateAgentRun: (issueId: string) => void | Promise<void>
   onHoverChange?: (hovered: boolean) => void
 }) {
   const navigate = useNavigate()
@@ -2523,6 +2656,23 @@ function IssueRow({
       {shows('updated') && (
         <div className="hidden sm:block shrink-0 font-mono text-[10px] uppercase tracking-label text-fg-4">{formatShortDate(issue.updatedAt)}</div>
       )}
+      {!hasAgentRun ? (
+        <button
+          type="button"
+          onClick={(event) => {
+            event.stopPropagation()
+            void onCreateAgentRun(issue.id)
+          }}
+          onMouseDown={(event) => event.stopPropagation()}
+          disabled={!canCreateAgentRun || creatingAgentRun}
+          aria-label={`queue agent run for ${issue.identifier}`}
+          className="hidden h-6 shrink-0 items-center gap-1 border border-edge/20 bg-accent-fill/8 px-2 font-mono text-[10px] uppercase tracking-label text-accent opacity-0 transition hover:border-accent disabled:cursor-not-allowed disabled:text-fg-4 group-hover:inline-flex group-hover:opacity-100 group-focus-within:inline-flex group-focus-within:opacity-100"
+          title={canCreateAgentRun ? 'queue agent run' : 'needs a repository'}
+        >
+          <TerminalSquare className="h-3 w-3" />
+          {creatingAgentRun ? 'queueing' : 'do task'}
+        </button>
+      ) : null}
     </div>
   )
 }
@@ -3079,4 +3229,38 @@ function getUserInitials(user: Schema['tables']['users']['row']) {
 
 function sumEstimates(items: Schema['tables']['pm_issues']['row'][]) {
   return items.reduce((total, issue) => total + (issue.estimate ?? 0), 0)
+}
+
+function buildDefaultAgentBranchName(issue: Schema['tables']['pm_issues']['row'], repository: DeveloperRepository) {
+  return `agent/${repository.projectKey}-${issue.identifier.toLowerCase()}-${slugifyAgentBranchPart(issue.title)}`
+}
+
+function normalizeBranchName(value: string) {
+  return value
+    .trim()
+    .replace(/\s+/g, '-')
+    .replace(/\/+/g, '/')
+    .replace(/^\/+|\/+$/g, '')
+}
+
+function isValidBranchName(value: string) {
+  if (!value) return false
+  if (value === '@') return false
+  if (value.endsWith('.')) return false
+  if (value.includes('..')) return false
+  if (value.includes('@{')) return false
+  if (/[~^:?*[\]\\\s]/.test(value)) return false
+  return value.split('/').every((part) => part && !part.startsWith('.') && !part.endsWith('.lock'))
+}
+
+function slugifyAgentBranchPart(value: string) {
+  const slug = value
+    .toLowerCase()
+    .normalize('NFKD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 42)
+
+  return slug || 'issue'
 }
