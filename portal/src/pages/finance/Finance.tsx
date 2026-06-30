@@ -782,6 +782,7 @@ export default function Finance() {
       label: 'months',
       icon: CalendarDays,
       options: monthFilterOptions,
+      allowSelectAll: true,
     },
     {
       field: 'categories',
@@ -795,6 +796,7 @@ export default function Finance() {
           icon: <Tag className="h-3.5 w-3.5" />,
         })),
       ],
+      allowSelectAll: true,
     },
   ]
   const selectedMovementAccount = scopedAccounts.find((account) => account.id === movementDraft.accountId)
