@@ -298,6 +298,7 @@ export default function Finance() {
   })
   const [activeFilters, setActiveFilters] = useState<ActiveFilters>({})
   const [dashboardFilters, setDashboardFilters] = useState<ActiveFilters>({})
+  const [categoryFilters, setCategoryFilters] = useState<ActiveFilters>({})
   const [reviewStatusFilter, setReviewStatusFilter] = useState<ReviewStatusFilter>('all')
   const [search, setSearch] = useState('')
   const [movementSortDirection, setMovementSortDirection] = useState<MovementSortDirection>('desc')
@@ -387,6 +388,8 @@ export default function Finance() {
   const selectedDashboardMonthFilterIds = dashboardFilters.months ?? []
   const selectedDashboardQuarterFilterIds = dashboardFilters.quarters ?? []
   const selectedDashboardCurrencyFilterIds = dashboardFilters.currencies ?? []
+  const selectedCategoryMonthFilterIds = categoryFilters.months ?? []
+  const selectedCategoryPageCategoryFilterIds = categoryFilters.categories ?? []
   const selectedFinanceCategoryId = categoryIdFromPath(location.pathname)
   const selectedFinanceCategory = selectedFinanceCategoryId && selectedFinanceCategoryId !== UNCATEGORIZED_VALUE
     ? scopedCategories.find((category) => category.id === selectedFinanceCategoryId) ?? null
@@ -561,6 +564,8 @@ export default function Finance() {
     .filter((movement) => !isTransferLikeMovement(movement, scopedCategories))
     .filter((movement) => movement.amountMinor < 0)
     .filter((movement) => !selectedFinanceCategoryId || movementMatchesCategory(movement, selectedFinanceCategoryId))
+    .filter((movement) => selectedCategoryMonthFilterIds.length === 0 || selectedCategoryMonthFilterIds.includes(monthKey(movement.transactionDate)))
+    .filter((movement) => selectedCategoryPageCategoryFilterIds.length === 0 || selectedCategoryPageCategoryFilterIds.includes(movement.categoryId ?? UNCATEGORIZED_VALUE))
     .sort((a, b) => b.transactionDate - a.transactionDate || formatTransactionTime(b.transactionTime).localeCompare(formatTransactionTime(a.transactionTime)) || a.description.localeCompare(b.description))
   const categoryDetailTrend = dashboardConversionRates
     ? buildCategorySpendTrend(categoryDetailMovements, dashboardReportingCurrencyCode, dashboardConversionRates)
@@ -754,6 +759,27 @@ export default function Finance() {
       label: 'quarters',
       icon: CalendarDays,
       options: quarterFilterOptions,
+    },
+  ]
+  const categoryFilterConfigs: FilterFieldConfig[] = [
+    {
+      field: 'months',
+      label: 'months',
+      icon: CalendarDays,
+      options: monthFilterOptions,
+    },
+    {
+      field: 'categories',
+      label: 'categories',
+      icon: Tag,
+      options: [
+        { value: UNCATEGORIZED_VALUE, label: 'uncategorized' },
+        ...scopedCategories.map((category) => ({
+          value: category.id,
+          label: category.name,
+          icon: <Tag className="h-3.5 w-3.5" />,
+        })),
+      ],
     },
   ]
   const selectedMovementAccount = scopedAccounts.find((account) => account.id === movementDraft.accountId)
@@ -1146,6 +1172,19 @@ export default function Finance() {
 
   function clearDashboardFilters() {
     setDashboardFilters({})
+  }
+
+  function setCategoryFilterField(field: string, values: string[]) {
+    setCategoryFilters((current) => {
+      const next = { ...current }
+      if (values.length === 0) delete next[field]
+      else next[field] = values
+      return next
+    })
+  }
+
+  function clearCategoryFilters() {
+    setCategoryFilters({})
   }
 
   function stageImportFiles(files: File[]) {
@@ -1686,6 +1725,7 @@ export default function Finance() {
     if (tab === 'dashboard') {
       pendingDashboardScrollRestoreRef.current = dashboardScrollRef.current?.scrollTop ?? 0
     }
+    if (!categoryId) setCategoryFilters({})
     navigate(categoryId ? pathForCategory(categoryId) : pathForCategories())
   }
 
@@ -1890,21 +1930,15 @@ export default function Finance() {
                 <div className="font-mono text-[10px] uppercase tracking-label text-fg-4">{categoryDetailIsFiltered ? 'category filter' : 'categories'}</div>
                 <h2 className="mt-1 font-mono text-2xl font-bold lowercase text-fg-1">{categoryDetailName}</h2>
               </div>
-              {!categoryDetailIsFiltered && categoryBreakdown && categoryBreakdown.entries.length > 0 ? (
-                <div className="flex max-w-full gap-1 overflow-x-auto pb-1 font-mono text-[10px] uppercase tracking-label">
-                  {categoryBreakdown.entries.map((entry) => (
-                    <button
-                      key={entry.id}
-                      type="button"
-                      onClick={() => navigate(pathForCategory(entry.id))}
-                      className="inline-flex h-8 shrink-0 items-center gap-2 border border-edge/14 px-2.5 text-fg-3 transition hover:border-edge/30 hover:text-accent"
-                    >
-                      <span className="h-2.5 w-2.5" style={{ backgroundColor: entry.color }} />
-                      {entry.name}
-                    </button>
-                  ))}
-                </div>
-              ) : null}
+              <div className="[&>div>div>button]:h-8 [&>div>div>button]:px-3">
+                <FilterButton
+                  activeFilters={categoryFilters}
+                  filterConfigs={categoryFilterConfigs}
+                  onFilterChange={setCategoryFilterField}
+                  onClearAll={clearCategoryFilters}
+                  chipsPlacement="below"
+                />
+              </div>
             </div>
 
             <div className="grid border-l border-t border-edge/12 font-mono md:grid-cols-3">
@@ -2174,7 +2208,13 @@ export default function Finance() {
                   >
                     where money goes
                   </button>
-                  <div className="mt-1 text-sm lowercase text-fg-1">spend by category · reported in {dashboardReportingCurrencyCode}</div>
+                  <button
+                    type="button"
+                    onClick={() => openCategoryDetail('')}
+                    className="mt-1 block text-left text-sm lowercase text-fg-1 underline-offset-2 transition hover:text-accent hover:underline focus-visible:text-accent focus-visible:underline focus-visible:outline-none"
+                  >
+                    spend by category · reported in {dashboardReportingCurrencyCode}
+                  </button>
                 </div>
                 <ChartPie className="h-4 w-4 text-accent" />
               </div>
