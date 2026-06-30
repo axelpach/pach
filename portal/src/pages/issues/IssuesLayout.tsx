@@ -64,7 +64,7 @@ export default function IssuesLayout() {
   const sidebarStorageKey = user ? `pach:issues:sidebar:${user.id}` : null
   const initialSidebar = readStoredSidebar(sidebarStorageKey)
 
-  const [section, setSectionState] = useState<TrackerSection>({ kind: 'all' })
+  const [section, setSectionState] = useState<TrackerSection>(initialSidebar.section)
   const [teamsSectionCollapsed, setTeamsSectionCollapsed] = useState(initialSidebar.teamsSectionCollapsed)
   const [collapsedTeams, setCollapsedTeams] = useState<Set<string>>(() => new Set(initialSidebar.collapsedTeams))
   const [teamModal, setTeamModal] = useState<TeamModalState>(null)
@@ -326,8 +326,9 @@ export default function IssuesLayout() {
   useEffect(() => {
     if (section.kind !== 'team') return
     if (visibleTeams.some((team) => team.id === section.teamId)) return
+    if (teams.length === 0 && scopedIssues.length === 0) return
     setSectionState({ kind: 'all' })
-  }, [section, visibleTeams])
+  }, [section, visibleTeams, teams.length, scopedIssues.length])
 
   // keep section valid if saved view disappears
   useEffect(() => {
@@ -363,13 +364,14 @@ export default function IssuesLayout() {
     return () => window.removeEventListener('keydown', handleEscape)
   }, [teamModal])
 
-  // persist sidebar collapse state per-user (filter state lives in Issues.tsx)
+  // persist sidebar navigation/collapse state per-user (filter state lives in Issues.tsx)
   useEffect(() => {
     if (!sidebarStorageKey) return
     try {
       localStorage.setItem(
         sidebarStorageKey,
         JSON.stringify({
+          section,
           teamsSectionCollapsed,
           collapsedTeams: [...collapsedTeams],
         }),
@@ -801,19 +803,22 @@ function TeamNameModal({
 }
 
 function readStoredSidebar(storageKey: string | null): {
+  section: TrackerSection
   teamsSectionCollapsed: boolean
   collapsedTeams: string[]
 } {
-  const empty = { teamsSectionCollapsed: false, collapsedTeams: [] }
+  const empty = { section: { kind: 'all' } as TrackerSection, teamsSectionCollapsed: false, collapsedTeams: [] }
   if (!storageKey || typeof window === 'undefined') return empty
   try {
     const raw = window.localStorage.getItem(storageKey)
     if (!raw) return empty
     const parsed = JSON.parse(raw) as {
+      section?: unknown
       teamsSectionCollapsed?: unknown
       collapsedTeams?: unknown
     }
     return {
+      section: readStoredSection(parsed.section),
       teamsSectionCollapsed: parsed.teamsSectionCollapsed === true,
       collapsedTeams: Array.isArray(parsed.collapsedTeams)
         ? parsed.collapsedTeams.filter((v): v is string => typeof v === 'string')
@@ -822,4 +827,23 @@ function readStoredSidebar(storageKey: string | null): {
   } catch {
     return empty
   }
+}
+
+function readStoredSection(value: unknown): TrackerSection {
+  if (!value || typeof value !== 'object') return { kind: 'all' }
+
+  const section = value as Record<string, unknown>
+  if (section.kind === 'all') return { kind: 'all' }
+  if (section.kind === 'view' && typeof section.viewId === 'string') {
+    return { kind: 'view', viewId: section.viewId }
+  }
+  if (
+    section.kind === 'team' &&
+    typeof section.teamId === 'string' &&
+    (section.tab === 'issues' || section.tab === 'projects')
+  ) {
+    return { kind: 'team', teamId: section.teamId, tab: section.tab }
+  }
+
+  return { kind: 'all' }
 }
