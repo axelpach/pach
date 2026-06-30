@@ -1959,8 +1959,8 @@ export default function Finance() {
             </div>
           </div>
 
-          <div className="min-h-0 flex-1 overflow-auto px-3 py-3 md:px-8 md:py-5">
-            <div className="mb-4 flex flex-col items-start gap-3">
+          <div className="shrink-0 border-b border-edge/8 bg-bg px-3 py-3 md:px-8 md:py-4">
+            <div className="flex flex-col items-start gap-3">
               <div>
                 <div className="font-mono text-[10px] uppercase tracking-label text-fg-4">{categoryDetailIsFiltered ? 'category filter' : 'categories'}</div>
                 <h2 className="mt-1 font-mono text-2xl font-bold lowercase text-fg-1">{categoryDetailName}</h2>
@@ -1975,7 +1975,9 @@ export default function Finance() {
                 />
               </div>
             </div>
+          </div>
 
+          <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden px-3 py-3 md:px-8 md:py-5">
             <div className="grid border-l border-t border-edge/12 font-mono md:grid-cols-3">
               <CategoryKpi
                 label="total spend"
@@ -2032,7 +2034,7 @@ export default function Finance() {
                 </div>
               </section>
 
-              <section className="flex min-h-[420px] flex-col border border-edge/12 bg-pit-2">
+              <section className="flex h-[420px] min-h-0 flex-col overflow-hidden border border-edge/12 bg-pit-2">
                 <div className="flex items-center justify-between border-b border-edge/12 px-4 py-3 font-mono">
                   <div>
                     <div className="text-[10px] uppercase tracking-label text-fg-4">expenses</div>
@@ -2040,7 +2042,7 @@ export default function Finance() {
                   </div>
                   <ChartPie className="h-4 w-4 text-accent" />
                 </div>
-                <div className="grid min-h-0 flex-1 gap-5 overflow-y-auto overflow-x-hidden p-4">
+                <div className="grid min-h-0 flex-1 gap-5 overflow-y-auto overflow-x-hidden overscroll-contain p-4">
                   {!dashboardConversionRates ? (
                     <div className="flex min-h-72 items-center justify-center border border-dashed border-edge/12 font-mono text-sm text-fg-4">
                       // loading fx rates...
@@ -2084,7 +2086,7 @@ export default function Finance() {
               </section>
             </div>
 
-            <section className="mt-4 flex min-h-[420px] flex-col border border-edge/12 bg-pit-2">
+            <section className="mt-4 flex h-[480px] min-h-0 flex-col overflow-hidden border border-edge/12 bg-pit-2">
               <div className="flex items-center justify-between border-b border-edge/12 px-4 py-3 font-mono">
                 <div>
                   <div className="text-[10px] uppercase tracking-label text-fg-4">movements</div>
