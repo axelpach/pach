@@ -104,6 +104,15 @@ function isNavPathActive(targetPath: string, pathname: string) {
   return pathname === targetPath || pathname.startsWith(`${targetPath}/`)
 }
 
+function isTextEntryTarget(target: EventTarget | null) {
+  return (
+    target instanceof HTMLInputElement ||
+    target instanceof HTMLTextAreaElement ||
+    target instanceof HTMLSelectElement ||
+    (target instanceof HTMLElement && target.isContentEditable)
+  )
+}
+
 /* ---------------- Topbar ---------------- */
 function Topbar() {
   const { user, logout } = useAuth()
@@ -350,18 +359,24 @@ function AppShell() {
 
   useEffect(() => {
     function handleKeyDown(event: KeyboardEvent) {
+      if (!event.shiftKey || event.ctrlKey || event.metaKey || event.altKey) return
+      if (event.key.toLowerCase() !== 'c') return
+      if (isTextEntryTarget(event.target)) return
+
+      event.preventDefault()
+      navigate('/issues', { state: { openIssueComposerAt: Date.now() } })
+    }
+
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [navigate])
+
+  useEffect(() => {
+    function handleKeyDown(event: KeyboardEvent) {
       if (!event.ctrlKey || !event.shiftKey || event.altKey || event.metaKey) return
       if (event.key !== 'ArrowUp' && event.key !== 'ArrowDown') return
 
-      const target = event.target
-      if (
-        target instanceof HTMLInputElement ||
-        target instanceof HTMLTextAreaElement ||
-        target instanceof HTMLSelectElement ||
-        (target instanceof HTMLElement && target.isContentEditable)
-      ) {
-        return
-      }
+      if (isTextEntryTarget(event.target)) return
 
       const currentIndex = visibleOuterNavItems.findIndex((item) => {
         if (item.path === '/crm') return location.pathname.startsWith('/crm')

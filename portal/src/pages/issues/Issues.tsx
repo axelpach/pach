@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { AlertTriangle, ArrowDown, ArrowUp, ArrowUpDown, BookmarkPlus, Bot, Building2, CheckCircle2, Check, ChevronDown, ChevronRight, Circle, FolderKanban, GripVertical, Plus, Save, Settings2, Trash2 } from 'lucide-react'
-import { useNavigate } from 'react-router-dom'
+import { useLocation, useNavigate } from 'react-router-dom'
 import {
   DndContext,
   DragOverlay,
@@ -139,6 +139,10 @@ type RowShortcutRequest = {
   nonce: number
 }
 
+type IssueRouteState = {
+  openIssueComposerAt?: number
+}
+
 type IssueViewState = {
   filters: ActiveFilters
   collapsedPriorities: number[]
@@ -150,6 +154,8 @@ type IssueViewState = {
 export default function Issues() {
   const z = useZero<Schema, Mutators>()
   const { user } = useAuth()
+  const location = useLocation()
+  const navigate = useNavigate()
   const { section, setSection, composerRequestId } = useTrackerContext()
 
   const [companies] = useQuery(z.query.organizations.orderBy('name', 'asc'))
@@ -541,6 +547,15 @@ export default function Issues() {
     lastComposerRequestRef.current = composerRequestId
     setComposerOpen(true)
   }, [composerRequestId])
+
+  const issueRouteState = location.state as IssueRouteState | null
+  const openIssueComposerAt =
+    typeof issueRouteState?.openIssueComposerAt === 'number' ? issueRouteState.openIssueComposerAt : null
+  useEffect(() => {
+    if (!openIssueComposerAt) return
+    setComposerOpen(true)
+    navigate(`${location.pathname}${location.search}`, { replace: true, state: null })
+  }, [location.pathname, location.search, navigate, openIssueComposerAt])
 
   useEffect(() => {
     function handleKeyDown(event: KeyboardEvent) {
