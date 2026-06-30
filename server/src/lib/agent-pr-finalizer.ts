@@ -15,6 +15,7 @@ import {
 } from '../../../db/schema.js'
 import { getDb } from '../db.js'
 import { readGithubTokenForRepository } from './github-credentials.js'
+import { syncIssueStatusForPullRequest } from './pull-request-issue-status.js'
 
 const execFileAsync = promisify(execFile)
 
@@ -108,6 +109,12 @@ export async function finalizeAgentRunPullRequest({
     pr,
     now,
   })
+  const issueStatusSync = await syncIssueStatusForPullRequest({
+    issueId: saved.issueId,
+    pullRequest: saved,
+    source: activitySource,
+    now,
+  })
 
   if (branch) {
     await db
@@ -128,6 +135,7 @@ export async function finalizeAgentRunPullRequest({
         pullRequestNumber: saved.number,
         pullRequestUrl: saved.url,
         pullRequestState: saved.state,
+        issueStatusSync,
       },
       updatedAt: now,
     })
@@ -143,6 +151,7 @@ export async function finalizeAgentRunPullRequest({
       pullRequestId: saved.id,
       pullRequestNumber: saved.number,
       pullRequestUrl: saved.url,
+      issueStatusSync,
       stdout: pushResult.stdout,
       stderr: pushResult.stderr,
     },

@@ -8,6 +8,7 @@ import { buildAgentRunSpec, buildGeneralMcpPrompt } from '../lib/agent-run-promp
 import { insertIssueActivityEvent } from '../lib/activity-events.js'
 import { readGithubCredentialForRepository } from '../lib/github-credentials.js'
 import { hashMcpToken, hasMcpCapability, type McpAuthContext, type McpCapability } from '../lib/mcp-token.js'
+import { syncIssueStatusForPullRequest } from '../lib/pull-request-issue-status.js'
 
 const router = Router()
 const ACTIVE_RUN_STATUSES = ['reserved', 'bootstrapping', 'running', 'needs_human'] as const
@@ -379,6 +380,12 @@ router.post('/runs/:id/pull-request', async (req: AgentWorkerRequest, res) => {
     const [saved] = existing
       ? await getDb().update(githubPullRequests).set(values).where(eq(githubPullRequests.id, existing.id)).returning()
       : await getDb().insert(githubPullRequests).values({ ...values, createdAt: now }).returning()
+    const issueStatusSync = await syncIssueStatusForPullRequest({
+      issueId: saved.issueId,
+      pullRequest: saved,
+      source: 'agent-worker',
+      now,
+    })
 
     if (branch) {
       await getDb()
@@ -397,6 +404,7 @@ router.post('/runs/:id/pull-request', async (req: AgentWorkerRequest, res) => {
           pullRequestCreatedAt: now.toISOString(),
           pullRequestNumber: saved.number,
           pullRequestUrl: saved.url,
+          issueStatusSync,
         },
         updatedAt: now,
       })
@@ -410,6 +418,7 @@ router.post('/runs/:id/pull-request', async (req: AgentWorkerRequest, res) => {
         pullRequestId: saved.id,
         pullRequestNumber: saved.number,
         pullRequestUrl: saved.url,
+        issueStatusSync,
       },
     })
 

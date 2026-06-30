@@ -9,9 +9,11 @@ import {
   githubWebhookEvents,
 } from '../../../db/schema.js'
 import { getDb } from '../db.js'
+import { syncIssueStatusForPullRequest } from '../lib/pull-request-issue-status.js'
 
 const router = Router()
 const rawJson = express.raw({ type: ['application/json', 'application/*+json'], limit: '10mb' })
+const FINAL_AGENT_RUN_STATUSES = new Set(['completed', 'failed', 'canceled'])
 
 router.post('/', rawJson, async (req, res) => {
   const rawBody = Buffer.isBuffer(req.body) ? req.body : Buffer.from('')
@@ -174,6 +176,12 @@ async function syncPullRequestWebhook({
   const [saved] = existingPullRequest
     ? await db.update(githubPullRequests).set(values).where(eq(githubPullRequests.id, existingPullRequest.id)).returning()
     : await db.insert(githubPullRequests).values({ ...values, createdAt: now }).returning()
+  const issueStatusSync = await syncIssueStatusForPullRequest({
+    issueId: saved.issueId,
+    pullRequest: saved,
+    source: 'github-webhook',
+    now,
+  })
 
   if (branch) {
     await db
@@ -190,7 +198,7 @@ async function syncPullRequestWebhook({
     await db
       .update(agentRuns)
       .set({
-        status: run.status === 'completed' || run.status === 'pr_ready' ? 'pr_ready' : run.status,
+        status: FINAL_AGENT_RUN_STATUSES.has(run.status) ? run.status : 'pr_ready',
         statusMessage: pullRequestStatusMessage(saved),
         metadata: {
           ...(run.metadata ?? {}),
@@ -199,6 +207,7 @@ async function syncPullRequestWebhook({
           pullRequestNumber: saved.number,
           pullRequestUrl: saved.url,
           pullRequestState: saved.state,
+          issueStatusSync,
         },
         updatedAt: now,
       })
