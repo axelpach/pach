@@ -15,6 +15,7 @@ export type FilterFieldConfig = {
   label: string
   icon: ComponentType<{ className?: string }>
   options: FilterOption[]
+  allowSelectAll?: boolean
 }
 
 export function FilterButton({
@@ -182,6 +183,9 @@ function FilterDropdown({
 
   const selectedConfig = filterConfigs.find((c) => c.field === selectedField)
   const selectedValues = activeFilters[selectedField] || []
+  const selectedOptionValues = selectedConfig?.options.map((option) => option.value) ?? []
+  const selectedOptionValueSet = new Set(selectedValues)
+  const allOptionsSelected = selectedOptionValues.length > 0 && selectedOptionValues.every((value) => selectedOptionValueSet.has(value))
 
   const filteredOptions = useMemo(() => {
     if (!selectedConfig) return []
@@ -202,6 +206,10 @@ function FilterDropdown({
 
   function clearField() {
     onFilterChange(selectedField, [])
+  }
+
+  function selectAllField() {
+    onFilterChange(selectedField, selectedOptionValues)
   }
 
   return (
@@ -243,17 +251,32 @@ function FilterDropdown({
           <span className="font-mono text-[10px] uppercase tracking-label text-fg-3">
             {selectedConfig?.label}
           </span>
-          <button
-            onClick={clearField}
-            disabled={selectedValues.length === 0}
-            className={`font-mono text-[10px] uppercase tracking-label transition ${
-              selectedValues.length > 0
-                ? 'text-fg-3 hover:text-fail'
-                : 'text-fg-4 cursor-not-allowed opacity-50'
-            }`}
-          >
-            clear
-          </button>
+          <div className="flex items-center gap-2">
+            {selectedConfig?.allowSelectAll ? (
+              <button
+                onClick={selectAllField}
+                disabled={selectedOptionValues.length === 0 || allOptionsSelected}
+                className={`font-mono text-[10px] uppercase tracking-label transition ${
+                  selectedOptionValues.length > 0 && !allOptionsSelected
+                    ? 'text-fg-3 hover:text-accent'
+                    : 'cursor-not-allowed text-fg-4 opacity-50'
+                }`}
+              >
+                select all
+              </button>
+            ) : null}
+            <button
+              onClick={clearField}
+              disabled={selectedValues.length === 0}
+              className={`font-mono text-[10px] uppercase tracking-label transition ${
+                selectedValues.length > 0
+                  ? 'text-fg-3 hover:text-fail'
+                  : 'text-fg-4 cursor-not-allowed opacity-50'
+              }`}
+            >
+              clear
+            </button>
+          </div>
         </div>
 
         {showSearch && (
