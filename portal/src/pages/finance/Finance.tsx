@@ -116,6 +116,28 @@ type CategorySpendTrend = {
   averageMonthCount: number
   missingCurrencies: string[]
 }
+type CategorySpendBarSegment = {
+  categoryId: string
+  categoryName: string
+  amountMinor: number
+  color: string
+}
+type CategorySpendBarPoint = {
+  id: string
+  label: string
+  shortLabel: string
+  totalAmountMinor: number
+  segments: CategorySpendBarSegment[]
+  missingCurrencies: string[]
+}
+type CategorySpendBarTrend = {
+  points: CategorySpendBarPoint[]
+  totalAmountMinor: number
+  currentMonthAmountMinor: number
+  averageMonthlyAmountMinor: number
+  averageMonthCount: number
+  missingCurrencies: string[]
+}
 type FxRateState = {
   status: 'idle' | 'loading' | 'ready' | 'failed'
   baseCurrencyCode: string
@@ -141,7 +163,7 @@ type ForecastScenarioInputs = {
 }
 
 function tabFromPath(pathname: string): Tab {
-  if (categoryIdFromPath(pathname)) return 'category'
+  if (isCategoryPath(pathname)) return 'category'
   if (pathname === '/finance' || pathname === '/finance/' || pathname === '/finance/dashboard') return 'dashboard'
   if (pathname === '/finance/accounts' || pathname === '/finance/accounts-cards') return 'accounts'
   return pathname === '/finance/forecasts' ? 'forecasts' : 'movements'
@@ -165,8 +187,16 @@ function categoryIdFromPath(pathname: string) {
   }
 }
 
+function isCategoryPath(pathname: string) {
+  return pathname === '/finance/categories' || pathname === '/finance/categories/' || pathname.startsWith('/finance/categories/')
+}
+
 function pathForCategory(categoryId: string) {
   return `/finance/categories/${encodeURIComponent(categoryId)}`
+}
+
+function pathForCategories() {
+  return '/finance/categories'
 }
 
 function financeOrganizationStorageKey(userId: string) {
@@ -526,20 +556,22 @@ export default function Finance() {
     : categoryBreakdown?.missingCurrencies.length
       ? `// no converted spend · missing ${categoryBreakdown.missingCurrencies.join(', ')}`
       : '// no spend to chart'
-  const categoryDetailMovements = selectedFinanceCategoryId
-    ? scopedMovements
-      .filter((movement) => movement.status !== 'ignored')
-      .filter((movement) => !isTransferLikeMovement(movement, scopedCategories))
-      .filter((movement) => movement.amountMinor < 0)
-      .filter((movement) => movementMatchesCategory(movement, selectedFinanceCategoryId))
-      .sort((a, b) => b.transactionDate - a.transactionDate || formatTransactionTime(b.transactionTime).localeCompare(formatTransactionTime(a.transactionTime)) || a.description.localeCompare(b.description))
-    : []
-  const categoryDetailTrend = selectedFinanceCategoryId && dashboardConversionRates
+  const categoryDetailMovements = scopedMovements
+    .filter((movement) => movement.status !== 'ignored')
+    .filter((movement) => !isTransferLikeMovement(movement, scopedCategories))
+    .filter((movement) => movement.amountMinor < 0)
+    .filter((movement) => !selectedFinanceCategoryId || movementMatchesCategory(movement, selectedFinanceCategoryId))
+    .sort((a, b) => b.transactionDate - a.transactionDate || formatTransactionTime(b.transactionTime).localeCompare(formatTransactionTime(a.transactionTime)) || a.description.localeCompare(b.description))
+  const categoryDetailTrend = dashboardConversionRates
     ? buildCategorySpendTrend(categoryDetailMovements, dashboardReportingCurrencyCode, dashboardConversionRates)
+    : null
+  const categoryDetailBarTrend = dashboardConversionRates
+    ? buildCategorySpendBarTrend(categoryDetailMovements, scopedCategories, dashboardReportingCurrencyCode, dashboardConversionRates)
     : null
   const categoryDetailName = selectedFinanceCategoryId === UNCATEGORIZED_VALUE
     ? 'uncategorized'
-    : selectedFinanceCategory?.name ?? 'category'
+    : selectedFinanceCategory?.name ?? (selectedFinanceCategoryId ? 'category' : 'all categories')
+  const categoryDetailIsFiltered = Boolean(selectedFinanceCategoryId)
   const accountStats = useMemo(
     () => new Map(scopedAccounts.map((account) => [account.id, buildAccountStats(account, scopedMovements)])),
     [scopedAccounts, scopedMovements],
@@ -743,11 +775,11 @@ export default function Finance() {
     } else if (location.pathname === '/finance/accounts-cards') {
       navigate('/finance/accounts', { replace: true })
     } else if (tab === 'category') {
-      if (!selectedFinanceCategoryId) navigate('/finance/dashboard', { replace: true })
+      if (location.pathname === '/finance/categories/') navigate(pathForCategories(), { replace: true })
     } else if (location.pathname !== canonicalPath) {
       navigate('/finance/dashboard', { replace: true })
     }
-  }, [location.pathname, navigate, selectedFinanceCategoryId, tab])
+  }, [location.pathname, navigate, tab])
 
   useLayoutEffect(() => {
     const previousTab = previousTabRef.current
@@ -1654,7 +1686,7 @@ export default function Finance() {
     if (tab === 'dashboard') {
       pendingDashboardScrollRestoreRef.current = dashboardScrollRef.current?.scrollTop ?? 0
     }
-    navigate(pathForCategory(categoryId))
+    navigate(categoryId ? pathForCategory(categoryId) : pathForCategories())
   }
 
   function applyForecastTrailingAverages() {
@@ -1723,6 +1755,12 @@ export default function Finance() {
             onClick={() => navigate(pathForTab('movements'))}
           />
           <FinanceSidebarButton
+            active={tab === 'category'}
+            label="categories"
+            meta={categoryBreakdown?.entries.length ? String(categoryBreakdown.entries.length) : undefined}
+            onClick={() => navigate(pathForCategories())}
+          />
+          <FinanceSidebarButton
             active={tab === 'accounts'}
             label="accounts/cards"
             meta={String(scopedAccounts.length)}
@@ -1768,7 +1806,7 @@ export default function Finance() {
               />
             </div>
           </div>
-          <div className="grid grid-cols-4 gap-1 font-mono text-[10px] uppercase tracking-label">
+          <div className="grid grid-cols-5 gap-1 font-mono text-[10px] uppercase tracking-label">
             <button
               type="button"
               onClick={() => navigate(pathForTab('dashboard'))}
@@ -1782,6 +1820,13 @@ export default function Finance() {
               className={`border px-2 py-2 text-center transition ${tab === 'movements' ? 'border-edge/45 bg-accent-fill/8 text-accent' : 'border-edge/12 text-fg-3'}`}
             >
               movements
+            </button>
+            <button
+              type="button"
+              onClick={() => navigate(pathForCategories())}
+              className={`border px-2 py-2 text-center transition ${tab === 'category' ? 'border-edge/45 bg-accent-fill/8 text-accent' : 'border-edge/12 text-fg-3'}`}
+            >
+              cats
             </button>
             <button
               type="button"
@@ -1825,15 +1870,41 @@ export default function Finance() {
               <span className="text-fg-4">/</span>
               <span className="truncate text-accent">{categoryDetailName}</span>
             </div>
-            <div className="shrink-0 text-[10px] uppercase tracking-label text-fg-4">
-              reported in {dashboardReportingCurrencyCode}
+            <div className="flex shrink-0 items-center gap-2 text-[10px] uppercase tracking-label">
+              {categoryDetailIsFiltered ? (
+                <button
+                  type="button"
+                  onClick={() => navigate(pathForCategories())}
+                  className="border border-edge/18 px-2 py-1 text-fg-3 transition hover:border-edge/32 hover:text-accent"
+                >
+                  clear filter
+                </button>
+              ) : null}
+              <span className="text-fg-4">reported in {dashboardReportingCurrencyCode}</span>
             </div>
           </div>
 
           <div className="min-h-0 flex-1 overflow-auto px-3 py-3 md:px-8 md:py-5">
-            <div className="mb-4">
-              <div className="font-mono text-[10px] uppercase tracking-label text-fg-4">category</div>
-              <h2 className="mt-1 font-mono text-2xl font-bold lowercase text-fg-1">{categoryDetailName}</h2>
+            <div className="mb-4 flex flex-wrap items-end justify-between gap-3">
+              <div>
+                <div className="font-mono text-[10px] uppercase tracking-label text-fg-4">{categoryDetailIsFiltered ? 'category filter' : 'categories'}</div>
+                <h2 className="mt-1 font-mono text-2xl font-bold lowercase text-fg-1">{categoryDetailName}</h2>
+              </div>
+              {!categoryDetailIsFiltered && categoryBreakdown && categoryBreakdown.entries.length > 0 ? (
+                <div className="flex max-w-full gap-1 overflow-x-auto pb-1 font-mono text-[10px] uppercase tracking-label">
+                  {categoryBreakdown.entries.map((entry) => (
+                    <button
+                      key={entry.id}
+                      type="button"
+                      onClick={() => navigate(pathForCategory(entry.id))}
+                      className="inline-flex h-8 shrink-0 items-center gap-2 border border-edge/14 px-2.5 text-fg-3 transition hover:border-edge/30 hover:text-accent"
+                    >
+                      <span className="h-2.5 w-2.5" style={{ backgroundColor: entry.color }} />
+                      {entry.name}
+                    </button>
+                  ))}
+                </div>
+              ) : null}
             </div>
 
             <div className="grid border-l border-t border-edge/12 font-mono md:grid-cols-3">
@@ -1859,7 +1930,7 @@ export default function Finance() {
                 <div className="flex items-center justify-between border-b border-edge/12 px-4 py-3 font-mono">
                   <div>
                     <div className="text-[10px] uppercase tracking-label text-fg-4">evolution</div>
-                    <div className="mt-1 text-sm lowercase text-fg-1">monthly spend</div>
+                    <div className="mt-1 text-sm lowercase text-fg-1">monthly spend by category</div>
                   </div>
                   <CalendarDays className="h-4 w-4 text-accent" />
                 </div>
@@ -1868,27 +1939,27 @@ export default function Finance() {
                     <div className="flex min-h-72 flex-1 items-center justify-center border border-dashed border-edge/12 font-mono text-sm text-fg-4 xl:min-h-0">
                       // loading fx rates...
                     </div>
-                  ) : !categoryDetailTrend || categoryDetailTrend.points.length === 0 ? (
+                  ) : !categoryDetailBarTrend || categoryDetailBarTrend.points.length === 0 ? (
                     <div className="flex min-h-72 flex-1 items-center justify-center border border-dashed border-edge/12 font-mono text-sm text-fg-4 xl:min-h-0">
-                      // no spend in this category
+                      {categoryDetailIsFiltered ? '// no spend in this category' : '// no category spend'}
                     </div>
                   ) : (
                     <>
                       <div className="min-h-72 flex-1 xl:min-h-0">
-                        <MonthlyBalanceAreaChart
-                          points={categoryDetailTrend.points}
+                        <CategorySpendBarChart
+                          points={categoryDetailBarTrend.points}
                           currencyCode={dashboardReportingCurrencyCode}
-                          fitYAxisToData
+                          onCategoryClick={(categoryId) => navigate(pathForCategory(categoryId))}
                         />
                       </div>
                       <div className="mt-3 flex justify-between gap-3 overflow-hidden font-mono text-[10px] uppercase tracking-label text-fg-4">
-                        {categoryDetailTrend.points.map((point) => (
+                        {categoryDetailBarTrend.points.map((point) => (
                           <span key={point.id} className="truncate">{point.shortLabel}</span>
                         ))}
                       </div>
-                      {categoryDetailTrend.missingCurrencies.length > 0 ? (
+                      {categoryDetailBarTrend.missingCurrencies.length > 0 ? (
                         <div className="mt-3 border-t border-edge/8 pt-2 font-mono text-[10px] uppercase tracking-label text-fail">
-                          missing {categoryDetailTrend.missingCurrencies.join(', ')}
+                          missing {categoryDetailBarTrend.missingCurrencies.join(', ')}
                         </div>
                       ) : null}
                     </>
@@ -1912,6 +1983,7 @@ export default function Finance() {
                   ) : (
                     categoryDetailMovements.map((movement) => {
                       const account = scopedAccounts.find((entry) => entry.id === movement.accountId)
+                      const category = scopedCategories.find((entry) => entry.id === movement.categoryId)
                       return (
                         <div key={movement.id} className="grid grid-cols-[minmax(0,1fr)_auto] gap-3 border-b border-edge/8 px-4 py-3 font-mono text-xs last:border-b-0">
                           <div className="min-w-0">
@@ -1928,6 +2000,16 @@ export default function Finance() {
                               {account?.name ?? 'unknown account'}
                               {movement.merchantName ? ` · ${movement.description}` : ''}
                             </div>
+                            {!categoryDetailIsFiltered ? (
+                              <button
+                                type="button"
+                                onClick={() => navigate(pathForCategory(movement.categoryId ?? UNCATEGORIZED_VALUE))}
+                                className="mt-1 inline-flex items-center gap-1.5 text-[10px] uppercase tracking-label text-fg-3 transition hover:text-accent"
+                              >
+                                <span className="h-2 w-2" style={{ backgroundColor: categoryBreakdown?.entries.find((entry) => entry.id === (movement.categoryId ?? UNCATEGORIZED_VALUE))?.color ?? CATEGORY_CHART_COLORS[0] }} />
+                                {category?.name ?? 'uncategorized'}
+                              </button>
+                            ) : null}
                           </div>
                           <div className="whitespace-nowrap text-right tabular-nums text-fail">
                             {formatMoney(movement.amountMinor, movement.currencyCode)}
@@ -2085,7 +2167,13 @@ export default function Finance() {
             <section className="flex min-h-0 flex-col overflow-hidden border border-edge/12 bg-pit-2">
               <div className="flex items-center justify-between border-b border-edge/12 px-4 py-3 font-mono">
                 <div>
-                  <div className="text-[10px] uppercase tracking-label text-fg-4">where money goes</div>
+                  <button
+                    type="button"
+                    onClick={() => openCategoryDetail('')}
+                    className="text-left text-[10px] uppercase tracking-label text-fg-4 transition hover:text-accent"
+                  >
+                    where money goes
+                  </button>
                   <div className="mt-1 text-sm lowercase text-fg-1">spend by category · reported in {dashboardReportingCurrencyCode}</div>
                 </div>
                 <ChartPie className="h-4 w-4 text-accent" />
@@ -4370,6 +4458,120 @@ function CategoryPieChart({
   )
 }
 
+function CategorySpendBarChart({
+  points,
+  currencyCode,
+  onCategoryClick,
+}: {
+  points: CategorySpendBarPoint[]
+  currencyCode: string
+  onCategoryClick?: (categoryId: string) => void
+}) {
+  const [hovered, setHovered] = useState<{ point: CategorySpendBarPoint; segment?: CategorySpendBarSegment; x: number; y: number } | null>(null)
+  const wrapperRef = useRef<HTMLDivElement | null>(null)
+  const maxValue = Math.max(...points.map((point) => point.totalAmountMinor), 1)
+  const chartWidth = 720
+  const chartHeight = 220
+  const padTop = 18
+  const padBottom = 22
+  const padX = 12
+  const plotHeight = chartHeight - padTop - padBottom
+  const gap = 8
+  const barWidth = Math.max(10, (chartWidth - padX * 2 - gap * Math.max(points.length - 1, 0)) / Math.max(points.length, 1))
+
+  function moveTooltip(event: MouseEvent<SVGElement>, point: CategorySpendBarPoint, segment?: CategorySpendBarSegment) {
+    const rect = wrapperRef.current?.getBoundingClientRect()
+    setHovered({
+      point,
+      segment,
+      x: rect ? event.clientX - rect.left : 0,
+      y: rect ? event.clientY - rect.top : 0,
+    })
+  }
+
+  return (
+    <div
+      ref={wrapperRef}
+      className="relative h-full w-full"
+      onMouseLeave={() => setHovered(null)}
+    >
+      <svg viewBox={`0 0 ${chartWidth} ${chartHeight}`} preserveAspectRatio="none" className="block h-full w-full" role="img" aria-label="Monthly spend by category">
+        {[0.25, 0.5, 0.75, 1].map((ratio) => (
+          <line
+            key={ratio}
+            x1={padX}
+            x2={chartWidth - padX}
+            y1={padTop + (1 - ratio) * plotHeight}
+            y2={padTop + (1 - ratio) * plotHeight}
+            stroke="rgb(var(--edge-rgb) / 0.12)"
+            strokeDasharray="2 5"
+            vectorEffect="non-scaling-stroke"
+          />
+        ))}
+        {points.map((point, index) => {
+          const x = padX + index * (barWidth + gap)
+          let yCursor = padTop + plotHeight
+          const visibleSegments = point.segments.filter((segment) => segment.amountMinor > 0)
+          return (
+            <g key={point.id}>
+              <rect
+                x={x}
+                y={padTop}
+                width={barWidth}
+                height={plotHeight}
+                fill="rgb(var(--edge-rgb) / 0.035)"
+                onMouseMove={(event) => moveTooltip(event, point)}
+              />
+              {visibleSegments.map((segment) => {
+                const segmentHeight = Math.max((segment.amountMinor / maxValue) * plotHeight, 1)
+                yCursor -= segmentHeight
+                return (
+                  <rect
+                    key={segment.categoryId}
+                    x={x}
+                    y={yCursor}
+                    width={barWidth}
+                    height={segmentHeight}
+                    fill={segment.color}
+                    className={`transition hover:brightness-125 ${onCategoryClick ? 'cursor-pointer' : ''}`}
+                    onClick={() => onCategoryClick?.(segment.categoryId)}
+                    onMouseEnter={(event) => moveTooltip(event, point, segment)}
+                    onMouseMove={(event) => moveTooltip(event, point, segment)}
+                  />
+                )
+              })}
+            </g>
+          )
+        })}
+      </svg>
+      {hovered ? (
+        <div
+          className="pointer-events-none absolute z-20 min-w-48 border border-edge/24 bg-pit px-3 py-2 font-mono text-xs shadow-terminal-popover"
+          style={{
+            left: hovered.x,
+            top: hovered.y,
+            transform: hovered.x > (wrapperRef.current?.clientWidth ?? 0) - 220 ? 'translate(-100%, -100%)' : 'translateY(-100%)',
+          }}
+        >
+          <div className="text-[10px] uppercase tracking-label text-fg-4">{hovered.point.label}</div>
+          {hovered.segment ? (
+            <div className="mt-1 flex items-center gap-2 text-fg-1">
+              <span className="h-2.5 w-2.5" style={{ backgroundColor: hovered.segment.color }} />
+              <span className="truncate">{hovered.segment.categoryName}</span>
+            </div>
+          ) : null}
+          <div className="mt-1 text-fail tabular-nums">
+            {formatMoney(hovered.segment ? -hovered.segment.amountMinor : -hovered.point.totalAmountMinor, currencyCode)}
+          </div>
+          {hovered.point.missingCurrencies.length > 0 ? (
+            <div className="mt-1 text-[10px] uppercase tracking-label text-fail">missing {hovered.point.missingCurrencies.join(', ')}</div>
+          ) : null}
+        </div>
+      ) : null}
+    </div>
+  )
+}
+
 function MonthlyBalanceAreaChart({
   points,
   currencyCode,
@@ -5406,6 +5608,85 @@ function buildCategorySpendTrend(
     currentMonthAmountMinor,
     averageMonthlyAmountMinor,
     averageMonthCount: averageMonthIds.length,
+    missingCurrencies: Array.from(missingCurrencies).sort((a, b) => currencySortValue(a).localeCompare(currencySortValue(b))),
+  }
+}
+
+function buildCategorySpendBarTrend(
+  movements: FinanceMovement[],
+  categories: FinanceCategory[],
+  reportingCurrencyCode: string,
+  ratesFromReportingCurrency: Record<string, number>,
+): CategorySpendBarTrend {
+  const categoryMap = new Map(categories.map((category) => [category.id, category]))
+  const totalsByMonth = new Map<string, { totalAmountMinor: number; categoryAmounts: Map<string, number>; missingCurrencies: Set<string> }>()
+  const totalsByCategory = new Map<string, { categoryName: string; amountMinor: number }>()
+  const missingCurrencies = new Set<string>()
+  const movementMonths = new Set<string>()
+  let totalAmountMinor = 0
+
+  for (const movement of movements) {
+    const monthId = monthKey(movement.transactionDate)
+    movementMonths.add(monthId)
+    const monthTotal = totalsByMonth.get(monthId) ?? { totalAmountMinor: 0, categoryAmounts: new Map<string, number>(), missingCurrencies: new Set<string>() }
+    const rate = conversionRateToReportingCurrency(movement.currencyCode, reportingCurrencyCode, ratesFromReportingCurrency)
+    if (rate == null) {
+      monthTotal.missingCurrencies.add(movement.currencyCode)
+      missingCurrencies.add(movement.currencyCode)
+      totalsByMonth.set(monthId, monthTotal)
+      continue
+    }
+
+    const category = movement.categoryId ? categoryMap.get(movement.categoryId) : null
+    const categoryId = category?.id ?? UNCATEGORIZED_VALUE
+    const categoryName = category?.name ?? 'uncategorized'
+    const amountMinor = Math.round(Math.abs(movement.amountMinor) * rate)
+    monthTotal.totalAmountMinor += amountMinor
+    monthTotal.categoryAmounts.set(categoryId, (monthTotal.categoryAmounts.get(categoryId) ?? 0) + amountMinor)
+    totalsByMonth.set(monthId, monthTotal)
+    const categoryTotal = totalsByCategory.get(categoryId) ?? { categoryName, amountMinor: 0 }
+    categoryTotal.amountMinor += amountMinor
+    totalsByCategory.set(categoryId, categoryTotal)
+    totalAmountMinor += amountMinor
+  }
+
+  const sortedCategories = Array.from(totalsByCategory.entries()).sort((a, b) => b[1].amountMinor - a[1].amountMinor)
+  const categoryColors = new Map(sortedCategories.map(([categoryId], index) => [categoryId, CATEGORY_CHART_COLORS[index % CATEGORY_CHART_COLORS.length]]))
+  const sortedMovementMonths = Array.from(movementMonths).sort()
+  const currentMonthId = monthKey(Date.now())
+  const latestMovementMonth = sortedMovementMonths[sortedMovementMonths.length - 1]
+  const detailEndMonth = latestMovementMonth && latestMovementMonth > currentMonthId ? latestMovementMonth : currentMonthId
+  const monthIds = sortedMovementMonths.length > 0 && detailEndMonth >= CATEGORY_DETAIL_START_MONTH
+    ? enumerateMonthKeys(CATEGORY_DETAIL_START_MONTH, detailEndMonth)
+    : []
+  const points = monthIds.map((id) => {
+    const value = totalsByMonth.get(id) ?? { totalAmountMinor: 0, categoryAmounts: new Map<string, number>(), missingCurrencies: new Set<string>() }
+    return {
+      id,
+      label: formatMonthLabel(Date.UTC(Number(id.slice(0, 4)), Number(id.slice(5, 7)) - 1, 1)),
+      shortLabel: formatMonthShortLabel(id),
+      totalAmountMinor: value.totalAmountMinor,
+      segments: sortedCategories
+        .map(([categoryId, category]) => ({
+          categoryId,
+          categoryName: category.categoryName,
+          amountMinor: value.categoryAmounts.get(categoryId) ?? 0,
+          color: categoryColors.get(categoryId) ?? CATEGORY_CHART_COLORS[0],
+        }))
+        .filter((segment) => segment.amountMinor > 0),
+      missingCurrencies: Array.from(value.missingCurrencies).sort((a, b) => currencySortValue(a).localeCompare(currencySortValue(b))),
+    }
+  })
+  const averageMonthlyAmountMinor = monthIds.length > 0
+    ? Math.round(monthIds.reduce((sum, id) => sum + (totalsByMonth.get(id)?.totalAmountMinor ?? 0), 0) / monthIds.length)
+    : 0
+
+  return {
+    points,
+    totalAmountMinor,
+    currentMonthAmountMinor: totalsByMonth.get(currentMonthId)?.totalAmountMinor ?? 0,
+    averageMonthlyAmountMinor,
+    averageMonthCount: monthIds.length,
     missingCurrencies: Array.from(missingCurrencies).sort((a, b) => currencySortValue(a).localeCompare(currencySortValue(b))),
   }
 }
