@@ -1,13 +1,13 @@
 import { useQuery, useZero } from '@rocicorp/zero/react'
 import {
   Archive,
-  ArrowLeft,
   Building2,
   ChevronDown,
   ChevronRight,
   FileText,
   History,
   ListTree,
+  Menu,
   Megaphone,
   Plus,
   Search,
@@ -45,6 +45,7 @@ export default function Docs() {
   const [bodyDraft, setBodyDraft] = useState('')
   const [selectedSnapshotId, setSelectedSnapshotId] = useState<string | null>(null)
   const [versionsFrameOpen, setVersionsFrameOpen] = useState(false)
+  const [mobileDocsOpen, setMobileDocsOpen] = useState(false)
   const [expandedDocumentIds, setExpandedDocumentIds] = useState<Set<string>>(() => new Set())
   const [archiveConfirmDocument, setArchiveConfirmDocument] = useState<DocumentRow | null>(null)
   const [marketingContentConfirmDocument, setMarketingContentConfirmDocument] = useState<DocumentRow | null>(null)
@@ -308,6 +309,11 @@ export default function Docs() {
     navigate(next ? `/docs/${next.id}` : '/docs')
   }
 
+  function openDocument(id: string) {
+    setMobileDocsOpen(false)
+    navigate(`/docs/${id}`)
+  }
+
   async function archiveDocument(entry: DocumentRow) {
     await z.mutate.documents.update({ id: entry.id, status: 'archived' })
     setArchiveConfirmDocument(null)
@@ -513,10 +519,10 @@ export default function Docs() {
           <div className="mx-auto min-h-full max-w-3xl px-5 py-5 md:px-10 md:py-8">
             <div className="mb-5 flex items-center justify-between gap-3">
               <button
-                onClick={() => navigate('/docs')}
-                className="inline-flex items-center gap-2 font-mono text-xs lowercase text-fg-4 transition hover:text-accent md:hidden"
+                onClick={() => setMobileDocsOpen(true)}
+                className="inline-flex h-8 items-center gap-2 border border-edge/15 px-2.5 font-mono text-xs lowercase text-fg-3 transition hover:border-accent hover:text-accent md:hidden"
               >
-                <ArrowLeft className="h-3.5 w-3.5" />
+                <Menu className="h-3.5 w-3.5" />
                 docs
               </button>
               <div className="hidden min-w-0 items-center gap-2 font-mono text-[10px] uppercase tracking-label text-fg-4 md:flex">
@@ -636,24 +642,124 @@ export default function Docs() {
             />
           </div>
         ) : (
-          <div className="flex h-full items-center justify-center px-5">
-            <div className="max-w-sm text-center">
+          <div className="flex h-full items-center justify-center px-5 py-8">
+            <div className="w-full max-w-sm text-center">
               <FileText className="mx-auto h-10 w-10 text-fg-4" />
               <h1 className="mt-4 font-mono text-2xl font-bold lowercase text-fg-1">documents</h1>
               <p className="mt-2 font-mono text-sm leading-relaxed text-fg-3">
                 Create focused documents with slash commands and plain URL links.
               </p>
-              <button
-                onClick={() => void createDocument()}
-                className="mt-5 inline-flex items-center gap-2 border border-edge/28 bg-accent-fill/8 px-3 py-2 font-mono text-xs uppercase tracking-label text-accent transition hover:bg-accent-fill/14"
-              >
-                <Plus className="h-3.5 w-3.5" />
-                new document
-              </button>
+              <div className="mt-5 flex flex-col items-center gap-2 sm:flex-row sm:justify-center">
+                <button
+                  onClick={() => setMobileDocsOpen(true)}
+                  className="inline-flex items-center gap-2 border border-edge/28 px-3 py-2 font-mono text-xs uppercase tracking-label text-fg-3 transition hover:border-accent hover:text-accent md:hidden"
+                >
+                  <ListTree className="h-3.5 w-3.5" />
+                  browse docs
+                </button>
+                <button
+                  onClick={() => void createDocument()}
+                  className="inline-flex items-center gap-2 border border-edge/28 bg-accent-fill/8 px-3 py-2 font-mono text-xs uppercase tracking-label text-accent transition hover:bg-accent-fill/14"
+                >
+                  <Plus className="h-3.5 w-3.5" />
+                  new document
+                </button>
+              </div>
             </div>
           </div>
         )}
       </main>
+
+      {mobileDocsOpen ? (
+        <div className="fixed inset-0 z-[850] md:hidden" onClick={() => setMobileDocsOpen(false)}>
+          <div className="absolute inset-0 bg-black/70 backdrop-blur-sm" />
+          <aside
+            className="relative flex h-full w-full max-w-[360px] flex-col border-r border-edge/35 bg-void font-mono shadow-terminal-overlay"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="flex items-center justify-between gap-3 border-b border-edge/12 px-4 py-3">
+              <div>
+                <div className="font-mono text-[10px] uppercase tracking-label text-fg-4">docs</div>
+                <div className="font-mono text-lg font-bold lowercase text-fg-1">documents</div>
+              </div>
+              <button
+                onClick={() => setMobileDocsOpen(false)}
+                className="flex h-8 w-8 items-center justify-center border border-edge/15 text-fg-3 transition hover:border-accent hover:text-accent"
+                aria-label="Close documents"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            <div className="border-b border-edge/12 px-4 py-3">
+              <div className="mb-2 flex items-center justify-between gap-3">
+                <div className="font-mono text-[10px] uppercase tracking-label text-fg-4">organization</div>
+                <button
+                  onClick={() => {
+                    setMobileDocsOpen(false)
+                    void createDocument()
+                  }}
+                  className="inline-flex h-7 items-center gap-1.5 border border-edge/18 bg-accent-fill/6 px-2 font-mono text-[10px] uppercase tracking-label text-accent transition hover:bg-accent-fill/12"
+                >
+                  <Plus className="h-3 w-3" />
+                  new
+                </button>
+              </div>
+              <div className="relative">
+                <Building2 className="pointer-events-none absolute left-3 top-1/2 z-10 h-3.5 w-3.5 -translate-y-1/2 text-fg-4" />
+                <PachSelect
+                  value={organizationFilter}
+                  onChange={handleOrganizationChange}
+                  options={organizationOptions}
+                  display={selectedOrganization?.name ?? (organizationFilter === NO_ORGANIZATION ? 'no organization' : 'organization')}
+                  popupWidth="260"
+                  triggerClassName="flex h-9 w-full items-center justify-between border border-edge/18 bg-rim pl-9 pr-2 text-left font-mono text-xs text-fg-1 outline-none transition hover:border-edge/32 hover:bg-accent-fill/4 focus-visible:border-accent focus-visible:shadow-glow-xs"
+                />
+              </div>
+
+              <div className="mt-3 flex items-center gap-2 border border-edge/12 bg-pit-3 px-2 py-2">
+                <Search className="h-3.5 w-3.5 text-fg-4" />
+                <input
+                  value={search}
+                  onChange={(event) => setSearch(event.target.value)}
+                  placeholder="search docs"
+                  className="min-w-0 flex-1 bg-transparent font-mono text-xs text-fg-1 outline-none placeholder:text-fg-4"
+                />
+              </div>
+            </div>
+
+            <div className="min-h-0 flex-1 overflow-auto px-2 py-2">
+              {documentTree.length === 0 ? (
+                <button
+                  onClick={() => {
+                    setMobileDocsOpen(false)
+                    void createDocument()
+                  }}
+                  className="flex w-full items-center gap-2 border border-dashed border-edge/18 px-3 py-3 text-left font-mono text-xs lowercase text-fg-4 transition hover:border-edge/35 hover:text-accent"
+                >
+                  <Plus className="h-3.5 w-3.5" />
+                  create first doc
+                </button>
+              ) : (
+                documentTree.map((node) => (
+                  <DocumentTreeItem
+                    key={node.document.id}
+                    node={node}
+                    depth={0}
+                    expandedIds={expandedDocumentIds}
+                    selectedDocumentId={selectedDocument?.id ?? null}
+                    organizations={organizations}
+                    onToggle={toggleDocumentExpanded}
+                    onOpen={openDocument}
+                    onCreateChild={(parent) => void createDocument('Untitled', parent)}
+                    forceExpanded={Boolean(search.trim())}
+                  />
+                ))
+              )}
+            </div>
+          </aside>
+        </div>
+      ) : null}
 
       {archiveConfirmDocument ? (
         <ArchiveDocumentModal
