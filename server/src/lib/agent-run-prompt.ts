@@ -10,20 +10,81 @@ export type AgentRunPromptRecord = {
   metadata?: Record<string, unknown> | null
 }
 
+export type AgentRunSpec = {
+  version: 1
+  promptSource: 'server'
+  workerProtocol: 'pach-agent/v1'
+  agentProfile: 'engineering' | 'general' | 'design_template'
+  executionMode: 'code_worktree' | 'mcp'
+  continuation: {
+    isContinuation: boolean
+    codexSessionId?: string | null
+    feedbackMessageId?: string | null
+  }
+  repository?: {
+    fullName?: string | null
+    baseBranch?: string | null
+    branchName?: string | null
+    workspacePath?: string | null
+  }
+  finalization: {
+    commitAndPush: boolean
+    openPullRequest: boolean
+    pullRequestDraft: false
+  }
+}
+
+export function buildAgentRunSpec(run: AgentRunPromptRecord): AgentRunSpec {
+  const executionMode = readMetadataString(run.metadata, 'executionMode')
+  const codeWorktree = executionMode === 'code_worktree'
+  const codexSessionId = readMetadataString(run.metadata, 'codexSessionId')
+  const feedbackMessageId = readMetadataString(run.metadata, 'feedbackMessageId')
+  const feedback = readMetadataString(run.metadata, 'feedback')
+  const agentProfile = run.subjectType === 'design_template_run'
+    ? 'design_template'
+    : codeWorktree ? 'engineering' : 'general'
+
+  return {
+    version: 1,
+    promptSource: 'server',
+    workerProtocol: 'pach-agent/v1',
+    agentProfile,
+    executionMode: codeWorktree ? 'code_worktree' : 'mcp',
+    continuation: {
+      isContinuation: Boolean(codexSessionId || feedback || feedbackMessageId),
+      codexSessionId,
+      feedbackMessageId,
+    },
+    repository: codeWorktree
+      ? {
+          fullName: run.repoFullName,
+          baseBranch: run.baseBranch,
+          branchName: run.branchName,
+          workspacePath: run.workspacePath,
+        }
+      : undefined,
+    finalization: {
+      commitAndPush: codeWorktree,
+      openPullRequest: codeWorktree,
+      pullRequestDraft: false,
+    },
+  }
+}
+
 export function buildGeneralMcpPrompt(run: AgentRunPromptRecord) {
   if (run.subjectType === 'design_template_run') return buildDesignTemplateMcpPrompt(run)
 
+  const runSpec = buildAgentRunSpec(run)
   const feedback = readMetadataString(run.metadata, 'feedback')
   const parentRunId = readMetadataString(run.metadata, 'parentRunId')
   const attachments = formatInputMediaPrompt(run.metadata)
-  const executionMode = readMetadataString(run.metadata, 'executionMode')
-  const codeWorktree = executionMode === 'code_worktree'
+  const codeWorktree = runSpec.executionMode === 'code_worktree'
   return [
     codeWorktree ? 'You are Pach engineering issue worker.' : 'You are Pach general MCP issue worker.',
     '',
     'Use Pach MCP tools for Pach state. You may call Pach MCP tools directly and repeatedly as needed.',
     codeWorktree
-      ? 'For this worker, Codex is running with full local trust. Still act conservatively: do not send external messages, publish content, or perform irreversible external actions. Pach owns GitHub finalization for this run: leave the working branch ready for Pach to commit, push, and open the pull request.'
+      ? 'For this worker, Codex is running with full local trust. Still act conservatively: do not send external messages, publish content, merge pull requests, or perform irreversible external actions. You may commit on the working branch and create a ready-for-review pull request pointing at the base branch when you believe the work is successfully done.'
       : 'For this worker, Codex is running with full local trust. Still act conservatively: do not send external messages, publish content, push code, open pull requests, or perform irreversible external actions unless the issue explicitly asks for it.',
     `Issue id: ${run.issueId}`,
     `Agent run id: ${run.id}`,
@@ -31,6 +92,7 @@ export function buildGeneralMcpPrompt(run: AgentRunPromptRecord) {
     codeWorktree && run.baseBranch ? `Base branch: ${run.baseBranch}` : null,
     codeWorktree && run.branchName ? `Working branch: ${run.branchName}` : null,
     codeWorktree && run.workspacePath ? `Workspace path: ${run.workspacePath}` : null,
+    codeWorktree ? `Server run policy: commitAndPush=${runSpec.finalization.commitAndPush}; openPullRequest=${runSpec.finalization.openPullRequest}; pullRequestDraft=${runSpec.finalization.pullRequestDraft}.` : null,
     parentRunId ? `Parent run id: ${parentRunId}` : null,
     feedback ? `User feedback: ${feedback}` : null,
     attachments,
@@ -49,10 +111,10 @@ export function buildGeneralMcpPrompt(run: AgentRunPromptRecord) {
       ? '4. Inspect and edit the repository in the current working directory. Run the relevant checks you can run locally.'
       : '4. Put the final result in pach.progress.report with phase "final_result".',
     codeWorktree
-      ? '5. When the implementation is ready, leave the branch ready for a pull request. Put the final result in pach.progress.report with phase "final_result", including changed files, checks run, and metadata.readyForPr=true when Pach should open the PR.'
+      ? '5. When the implementation is ready, follow the server policy above: commit on the working branch and open or update a ready-for-review pull request when appropriate. Put the final result in pach.progress.report with phase "final_result", including changed files, checks run, PR status or URL when available, and metadata.readyForPr=true when the branch is ready for PR finalization.'
       : '5. If you update issue fields, use pach.issue.update and explain the change in activitySummary.',
     codeWorktree
-      ? '6. Do not merge anything. Do not push directly yourself; Pach will finalize the branch through the connected repository token.'
+      ? '6. Never merge a pull request. You may commit on this branch and open or update a pull request pointing at the base branch when the work is successful; otherwise leave the branch ready for Pach finalization.'
       : null,
     '',
     'Keep the final result concise and useful inside the Pach run progress stream.',

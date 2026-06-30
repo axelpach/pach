@@ -4,7 +4,7 @@ import type { Request } from 'express'
 import { and, desc, eq, inArray, isNull, or } from 'drizzle-orm'
 import { agentRunProgressReports, agentRuns, agentWorkers, githubBranches, githubPullRequests, mcpTokens, pmIssues } from '../../../db/schema.js'
 import { getDb } from '../db.js'
-import { buildGeneralMcpPrompt } from '../lib/agent-run-prompt.js'
+import { buildAgentRunSpec, buildGeneralMcpPrompt } from '../lib/agent-run-prompt.js'
 import { insertIssueActivityEvent } from '../lib/activity-events.js'
 import { readGithubCredentialForRepository } from '../lib/github-credentials.js'
 import { hashMcpToken, hasMcpCapability, type McpAuthContext, type McpCapability } from '../lib/mcp-token.js'
@@ -136,6 +136,17 @@ router.post('/runs/claim', async (req: AgentWorkerRequest, res) => {
       if (!hasCapacity(activeRuns, executionClass, limits)) continue
 
       const now = new Date()
+      const claimedMetadata = {
+        ...(candidate.metadata ?? {}),
+        executionClass,
+        requiredCapabilities,
+        claimedAt: now.toISOString(),
+        claimedBy: worker.id,
+      }
+      const runSpec = buildAgentRunSpec({
+        ...candidate,
+        metadata: claimedMetadata,
+      })
       const [claimed] = await db
         .update(agentRuns)
         .set({
@@ -144,11 +155,8 @@ router.post('/runs/claim', async (req: AgentWorkerRequest, res) => {
           statusMessage: `claimed by ${worker.name}`,
           startedAt: candidate.startedAt ?? now,
           metadata: {
-            ...(candidate.metadata ?? {}),
-            executionClass,
-            requiredCapabilities,
-            claimedAt: now.toISOString(),
-            claimedBy: worker.id,
+            ...claimedMetadata,
+            serverRunSpec: runSpec,
           },
           updatedAt: now,
         })
@@ -188,6 +196,7 @@ router.post('/runs/claim', async (req: AgentWorkerRequest, res) => {
         worker,
         executionPrompt: buildGeneralMcpPrompt(claimed),
         executionPromptSource: 'server',
+        runSpec,
       })
       return
     }
