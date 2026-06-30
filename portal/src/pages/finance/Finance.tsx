@@ -1925,7 +1925,7 @@ export default function Finance() {
           </div>
 
           <div className="min-h-0 flex-1 overflow-auto px-3 py-3 md:px-8 md:py-5">
-            <div className="mb-4 flex flex-wrap items-end justify-between gap-3">
+            <div className="mb-4 flex flex-col items-start gap-3">
               <div>
                 <div className="font-mono text-[10px] uppercase tracking-label text-fg-4">{categoryDetailIsFiltered ? 'category filter' : 'categories'}</div>
                 <h2 className="mt-1 font-mono text-2xl font-bold lowercase text-fg-1">{categoryDetailName}</h2>
