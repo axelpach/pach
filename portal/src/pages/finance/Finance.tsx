@@ -390,6 +390,7 @@ export default function Finance() {
   const scopedCategories = financeCategories.filter((category) => category.organizationId === selectedOrganizationId && !category.archived)
   const scopedMovements = movements.filter((movement) => movement.organizationId === selectedOrganizationId)
   const scopedTransfers = transfers.filter((transfer) => transfer.organizationId === selectedOrganizationId)
+  const scopedAccountById = useMemo(() => new Map(scopedAccounts.map((account) => [account.id, account])), [scopedAccounts])
   const selectedAccountFilterIds = activeFilters.accounts ?? []
   const selectedStatusFilterIds = activeFilters.statuses ?? []
   const selectedTypeFilterIds = activeFilters.types ?? []
@@ -402,6 +403,7 @@ export default function Finance() {
   const selectedDashboardCurrencyFilterIds = dashboardFilters.currencies ?? []
   const selectedCategoryMonthFilterIds = categoryFilters.months ?? []
   const selectedCategoryPageCategoryFilterIds = categoryFilters.categories ?? []
+  const selectedCategoryAssigneeFilterIds = categoryFilters.assignees ?? []
   const selectedFinanceCategoryId = categoryIdFromPath(location.pathname)
   const selectedFinanceCategory = selectedFinanceCategoryId && selectedFinanceCategoryId !== UNCATEGORIZED_VALUE
     ? scopedCategories.find((category) => category.id === selectedFinanceCategoryId) ?? null
@@ -580,6 +582,11 @@ export default function Finance() {
     .filter((movement) => movement.amountMinor < 0)
     .filter((movement) => !selectedFinanceCategoryId || movementMatchesCategory(movement, selectedFinanceCategoryId))
     .filter((movement) => selectedCategoryMonthFilterIds.length === 0 || selectedCategoryMonthFilterIds.includes(monthKey(movement.transactionDate)))
+    .filter((movement) => {
+      if (selectedCategoryAssigneeFilterIds.length === 0) return true
+      const holderUserId = scopedAccountById.get(movement.accountId)?.holderUserId ?? '__unassigned__'
+      return selectedCategoryAssigneeFilterIds.includes(holderUserId)
+    })
     .filter((movement) => selectedCategoryPageCategoryFilterIds.length === 0 || selectedCategoryPageCategoryFilterIds.includes(movement.categoryId ?? UNCATEGORIZED_VALUE))
     .sort((a, b) => b.transactionDate - a.transactionDate || formatTransactionTime(b.transactionTime).localeCompare(formatTransactionTime(a.transactionTime)) || a.description.localeCompare(b.description))
   const categoryDetailTrend = dashboardConversionRates
@@ -782,6 +789,13 @@ export default function Finance() {
       label: 'months',
       icon: CalendarDays,
       options: monthFilterOptions,
+      allowSelectAll: true,
+    },
+    {
+      field: 'assignees',
+      label: 'assignees',
+      icon: UserRound,
+      options: holderOptions,
       allowSelectAll: true,
     },
     {
