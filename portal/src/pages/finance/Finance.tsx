@@ -499,21 +499,19 @@ export default function Finance() {
     .filter((movement) => selectedDashboardMonthFilterIds.length === 0 || selectedDashboardMonthFilterIds.includes(monthKey(movement.transactionDate)))
     .filter((movement) => selectedDashboardQuarterFilterIds.length === 0 || selectedDashboardQuarterFilterIds.includes(quarterKey(movement.transactionDate)))
     .filter((movement) => selectedDashboardCurrencyFilterIds.length === 0 || selectedDashboardCurrencyFilterIds.includes(movement.currencyCode))
-  const dashboardPeriodIsInProgress = dashboardPeriodIncludesCurrentMonth(
-    selectedDashboardMonthFilterIds,
-    selectedDashboardQuarterFilterIds,
-    dashboardPeriodMovements,
-  )
   const dashboardBalanceMovements = scopedMovements
     .filter((movement) => dashboardBalanceCutoffMs == null || movement.transactionDate < dashboardBalanceCutoffMs)
     .filter((movement) => selectedDashboardCurrencyFilterIds.length === 0 || selectedDashboardCurrencyFilterIds.includes(movement.currencyCode))
   const dashboardPeriodAccountMovements = dashboardPeriodMovements.filter((movement) => movement.status !== 'ignored')
+  const dashboardChartAccountMovements = scopedMovements
+    .filter((movement) => movement.status !== 'ignored')
+    .filter((movement) => selectedDashboardCurrencyFilterIds.length === 0 || selectedDashboardCurrencyFilterIds.includes(movement.currencyCode))
   const dashboardBalanceAccountMovements = dashboardBalanceMovements.filter((movement) => movement.status !== 'ignored')
   const dashboardNonTransferMovements = dashboardPeriodAccountMovements.filter((movement) => !isTransferLikeMovement(movement, scopedCategories))
   const dashboardAccountBalances = buildAccountBalanceBreakdown(dashboardBalanceAccountMovements, scopedAccounts, selectedDashboardCurrencyFilterIds)
   const dashboardBalanceTotals = summarizeAccountBalances(dashboardAccountBalances)
   const dashboardKpis = summarizeDashboardKpis(dashboardAccountBalances, dashboardNonTransferMovements)
-  const monthlyBalance = buildMonthlyBalance(dashboardPeriodAccountMovements, scopedAccounts, selectedDashboardCurrencyFilterIds)
+  const monthlyBalance = buildMonthlyBalance(dashboardChartAccountMovements, scopedAccounts, selectedDashboardCurrencyFilterIds)
   const dashboardFxReady = dashboardFx.status === 'ready' && dashboardFx.baseCurrencyCode === dashboardReportingCurrencyCode
   const dashboardFxFailed = dashboardFx.status === 'failed' && dashboardFx.baseCurrencyCode === dashboardReportingCurrencyCode
   const dashboardConversionRates = dashboardFxReady ? dashboardFx.rates : dashboardFxFailed ? {} : null
@@ -2279,12 +2277,12 @@ export default function Finance() {
               <div className="flex min-h-0 flex-1 flex-col p-4">
                 {monthlyBalanceChartPoints.length === 0 ? (
                   <div className="flex min-h-56 flex-1 items-center justify-center border border-dashed border-edge/12 font-mono text-sm text-fg-4">
-                    // no movements in this period
+                    // no dashboard movements
                   </div>
                 ) : (
                   <>
                     <div className="min-h-64 flex-1">
-                      <MonthlyBalanceAreaChart points={monthlyBalanceChartPoints} currencyCode={monthlyBalanceChartCurrencyCode} markCurrentMonth={dashboardPeriodIsInProgress} />
+                      <MonthlyBalanceAreaChart points={monthlyBalanceChartPoints} currencyCode={monthlyBalanceChartCurrencyCode} markCurrentMonth />
                     </div>
                     <div className="mt-3 flex justify-between gap-3 overflow-hidden font-mono text-[10px] uppercase tracking-label text-fg-4">
                       {monthlyBalanceChartPoints.map((point) => (
@@ -5050,13 +5048,6 @@ function quarterKey(value: number) {
   const year = date.getUTCFullYear()
   const quarter = Math.floor(date.getUTCMonth() / 3) + 1
   return `${year}-Q${quarter}`
-}
-
-function dashboardPeriodIncludesCurrentMonth(monthIds: string[], quarterIds: string[], movements: FinanceMovement[]) {
-  const currentMonthId = monthKey(Date.now())
-  if (monthIds.length > 0) return monthIds.includes(currentMonthId)
-  if (quarterIds.length > 0) return quarterIds.includes(quarterKey(Date.now()))
-  return movements.some((movement) => monthKey(movement.transactionDate) === currentMonthId)
 }
 
 function dashboardPeriodEndExclusiveMs(monthIds: string[], quarterIds: string[]) {
