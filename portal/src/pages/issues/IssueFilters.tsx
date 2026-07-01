@@ -213,9 +213,9 @@ function FilterDropdown({
   }
 
   return (
-    <div className="flex w-[480px] max-h-[340px] overflow-hidden border border-edge/25 bg-pit shadow-terminal-popover">
+    <div className="flex max-h-[min(340px,calc(100dvh-8rem))] w-[calc(100vw-2rem)] max-w-[480px] flex-col overflow-hidden border border-edge/25 bg-pit shadow-terminal-popover sm:flex-row">
       {/* left: field list */}
-      <div className="w-[160px] shrink-0 overflow-y-auto border-r border-edge/12 py-1">
+      <div className="flex max-h-[112px] w-full shrink-0 overflow-auto border-b border-edge/12 py-1 sm:block sm:max-h-none sm:w-[160px] sm:border-b-0 sm:border-r">
         {filterConfigs.map((config) => {
           const isSelected = config.field === selectedField
           const isActive = (activeFilters[config.field]?.length ?? 0) > 0
@@ -227,7 +227,7 @@ function FilterDropdown({
                 setSelectedField(config.field)
                 setSearchQuery('')
               }}
-              className={`flex w-full items-center gap-2 px-3 py-1.5 text-left font-mono text-xs lowercase transition ${
+              className={`flex min-w-max items-center gap-2 px-3 py-1.5 text-left font-mono text-xs lowercase transition sm:w-full ${
                 isSelected
                   ? 'bg-accent-fill/8 text-accent'
                   : 'text-fg-2 hover:bg-accent-fill/4 hover:text-fg-1'
