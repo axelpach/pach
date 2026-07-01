@@ -131,10 +131,9 @@ export default function Docs() {
       : [],
     [documentSnapshots, selectedDocument?.id],
   )
-  const latestSnapshot = selectedDocumentSnapshots[0] ?? null
   const mainSnapshot = selectedDocument?.currentSnapshotId
-    ? selectedDocumentSnapshots.find((snapshot) => snapshot.id === selectedDocument.currentSnapshotId) ?? latestSnapshot
-    : latestSnapshot
+    ? selectedDocumentSnapshots.find((snapshot) => snapshot.id === selectedDocument.currentSnapshotId) ?? null
+    : null
   const selectedSnapshot = selectedSnapshotId
     ? selectedDocumentSnapshots.find((snapshot) => snapshot.id === selectedSnapshotId) ?? null
     : null
@@ -399,7 +398,7 @@ export default function Docs() {
   }
 
   async function deleteDocumentVersion(entry: DocumentRow, snapshot: DocumentSnapshotRow) {
-    const isMain = isDocumentMainSnapshot(entry, snapshot, mainSnapshot)
+    const isMain = isDocumentMainSnapshot(entry, snapshot)
     if (isMain) {
       setDocumentActionStatus({ kind: 'fail', message: 'main version cannot be deleted' })
       return
@@ -813,7 +812,6 @@ export default function Docs() {
         <DocumentVersionsFrame
           document={selectedDocument}
           snapshots={selectedDocumentSnapshots}
-          mainSnapshot={mainSnapshot}
           selectedSnapshot={selectedSnapshot}
           onClose={() => setVersionsFrameOpen(false)}
           onCreateVersion={() => void createDocumentVersion(selectedDocument)}
@@ -953,7 +951,6 @@ function MarketingContentDocumentModal({
 function DocumentVersionsFrame({
   document,
   snapshots,
-  mainSnapshot,
   selectedSnapshot,
   onClose,
   onCreateVersion,
@@ -964,7 +961,6 @@ function DocumentVersionsFrame({
 }: {
   document: DocumentRow
   snapshots: DocumentSnapshotRow[]
-  mainSnapshot: DocumentSnapshotRow | null
   selectedSnapshot: DocumentSnapshotRow | null
   onClose: () => void
   onCreateVersion: () => void
@@ -1039,7 +1035,7 @@ function DocumentVersionsFrame({
               </div>
             ) : (
               snapshots.map((snapshot) => {
-                const isMain = isDocumentMainSnapshot(document, snapshot, mainSnapshot)
+                const isMain = isDocumentMainSnapshot(document, snapshot)
                 const isSelected = selectedSnapshot?.id === snapshot.id
                 return (
                   <div
@@ -1346,12 +1342,8 @@ function uniqueMarketingChannels(items: Array<{ supportedChannels: string[] }>) 
   return channels.length ? channels.join(', ') : 'content'
 }
 
-function isDocumentMainSnapshot(
-  document: DocumentRow,
-  snapshot: DocumentSnapshotRow,
-  mainSnapshot: DocumentSnapshotRow | null,
-) {
-  return document.currentSnapshotId ? document.currentSnapshotId === snapshot.id : mainSnapshot?.id === snapshot.id
+function isDocumentMainSnapshot(document: DocumentRow, snapshot: DocumentSnapshotRow) {
+  return document.currentSnapshotId === snapshot.id
 }
 
 function formatSnapshotDate(value: number) {
