@@ -17,7 +17,7 @@ import {
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { PachSelect, type PachSelectOption } from '../../components/PachSelect'
-import { RichEditor } from '../../components/rich-editor/RichEditor'
+import { RichEditor, type RichEditorHandle } from '../../components/rich-editor/RichEditor'
 import { config } from '../../config'
 import { authFetch, useAuth } from '../../lib/auth'
 import type { Mutators } from '../../mutators'
@@ -49,6 +49,7 @@ export default function Docs() {
   const navigate = useNavigate()
   const { documentId } = useParams<{ documentId?: string }>()
   const { user } = useAuth()
+  const richEditorRef = useRef<RichEditorHandle | null>(null)
   const [search, setSearch] = useState('')
   const [organizationFilter, setOrganizationFilter] = useState<string>(() => readStoredDocsOrganizationFilter())
   const [titleDraft, setTitleDraft] = useState('')
@@ -643,7 +644,10 @@ export default function Docs() {
               onKeyDown={(event) => {
                 if (event.key !== 'Enter') return
                 event.preventDefault()
-                event.currentTarget.blur()
+                if (!selectedDocument) return
+                if (selectedSnapshot) void saveSnapshotVersion(selectedDocument, selectedSnapshot, titleDraft, bodyDraft)
+                else void saveLiveDocument(selectedDocument, titleDraft, bodyDraft)
+                requestAnimationFrame(() => richEditorRef.current?.focus())
               }}
               onBlur={() => {
                 if (!selectedDocument) return
@@ -655,6 +659,7 @@ export default function Docs() {
             />
 
             <RichEditor
+              ref={richEditorRef}
               key={selectedSnapshot?.id ?? selectedDocument.id}
               owner={{ type: 'document', id: selectedDocument.id }}
               value={bodyDraft}

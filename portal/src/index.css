@@ -55,6 +55,14 @@ input::placeholder, textarea::placeholder { color: var(--fg-4); }
   color: var(--fg-4);
 }
 
+.doc-editor p.is-editor-empty:first-child::before {
+  color: var(--fg-4);
+  content: attr(data-placeholder);
+  float: left;
+  height: 0;
+  pointer-events: none;
+}
+
 .doc-editor h1,
 .doc-editor h2,
 .doc-editor h3,
@@ -109,6 +117,26 @@ input::placeholder, textarea::placeholder { color: var(--fg-4); }
 
 .doc-editor li::marker {
   color: var(--fg-4);
+}
+
+.doc-editor > img,
+.doc-editor img[data-storage-key] {
+  background: var(--bg-3);
+  display: block;
+  margin: 0.8rem 0 1rem;
+  max-height: 560px;
+  max-width: 100%;
+  object-fit: contain;
+}
+
+.doc-editor img[data-media-loading='true'] {
+  min-height: 120px;
+  min-width: 220px;
+  background: repeating-linear-gradient(
+    90deg,
+    rgb(var(--accent-fill-rgb) / 0.04) 0 8px,
+    rgb(var(--accent-fill-rgb) / 0.08) 8px 16px
+  );
 }
 
 .doc-editor figure[data-media-kind='image'] {
@@ -291,41 +319,50 @@ input::placeholder, textarea::placeholder { color: var(--fg-4); }
   color: var(--fail);
 }
 
-.doc-editor [data-checklist-item='true'] {
+.doc-editor ul[data-type='taskList'] {
+  list-style: none;
+  padding-left: 0;
+}
+
+.doc-editor ul[data-type='taskList'] ul[data-type='taskList'] {
+  padding-left: 1.55rem;
+}
+
+.doc-editor ul[data-type='taskList'] > li {
   align-items: baseline;
   display: flex;
   gap: 0.65rem;
+  padding-left: 0;
 }
 
-.doc-editor [data-checklist-toggle='true'] {
-  border: 1px solid var(--fg-3);
-  color: var(--accent);
-  cursor: pointer;
+.doc-editor ul[data-type='taskList'] > li > label {
+  align-items: center;
   display: inline-flex;
   flex: 0 0 auto;
   height: 0.9rem;
   justify-content: center;
-  line-height: 0.75rem;
   margin-top: 0.25rem;
   width: 0.9rem;
 }
 
-.doc-editor [data-checklist-item='true'][data-checked='true'] [data-checklist-toggle='true'] {
-  border-color: rgb(var(--edge-rgb) / 0.45);
+.doc-editor ul[data-type='taskList'] > li > label input {
+  accent-color: var(--accent);
+  cursor: pointer;
+  height: 0.9rem;
+  margin: 0;
+  width: 0.9rem;
 }
 
-.doc-editor [data-checklist-item='true'][data-checked='true'] [data-checklist-toggle='true']::before {
-  content: '✓';
-  font-size: 0.75rem;
-}
-
-.doc-editor [data-checklist-text='true'] {
-  color: var(--fg-2);
+.doc-editor ul[data-type='taskList'] > li > div {
   flex: 1 1 auto;
   min-width: 0;
 }
 
-.doc-editor [data-checklist-item='true'][data-checked='true'] [data-checklist-text='true'] {
+.doc-editor ul[data-type='taskList'] > li > div > p {
+  margin: 0;
+}
+
+.doc-editor ul[data-type='taskList'] > li[data-checked='true'] > div {
   color: var(--fg-3);
 }
 
@@ -421,6 +458,75 @@ input::placeholder, textarea::placeholder { color: var(--fg-4); }
 
 .doc-editor [data-collapsible='true'][data-open='false'] [data-collapsible-content='true'] {
   display: none;
+}
+
+.doc-editor [data-type='details'] {
+  display: grid;
+  grid-template-columns: 1.3rem minmax(0, 1fr);
+  margin: 0.75rem 0 1rem;
+}
+
+.doc-editor [data-type='details'] > button {
+  align-items: center;
+  align-self: start;
+  background: transparent;
+  border: 0;
+  color: var(--fg-3);
+  cursor: pointer;
+  display: inline-flex;
+  height: 1.3rem;
+  justify-content: center;
+  margin-top: 0.15rem;
+  padding: 0;
+  transition: color var(--t-base) var(--ease-out);
+  width: 1.3rem;
+}
+
+.doc-editor [data-type='details'] > button:hover {
+  color: var(--accent);
+}
+
+.doc-editor [data-type='details'] > button svg {
+  fill: none;
+  height: 0.95rem;
+  pointer-events: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 2.5;
+  transform: rotate(0deg);
+  transition: transform var(--t-base) var(--ease-out);
+  width: 0.95rem;
+}
+
+.doc-editor [data-type='details'].is-open > button svg {
+  transform: rotate(90deg);
+}
+
+.doc-editor [data-type='details'] > div {
+  min-width: 0;
+}
+
+.doc-editor summary {
+  color: var(--fg-1);
+  cursor: text;
+  font-size: 1rem;
+  font-weight: 650;
+  line-height: 1.45;
+  list-style: none;
+  min-height: 1.75rem;
+  outline: none;
+}
+
+.doc-editor summary::-webkit-details-marker {
+  display: none;
+}
+
+.doc-editor [data-type='detailsContent'] {
+  color: var(--fg-2);
+  margin-top: 0.45rem;
+  min-height: 1.75rem;
+  outline: none;
 }
 
 .doc-editor pre {
