@@ -222,14 +222,22 @@ export function startTaskTriggerRunner() {
   const intervalMs = Number(process.env.TASK_TRIGGER_RUNNER_INTERVAL_MS ?? 60 * 60 * 1000)
   const safeIntervalMs = Number.isFinite(intervalMs) && intervalMs > 0 ? intervalMs : 60 * 60 * 1000
 
-  void runDueTaskTriggers().then((summary) => {
-    if (summary.checked > 0) console.log('[task-triggers] startup run', summary)
-  })
+  void runDueTaskTriggers()
+    .then((summary) => {
+      if (summary.checked > 0) console.log('[task-triggers] startup run', summary)
+    })
+    .catch((error) => {
+      console.error('[task-triggers] startup run failed:', error)
+    })
 
   const timer = setInterval(() => {
-    void runDueTaskTriggers().then((summary) => {
-      if (summary.checked > 0) console.log('[task-triggers] interval run', summary)
-    })
+    void runDueTaskTriggers()
+      .then((summary) => {
+        if (summary.checked > 0) console.log('[task-triggers] interval run', summary)
+      })
+      .catch((error) => {
+        console.error('[task-triggers] interval run failed:', error)
+      })
   }, safeIntervalMs)
 
   return timer

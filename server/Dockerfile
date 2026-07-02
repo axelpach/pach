@@ -22,4 +22,4 @@ ENV NODE_ENV=production
 ENV PORT=3002
 EXPOSE 3002
 
-CMD ["sh", "-c", "pnpm db:migrate && pnpm --filter server start"]
+CMD ["sh", "server/scripts/deploy-start.sh"]

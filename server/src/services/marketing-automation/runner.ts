@@ -429,16 +429,24 @@ export function startMarketingAutomationRunner() {
   let lastCadenceRunAt = 0
 
   const runScheduled = (label: string) => {
-    void runDueNewsletterBroadcasts().then((summary) => {
-      if (summary.checked > 0) console.log(`[marketing-automation] ${label} scheduled`, summary)
-    })
+    void runDueNewsletterBroadcasts()
+      .then((summary) => {
+        if (summary.checked > 0) console.log(`[marketing-automation] ${label} scheduled`, summary)
+      })
+      .catch((error) => {
+        console.error(`[marketing-automation] ${label} scheduled run failed:`, error)
+      })
   }
 
   const runCadence = (label: string) => {
     lastCadenceRunAt = Date.now()
-    void runMarketingCadenceChecks().then((summary) => {
-      if (summary.checked > 0) console.log(`[marketing-automation] ${label} cadence`, summary)
-    })
+    void runMarketingCadenceChecks()
+      .then((summary) => {
+        if (summary.checked > 0) console.log(`[marketing-automation] ${label} cadence`, summary)
+      })
+      .catch((error) => {
+        console.error(`[marketing-automation] ${label} cadence run failed:`, error)
+      })
   }
 
   runScheduled('startup')
