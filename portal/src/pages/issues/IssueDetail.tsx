@@ -33,6 +33,12 @@ import { AgentConversationView } from '../../components/agents/AgentConversation
 import { StatusIcon } from './StatusIcon'
 import { PriorityIcon } from './PriorityIcon'
 import { closePopupFromOutsideClick } from './popupEvents'
+import {
+  AgentModeChoiceModal,
+  type AgentMode,
+  type AgentModeChoice,
+  type AgentRepositoryPreview,
+} from './AgentModeChoiceModal'
 
 const PRIORITY_OPTIONS = [
   { value: 0, label: 'no priority', accent: 'text-fg-3' },
@@ -84,12 +90,16 @@ export default function IssueDetail() {
   const { user, token } = useAuth()
   const [bootstrappingRunId, setBootstrappingRunId] = useState<string | null>(null)
   const [agentActionMessage, setAgentActionMessage] = useState<string | null>(null)
+  const [agentRunToast, setAgentRunToast] = useState<string | null>(null)
+  const [agentModeChoice, setAgentModeChoice] = useState<AgentModeChoice | null>(null)
+  const [agentModeBusy, setAgentModeBusy] = useState<AgentMode | null>(null)
   const [cancelingRunId, setCancelingRunId] = useState<string | null>(null)
   const [prActionBusy, setPrActionBusy] = useState(false)
   const [selectedRepositoryId, setSelectedRepositoryId] = useState('')
   const [branchNameDraft, setBranchNameDraft] = useState('')
   const [branchNameTouched, setBranchNameTouched] = useState(false)
   const [organizationGithubSettings, setOrganizationGithubSettings] = useState<OrganizationGithubSettings | null>(null)
+  const agentRunToastTimerRef = useRef<number | null>(null)
   const agentFullViewOpen = searchParams.get('agent') === 'full'
 
   const [allIssues] = useQuery(z.query.pm_issues.orderBy('updatedAt', 'desc'))
@@ -188,6 +198,21 @@ export default function IssueDetail() {
     next.delete('agent')
     setSearchParams(next)
   }
+
+  function showAgentRunToast(message: string) {
+    setAgentRunToast(message)
+    if (agentRunToastTimerRef.current != null) window.clearTimeout(agentRunToastTimerRef.current)
+    agentRunToastTimerRef.current = window.setTimeout(() => {
+      setAgentRunToast(null)
+      agentRunToastTimerRef.current = null
+    }, 3600)
+  }
+
+  useEffect(() => {
+    return () => {
+      if (agentRunToastTimerRef.current != null) window.clearTimeout(agentRunToastTimerRef.current)
+    }
+  }, [])
 
   const team = issue ? teams.find((t) => t.id === issue.teamId) ?? null : null
   const project = issue?.projectId ? projects.find((p) => p.id === issue.projectId) ?? null : null
@@ -431,85 +456,67 @@ export default function IssueDetail() {
     }
   }
 
-  async function createAgentRun() {
+  async function createAgentRun(modeOverride?: AgentMode) {
     if (!issue) return
 
     const repo = selectDeveloperRepository()
-    if (!repo) {
-      setAgentActionMessage('connect a GitHub repository in settings first')
-      return
+    const branchName = branchNameIsValid && branchNameDraft.trim()
+      ? normalizeBranchName(branchNameDraft)
+      : undefined
+
+    try {
+      await commitTitle()
+      if (descSaveTimerRef.current != null) {
+        window.clearTimeout(descSaveTimerRef.current)
+        descSaveTimerRef.current = null
+      }
+      await commitDescription()
+
+      const response = await authFetch(`${config.apiUrl}/agent/issues/${issue.id}/runs/queue`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          source: 'issue_do_task',
+          repositoryId: repo?.id,
+          branchName,
+          modeOverride,
+        }),
+      })
+      const payload = await response.json().catch(() => ({})) as {
+        code?: string
+        error?: string
+        route?: { mode?: string; reason?: string; confidence?: number }
+        engineeringRepository?: AgentRepositoryPreview | null
+        run?: { branchName?: string }
+      }
+      if (response.status === 409 && payload.code === 'ROUTE_NEEDS_CLARIFICATION') {
+        setAgentModeChoice({
+          issueId: issue.id,
+          issueLabel: issue.identifier,
+          issueTitle: issue.title,
+          reason: payload.route?.reason ?? payload.error ?? 'Pach could not confidently choose an agent mode.',
+          confidence: payload.route?.confidence,
+          engineeringRepository: payload.engineeringRepository ?? null,
+        })
+        return
+      }
+      if (!response.ok) throw new Error(payload.error ?? 'Failed to queue agent run')
+      if (payload.run?.branchName) setBranchNameDraft(payload.run.branchName)
+      const mode = payload.route?.mode?.replace('_', ' ') ?? 'agent'
+      setAgentModeChoice(null)
+      setAgentActionMessage(`queued ${mode} run`)
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed to queue agent run'
+      setAgentActionMessage(message)
+      showAgentRunToast(message)
+    } finally {
+      if (modeOverride) setAgentModeBusy(null)
     }
+  }
 
-    const runId = crypto.randomUUID()
-    const conversationId = crypto.randomUUID()
-    const messageId = crypto.randomUUID()
-    const branchName = normalizeBranchName(branchNameDraft || buildDefaultAgentBranchName(issue, repo))
-    if (!isValidBranchName(branchName)) {
-      setAgentActionMessage('enter a valid branch name')
-      return
-    }
-    setBranchNameDraft(branchName)
-
-    await z.mutate.agent_conversations.create({
-      id: conversationId,
-      issueId: issue.id,
-      title: issue.title,
-      metadata: {
-        source: 'issue_detail',
-      },
-    })
-
-    await z.mutate.agent_runs.create({
-      id: runId,
-      conversationId,
-      issueId: issue.id,
-      repositoryId: repo.id,
-      projectKey: repo.projectKey,
-      repoFullName: repo.fullName,
-      baseBranch: repo.defaultBranch,
-      branchName,
-      status: 'queued',
-      statusMessage: 'queued for agent worker',
-      metadata: {
-        executionClass: 'general',
-        handler: 'general-mcp',
-        intent: 'engineering',
-        executionMode: 'code_worktree',
-        requiredCapabilities: ['codex.local', 'pach-mcp'],
-        queuedVia: 'issue_detail',
-        conversationId,
-      },
-    })
-
-    await z.mutate.github_branches.create({
-      id: crypto.randomUUID(),
-      repositoryId: repo.id,
-      agentRunId: runId,
-      issueId: issue.id,
-      name: branchName,
-      baseBranch: repo.defaultBranch,
-      status: 'planned',
-    })
-
-    await z.mutate.agent_messages.create({
-      id: messageId,
-      conversationId,
-      runId,
-      role: 'user',
-      body: `Go solve ${issue.identifier}: ${issue.title}`,
-      metadata: {
-        source: 'go_solve',
-      },
-    })
-
-    await logActivity('queued general MCP agent run', 'agent_run_created', {
-      runId,
-      conversationId,
-      repository: repo.fullName,
-      executionClass: 'general',
-      handler: 'general-mcp',
-      requiredCapabilities: ['codex.local', 'pach-mcp'],
-    })
+  function chooseAgentMode(mode: AgentMode) {
+    setAgentModeBusy(mode)
+    void createAgentRun(mode)
   }
 
   async function sendAgentFeedback(feedback: string, inputMedia: PendingAgentInputMedia[] = []) {
@@ -987,6 +994,22 @@ export default function IssueDetail() {
         </div>
         )}
       </div>
+      {agentModeChoice ? (
+        <AgentModeChoiceModal
+          choice={agentModeChoice}
+          busyMode={agentModeBusy}
+          onChoose={chooseAgentMode}
+          onCancel={() => {
+            setAgentModeChoice(null)
+            setAgentModeBusy(null)
+          }}
+        />
+      ) : null}
+      {agentRunToast ? (
+        <div className="fixed bottom-4 right-4 z-[960] max-w-sm border border-fail/30 bg-pit-2 px-3 py-2 font-mono text-xs text-fg-2 shadow-terminal-overlay">
+          {agentRunToast}
+        </div>
+      ) : null}
     </div>
   )
 }
@@ -1052,7 +1075,7 @@ function AgentSidebarCard({
   onOpenFullView: () => void
 }) {
   const onlineWorkers = workers.filter((worker) => worker.status !== 'offline')
-  const canCreateRun = allowCreateRun && repositories.length > 0 && branchNameIsValid && !run
+  const canCreateRun = allowCreateRun && !run
   const runIsActive = Boolean(run && !['completed', 'failed', 'canceled'].includes(run.status))
   const runIsFinal = Boolean(run && ['completed', 'failed', 'canceled'].includes(run.status))
   const canCancelRun = Boolean(run && !runIsFinal)
@@ -1097,7 +1120,7 @@ function AgentSidebarCard({
               }}
               disabled={!canCreateRun}
               className="inline-flex h-7 items-center gap-1.5 border border-edge/20 bg-accent-fill/8 px-2 font-mono text-[10px] uppercase tracking-label text-accent transition hover:border-accent disabled:cursor-not-allowed disabled:opacity-40"
-              title={canCreateRun ? 'queue agent run' : 'needs a repository'}
+              title={canCreateRun ? 'queue agent run' : 'agent run unavailable'}
             >
               <TerminalSquare className="h-3 w-3" />
               do task
@@ -1379,7 +1402,7 @@ function AgentRunPanel({
   actionMessage: string | null
 }) {
   const onlineWorkers = workers.filter((worker) => worker.status !== 'offline')
-  const canCreateRun = repositories.length > 0 && !run
+  const canCreateRun = !run
   const executionClass = readMetadataString(run?.metadata, 'executionClass')
   const handler = readMetadataString(run?.metadata, 'handler')
   const isGeneralRun = executionClass === 'general'
@@ -1753,7 +1776,7 @@ function AgentRunPanel({
             }}
             disabled={!canCreateRun}
             className="inline-flex h-7 items-center gap-1.5 border border-edge/20 bg-pit-3 px-2 font-mono text-[10px] uppercase tracking-label text-fg-3 transition hover:border-accent hover:text-accent disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:border-edge/20 disabled:hover:text-fg-3"
-            title={canCreateRun ? 'queue agent run' : 'needs a repository'}
+            title={canCreateRun ? 'queue agent run' : 'agent run unavailable'}
           >
             <TerminalSquare className="h-3 w-3" />
             go solve

@@ -14,7 +14,7 @@ export type AgentRunSpec = {
   version: 1
   promptSource: 'server'
   workerProtocol: 'pach-agent/v1'
-  agentProfile: 'engineering' | 'general' | 'design_template'
+  agentProfile: 'engineering' | 'general' | 'editorial' | 'design_template'
   executionMode: 'code_worktree' | 'mcp'
   continuation: {
     isContinuation: boolean
@@ -37,11 +37,13 @@ export type AgentRunSpec = {
 export function buildAgentRunSpec(run: AgentRunPromptRecord): AgentRunSpec {
   const executionMode = readMetadataString(run.metadata, 'executionMode')
   const codeWorktree = executionMode === 'code_worktree'
+  const handler = readMetadataString(run.metadata, 'handler')
   const codexSessionId = readMetadataString(run.metadata, 'codexSessionId')
   const feedbackMessageId = readMetadataString(run.metadata, 'feedbackMessageId')
   const feedback = readMetadataString(run.metadata, 'feedback')
   const agentProfile = run.subjectType === 'design_template_run'
     ? 'design_template'
+    : handler === 'editorial-mcp' ? 'editorial'
     : codeWorktree ? 'engineering' : 'general'
 
   return {
@@ -73,6 +75,7 @@ export function buildAgentRunSpec(run: AgentRunPromptRecord): AgentRunSpec {
 
 export function buildGeneralMcpPrompt(run: AgentRunPromptRecord) {
   if (run.subjectType === 'design_template_run') return buildDesignTemplateMcpPrompt(run)
+  if (readMetadataString(run.metadata, 'handler') === 'editorial-mcp') return buildEditorialMcpPrompt(run)
 
   const runSpec = buildAgentRunSpec(run)
   const feedback = readMetadataString(run.metadata, 'feedback')
@@ -118,6 +121,48 @@ export function buildGeneralMcpPrompt(run: AgentRunPromptRecord) {
       : null,
     '',
     'Keep the final result concise and useful inside the Pach run progress stream.',
+  ].filter((line): line is string => Boolean(line)).join('\n')
+}
+
+function buildEditorialMcpPrompt(run: AgentRunPromptRecord) {
+  const runSpec = buildAgentRunSpec(run)
+  const feedback = readMetadataString(run.metadata, 'feedback')
+  const parentRunId = readMetadataString(run.metadata, 'parentRunId')
+  const attachments = formatInputMediaPrompt(run.metadata)
+  const editorialIntent = readMetadataString(run.metadata, 'editorialIntent')
+  const guidelinesPolicy = readMetadataString(run.metadata, 'guidelinesPolicy') ?? 'none'
+  const routeReason = readMetadataString(run.metadata, 'routeReason')
+
+  return [
+    'You are Pach editorial MCP issue worker.',
+    '',
+    'Use Pach MCP tools for Pach state. You may call Pach MCP tools directly and repeatedly as needed.',
+    'For this worker, Codex is running with full local trust. Still act conservatively: do not send external messages, publish content, create marketing broadcasts, or perform irreversible external actions unless the issue explicitly asks and the available Pach tool is clearly safe.',
+    `Issue id: ${run.issueId}`,
+    `Agent run id: ${run.id}`,
+    parentRunId ? `Parent run id: ${parentRunId}` : null,
+    feedback ? `User feedback: ${feedback}` : null,
+    editorialIntent ? `Editorial intent: ${editorialIntent}` : null,
+    `Guidelines policy: ${guidelinesPolicy}`,
+    routeReason ? `Routing reason: ${routeReason}` : null,
+    attachments,
+    '',
+    'Workflow:',
+    feedback
+      ? '1. Continue from the previous session if available, and use the user feedback above as the latest instruction.'
+      : '1. Read the issue with pach.issue.get using the issue id above.',
+    '2. Report progress with pach.progress.report and include the agent run id.',
+    '3. Read pach.document.format.get before writing document body content. Also read pach.editorial.profile.get for the issue organization when the issue has an organization.',
+    guidelinesPolicy === 'newsletter_guidelines_required'
+      ? '4. Before drafting, find the organization Newsletter Guidelines by calling pach.document.list scoped to the issue organization with search "Newsletter Guidelines". Use an active document whose title contains "Newsletter Guidelines", then read it with pach.document.get. If no such document exists, report phase "blocked" and explain the missing guidelines instead of drafting.'
+      : '4. Do not search for Newsletter Guidelines unless the issue or feedback explicitly asks for newsletter/article/blog-post guidelines.',
+    '5. Create or update a Pach document as the review artifact. For new article/newsletter/blog drafts, use pach.document.create. For edits to an existing referenced document, use pach.document.update with the default version workflow unless the issue explicitly asks to update live content.',
+    '6. For article/newsletter/blog drafts, use Pach markdown and keep a useful review structure: brief/context, sources if any, outline if useful, then the draft body. Preserve visible source blocks for source material when relevant.',
+    '7. When the draft/edit is ready for human review, update the issue with pach.issue.update: append a Markdown review link like "[Review draft: Title](/docs/DOCUMENT_ID)" to the issue description, set statusKey to "in_review", and include a clear activitySummary.',
+    '8. Put the final result in pach.progress.report with phase "final_result". Include the document title, /docs link, whether Newsletter Guidelines were used, and anything the reviewer should check.',
+    '',
+    'Keep the final result concise and useful inside the Pach run progress stream.',
+    `Run spec profile: ${runSpec.agentProfile}`,
   ].filter((line): line is string => Boolean(line)).join('\n')
 }
 

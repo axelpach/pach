@@ -13,6 +13,7 @@ import { verifyToken } from '../lib/auth.js'
 import { insertIssueActivityEvent } from '../lib/activity-events.js'
 import { readGithubTokenForRepository } from '../lib/github-credentials.js'
 import { finalizeAgentRunPullRequest } from '../lib/agent-pr-finalizer.js'
+import { routeAgentModeOverride, routeAgentRun } from '../lib/agent-run-router.js'
 import {
   agentRunProgressReports,
   agentRunArtifacts,
@@ -22,8 +23,16 @@ import {
   agentTerminals,
   agentWorkers,
   githubBranches,
+  githubRepositories,
   githubPullRequests,
+  organizationRepositories,
+  organizations,
+  pmIssueLabels,
   pmIssues,
+  pmLabels,
+  pmProjects,
+  pmStatuses,
+  pmTeams,
 } from '../../../db/schema.js'
 
 const router = Router()
@@ -202,6 +211,182 @@ router.post('/workers/:id/health-check', async (req, res) => {
   }
 })
 
+router.post('/issues/:issueId/runs/queue', async (req, res) => {
+  const { issueId } = req.params
+
+  try {
+    const source = readOptionalString(req.body?.source) ?? 'issue_do_task'
+    if (source !== 'issue_do_task') {
+      res.status(400).json({ ok: false, error: 'Only issue_do_task queueing is supported on this endpoint.' })
+      return
+    }
+
+    const db = getDb()
+    const [issue] = await db.select().from(pmIssues).where(eq(pmIssues.id, issueId)).limit(1)
+    if (!issue) {
+      res.status(404).json({ ok: false, error: 'Issue not found' })
+      return
+    }
+
+    const context = await readIssueRouteContext(issue)
+    const modeOverride = readOptionalString(req.body?.modeOverride)
+    const route = modeOverride
+      ? routeAgentModeOverride(modeOverride, context)
+      : await routeAgentRun(context)
+    if (!route) {
+      res.status(400).json({
+        ok: false,
+        code: 'INVALID_AGENT_MODE',
+        error: 'Invalid agent mode override.',
+        availableModes: ['engineering', 'editorial', 'general_mcp'],
+      })
+      return
+    }
+    const preferredRepositoryId = readOptionalString(req.body?.repositoryId)
+    const requestedBranchName = readOptionalString(req.body?.branchName)
+    const engineeringRepository = await selectRepositoryForIssue(issue, preferredRepositoryId)
+    if (route.mode === 'needs_clarification') {
+      res.status(409).json({
+        ok: false,
+        code: 'ROUTE_NEEDS_CLARIFICATION',
+        error: 'Pach could not confidently choose an agent mode.',
+        route,
+        availableModes: route.availableModes,
+        engineeringRepository: engineeringRepository ? serializeRepositoryPreview(engineeringRepository) : null,
+      })
+      return
+    }
+
+    const repository = route.executionMode === 'code_worktree'
+      ? engineeringRepository
+      : null
+
+    if (route.executionMode === 'code_worktree' && !repository) {
+      res.status(422).json({
+        ok: false,
+        code: 'ENGINEERING_REPO_REQUIRED',
+        error: 'Engineering runs need an active repository for this organization.',
+        route,
+      })
+      return
+    }
+
+    const runId = randomUUID()
+    const conversationId = randomUUID()
+    const messageId = randomUUID()
+    const branchName = route.executionMode === 'code_worktree' && repository
+      ? normalizeBranchName(requestedBranchName ?? buildDefaultAgentBranchName(issue, repository))
+      : `mcp/${issue.identifier.toLowerCase()}-${runId.slice(0, 8)}`
+
+    if (route.executionMode === 'code_worktree' && !isValidBranchName(branchName)) {
+      res.status(400).json({ ok: false, error: 'Invalid branch name.', route })
+      return
+    }
+
+    const now = new Date()
+    await db.insert(agentConversations).values({
+      id: conversationId,
+      issueId: issue.id,
+      title: issue.title,
+      status: 'open',
+      metadata: {
+        source,
+        route,
+      },
+      createdAt: now,
+      updatedAt: now,
+    })
+
+    const runMetadata = {
+      executionClass: 'general',
+      handler: route.handler,
+      intent: route.mode,
+      executionMode: route.executionMode,
+      agentProfile: route.mode,
+      requiredCapabilities: ['codex.local', 'pach-mcp'],
+      queuedVia: source,
+      conversationId,
+      route,
+      routeClassifier: route.classifier,
+      routeConfidence: route.confidence,
+      routeReason: route.reason,
+      editorialIntent: route.editorialIntent,
+      guidelinesPolicy: route.guidelinesPolicy,
+    }
+
+    const [run] = await db.insert(agentRuns).values({
+      id: runId,
+      conversationId,
+      issueId: issue.id,
+      repositoryId: repository?.id,
+      projectKey: repository?.projectKey ?? context.organizationProject ?? 'pach',
+      repoFullName: repository?.fullName ?? 'pach/mcp',
+      baseBranch: repository?.defaultBranch ?? 'main',
+      branchName,
+      agentKind: 'codex',
+      status: 'queued',
+      statusMessage: `queued ${route.mode.replace('_', ' ')} agent worker`,
+      subjectType: 'issue',
+      subjectId: issue.id,
+      metadata: runMetadata,
+      createdAt: now,
+      updatedAt: now,
+    }).returning()
+
+    if (repository) {
+      await db.insert(githubBranches).values({
+        id: randomUUID(),
+        repositoryId: repository.id,
+        agentRunId: run.id,
+        issueId: issue.id,
+        name: branchName,
+        baseBranch: repository.defaultBranch,
+        status: 'planned',
+        createdAt: now,
+        updatedAt: now,
+      })
+    }
+
+    await db.insert(agentMessages).values({
+      id: messageId,
+      conversationId,
+      runId: run.id,
+      role: 'user',
+      body: `Go solve ${issue.identifier}: ${issue.title}`,
+      metadata: {
+        source: 'go_solve',
+        route,
+      },
+      createdAt: now,
+    })
+
+    await appendRunActivity(run, `queued ${route.mode.replace('_', ' ')} agent run`, 'agent_run_created', {
+      conversationId,
+      repository: repository?.fullName,
+      executionClass: 'general',
+      handler: route.handler,
+      executionMode: route.executionMode,
+      requiredCapabilities: ['codex.local', 'pach-mcp'],
+      route,
+    })
+
+    res.json({
+      ok: true,
+      run,
+      conversationId,
+      messageId,
+      route,
+      repository,
+    })
+  } catch (error) {
+    console.error('Failed to queue issue agent run', error)
+    res.status(500).json({
+      ok: false,
+      error: error instanceof Error ? error.message : 'Failed to queue agent run',
+    })
+  }
+})
+
 router.post('/runs/:id/cancel', async (req, res) => {
   const { id } = req.params
 
@@ -332,6 +517,9 @@ router.post('/runs/:id/follow-up', async (req, res) => {
 
     const runMetadata = parentRun.metadata ?? {}
     const followUpCount = readMetadataNumber(runMetadata, 'followUpCount') + 1
+    const existingExecutionMode = readMetadataString(runMetadata, 'executionMode')
+    const existingHandler = readMetadataString(runMetadata, 'handler')
+    const existingIntent = readMetadataString(runMetadata, 'intent')
     const [run] = await db
       .update(agentRuns)
       .set({
@@ -342,10 +530,10 @@ router.post('/runs/:id/follow-up', async (req, res) => {
         metadata: {
           ...runMetadata,
           executionClass: 'general',
-          handler: 'general-mcp',
-          intent: 'engineering',
-          executionMode: 'code_worktree',
-          requiredCapabilities: ['codex.local', 'pach-mcp'],
+          handler: existingHandler ?? (existingExecutionMode === 'code_worktree' ? 'engineering-code-worktree' : 'general-mcp'),
+          intent: existingIntent ?? (existingExecutionMode === 'code_worktree' ? 'engineering' : 'general_mcp'),
+          executionMode: existingExecutionMode ?? 'mcp',
+          requiredCapabilities: readMetadataStringArray(runMetadata, 'requiredCapabilities') ?? ['codex.local', 'pach-mcp'],
           queuedVia: 'agent_feedback',
           conversationId,
           feedbackMessageId: messageId,
@@ -1203,6 +1391,132 @@ async function handleAgentTerminalSocket(socket: WebSocket, req: IncomingMessage
   })
 }
 
+async function readIssueRouteContext(issue: typeof pmIssues.$inferSelect) {
+  const db = getDb()
+  const [team] = await db.select().from(pmTeams).where(eq(pmTeams.id, issue.teamId)).limit(1)
+  const [project] = issue.projectId
+    ? await db.select().from(pmProjects).where(eq(pmProjects.id, issue.projectId)).limit(1)
+    : []
+  const [status] = await db.select().from(pmStatuses).where(eq(pmStatuses.id, issue.statusId)).limit(1)
+  const [organization] = issue.contextCompanyId
+    ? await db.select().from(organizations).where(eq(organizations.id, issue.contextCompanyId)).limit(1)
+    : []
+  const labelLinks = await db.select().from(pmIssueLabels).where(eq(pmIssueLabels.issueId, issue.id))
+  const labels = labelLinks.length > 0
+    ? await db
+      .select()
+      .from(pmLabels)
+      .where(inArray(pmLabels.id, labelLinks.map((link) => link.labelId)))
+    : []
+
+  return {
+    source: 'issue_do_task' as const,
+    issueIdentifier: issue.identifier,
+    title: issue.title,
+    description: issue.description,
+    teamName: team?.name,
+    teamKey: team?.key,
+    projectName: project?.name,
+    projectSlug: project?.slug,
+    organizationName: organization?.name,
+    organizationProject: organization?.project,
+    statusName: status?.name,
+    statusType: status?.type,
+    labelNames: labels.map((label) => label.name),
+  }
+}
+
+async function selectRepositoryForIssue(issue: typeof pmIssues.$inferSelect, preferredRepositoryId?: string) {
+  const db = getDb()
+  const repositories = await db.select().from(githubRepositories).where(eq(githubRepositories.active, true)).limit(200)
+  if (repositories.length === 0) return null
+
+  const links = issue.contextCompanyId
+    ? await db
+      .select()
+      .from(organizationRepositories)
+      .where(and(
+        eq(organizationRepositories.organizationId, issue.contextCompanyId),
+        eq(organizationRepositories.active, true),
+      ))
+    : []
+  const linkByRepositoryId = new Map(links.map((link) => [link.repositoryId, link]))
+
+  if (preferredRepositoryId) {
+    const preferred = repositories.find((repository) => repository.id === preferredRepositoryId)
+    if (!preferred) return null
+    if (issue.contextCompanyId && !linkByRepositoryId.has(preferred.id)) return null
+    return preferred
+  }
+
+  const candidates = issue.contextCompanyId
+    ? repositories.filter((repository) => linkByRepositoryId.has(repository.id))
+    : repositories
+
+  return candidates
+    .sort((a, b) => {
+      const aLink = linkByRepositoryId.get(a.id)
+      const bLink = linkByRepositoryId.get(b.id)
+      const defaultDiff = Number(bLink?.isDefault ?? false) - Number(aLink?.isDefault ?? false)
+      if (defaultDiff !== 0) return defaultDiff
+      const roleDiff = repositoryRoleRank(aLink?.role) - repositoryRoleRank(bLink?.role)
+      if (roleDiff !== 0) return roleDiff
+      return a.fullName.localeCompare(b.fullName)
+    })[0] ?? null
+}
+
+function serializeRepositoryPreview(repository: typeof githubRepositories.$inferSelect) {
+  return {
+    id: repository.id,
+    projectKey: repository.projectKey,
+    fullName: repository.fullName,
+    defaultBranch: repository.defaultBranch,
+  }
+}
+
+function repositoryRoleRank(role: string | null | undefined) {
+  if (role === 'primary') return 0
+  if (role === 'engineering') return 1
+  if (role === 'automation') return 2
+  if (role === 'docs') return 3
+  if (role === 'marketing') return 4
+  return 99
+}
+
+function buildDefaultAgentBranchName(issue: typeof pmIssues.$inferSelect, repository: typeof githubRepositories.$inferSelect) {
+  return `agent/${repository.projectKey}-${issue.identifier.toLowerCase()}-${slugifyBranchPart(issue.title)}`
+}
+
+function normalizeBranchName(value: string) {
+  return value
+    .trim()
+    .replace(/\s+/g, '-')
+    .replace(/\/+/g, '/')
+    .replace(/^\/+|\/+$/g, '')
+}
+
+function isValidBranchName(value: string) {
+  if (!value) return false
+  if (value === '@') return false
+  if (value.endsWith('.')) return false
+  if (value.includes('..')) return false
+  if (value.includes('@{')) return false
+  if (/[~^:?*[\]\\\s]/.test(value)) return false
+  return value.split('/').every((part) => part && !part.startsWith('.') && !part.endsWith('.lock'))
+}
+
+function slugifyBranchPart(value: string) {
+  const slug = value
+    .toLowerCase()
+    .normalize('NFKD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 42)
+
+  return slug || 'issue'
+}
+
 async function findExistingWorker(worker: WorkerConfig) {
   const db = getDb()
   const existing = await db.select().from(agentWorkers)
@@ -1441,6 +1755,14 @@ function readMetadataNumber(metadata: unknown, key: string) {
   if (!metadata || typeof metadata !== 'object') return 0
   const value = (metadata as Record<string, unknown>)[key]
   return typeof value === 'number' && Number.isFinite(value) ? value : 0
+}
+
+function readMetadataStringArray(metadata: unknown, key: string) {
+  if (!metadata || typeof metadata !== 'object') return null
+  const value = (metadata as Record<string, unknown>)[key]
+  if (!Array.isArray(value)) return null
+  const items = value.filter((item): item is string => typeof item === 'string' && item.trim().length > 0)
+  return items.length > 0 ? items : null
 }
 
 function readRunCodexSessionId(metadata: unknown) {

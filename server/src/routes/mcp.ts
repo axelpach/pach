@@ -257,6 +257,8 @@ const tools: ToolDefinition[] = [
         title: { type: 'string' },
         description: { type: 'string' },
         statusId: { type: 'string' },
+        statusKey: { type: 'string', description: 'Optional status key such as in_review. Used when statusId is omitted.' },
+        statusType: { type: 'string', description: 'Optional status type such as review. Used when statusId and statusKey are omitted.' },
         priority: { type: 'number' },
         estimate: { type: ['number', 'null'] },
         blockedReason: { type: ['string', 'null'] },
@@ -1171,7 +1173,12 @@ async function updateIssue(req: AuthenticatedRequest, args: unknown) {
 
   if (typeof body.title === 'string') updates.title = body.title
   if (typeof body.description === 'string') updates.description = body.description
-  if (typeof body.statusId === 'string') updates.statusId = body.statusId
+  if (typeof body.statusId === 'string') {
+    updates.statusId = body.statusId
+  } else {
+    const resolvedStatus = await resolveIssueStatusFromUpdate(issue, body)
+    if (resolvedStatus) updates.statusId = resolvedStatus.id
+  }
   if (typeof body.priority === 'number') updates.priority = body.priority
   if (typeof body.estimate === 'number' || body.estimate === null) updates.estimate = body.estimate
   if (typeof body.blockedReason === 'string' || body.blockedReason === null) updates.blockedReason = body.blockedReason
@@ -1202,6 +1209,32 @@ async function updateIssue(req: AuthenticatedRequest, args: unknown) {
     issue: serializeIssue(updated),
     changedFields,
   }
+}
+
+async function resolveIssueStatusFromUpdate(issue: typeof pmIssues.$inferSelect, body: Record<string, unknown>) {
+  const statusKey = readOptionalString(body.statusKey)
+  const statusType = readOptionalString(body.statusType)
+  if (!statusKey && !statusType) return null
+
+  const statuses = await getDb().select().from(pmStatuses).limit(500)
+  const matches = statuses
+    .filter((status) => status.teamId === issue.teamId || status.teamId == null)
+    .filter((status) => {
+      if (statusKey && !matchesStringFilter(status.key, [statusKey], 'exact')) return false
+      if (statusType && !matchesStringFilter(status.type, [statusType], 'exact')) return false
+      return true
+    })
+    .sort((a, b) => {
+      const teamDiff = Number(b.teamId === issue.teamId) - Number(a.teamId === issue.teamId)
+      if (teamDiff !== 0) return teamDiff
+      return a.position - b.position
+    })
+
+  if (matches.length === 0) {
+    throw new Error(`Issue status not found for ${statusKey ? `key "${statusKey}"` : `type "${statusType}"`}`)
+  }
+
+  return matches[0]
 }
 
 async function listActivityEvents(req: AuthenticatedRequest, args: unknown) {

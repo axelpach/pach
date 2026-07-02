@@ -10,9 +10,13 @@ import {
   finImports,
   finMovements,
 } from '../../../db/schema.js'
+import {
+  CLAUDE_HAIKU_MODEL,
+  createAnthropicMessage,
+  readAnthropicText,
+  readAnthropicToolInput,
+} from '../lib/anthropic.js'
 
-const ANTHROPIC_API_URL = 'https://api.anthropic.com/v1/messages'
-const HAIKU_MODEL = 'claude-haiku-4-5-20251001'
 const FINANCE_STATEMENT_TOOL_NAME = 'record_finance_statement'
 const MAX_IMPORT_BYTES = 10 * 1024 * 1024
 
@@ -51,13 +55,6 @@ type ParsedStatement = {
   detectedInstitution?: string | null
   detectedAccountHint?: string | null
   transactions: ParsedMovement[]
-}
-
-type AnthropicContentBlock = {
-  type?: string
-  text?: string
-  name?: string
-  input?: unknown
 }
 
 const FINANCE_STATEMENT_TOOL = {
@@ -269,7 +266,7 @@ export async function importFinanceMovements(input: FinanceImportInput) {
         itemsDuplicate: duplicates,
         itemsNeedingReview: needsReview,
         rawSummary: {
-          model: HAIKU_MODEL,
+          model: CLAUDE_HAIKU_MODEL,
           created: 0,
           ready,
           duplicates,
@@ -511,45 +508,27 @@ async function parseWithHaiku(input: {
   accountCurrencyCode: string
   existingCategoryNames: string[]
 }): Promise<ParsedStatement> {
-  const apiKey = process.env.ANTHROPIC_API_KEY
-  if (!apiKey) {
-    throw new Error('ANTHROPIC_API_KEY is not set.')
-  }
-
   const content = buildAnthropicContent(input)
-  const response = await fetch(ANTHROPIC_API_URL, {
-    method: 'POST',
-    headers: {
-      'x-api-key': apiKey,
-      'anthropic-version': '2023-06-01',
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-      model: HAIKU_MODEL,
-      max_tokens: 8192,
-      temperature: 0,
-      system:
-        `You extract bank and credit card movements for a finance ledger. Use the provided tool to return structured data. Amounts must be signed: income/deposits positive, expenses/card purchases negative, transfers may be positive or negative as shown by the source account. The account currency is ${input.accountCurrencyCode}; use that currency for movements unless the document explicitly shows a different transaction currency. If a movement date does not show a year, use ${new Date().getFullYear()} as the year. If a movement has a visible transaction time, return it as transactionTime in HH:mm:ss; if not, omit transactionTime. Never use the phone status bar time as a transaction time.`,
-      tools: [FINANCE_STATEMENT_TOOL],
-      tool_choice: { type: 'tool', name: FINANCE_STATEMENT_TOOL_NAME },
-      messages: [
-        {
-          role: 'user',
-          content,
-        },
-      ],
-    }),
+  const payload = await createAnthropicMessage({
+    model: CLAUDE_HAIKU_MODEL,
+    max_tokens: 8192,
+    temperature: 0,
+    system:
+      `You extract bank and credit card movements for a finance ledger. Use the provided tool to return structured data. Amounts must be signed: income/deposits positive, expenses/card purchases negative, transfers may be positive or negative as shown by the source account. The account currency is ${input.accountCurrencyCode}; use that currency for movements unless the document explicitly shows a different transaction currency. If a movement date does not show a year, use ${new Date().getFullYear()} as the year. If a movement has a visible transaction time, return it as transactionTime in HH:mm:ss; if not, omit transactionTime. Never use the phone status bar time as a transaction time.`,
+    tools: [FINANCE_STATEMENT_TOOL],
+    tool_choice: { type: 'tool', name: FINANCE_STATEMENT_TOOL_NAME },
+    messages: [
+      {
+        role: 'user',
+        content,
+      },
+    ],
   })
 
-  const payload = await response.json() as { content?: AnthropicContentBlock[]; error?: { message?: string } }
-  if (!response.ok) {
-    throw new Error(payload.error?.message || `Anthropic request failed with ${response.status}`)
-  }
-
-  const toolInput = payload.content?.find((part) => part.type === 'tool_use' && part.name === FINANCE_STATEMENT_TOOL_NAME)?.input
+  const toolInput = readAnthropicToolInput(payload, FINANCE_STATEMENT_TOOL_NAME)
   if (toolInput) return parseToolResponse(toolInput)
 
-  const text = payload.content?.map((part) => part.text ?? '').join('\n') ?? ''
+  const text = readAnthropicText(payload)
   return parseJsonResponse(text)
 }
 

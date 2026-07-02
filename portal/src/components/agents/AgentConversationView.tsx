@@ -84,7 +84,7 @@ export function AgentConversationView({
   const conversationEndRef = useRef<HTMLDivElement | null>(null)
   const feedbackFileInputRef = useRef<HTMLInputElement | null>(null)
   const onlineWorkers = workers.filter((worker) => worker.status !== 'offline')
-  const canCreateRun = allowCreateRun && repositories.length > 0 && branchNameIsValid && !run
+  const canCreateRun = allowCreateRun && !run
   const canCancelRun = Boolean(run && !['completed', 'failed', 'canceled'].includes(run.status))
   const runIsWorking = isRunWorking(run)
   const streamItems = buildAgentConversationStream({ progressReports, legacyProgressActivity, messages })

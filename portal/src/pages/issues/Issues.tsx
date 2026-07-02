@@ -31,11 +31,18 @@ import { closePopupFromOutsideClick } from './popupEvents'
 import { useQuery, useZero } from '@rocicorp/zero/react'
 import type { Schema } from '../../zero-schema'
 import type { Mutators } from '../../mutators'
-import { useAuth } from '../../lib/auth'
+import { authFetch, useAuth } from '../../lib/auth'
+import { config } from '../../config'
 import { useTrackerContext } from './IssuesLayout'
 import { IconTooltip } from '../../components/IconTooltip'
 import { DeleteViewModal } from '../../components/DeleteViewModal'
 import { requestGlobalIssueComposer } from './IssueComposer'
+import {
+  AgentModeChoiceModal,
+  type AgentMode,
+  type AgentModeChoice,
+  type AgentRepositoryPreview,
+} from './AgentModeChoiceModal'
 
 const PRIORITY_GROUPS = [
   { value: 1, label: 'urgent', accent: 'text-amber' },
@@ -127,20 +134,17 @@ const DEFAULT_VISIBLE_FIELDS: RowField[] = [
   'updated',
 ]
 
-type DeveloperRepository = Pick<
-  Schema['tables']['github_repositories']['row'],
-  'id' | 'projectKey' | 'fullName' | 'defaultBranch' | 'active'
->
-
-type OrganizationRepositoryLink = Pick<
-  Schema['tables']['organization_repositories']['row'],
-  'id' | 'organizationId' | 'repositoryId' | 'role' | 'isDefault' | 'active'
->
-
 type RowShortcutRequest = {
   issueId: string
   control: 'status' | 'labels'
   nonce: number
+}
+
+type QueueAgentRunPayload = {
+  code?: string
+  error?: string
+  route?: { mode?: string; reason?: string; confidence?: number }
+  engineeringRepository?: AgentRepositoryPreview | null
 }
 
 type IssueViewState = {
@@ -167,8 +171,6 @@ export default function Issues() {
   const [labels] = useQuery(z.query.pm_labels.orderBy('name', 'asc'))
   const [issueLabels] = useQuery(z.query.pm_issue_labels)
   const [agentRuns] = useQuery(z.query.agent_runs.orderBy('createdAt', 'desc'))
-  const [repositories] = useQuery(z.query.github_repositories.orderBy('fullName', 'asc'))
-  const [organizationRepositoryLinks] = useQuery(z.query.organization_repositories.orderBy('updatedAt', 'desc'))
   const [savedViews] = useQuery(z.query.pm_saved_views.orderBy('position', 'asc'))
   const accessibleOrganizationIds = useMemo(() => new Set(user?.organizationIds ?? []), [user?.organizationIds])
   const canAccessUnscoped = user?.canAccessUnscoped ?? false
@@ -185,6 +187,7 @@ export default function Issues() {
   const scrollContainerRef = useRef<HTMLDivElement | null>(null)
   const scrollRestoredRef = useRef(false)
   const scrollSaveTimerRef = useRef<number | null>(null)
+  const agentRunToastTimerRef = useRef<number | null>(null)
 
   const [sortConfig, setSortConfig] = useState<SortConfig>(() => initialStoredView.sort)
   const [visibleFields, setVisibleFields] = useState<Set<RowField>>(
@@ -194,6 +197,9 @@ export default function Issues() {
 
   const [activeFilters, setActiveFilters] = useState<ActiveFilters>(() => initialStoredView.filters)
   const [creatingAgentRunIssueId, setCreatingAgentRunIssueId] = useState<string | null>(null)
+  const [agentModeChoice, setAgentModeChoice] = useState<AgentModeChoice | null>(null)
+  const [agentModeBusy, setAgentModeBusy] = useState<AgentMode | null>(null)
+  const [agentRunToast, setAgentRunToast] = useState<string | null>(null)
   const [collapsedPriorities, setCollapsedPriorities] = useState<Set<number>>(() => new Set(initialStoredView.collapsedPriorities))
   const [collapsedStatuses, setCollapsedStatuses] = useState<Set<string>>(() => new Set(initialStoredView.collapsedStatuses))
   const [hoveredIssueId, setHoveredIssueId] = useState<string | null>(null)
@@ -340,9 +346,6 @@ export default function Issues() {
       .map((run) => run.issueId),
   )
   const agentRunIssueIds = new Set(agentRuns.map((run) => run.issueId).filter((id): id is string => Boolean(id)))
-  const activeRepositories = repositories.filter((repository) => repository.active)
-  const repositoryById = new Map(activeRepositories.map((repository) => [repository.id, repository]))
-  const activeOrganizationRepositoryLinks = organizationRepositoryLinks.filter((link) => link.active)
   const labelsByIssue = new Map<string, Schema['tables']['pm_labels']['row'][]>()
   for (const link of issueLabels) {
     const label = labelMap.get(link.labelId)
@@ -372,6 +375,15 @@ export default function Issues() {
   function closeDeleteViewModal() {
     setDeleteViewModalOpen(false)
     setDeletingView(false)
+  }
+
+  function showAgentRunToast(message: string) {
+    setAgentRunToast(message)
+    if (agentRunToastTimerRef.current != null) window.clearTimeout(agentRunToastTimerRef.current)
+    agentRunToastTimerRef.current = window.setTimeout(() => {
+      setAgentRunToast(null)
+      agentRunToastTimerRef.current = null
+    }, 3600)
   }
 
   async function submitSavedView() {
@@ -503,6 +515,12 @@ export default function Issues() {
 
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [])
+
+  useEffect(() => {
+    return () => {
+      if (agentRunToastTimerRef.current != null) window.clearTimeout(agentRunToastTimerRef.current)
+    }
   }, [])
 
   useEffect(() => {
@@ -776,99 +794,49 @@ export default function Issues() {
     })
   }
 
-  function selectDeveloperRepositoryForIssue(issue: Schema['tables']['pm_issues']['row']): DeveloperRepository | null {
-    const linkedRepositories = activeOrganizationRepositoryLinks
-      .filter((link) => link.organizationId === issue.contextCompanyId)
-      .map((link) => ({
-        link,
-        repository: repositoryById.get(link.repositoryId),
-      }))
-      .filter((entry): entry is { link: OrganizationRepositoryLink; repository: DeveloperRepository } => Boolean(entry.repository))
-      .toSorted((a, b) => Number(b.link.isDefault) - Number(a.link.isDefault) || a.repository.fullName.localeCompare(b.repository.fullName))
-
-    return linkedRepositories[0]?.repository ?? null
-  }
-
-  async function createAgentRunForIssue(issueId: string) {
+  async function createAgentRunForIssue(issueId: string, modeOverride?: AgentMode) {
     const issue = scopedIssues.find((entry) => entry.id === issueId)
     if (!issue || creatingAgentRunIssueId) return
 
-    const repo = selectDeveloperRepositoryForIssue(issue)
-    if (!repo) return
-
-    const runId = crypto.randomUUID()
-    const conversationId = crypto.randomUUID()
-    const messageId = crypto.randomUUID()
-    const branchName = normalizeBranchName(buildDefaultAgentBranchName(issue, repo))
-    if (!isValidBranchName(branchName)) return
-
     setCreatingAgentRunIssueId(issue.id)
     try {
-      await z.mutate.agent_conversations.create({
-        id: conversationId,
-        issueId: issue.id,
-        title: issue.title,
-        metadata: {
-          source: 'issue_list',
-        },
+      const response = await authFetch(`${config.apiUrl}/agent/issues/${issue.id}/runs/queue`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          source: 'issue_do_task',
+          modeOverride,
+        }),
       })
-
-      await z.mutate.agent_runs.create({
-        id: runId,
-        conversationId,
-        issueId: issue.id,
-        repositoryId: repo.id,
-        projectKey: repo.projectKey,
-        repoFullName: repo.fullName,
-        baseBranch: repo.defaultBranch,
-        branchName,
-        status: 'queued',
-        statusMessage: 'queued for agent worker',
-        metadata: {
-          executionClass: 'general',
-          handler: 'general-mcp',
-          intent: 'engineering',
-          executionMode: 'code_worktree',
-          requiredCapabilities: ['codex.local', 'pach-mcp'],
-          queuedVia: 'issue_list',
-          conversationId,
-        },
-      })
-
-      await z.mutate.github_branches.create({
-        id: crypto.randomUUID(),
-        repositoryId: repo.id,
-        agentRunId: runId,
-        issueId: issue.id,
-        name: branchName,
-        baseBranch: repo.defaultBranch,
-        status: 'planned',
-      })
-
-      await z.mutate.agent_messages.create({
-        id: messageId,
-        conversationId,
-        runId,
-        role: 'user',
-        body: `Go solve ${issue.identifier}: ${issue.title}`,
-        metadata: {
-          source: 'go_solve',
-        },
-      })
-
-      await logActivity(issue.id, 'queued general MCP agent run', 'agent_run_created', {
-        runId,
-        conversationId,
-        repository: repo.fullName,
-        executionClass: 'general',
-        handler: 'general-mcp',
-        requiredCapabilities: ['codex.local', 'pach-mcp'],
-      })
+      const payload = await response.json().catch(() => ({})) as QueueAgentRunPayload
+      if (response.status === 409 && payload.code === 'ROUTE_NEEDS_CLARIFICATION') {
+        setAgentModeChoice({
+          issueId: issue.id,
+          issueLabel: issue.identifier,
+          issueTitle: issue.title,
+          reason: payload.route?.reason ?? payload.error ?? 'Pach could not confidently choose an agent mode.',
+          confidence: payload.route?.confidence,
+          engineeringRepository: payload.engineeringRepository ?? null,
+        })
+        return
+      }
+      if (!response.ok) throw new Error(payload.error ?? 'Failed to queue agent run')
+      const mode = payload.route?.mode?.replace('_', ' ') ?? 'agent'
+      setAgentModeChoice(null)
+      showAgentRunToast(`queued ${mode} run`)
     } catch (error) {
       console.error('Failed to queue agent run from issue list', error)
+      showAgentRunToast(error instanceof Error ? error.message : 'Failed to queue agent run')
     } finally {
       setCreatingAgentRunIssueId((current) => (current === issue.id ? null : current))
+      if (modeOverride) setAgentModeBusy(null)
     }
+  }
+
+  function chooseAgentMode(mode: AgentMode) {
+    if (!agentModeChoice || agentModeBusy) return
+    setAgentModeBusy(mode)
+    void createAgentRunForIssue(agentModeChoice.issueId, mode)
   }
 
   const [activeDragId, setActiveDragId] = useState<string | null>(null)
@@ -1281,7 +1249,7 @@ export default function Issues() {
                                         )}
                                         hasActiveAgentRun={activeAgentRunIssueIds.has(issue.id)}
                                         hasAgentRun={agentRunIssueIds.has(issue.id)}
-                                        canCreateAgentRun={Boolean(selectDeveloperRepositoryForIssue(issue))}
+                                        canCreateAgentRun={true}
                                         creatingAgentRun={creatingAgentRunIssueId === issue.id}
                                         visibleFields={visibleFields}
                                         shortcutRequest={rowShortcutRequest}
@@ -1397,6 +1365,24 @@ export default function Issues() {
         onConfirm={deleteActiveSavedView}
       />
     )}
+
+    {agentModeChoice ? (
+      <AgentModeChoiceModal
+        choice={agentModeChoice}
+        busyMode={agentModeBusy}
+        onChoose={chooseAgentMode}
+        onCancel={() => {
+          setAgentModeChoice(null)
+          setAgentModeBusy(null)
+        }}
+      />
+    ) : null}
+
+    {agentRunToast ? (
+      <div className="fixed bottom-4 right-4 z-[960] max-w-sm border border-fail/30 bg-pit-2 px-3 py-2 font-mono text-xs text-fg-2 shadow-terminal-overlay">
+        {agentRunToast}
+      </div>
+    ) : null}
     </>
   )
 }
@@ -2087,7 +2073,7 @@ function IssueRow({
           disabled={!canCreateAgentRun || creatingAgentRun}
           aria-label={`queue agent run for ${issue.identifier}`}
           className="hidden h-6 shrink-0 items-center gap-1 border border-edge/20 bg-accent-fill/8 px-2 font-mono text-[10px] uppercase tracking-label text-accent opacity-0 transition hover:border-accent disabled:cursor-not-allowed disabled:text-fg-4 group-hover:inline-flex group-hover:opacity-100 group-focus-within:inline-flex group-focus-within:opacity-100"
-          title={canCreateAgentRun ? 'queue agent run' : 'needs a repository'}
+          title={canCreateAgentRun ? 'queue agent run' : 'agent run unavailable'}
         >
           <TerminalSquare className="h-3 w-3" />
           {creatingAgentRun ? 'queueing' : 'do task'}
@@ -2649,38 +2635,4 @@ function getUserInitials(user: Schema['tables']['users']['row']) {
 
 function sumEstimates(items: Schema['tables']['pm_issues']['row'][]) {
   return items.reduce((total, issue) => total + (issue.estimate ?? 0), 0)
-}
-
-function buildDefaultAgentBranchName(issue: Schema['tables']['pm_issues']['row'], repository: DeveloperRepository) {
-  return `agent/${repository.projectKey}-${issue.identifier.toLowerCase()}-${slugifyAgentBranchPart(issue.title)}`
-}
-
-function normalizeBranchName(value: string) {
-  return value
-    .trim()
-    .replace(/\s+/g, '-')
-    .replace(/\/+/g, '/')
-    .replace(/^\/+|\/+$/g, '')
-}
-
-function isValidBranchName(value: string) {
-  if (!value) return false
-  if (value === '@') return false
-  if (value.endsWith('.')) return false
-  if (value.includes('..')) return false
-  if (value.includes('@{')) return false
-  if (/[~^:?*[\]\\\s]/.test(value)) return false
-  return value.split('/').every((part) => part && !part.startsWith('.') && !part.endsWith('.lock'))
-}
-
-function slugifyAgentBranchPart(value: string) {
-  const slug = value
-    .toLowerCase()
-    .normalize('NFKD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-+|-+$/g, '')
-    .slice(0, 42)
-
-  return slug || 'issue'
 }
