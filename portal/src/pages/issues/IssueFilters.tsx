@@ -213,9 +213,9 @@ function FilterDropdown({
   }
 
   return (
-    <div className="flex max-h-[min(340px,calc(100dvh-8rem))] w-[calc(100vw-2rem)] max-w-[480px] flex-col overflow-hidden border border-edge/25 bg-pit shadow-terminal-popover sm:flex-row">
+    <div className="flex max-h-[min(340px,calc(100dvh-8rem))] min-h-0 w-[calc(100vw-2rem)] max-w-[480px] flex-col overflow-hidden overscroll-contain border border-edge/25 bg-pit shadow-terminal-popover sm:flex-row">
       {/* left: field list */}
-      <div className="flex max-h-[112px] w-full shrink-0 overflow-auto border-b border-edge/12 py-1 sm:block sm:max-h-none sm:w-[160px] sm:border-b-0 sm:border-r">
+      <div className="flex max-h-[112px] w-full shrink-0 overflow-auto overscroll-contain border-b border-edge/12 py-1 sm:block sm:max-h-none sm:w-[160px] sm:border-b-0 sm:border-r">
         {filterConfigs.map((config) => {
           const isSelected = config.field === selectedField
           const isActive = (activeFilters[config.field]?.length ?? 0) > 0
@@ -246,7 +246,7 @@ function FilterDropdown({
       </div>
 
       {/* right: options */}
-      <div className="flex flex-1 min-w-0 flex-col">
+      <div className="flex min-h-0 flex-1 min-w-0 flex-col">
         <div className="flex items-center justify-between border-b border-edge/12 px-3 py-2">
           <span className="font-mono text-[10px] uppercase tracking-label text-fg-3">
             {selectedConfig?.label}
@@ -293,7 +293,7 @@ function FilterDropdown({
           </div>
         )}
 
-        <div className="flex-1 overflow-y-auto py-1">
+        <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain py-1">
           {filteredOptions.length === 0 ? (
             <div className="px-3 py-4 text-center font-mono text-xs text-fg-4">// no results</div>
           ) : (
