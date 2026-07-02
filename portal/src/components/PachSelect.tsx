@@ -68,7 +68,8 @@ export function PachSelect(props: Props) {
       const t = triggerRef.current
       if (!t) return
       const rect = t.getBoundingClientRect()
-      const width = popupWidth ? parseFloat(popupWidth) : (props.variant === 'button' ? 200 : rect.width)
+      const requestedWidth = popupWidth ? parseFloat(popupWidth) : (props.variant === 'button' ? 200 : rect.width)
+      const width = Math.min(requestedWidth, Math.max(160, window.innerWidth - 16))
       const spaceBelow = window.innerHeight - rect.bottom
       const spaceAbove = rect.top
       const placeAbove = spaceBelow < POPUP_MAX_HEIGHT + POPUP_GAP + 8 && spaceAbove > spaceBelow
