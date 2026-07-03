@@ -3,7 +3,7 @@ import { GetObjectCommand, S3Client } from '@aws-sdk/client-s3'
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner'
 import { Router } from 'express'
 import type { Request } from 'express'
-import { and, desc, eq, ilike, inArray, isNull, or } from 'drizzle-orm'
+import { and, desc, eq, gte, ilike, inArray, isNull, lte, or, type SQL } from 'drizzle-orm'
 import {
   activityEvents,
   agentRunProgressReports,
@@ -15,6 +15,9 @@ import {
   designTemplates,
   documentSnapshots,
   documents,
+  finAccounts,
+  finCategories,
+  finMovements,
   mcpTokens,
   mktPublications,
   organizations,
@@ -318,6 +321,64 @@ const tools: ToolDefinition[] = [
         summary: { type: 'string' },
         details: { type: 'object', additionalProperties: true },
         metadata: { type: 'object', additionalProperties: true },
+      },
+    },
+  },
+  {
+    name: 'pach.finance.movement.list',
+    description: 'List finance movements for one accessible organization, with account and category context for analysis.',
+    inputSchema: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        organizationId: {
+          type: 'string',
+          description: 'Optional organization UUID filter. Required unless the MCP token is bound to exactly one organization or another organization selector is provided.',
+        },
+        organizationName: {
+          type: 'string',
+          description: 'Optional organization display name filter.',
+        },
+        organizationProject: {
+          type: 'string',
+          description: 'Optional organization project key filter, e.g. "pach" or "ardia".',
+        },
+        limit: {
+          type: 'number',
+          description: 'Maximum number of movements. Defaults to 100, maximum 500.',
+        },
+        accountId: {
+          type: 'string',
+          description: 'Optional account UUID filter.',
+        },
+        categoryId: {
+          type: 'string',
+          description: 'Optional category UUID filter. Use "uncategorized" to return movements without a category.',
+        },
+        type: {
+          type: 'string',
+          description: 'Optional movement type filter: income, expense, transfer, or adjustment.',
+        },
+        status: {
+          type: 'string',
+          description: 'Optional movement status filter: pending_review, reviewed, or ignored.',
+        },
+        currencyCode: {
+          type: 'string',
+          description: 'Optional currency code filter, e.g. MXN or USD.',
+        },
+        startDate: {
+          type: 'string',
+          description: 'Optional inclusive transaction date lower bound in YYYY-MM-DD format.',
+        },
+        endDate: {
+          type: 'string',
+          description: 'Optional inclusive transaction date upper bound in YYYY-MM-DD format.',
+        },
+        search: {
+          type: 'string',
+          description: 'Optional case-insensitive search across description, merchant, and counterparty.',
+        },
       },
     },
   },
@@ -861,6 +922,9 @@ async function callTool(req: AuthenticatedRequest, params: unknown) {
       case 'pach.activity.record':
         requireMcpCapability(req, 'pach.activity.write')
         return toolResult(await recordActivityEvent(req, args))
+      case 'pach.finance.movement.list':
+        requireMcpCapability(req, 'pach.finance.read')
+        return toolResult(await listFinanceMovements(req, args))
       case 'pach.document.list':
         requireMcpCapability(req, 'pach.document.read')
         return toolResult(await listDocuments(req, args))
@@ -1334,6 +1398,103 @@ async function recordActivityEvent(req: AuthenticatedRequest, args: unknown) {
   return {
     ok: true,
     event: serializeActivityEvent(event, organization),
+  }
+}
+
+async function listFinanceMovements(req: AuthenticatedRequest, args: unknown) {
+  const body = isObject(args) ? args : {}
+  const organization = await resolveOrganizationForDocumentCreate(req, body)
+  if (!organization) {
+    throw new Error('Finance movement access requires one organization. Provide organizationId, organizationName, or organizationProject.')
+  }
+
+  const limit = readPositiveInteger(body.limit, 100, 1, 500)
+  const accountId = readOptionalString(body.accountId)
+  const categoryId = readOptionalString(body.categoryId)
+  const type = readOptionalString(body.type)
+  const status = readOptionalString(body.status)
+  const currencyCode = readOptionalString(body.currencyCode)?.toUpperCase()
+  const startDate = readOptionalDateOnly(body.startDate, 'startDate')
+  const endDate = readOptionalDateOnly(body.endDate, 'endDate')
+  const search = readOptionalString(body.search)
+
+  const conditions: SQL[] = [eq(finMovements.organizationId, organization.id)]
+  if (accountId) conditions.push(eq(finMovements.accountId, accountId))
+  if (categoryId) {
+    conditions.push(categoryId === 'uncategorized' ? isNull(finMovements.categoryId) : eq(finMovements.categoryId, categoryId))
+  }
+  if (type) conditions.push(eq(finMovements.type, type))
+  if (status) conditions.push(eq(finMovements.status, status))
+  if (currencyCode) conditions.push(eq(finMovements.currencyCode, currencyCode))
+  if (startDate) conditions.push(gte(finMovements.transactionDate, startDate))
+  if (endDate) conditions.push(lte(finMovements.transactionDate, endDate))
+  if (search) {
+    conditions.push(or(
+      ilike(finMovements.description, `%${search}%`),
+      ilike(finMovements.merchantName, `%${search}%`),
+      ilike(finMovements.counterparty, `%${search}%`),
+    )!)
+  }
+
+  const rows = await getDb()
+    .select({
+      movement: finMovements,
+      account: finAccounts,
+      category: finCategories,
+    })
+    .from(finMovements)
+    .leftJoin(finAccounts, eq(finAccounts.id, finMovements.accountId))
+    .leftJoin(finCategories, eq(finCategories.id, finMovements.categoryId))
+    .where(and(...conditions))
+    .orderBy(desc(finMovements.transactionDate), desc(finMovements.transactionTime), desc(finMovements.createdAt))
+    .limit(limit)
+
+  const movementRows = rows
+    .filter((row) => row.account?.organizationId === organization.id)
+    .filter((row) => !row.category || row.category.organizationId === organization.id)
+
+  const movements = movementRows.map((row) => ({
+    ...serializeRow(row.movement),
+    organizationName: organization.name,
+    organizationProject: organization.project,
+    account: row.account ? {
+      id: row.account.id,
+      name: row.account.name,
+      institutionName: row.account.institutionName,
+      type: row.account.type,
+      currencyCode: row.account.currencyCode,
+      status: row.account.status,
+    } : null,
+    category: row.category ? {
+      id: row.category.id,
+      name: row.category.name,
+      type: row.category.type,
+      parentId: row.category.parentId,
+      archived: row.category.archived,
+    } : null,
+  }))
+
+  return {
+    ok: true,
+    organization: {
+      id: organization.id,
+      name: organization.name,
+      project: organization.project,
+    },
+    count: movements.length,
+    limit,
+    filters: {
+      accountId,
+      categoryId,
+      type,
+      status,
+      currencyCode,
+      startDate,
+      endDate,
+      search,
+    },
+    totalsByCurrency: summarizeFinanceMovementsByCurrency(movementRows.map((row) => row.movement)),
+    movements,
   }
 }
 
@@ -2811,6 +2972,17 @@ function readOptionalDate(value: unknown) {
   throw new Error('Date value must be an ISO timestamp or millisecond timestamp')
 }
 
+function readOptionalDateOnly(value: unknown, field: string) {
+  const raw = readOptionalString(value)
+  if (!raw) return null
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(raw)) throw new Error(`${field} must be in YYYY-MM-DD format`)
+  const date = new Date(`${raw}T00:00:00.000Z`)
+  if (Number.isNaN(date.getTime()) || date.toISOString().slice(0, 10) !== raw) {
+    throw new Error(`${field} must be a valid calendar date`)
+  }
+  return raw
+}
+
 function readStringFilters(...values: unknown[]) {
   return values.flatMap((value) => {
     if (typeof value === 'string' && value.trim()) return [value.trim()]
@@ -2988,6 +3160,45 @@ function serializeRow<T extends Record<string, unknown>>(row: T) {
 
 function serializeNullableRow<T extends Record<string, unknown>>(row: T | undefined) {
   return row ? serializeRow(row) : null
+}
+
+function summarizeFinanceMovementsByCurrency(
+  movements: Array<{ currencyCode: unknown, amountMinor: unknown, type: unknown, status: unknown }>,
+) {
+  const byCurrency = new Map<string, {
+    currencyCode: string
+    incomeMinor: number
+    expenseMinor: number
+    transferMinor: number
+    adjustmentMinor: number
+    netMinor: number
+    movementCount: number
+    pendingReviewCount: number
+  }>()
+
+  for (const movement of movements) {
+    if (typeof movement.currencyCode !== 'string' || typeof movement.amountMinor !== 'number') continue
+    const current = byCurrency.get(movement.currencyCode) ?? {
+      currencyCode: movement.currencyCode,
+      incomeMinor: 0,
+      expenseMinor: 0,
+      transferMinor: 0,
+      adjustmentMinor: 0,
+      netMinor: 0,
+      movementCount: 0,
+      pendingReviewCount: 0,
+    }
+    current.netMinor += movement.amountMinor
+    current.movementCount += 1
+    if (movement.status === 'pending_review') current.pendingReviewCount += 1
+    if (movement.type === 'income') current.incomeMinor += movement.amountMinor
+    if (movement.type === 'expense') current.expenseMinor += movement.amountMinor
+    if (movement.type === 'transfer') current.transferMinor += movement.amountMinor
+    if (movement.type === 'adjustment') current.adjustmentMinor += movement.amountMinor
+    byCurrency.set(movement.currencyCode, current)
+  }
+
+  return [...byCurrency.values()]
 }
 
 function serializePublicUser(user: typeof users.$inferSelect) {
