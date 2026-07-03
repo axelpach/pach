@@ -343,11 +343,25 @@ function ContentSection({
   onFlash: (message: string) => void
 }) {
   const [publishing, setPublishing] = useState(false)
+  const [blogScheduleTimezone, setBlogScheduleTimezone] = useState(DEFAULT_MARKETING_TIMEZONE)
+  const [blogScheduleDraft, setBlogScheduleDraft] = useState('')
+  const [blogScheduleError, setBlogScheduleError] = useState('')
 
   const ctaOptions = useMemo<PachSelectOption[]>(
     () => [{ value: '', label: 'no cta' }, ...ctas.map((cta) => ({ value: cta.id, label: cta.label }))],
     [ctas],
   )
+  const selectedBlogRun = useMemo(
+    () => selectedContent ? runs.find((run) => run.contentItemId === selectedContent.id && run.channel === 'blog') ?? null : null,
+    [runs, selectedContent?.id],
+  )
+
+  useEffect(() => {
+    const timezone = selectedBlogRun?.scheduledTimezone || DEFAULT_MARKETING_TIMEZONE
+    setBlogScheduleTimezone(timezone)
+    setBlogScheduleDraft(dateTimeLocalValue(selectedBlogRun?.scheduledAt, timezone))
+    setBlogScheduleError('')
+  }, [selectedBlogRun?.id, selectedBlogRun?.scheduledAt, selectedBlogRun?.scheduledTimezone])
 
   async function snapshotContent(item: ContentItemRow) {
     const response = await authFetch(`${config.apiUrl}/marketing/content/${item.id}/snapshot`, {
@@ -361,6 +375,7 @@ function ContentSection({
 
   async function publishBlog(item: ContentItemRow) {
     setPublishing(true)
+    setBlogScheduleError('')
     try {
       const response = await authFetch(`${config.apiUrl}/marketing/content/${item.id}/publish-blog`, {
         method: 'POST',
@@ -372,6 +387,59 @@ function ContentSection({
     } finally {
       setPublishing(false)
     }
+  }
+
+  async function scheduleBlog(item: ContentItemRow) {
+    const scheduledAt = dateTimeLocalToTimestamp(blogScheduleDraft, blogScheduleTimezone)
+    if (!scheduledAt) {
+      setBlogScheduleError('Pick a valid schedule time')
+      return
+    }
+    setBlogScheduleError('')
+    try {
+      if (selectedBlogRun) {
+        const result = z.mutate.mkt_distribution_runs.update({
+          id: selectedBlogRun.id,
+          name: item.title,
+          status: 'scheduled',
+          scheduledAt,
+          scheduledTimezone: blogScheduleTimezone,
+          error: null,
+        })
+        await result.client
+      } else {
+        const result = z.mutate.mkt_distribution_runs.create({
+          id: crypto.randomUUID(),
+          organizationId: item.organizationId,
+          contentItemId: item.id,
+          channel: 'blog',
+          distributionType: 'publish',
+          name: item.title,
+          status: 'scheduled',
+          scheduledAt,
+          scheduledTimezone: blogScheduleTimezone,
+          recipientFilter: {},
+        })
+        await result.client
+      }
+      onFlash('blog post scheduled')
+    } catch (error) {
+      setBlogScheduleError(error instanceof Error ? error.message : String(error))
+    }
+  }
+
+  function unscheduleBlog() {
+    if (!selectedBlogRun || selectedBlogRun.status === 'published' || selectedBlogRun.status === 'sending') return
+    setBlogScheduleDraft('')
+    setBlogScheduleError('')
+    void z.mutate.mkt_distribution_runs.update({
+      id: selectedBlogRun.id,
+      status: 'draft',
+      scheduledAt: null,
+      startedAt: null,
+      error: null,
+    })
+    onFlash('blog schedule cleared')
   }
 
   return (
@@ -392,6 +460,7 @@ function ContentSection({
               {contentItems.map((item) => {
                 const blogRun = runs.find((run) => run.contentItemId === item.id && run.channel === 'blog')
                 const blogPublished = blogRun?.status === 'published'
+                const blogScheduled = blogRun?.status === 'scheduled'
                 const blogVisible = blogPublished && isPublicBlogContentItem(item)
                 return (
                   <tr
@@ -405,7 +474,9 @@ function ContentSection({
                     <td className="py-2.5 pr-3">{item.supportedChannels.join(', ')}</td>
                     <td className="py-2.5 pr-3"><StatusPill kind={statusKind(item.status)}>{item.status}</StatusPill></td>
                     <td className="py-2.5 pr-3">
-                      {blogVisible ? (
+                      {blogScheduled ? (
+                        <StatusPill kind="warn">{formatScheduledDate(blogRun?.scheduledAt, blogRun?.scheduledTimezone)}</StatusPill>
+                      ) : blogVisible ? (
                         <StatusPill>published</StatusPill>
                       ) : blogPublished ? (
                         <StatusPill kind="warn">hidden</StatusPill>
@@ -467,6 +538,42 @@ function ContentSection({
                 value={selectedContent.supportedChannels}
                 onChange={(supportedChannels) => void z.mutate.mkt_content_items.update({ id: selectedContent.id, supportedChannels })}
               />
+            </div>
+            <div className="border-t border-edge/12 pt-4">
+              <FieldLabel>blog schedule</FieldLabel>
+              <div className="grid gap-2">
+                <TermInput
+                  type="datetime-local"
+                  value={blogScheduleDraft}
+                  onChange={(event) => {
+                    setBlogScheduleDraft(event.target.value)
+                    if (blogScheduleError) setBlogScheduleError('')
+                  }}
+                />
+                <PachSelect
+                  value={blogScheduleTimezone}
+                  onChange={setBlogScheduleTimezone}
+                  options={MARKETING_TIMEZONE_OPTIONS}
+                  display={timezoneLabel(blogScheduleTimezone)}
+                />
+              </div>
+              <div className="mt-2 flex flex-wrap gap-2">
+                <Button
+                  onClick={() => void scheduleBlog(selectedContent)}
+                  disabled={!selectedContent.supportedChannels.includes('blog') || selectedBlogRun?.status === 'published' || selectedBlogRun?.status === 'sending'}
+                >
+                  schedule
+                </Button>
+                <Button
+                  onClick={unscheduleBlog}
+                  disabled={!selectedBlogRun?.scheduledAt || selectedBlogRun?.status === 'published' || selectedBlogRun?.status === 'sending'}
+                >
+                  unschedule
+                </Button>
+              </div>
+              <div className={`mt-2 font-mono text-[10px] uppercase tracking-label ${blogScheduleError ? 'text-fail' : 'text-fg-4'}`}>
+                {blogScheduleError || (selectedBlogRun?.scheduledAt ? `queued ${formatScheduledDate(selectedBlogRun.scheduledAt, selectedBlogRun.scheduledTimezone)}` : 'not scheduled')}
+              </div>
             </div>
             <div className="flex flex-wrap gap-2 pt-2">
               <Button icon={<RefreshCw className="h-3.5 w-3.5" />} onClick={() => void snapshotContent(selectedContent)} disabled={!selectedContent.sourceDocumentId}>

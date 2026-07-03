@@ -10,7 +10,7 @@ import {
 } from '../../../../db/schema.js'
 import { getDb } from '../../db.js'
 import { insertIssueActivityEvent } from '../../lib/activity-events.js'
-import { sendNewsletterRun } from '../../routes/marketing.js'
+import { publishBlogRun, sendNewsletterRun } from '../../routes/marketing.js'
 
 type MarketingAutomationSummary = {
   scheduled: {
@@ -49,20 +49,24 @@ const ONE_DAY_MS = 24 * 60 * 60 * 1000
 export async function runDueMarketingAutomation(params: { now?: Date; limit?: number } = {}): Promise<MarketingAutomationSummary> {
   const now = params.now ?? new Date()
   const [scheduled, cadence] = await Promise.all([
-    runDueNewsletterBroadcasts({ now, limit: params.limit }),
+    runDueScheduledMarketing({ now, limit: params.limit }),
     runMarketingCadenceChecks({ now, limit: params.limit }),
   ])
   return { scheduled, cadence }
 }
 
 export async function runDueNewsletterBroadcasts(params: { now?: Date; limit?: number } = {}) {
+  return runDueScheduledMarketing({ ...params, channel: 'newsletter' })
+}
+
+export async function runDueScheduledMarketing(params: { now?: Date; limit?: number; channel?: 'newsletter' | 'blog' } = {}) {
   const db = getDb()
   const now = params.now ?? new Date()
   const dueRuns = await db
     .select()
     .from(mktDistributionRuns)
     .where(and(
-      eq(mktDistributionRuns.channel, 'newsletter'),
+      params.channel ? eq(mktDistributionRuns.channel, params.channel) : inArray(mktDistributionRuns.channel, ['newsletter', 'blog']),
       eq(mktDistributionRuns.status, 'scheduled'),
       lte(mktDistributionRuns.scheduledAt, now),
     ))
@@ -89,11 +93,17 @@ export async function runDueNewsletterBroadcasts(params: { now?: Date; limit?: n
         continue
       }
 
-      await sendNewsletterRun(run.id, false)
+      if (run.channel === 'newsletter') {
+        await sendNewsletterRun(run.id, false)
+      } else if (run.channel === 'blog') {
+        await publishBlogRun(run.id)
+      } else {
+        throw new Error(`Unsupported scheduled marketing channel: ${run.channel}`)
+      }
       summary.sent += 1
     } catch (error) {
       summary.failed += 1
-      console.error(`[marketing-automation] Failed to send scheduled run ${run.id}:`, error)
+      console.error(`[marketing-automation] Failed scheduled ${run.channel} run ${run.id}:`, error)
       await db
         .update(mktDistributionRuns)
         .set({

@@ -638,45 +638,7 @@ router.post('/content/:id/publish-blog', asyncRoute(async (req, res) => {
     res.status(400).json({ error: 'Content item does not support the blog channel' })
     return
   }
-  const now = new Date()
-  const existing = await getDb()
-    .select()
-    .from(mktDistributionRuns)
-    .where(and(
-      eq(mktDistributionRuns.organizationId, item.organizationId),
-      eq(mktDistributionRuns.contentItemId, item.id),
-      eq(mktDistributionRuns.channel, 'blog'),
-    ))
-    .limit(1)
-
-  const run = existing[0]
-  const payload = {
-    status: 'published',
-    completedAt: now,
-    metrics: run?.metrics ?? {},
-    metadata: { ...(run?.metadata ?? {}), publishedAt: now.toISOString() },
-    updatedAt: now,
-  }
-
-  const [savedRun] = run
-    ? await getDb().update(mktDistributionRuns).set(payload).where(eq(mktDistributionRuns.id, run.id)).returning()
-    : await getDb().insert(mktDistributionRuns).values({
-      id: crypto.randomUUID(),
-      organizationId: item.organizationId,
-      contentItemId: item.id,
-      channel: 'blog',
-      distributionType: 'publish',
-      name: item.title,
-      status: 'published',
-      completedAt: now,
-      recipientFilter: {},
-      metrics: {},
-      metadata: { publishedAt: now.toISOString() },
-      createdAt: now,
-      updatedAt: now,
-    }).returning()
-
-  await getDb().update(mktContentItems).set({ status: 'ready', updatedAt: now }).where(eq(mktContentItems.id, item.id))
+  const savedRun = await publishBlogContentItem(item.id)
   res.json({ ok: true, distributionRun: serializeDates(savedRun) })
 }))
 
@@ -876,6 +838,74 @@ export async function sendNewsletterRun(runId: string, testOnly: boolean) {
   }
 
   return { distributionRun: serializeDates(updated), metrics, errors }
+}
+
+export async function publishBlogContentItem(contentItemId: string) {
+  const db = getDb()
+  const [item] = await db.select().from(mktContentItems).where(eq(mktContentItems.id, contentItemId)).limit(1)
+  if (!item) throw new MarketingInputError('Content item not found', 404)
+  if (!item.supportedChannels.includes('blog')) {
+    throw new MarketingInputError('Content item does not support the blog channel')
+  }
+
+  const [run] = await db
+    .select()
+    .from(mktDistributionRuns)
+    .where(and(
+      eq(mktDistributionRuns.organizationId, item.organizationId),
+      eq(mktDistributionRuns.contentItemId, item.id),
+      eq(mktDistributionRuns.channel, 'blog'),
+    ))
+    .limit(1)
+
+  if (run) return publishBlogRun(run.id)
+
+  const now = new Date()
+  const [created] = await db.insert(mktDistributionRuns).values({
+    id: crypto.randomUUID(),
+    organizationId: item.organizationId,
+    contentItemId: item.id,
+    channel: 'blog',
+    distributionType: 'publish',
+    name: item.title,
+    status: 'draft',
+    recipientFilter: {},
+    metrics: {},
+    metadata: {},
+    createdAt: now,
+    updatedAt: now,
+  }).returning()
+
+  return publishBlogRun(created.id)
+}
+
+export async function publishBlogRun(runId: string) {
+  const db = getDb()
+  const [run] = await db.select().from(mktDistributionRuns).where(eq(mktDistributionRuns.id, runId)).limit(1)
+  if (!run) throw new MarketingInputError('Distribution run not found', 404)
+  if (run.channel !== 'blog') throw new MarketingInputError('Only blog runs can be published by this route')
+  const [item] = run.contentItemId ? await db.select().from(mktContentItems).where(eq(mktContentItems.id, run.contentItemId)).limit(1) : []
+  if (!item) throw new MarketingInputError('Blog run is missing a content item')
+  if (!item.supportedChannels.includes('blog')) {
+    throw new MarketingInputError('Content item does not support the blog channel')
+  }
+
+  const now = new Date()
+  const [savedRun] = await db
+    .update(mktDistributionRuns)
+    .set({
+      status: 'published',
+      completedAt: now,
+      metrics: run.metrics ?? {},
+      error: null,
+      metadata: { ...(run.metadata ?? {}), publishedAt: now.toISOString() },
+      updatedAt: now,
+    })
+    .where(eq(mktDistributionRuns.id, run.id))
+    .returning()
+
+  await db.update(mktContentItems).set({ status: 'ready', updatedAt: now }).where(eq(mktContentItems.id, item.id))
+  return savedRun
 }
 
 async function renderNewsletterRun(runId: string) {
