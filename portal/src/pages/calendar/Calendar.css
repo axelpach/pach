@@ -1,0 +1,259 @@
+.pach-calendar-shell .fc {
+  height: 100%;
+  color: var(--fg-2);
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+
+.pach-calendar-shell .fc,
+.pach-calendar-shell .fc *,
+.pach-calendar-shell .fc *::before,
+.pach-calendar-shell .fc *::after {
+  box-sizing: border-box;
+}
+
+.pach-calendar-shell .fc-theme-standard .fc-scrollgrid,
+.pach-calendar-shell .fc-theme-standard td,
+.pach-calendar-shell .fc-theme-standard th {
+  border-color: rgb(var(--edge-rgb) / 0.12);
+}
+
+.pach-calendar-shell .fc .fc-scrollgrid {
+  border-width: 0;
+}
+
+.pach-calendar-shell .fc .fc-scrollgrid-section-header th {
+  background: rgb(var(--bg-3-rgb) / 0.62);
+}
+
+.pach-calendar-shell .fc .fc-col-header-cell-cushion,
+.pach-calendar-shell .fc .fc-daygrid-day-number {
+  color: var(--fg-3);
+  font-size: 10px;
+  letter-spacing: var(--tracking-label);
+  padding: 8px;
+  text-transform: uppercase;
+}
+
+.pach-calendar-shell .fc .fc-day-today {
+  background: rgb(var(--accent-fill-rgb) / 0.055);
+}
+
+.pach-calendar-shell .fc .fc-day-other {
+  background: rgb(var(--bg-0-rgb) / 0.14);
+}
+
+.pach-calendar-shell .fc .fc-daygrid-day-frame {
+  min-height: 118px;
+}
+
+.pach-calendar-shell .fc .fc-dayGridMonth-view .fc-daygrid-day-number {
+  display: inline-block;
+}
+
+.pach-calendar-day-number {
+  display: inline-block;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  font: inherit;
+  letter-spacing: inherit;
+  padding: 0;
+  text-transform: inherit;
+}
+
+.pach-calendar-day-number:hover,
+.pach-calendar-day-number:focus-visible {
+  color: var(--accent);
+  outline: none;
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 4px;
+}
+
+.pach-calendar-shell .fc .fc-timegrid-slot {
+  height: 42px;
+}
+
+.pach-calendar-shell .fc .fc-timegrid-slot-label,
+.pach-calendar-shell .fc .fc-timegrid-axis-cushion {
+  color: var(--fg-4);
+  font-size: 10px;
+}
+
+.pach-calendar-shell .fc .fc-timegrid-now-indicator-line {
+  border-color: var(--fail);
+}
+
+.pach-calendar-shell .fc .fc-timegrid-now-indicator-arrow {
+  border-left-color: var(--fail);
+  border-right-color: var(--fail);
+}
+
+.pach-calendar-shell .fc .fc-event {
+  border: 1px solid rgb(var(--accent-rgb) / 0.28);
+  border-radius: 0;
+  background: rgb(var(--accent-fill-rgb) / 0.09);
+  color: var(--fg-1);
+  cursor: pointer;
+  box-shadow: none;
+  overflow: hidden;
+  transition: background var(--t-base) var(--ease-out), border-color var(--t-base) var(--ease-out), box-shadow var(--t-base) var(--ease-out), transform var(--t-base) var(--ease-out);
+}
+
+.pach-calendar-shell .fc .fc-event:hover {
+  border-color: rgb(var(--accent-rgb) / 0.62);
+  background: rgb(var(--accent-fill-rgb) / 0.16);
+  box-shadow: var(--glow-xs);
+  transform: translateY(-1px);
+}
+
+.pach-calendar-shell .fc .fc-event-main {
+  min-width: 0;
+  overflow: hidden;
+}
+
+.pach-calendar-shell .fc .fc-timegrid-event,
+.pach-calendar-shell .fc .fc-timegrid-more-link {
+  min-height: 64px;
+}
+
+.pach-calendar-shell .fc .fc-daygrid-event {
+  margin: 1px 6px 3px;
+  min-height: 52px;
+  white-space: normal;
+}
+
+.pach-calendar-shell .fc .fc-daygrid-more-link {
+  color: var(--accent);
+  font-size: 10px;
+  letter-spacing: var(--tracking-label);
+  text-transform: uppercase;
+}
+
+.pach-calendar-shell .fc .fc-popover {
+  border: 1px solid rgb(var(--edge-rgb) / 0.25);
+  border-radius: 0;
+  background: var(--bg-2);
+  box-shadow: var(--shadow-popover);
+}
+
+.pach-calendar-shell .fc .fc-popover-header {
+  background: var(--bg-3);
+  color: var(--fg-2);
+}
+
+.pach-calendar-shell .fc .fc-list {
+  border: 0;
+}
+
+.pach-calendar-shell .fc .fc-list-day-cushion {
+  background: rgb(var(--bg-3-rgb) / 0.7);
+  color: var(--fg-2);
+  font-size: 10px;
+  letter-spacing: var(--tracking-label);
+  text-transform: uppercase;
+}
+
+.pach-calendar-shell .fc .fc-list-event:hover td {
+  background: rgb(var(--accent-fill-rgb) / 0.06);
+}
+
+.pach-calendar-shell .fc .fc-list-event-time,
+.pach-calendar-shell .fc .fc-list-event-graphic {
+  color: var(--fg-4);
+}
+
+.pach-calendar-shell .fc .fc-list-event-title {
+  color: var(--fg-2);
+}
+
+.pach-calendar-event {
+  display: flex;
+  height: 100%;
+  min-width: 0;
+  max-height: 100%;
+  flex-direction: column;
+  overflow: hidden;
+  padding: 5px 6px;
+}
+
+.pach-calendar-event__topline {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 6px;
+  font-size: 10px;
+  letter-spacing: var(--tracking-label);
+  text-transform: uppercase;
+}
+
+.pach-calendar-event__time {
+  flex-shrink: 0;
+  color: var(--accent);
+}
+
+.pach-calendar-event__status {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--fg-4);
+}
+
+.pach-calendar-event__title {
+  margin-top: 2px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--fg-1);
+  font-size: 11px;
+  line-height: 1.25;
+}
+
+.pach-calendar-event__meta {
+  margin-top: 2px;
+  min-height: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--fg-3);
+  font-size: 10px;
+  line-height: 1.2;
+}
+
+.pach-calendar-event--ok {
+  border-color: rgb(var(--ok-rgb) / 0.34) !important;
+  background: rgb(var(--ok-rgb) / 0.09) !important;
+}
+
+.pach-calendar-event--warn {
+  border-color: rgb(var(--warn-rgb) / 0.4) !important;
+  background: rgb(var(--warn-rgb) / 0.09) !important;
+}
+
+.pach-calendar-event--fail {
+  border-color: rgb(var(--fail-rgb) / 0.42) !important;
+  background: rgb(var(--fail-rgb) / 0.08) !important;
+}
+
+.pach-calendar-event--info {
+  border-color: rgb(var(--info-rgb) / 0.36) !important;
+  background: rgb(var(--info-rgb) / 0.08) !important;
+}
+
+@media (max-width: 767px) {
+  .pach-calendar-shell .fc .fc-daygrid-day-frame {
+    min-height: 82px;
+  }
+
+  .pach-calendar-shell .fc .fc-timegrid-slot {
+    height: 38px;
+  }
+
+  .pach-calendar-shell .fc .fc-col-header-cell-cushion,
+  .pach-calendar-shell .fc .fc-daygrid-day-number {
+    padding: 6px;
+  }
+}

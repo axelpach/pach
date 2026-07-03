@@ -25,6 +25,7 @@ export function FilterButton({
   onClearAll,
   chipsPlacement = 'inline',
   afterButton,
+  buttonClassName = '',
 }: {
   activeFilters: ActiveFilters
   filterConfigs: FilterFieldConfig[]
@@ -32,6 +33,7 @@ export function FilterButton({
   onClearAll: () => void
   chipsPlacement?: 'inline' | 'below'
   afterButton?: ReactNode
+  buttonClassName?: string
 }) {
   const [isOpen, setIsOpen] = useState(false)
   const [initialField, setInitialField] = useState<string | null>(null)
@@ -136,14 +138,14 @@ export function FilterButton({
                 : hasActive
                   ? 'border-edge/25 bg-pit-3 text-accent'
                   : 'border-edge/15 bg-pit-3 text-fg-3 hover:text-fg-1 hover:border-edge/25'
-            }`}
+            } ${buttonClassName}`}
           >
             filter
             {hasActive && <span className="text-accent">· {totalActive}</span>}
           </button>
 
           {isOpen && (
-            <div className="absolute left-0 top-full z-50 mt-1.5">
+            <div className="absolute left-0 top-full z-[1000] mt-1.5">
               <FilterDropdown
                 filterConfigs={filterConfigs}
                 activeFilters={activeFilters}

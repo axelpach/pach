@@ -1,6 +1,6 @@
 import { Routes, Route, NavLink, Navigate, useLocation, useNavigate, useParams } from 'react-router-dom'
 import { useQuery, useZero, ZeroProvider } from '@rocicorp/zero/react'
-import { Activity as ActivityIcon, CircleDollarSign, FileText, FolderKanban, LogOut, Megaphone, MessageCircleMore, Menu, Moon, Palette, Rows3, Settings2, Sun, X } from 'lucide-react'
+import { Activity as ActivityIcon, CalendarDays, CircleDollarSign, FileText, FolderKanban, LogOut, Megaphone, MessageCircleMore, Menu, Moon, Palette, Rows3, Settings2, Sun, X } from 'lucide-react'
 import { createContext, useContext, useEffect, useMemo, useState, type ComponentType, type ReactNode } from 'react'
 import { schema, type Schema } from './zero-schema'
 import { mutators, type Mutators } from './mutators'
@@ -11,6 +11,7 @@ import CRM from './pages/crm/CRM'
 import Docs from './pages/docs/Docs'
 import Finance from './pages/finance/Finance'
 import Activity from './pages/activity/Activity'
+import CalendarPage from './pages/calendar/Calendar'
 import Marketing from './pages/marketing/Marketing'
 import SettingsPage from './pages/settings/Settings'
 import Issues from './pages/issues/Issues'
@@ -39,6 +40,7 @@ type OuterNavItem = {
 const OUTER_NAV_ITEMS: readonly OuterNavItem[] = [
   { label: 'Issues', path: '/issues' },
   { label: 'Activity', path: '/activity' },
+  { label: 'Calendar', path: '/calendar' },
   { label: 'Docs', path: '/docs' },
   { label: 'CRM', path: '/crm' },
   { label: 'Marketing', path: '/marketing/content' },
@@ -224,6 +226,7 @@ const MOBILE_NAV_ITEMS: Array<{
 }> = [
   { to: '/issues', label: 'issues', icon: Rows3 },
   { to: '/activity', label: 'activity', icon: ActivityIcon },
+  { to: '/calendar', label: 'calendar', icon: CalendarDays },
   { to: '/docs', label: 'docs', icon: FileText },
   { to: '/crm', label: 'crm', icon: FolderKanban },
   { to: '/marketing/content', label: 'marketing', icon: Megaphone },
@@ -387,6 +390,7 @@ function AppShell() {
         if (item.path === '/design') return location.pathname.startsWith('/design') || location.pathname.startsWith('/decks')
         if (item.path === '/issues') return location.pathname.startsWith('/issues')
         if (item.path === '/activity') return location.pathname.startsWith('/activity')
+        if (item.path === '/calendar') return location.pathname.startsWith('/calendar')
         if (item.path === '/whatsapp/templates') return location.pathname.startsWith('/whatsapp')
         if (item.path.startsWith('/settings')) return location.pathname.startsWith('/settings')
         return false
@@ -424,6 +428,7 @@ function AppShell() {
               <Route path="/crm/*" element={<CRM />} />
               <Route path="/activity" element={<Activity />} />
               <Route path="/activity/:activityEventId" element={<Activity />} />
+              <Route path="/calendar" element={<CalendarPage />} />
               <Route path="/marketing/*" element={<Marketing />} />
               <Route path="/docs" element={<Docs />} />
               <Route path="/docs/:documentId" element={<Docs />} />
@@ -479,6 +484,7 @@ function useVisibleOuterNavItems() {
           icon:
             item.path === '/issues' ? Rows3 :
             item.path === '/activity' ? ActivityIcon :
+            item.path === '/calendar' ? CalendarDays :
             item.path === '/docs' ? FileText :
             item.path === '/crm' ? FolderKanban :
             item.path.startsWith('/marketing') ? Megaphone :
