@@ -426,7 +426,7 @@ export default function CalendarPage() {
             <div className="pointer-events-none absolute inset-x-4 top-20 border border-edge/16 bg-pit-2/95 px-4 py-6 text-center shadow-terminal-overlay md:left-1/2 md:w-[420px] md:-translate-x-1/2">
               <div className="font-mono text-xs uppercase tracking-label text-fg-3">// no scheduled events</div>
               <div className="mt-2 text-sm text-fg-4">
-                {calendarEvents.length === 0 ? 'scheduled marketing broadcasts will appear here' : 'no events match the current filters'}
+                {calendarEvents.length === 0 ? 'scheduled marketing runs will appear here' : 'no events match the current filters'}
               </div>
             </div>
           ) : null}
@@ -439,7 +439,7 @@ export default function CalendarPage() {
           </div>
           <div className="mt-4 space-y-2">
             {upcomingEvents.length === 0 ? (
-              <div className="font-mono text-xs text-fg-4">// no upcoming broadcasts</div>
+              <div className="font-mono text-xs text-fg-4">// no upcoming marketing runs</div>
             ) : (
               upcomingEvents.map((event) => (
                 <button
@@ -481,7 +481,7 @@ function buildMarketingBroadcastEvents(
   const publicationById = new Map(publications.map((entry) => [entry.id, entry]))
 
   return runs
-    .filter((run) => run.distributionType === 'broadcast' && run.channel === 'newsletter' && Boolean(run.scheduledAt))
+    .filter((run) => ['newsletter', 'blog'].includes(run.channel) && Boolean(run.scheduledAt))
     .map((run) => {
       const organization = organizationById.get(run.organizationId)
       const publication = run.publicationId ? publicationById.get(run.publicationId) : null
@@ -490,17 +490,17 @@ function buildMarketingBroadcastEvents(
       return {
         id: `marketing:${run.id}`,
         type: 'marketing',
-        title: run.name || run.subject || content?.title || 'newsletter broadcast',
+        title: run.name || run.subject || content?.title || (run.channel === 'blog' ? 'blog post' : 'newsletter broadcast'),
         startsAt,
         endsAt: startsAt + DEFAULT_EVENT_DURATION_MS,
         status: run.status,
         organizationId: run.organizationId,
         organizationName: organization?.name ?? 'unknown organization',
         publicationId: run.publicationId ?? null,
-        publicationName: publication?.name ?? 'newsletter',
+        publicationName: publication?.name ?? (run.channel === 'blog' ? 'blog' : 'newsletter'),
         contentTitle: content?.title ?? '',
         timezone: run.scheduledTimezone || 'America/Mexico_City',
-        href: `/marketing/broadcasts/${run.id}`,
+        href: run.channel === 'blog' && run.contentItemId ? `/marketing/content?content=${run.contentItemId}` : `/marketing/broadcasts/${run.id}`,
         tone: statusTone(run.status),
       } satisfies UnifiedCalendarEvent
     })
