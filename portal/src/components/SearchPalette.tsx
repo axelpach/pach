@@ -202,7 +202,7 @@ export function SearchPalette({ tabs }: { tabs: PaletteTab[] }) {
 
   return (
     <div
-      className="fixed inset-0 z-[100] flex items-start justify-center pt-[12vh] px-4 bg-overlay/70 backdrop-blur-sm"
+      className="fixed inset-0 z-[200] flex items-start justify-center pt-[12vh] px-4 bg-overlay/70 backdrop-blur-sm"
       onClick={() => setOpen(false)}
     >
       <div
