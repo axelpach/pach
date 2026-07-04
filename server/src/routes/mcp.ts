@@ -591,7 +591,7 @@ const tools: ToolDefinition[] = [
   },
   {
     name: 'pach.editorial.profile.get',
-    description: 'Read the effective editorial profile for an organization and optionally a marketing publication. Publication profile overrides organization profile.',
+    description: 'Read the effective editorial profile for an organization and optionally a marketing publication. Publication profile overrides organization profile. For newsletter/article work, prefer publication-scoped newsletterGuidelines when available.',
     inputSchema: {
       type: 'object',
       additionalProperties: false,
@@ -606,7 +606,7 @@ const tools: ToolDefinition[] = [
   },
   {
     name: 'pach.editorial.profile.update',
-    description: 'Update organization-level or publication-level editorial profile JSON. Use concise structured fields such as tone, audience, constraints, forbiddenPhrases, and exampleDocumentIds.',
+    description: 'Update organization-level or publication-level editorial profile JSON. Use concise structured fields such as tone, audience, newsletterGuidelines, constraints, forbiddenPhrases, and exampleDocumentIds.',
     inputSchema: {
       type: 'object',
       additionalProperties: false,

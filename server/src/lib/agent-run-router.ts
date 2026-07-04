@@ -76,7 +76,7 @@ const AGENT_ROUTE_TOOL = {
       guidelinesPolicy: {
         type: 'string',
         enum: ['newsletter_guidelines_required', 'editorial_profile_only', 'none'],
-        description: 'Whether the editorial worker must read the Newsletter Guidelines document.',
+        description: 'Whether the editorial worker must read publication-scoped newsletter guidelines from the editorial profile.',
       },
       reason: {
         type: 'string',
@@ -179,7 +179,7 @@ async function classifyIssueRouteWithHaiku(context: IssueRouteContext): Promise<
       'Choose engineering when the issue likely requires source-code, configuration, database migration, UI, backend, tests, or pull-request work.',
       'Choose editorial when the issue asks to write, draft, edit, rewrite, summarize, or prepare copy/documents/articles/blog/newsletter content.',
       'Choose general_mcp when the work can be done through Pach state/MCP without code changes and is not primarily editorial drafting.',
-      'Newsletter Guidelines are required only when the issue specifically asks for a newsletter, blog post, article, or publishable post draft/edit. Do not require them for generic document edits, grammar fixes, or short copy polishing.',
+      'Newsletter Guidelines are required only when the issue specifically asks for a newsletter, blog post, article, or publishable post draft/edit. Guidelines live in marketing publication editorial profiles, not Docs. Do not require them for generic document edits, grammar fixes, or short copy polishing.',
       'If unsure between engineering and non-code work, choose general_mcp with lower confidence.',
       'Never choose design_template for issue runs.',
     ].join(' '),

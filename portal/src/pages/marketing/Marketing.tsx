@@ -935,6 +935,7 @@ function NewslettersSection({
   const editingPublicationThemeMode = publicationEmailThemeMode(editingPublication)
   const editingPublicationCadence = publicationCadenceConfig(editingPublication)
   const editingPublicationMetadata = readRecord(editingPublication?.metadata)
+  const editingPublicationGuidelines = publicationNewsletterGuidelines(editingPublication)
   const subscriberRows = useMemo(() => subscriptions
     .filter((subscription) => subscription.channel === 'newsletter' && subscription.status === 'subscribed')
     .filter((subscription) => selectedPublicationFilterIds.length === 0 || selectedPublicationFilterIds.includes(subscription.publicationId))
@@ -980,6 +981,9 @@ function NewslettersSection({
         metadata: {
           emailThemeMode: 'light',
           emailWrapper: emailWrapperPayload(defaultEmailWrapper()),
+        },
+        editorialProfile: {
+          newsletterGuidelines: '',
         },
       })
       onSelectPublication(id)
@@ -1037,6 +1041,17 @@ function NewslettersSection({
       metadata: {
         ...metadata,
         marketingCadence: publicationCadencePayload(next),
+      },
+    })
+  }
+
+  async function updatePublicationGuidelines(newsletterGuidelines: string) {
+    if (!editingPublication) return
+    await z.mutate.mkt_publications.update({
+      id: editingPublication.id,
+      editorialProfile: {
+        ...readRecord(editingPublication.editorialProfile),
+        newsletterGuidelines,
       },
     })
   }
@@ -1248,6 +1263,15 @@ function NewslettersSection({
                 onChange={(status) => void z.mutate.mkt_publications.update({ id: editingPublication.id, status })}
                 options={['active', 'paused', 'archived'].map((status) => ({ value: status, label: status }))}
                 display={editingPublication.status}
+              />
+            </div>
+
+            <div className="border-t border-edge/12 pt-4">
+              <FieldLabel>newsletter guidelines</FieldLabel>
+              <CommitTextarea
+                rows={8}
+                value={editingPublicationGuidelines}
+                onCommit={(newsletterGuidelines) => updatePublicationGuidelines(newsletterGuidelines)}
               />
             </div>
 
@@ -2690,10 +2714,12 @@ function CommitTextarea({
   value,
   onCommit,
   label,
+  rows = 4,
 }: {
   value: string
   onCommit: (next: string) => void | Promise<void>
   label?: string
+  rows?: number
 }) {
   const [draft, setDraft] = useState(value)
   useEffect(() => setDraft(value), [value])
@@ -2704,7 +2730,7 @@ function CommitTextarea({
   return (
     <label className="block">
       {label ? <FieldLabel>{label}</FieldLabel> : null}
-      <TermTextarea rows={4} value={draft} onChange={(event) => setDraft(event.target.value)} onBlur={() => void commit()} />
+      <TermTextarea rows={rows} value={draft} onChange={(event) => setDraft(event.target.value)} onBlur={() => void commit()} />
     </label>
   )
 }
@@ -2908,6 +2934,11 @@ function publicationCadenceConfig(publication: PublicationRow | null): Publicati
     lookaheadDays: positiveInteger(cadence.lookaheadDays, fallback.lookaheadDays),
     cooldownDays: positiveInteger(cadence.cooldownDays, fallback.cooldownDays),
   }
+}
+
+function publicationNewsletterGuidelines(publication: PublicationRow | null) {
+  const editorialProfile = readRecord(publication?.editorialProfile)
+  return typeof editorialProfile.newsletterGuidelines === 'string' ? editorialProfile.newsletterGuidelines : ''
 }
 
 function publicationCadencePayload(cadence: PublicationCadenceConfig) {

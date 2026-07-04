@@ -152,14 +152,14 @@ function buildEditorialMcpPrompt(run: AgentRunPromptRecord) {
       ? '1. Continue from the previous session if available, and use the user feedback above as the latest instruction.'
       : '1. Read the issue with pach.issue.get using the issue id above.',
     '2. Report progress with pach.progress.report and include the agent run id.',
-    '3. Read pach.document.format.get before writing document body content. Also read pach.editorial.profile.get for the issue organization when the issue has an organization.',
+    '3. Read pach.document.format.get before writing document body content. Also read pach.editorial.profile.get for the issue organization when the issue has an organization. If the issue names a newsletter/publication, pass publicationSlug or publicationId so publication-level guidance overrides the organization profile.',
     guidelinesPolicy === 'newsletter_guidelines_required'
-      ? '4. Before drafting, find the organization Newsletter Guidelines by calling pach.document.list scoped to the issue organization with search "Newsletter Guidelines". Use an active document whose title contains "Newsletter Guidelines", then read it with pach.document.get. If no such document exists, report phase "blocked" and explain the missing guidelines instead of drafting.'
-      : '4. Do not search for Newsletter Guidelines unless the issue or feedback explicitly asks for newsletter/article/blog-post guidelines.',
+      ? '4. Before drafting, use pach.editorial.profile.get to read the relevant marketing publication editorial profile. Use effectiveProfile.newsletterGuidelines when present. If the issue names a publication but the selector is ambiguous or no publication-level newsletterGuidelines are available, report phase "blocked" and explain what publication guidance is missing instead of drafting. Do not search Docs for Newsletter Guidelines.'
+      : '4. Do not search Docs for Newsletter Guidelines. Use pach.editorial.profile.get only when the issue or feedback explicitly asks for newsletter/article/blog-post guidelines.',
     '5. Create or update a Pach document as the review artifact. For new article/newsletter/blog drafts, use pach.document.create. For edits to an existing referenced document, use pach.document.update with the default version workflow unless the issue explicitly asks to update live content.',
     '6. For article/newsletter/blog drafts, use Pach markdown and keep a useful review structure: brief/context, sources if any, outline if useful, then the draft body. Preserve visible source blocks for source material when relevant.',
     '7. When the draft/edit is ready for human review, update the issue with pach.issue.update: append a Markdown review link like "[Review draft: Title](/docs/DOCUMENT_ID)" to the issue description, set statusKey to "in_review", and include a clear activitySummary.',
-    '8. Put the final result in pach.progress.report with phase "final_result". Include the document title, /docs link, whether Newsletter Guidelines were used, and anything the reviewer should check.',
+    '8. Put the final result in pach.progress.report with phase "final_result". Include the document title, /docs link, whether publication newsletterGuidelines were used, and anything the reviewer should check.',
     '',
     'Keep the final result concise and useful inside the Pach run progress stream.',
     `Run spec profile: ${runSpec.agentProfile}`,

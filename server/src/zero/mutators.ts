@@ -842,7 +842,7 @@ export function createServerMutators(authData?: JWTPayload) {
       async create(tx: Tx, args: any) {
         requireOrganizationAccess(args.organizationId)
         const now = Date.now()
-        await tx.mutate.mkt_publications.insert({ type: 'newsletter', status: 'active', metadata: {}, ...args, createdAt: now, updatedAt: now })
+        await tx.mutate.mkt_publications.insert({ type: 'newsletter', status: 'active', editorialProfile: {}, metadata: {}, ...args, createdAt: now, updatedAt: now })
       },
       async update(tx: Tx, args: any) {
         await requireExistingOrganizationAccess(tx, 'mkt_publications', args.id)
