@@ -842,6 +842,7 @@ const organizationRepositories = table('organization_repositories')
 const agentRuns = table('agent_runs')
     .columns({
     id: string(),
+    organizationId: string().optional().from('organization_id'),
     conversationId: string().optional().from('conversation_id'),
     parentRunId: string().optional().from('parent_run_id'),
     issueId: string().optional().from('issue_id'),
@@ -868,6 +869,7 @@ const agentRuns = table('agent_runs')
 const agentConversations = table('agent_conversations')
     .columns({
     id: string(),
+    organizationId: string().optional().from('organization_id'),
     issueId: string().optional().from('issue_id'),
     title: string(),
     status: string(),
@@ -879,6 +881,7 @@ const agentConversations = table('agent_conversations')
 const agentMessages = table('agent_messages')
     .columns({
     id: string(),
+    organizationId: string().optional().from('organization_id'),
     conversationId: string().from('conversation_id'),
     runId: string().optional().from('run_id'),
     role: string(),
@@ -909,6 +912,7 @@ const agentRunInputMediaObjects = table('agent_run_input_media_objects')
 const agentRunInputMedia = table('agent_run_input_media')
     .columns({
     id: string(),
+    organizationId: string().optional().from('organization_id'),
     runId: string().from('run_id'),
     mediaObjectId: string().from('media_object_id'),
     messageId: string().optional().from('message_id'),
@@ -925,6 +929,7 @@ const agentRunInputMedia = table('agent_run_input_media')
 const agentTerminals = table('agent_terminals')
     .columns({
     id: string(),
+    organizationId: string().optional().from('organization_id'),
     runId: string().from('run_id'),
     name: string(),
     role: string(),
@@ -940,6 +945,7 @@ const agentTerminals = table('agent_terminals')
 const agentRunProgressReports = table('agent_run_progress_reports')
     .columns({
     id: string(),
+    organizationId: string().optional().from('organization_id'),
     runId: string().from('run_id'),
     issueId: string().optional().from('issue_id'),
     workerId: string().optional().from('worker_id'),
@@ -954,6 +960,7 @@ const agentRunProgressReports = table('agent_run_progress_reports')
 const agentRunArtifacts = table('agent_run_artifacts')
     .columns({
     id: string(),
+    organizationId: string().optional().from('organization_id'),
     runId: string().from('run_id'),
     issueId: string().optional().from('issue_id'),
     kind: string(),
@@ -970,6 +977,7 @@ const agentRunArtifacts = table('agent_run_artifacts')
 const githubBranches = table('github_branches')
     .columns({
     id: string(),
+    organizationId: string().optional().from('organization_id'),
     repositoryId: string().from('repository_id'),
     agentRunId: string().optional().from('agent_run_id'),
     issueId: string().optional().from('issue_id'),
@@ -984,6 +992,7 @@ const githubBranches = table('github_branches')
 const githubPullRequests = table('github_pull_requests')
     .columns({
     id: string(),
+    organizationId: string().optional().from('organization_id'),
     repositoryId: string().from('repository_id'),
     branchId: string().optional().from('branch_id'),
     agentRunId: string().optional().from('agent_run_id'),
@@ -1218,16 +1227,16 @@ export const permissions = definePermissions(schema, () => {
         agent_workers: unscopedOnly,
         github_repositories: unscopedOnly,
         organization_repositories: organizationScoped(),
-        agent_conversations: unscopedOnly,
-        agent_runs: unscopedOnly,
-        agent_messages: unscopedOnly,
+        agent_conversations: organizationScoped(),
+        agent_runs: organizationScoped(),
+        agent_messages: organizationScoped(),
         agent_run_input_media_objects: unscopedOnly,
-        agent_run_input_media: unscopedOnly,
-        agent_terminals: unscopedOnly,
-        agent_run_progress_reports: unscopedOnly,
-        agent_run_artifacts: unscopedOnly,
-        github_branches: unscopedOnly,
-        github_pull_requests: unscopedOnly,
+        agent_run_input_media: organizationScoped(),
+        agent_terminals: organizationScoped(),
+        agent_run_progress_reports: organizationScoped(),
+        agent_run_artifacts: organizationScoped(),
+        github_branches: organizationScoped(),
+        github_pull_requests: organizationScoped(),
         github_webhook_events: unscopedOnly,
         whatsapp_templates: organizationScoped(),
         whatsapp_campaigns: organizationScoped(),

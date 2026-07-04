@@ -330,6 +330,13 @@
       "when": 1782651600000,
       "tag": "0046_github_connections",
       "breakpoints": true
+    },
+    {
+      "idx": 47,
+      "version": "7",
+      "when": 1783195200000,
+      "tag": "0047_agent_run_organization_scope",
+      "breakpoints": true
     }
   ]
 }

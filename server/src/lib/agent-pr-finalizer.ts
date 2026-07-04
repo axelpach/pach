@@ -191,6 +191,7 @@ async function appendRunProgressReport(
 ) {
   await getDb().insert(agentRunProgressReports).values({
     id: randomUUID(),
+    organizationId: run.organizationId,
     runId: run.id,
     issueId: run.issueId,
     workerId: report.workerId,
@@ -363,6 +364,7 @@ async function upsertPullRequest({
 
   const db = getDb()
   const values = {
+    organizationId: run.organizationId,
     repositoryId: run.repositoryId,
     branchId,
     agentRunId: run.id,

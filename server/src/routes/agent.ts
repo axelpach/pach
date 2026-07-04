@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import { Router } from 'express'
+import { Router, type NextFunction, type Request, type Response } from 'express'
 import { execFile, spawn } from 'node:child_process'
 import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import type { Server as HttpServer, IncomingMessage } from 'node:http'
@@ -40,6 +40,19 @@ const execFileAsync = promisify(execFile)
 const ACTIVE_RUN_STATUSES = ['queued', 'reserved', 'bootstrapping', 'running', 'needs_human', 'pr_ready'] as const
 const FINAL_RUN_STATUSES = new Set(['completed', 'failed', 'canceled'])
 
+function requireWorkspaceAccess(req: Request, res: Response, next: NextFunction): void {
+  if (!req.user?.canAccessUnscoped) {
+    res.status(403).json({ error: 'Not authorized for workspace-level content' })
+    return
+  }
+  next()
+}
+
+function readRouteParam(req: Request, name: string): string {
+  const value = req.params[name]
+  return Array.isArray(value) ? value[0] ?? '' : value ?? ''
+}
+
 type WorkerConfig = {
   name: string
   provider?: string
@@ -78,7 +91,7 @@ export function attachAgentTerminalWebSocket(server: HttpServer) {
   })
 }
 
-router.post('/workers/sync', async (req, res) => {
+router.post('/workers/sync', requireWorkspaceAccess, async (req, res) => {
   try {
     const workers = readWorkerConfigs(req.body)
     if (workers.length === 0) {
@@ -138,8 +151,8 @@ router.post('/workers/sync', async (req, res) => {
   }
 })
 
-router.post('/workers/:id/health-check', async (req, res) => {
-  const { id } = req.params
+router.post('/workers/:id/health-check', requireWorkspaceAccess, async (req, res) => {
+  const id = readRouteParam(req, 'id')
 
   try {
     const db = getDb()
@@ -212,7 +225,7 @@ router.post('/workers/:id/health-check', async (req, res) => {
 })
 
 router.post('/issues/:issueId/runs/queue', async (req, res) => {
-  const { issueId } = req.params
+  const issueId = readRouteParam(req, 'issueId')
 
   try {
     const source = readOptionalString(req.body?.source) ?? 'issue_do_task'
@@ -225,6 +238,10 @@ router.post('/issues/:issueId/runs/queue', async (req, res) => {
     const [issue] = await db.select().from(pmIssues).where(eq(pmIssues.id, issueId)).limit(1)
     if (!issue) {
       res.status(404).json({ ok: false, error: 'Issue not found' })
+      return
+    }
+    if (!canAccessOrganization(req, issue.contextCompanyId)) {
+      res.status(403).json({ ok: false, error: 'Not authorized for this issue organization' })
       return
     }
 
@@ -286,6 +303,7 @@ router.post('/issues/:issueId/runs/queue', async (req, res) => {
     const now = new Date()
     await db.insert(agentConversations).values({
       id: conversationId,
+      organizationId: issue.contextCompanyId,
       issueId: issue.id,
       title: issue.title,
       status: 'open',
@@ -316,6 +334,7 @@ router.post('/issues/:issueId/runs/queue', async (req, res) => {
 
     const [run] = await db.insert(agentRuns).values({
       id: runId,
+      organizationId: issue.contextCompanyId,
       conversationId,
       issueId: issue.id,
       repositoryId: repository?.id,
@@ -336,6 +355,7 @@ router.post('/issues/:issueId/runs/queue', async (req, res) => {
     if (repository) {
       await db.insert(githubBranches).values({
         id: randomUUID(),
+        organizationId: issue.contextCompanyId,
         repositoryId: repository.id,
         agentRunId: run.id,
         issueId: issue.id,
@@ -349,6 +369,7 @@ router.post('/issues/:issueId/runs/queue', async (req, res) => {
 
     await db.insert(agentMessages).values({
       id: messageId,
+      organizationId: issue.contextCompanyId,
       conversationId,
       runId: run.id,
       role: 'user',
@@ -388,7 +409,7 @@ router.post('/issues/:issueId/runs/queue', async (req, res) => {
 })
 
 router.post('/runs/:id/cancel', async (req, res) => {
-  const { id } = req.params
+  const id = readRouteParam(req, 'id')
 
   try {
     const db = getDb()
@@ -396,6 +417,10 @@ router.post('/runs/:id/cancel', async (req, res) => {
 
     if (!run) {
       res.status(404).json({ ok: false, error: 'Agent run not found' })
+      return
+    }
+    if (!await canAccessRun(req, run)) {
+      res.status(403).json({ ok: false, error: 'Not authorized for this agent run' })
       return
     }
 
@@ -461,7 +486,7 @@ router.post('/runs/:id/cancel', async (req, res) => {
 })
 
 router.post('/runs/:id/follow-up', async (req, res) => {
-  const { id } = req.params
+  const id = readRouteParam(req, 'id')
 
   try {
     const feedback = readOptionalString(req.body?.feedback)
@@ -474,6 +499,10 @@ router.post('/runs/:id/follow-up', async (req, res) => {
     const [parentRun] = await db.select().from(agentRuns).where(eq(agentRuns.id, id)).limit(1)
     if (!parentRun) {
       res.status(404).json({ ok: false, error: 'Agent run not found' })
+      return
+    }
+    if (!await canAccessRun(req, parentRun)) {
+      res.status(403).json({ ok: false, error: 'Not authorized for this agent run' })
       return
     }
     if (!parentRun.issueId) {
@@ -499,6 +528,7 @@ router.post('/runs/:id/follow-up', async (req, res) => {
     if (!parentRun.conversationId) {
       await db.insert(agentConversations).values({
         id: conversationId,
+        organizationId: issue.contextCompanyId,
         issueId: issue.id,
         title: issue.title,
         status: 'open',
@@ -511,7 +541,7 @@ router.post('/runs/:id/follow-up', async (req, res) => {
     } else {
       await db
         .update(agentConversations)
-        .set({ status: 'open', updatedAt: now })
+        .set({ organizationId: parentRun.organizationId ?? issue.contextCompanyId, status: 'open', updatedAt: now })
         .where(eq(agentConversations.id, conversationId))
     }
 
@@ -523,6 +553,7 @@ router.post('/runs/:id/follow-up', async (req, res) => {
     const [run] = await db
       .update(agentRuns)
       .set({
+        organizationId: parentRun.organizationId ?? issue.contextCompanyId,
         conversationId,
         status: 'queued',
         statusMessage: parentRun.workerId ? 'queued for same agent worker' : 'queued for agent worker',
@@ -551,6 +582,7 @@ router.post('/runs/:id/follow-up', async (req, res) => {
 
     const [message] = await db.insert(agentMessages).values({
       id: messageId,
+      organizationId: parentRun.organizationId ?? issue.contextCompanyId,
       conversationId,
       runId: run.id,
       role: 'user',
@@ -583,8 +615,8 @@ router.post('/runs/:id/follow-up', async (req, res) => {
   }
 })
 
-router.post('/runs/:id/bootstrap-tmux', async (req, res) => {
-  const { id } = req.params
+router.post('/runs/:id/bootstrap-tmux', requireWorkspaceAccess, async (req, res) => {
+  const id = readRouteParam(req, 'id')
 
   try {
     const db = getDb()
@@ -703,8 +735,8 @@ router.post('/runs/:id/bootstrap-tmux', async (req, res) => {
   }
 })
 
-router.post('/runs/:id/prepare-repo', async (req, res) => {
-  const { id } = req.params
+router.post('/runs/:id/prepare-repo', requireWorkspaceAccess, async (req, res) => {
+  const id = readRouteParam(req, 'id')
 
   try {
     const db = getDb()
@@ -812,8 +844,8 @@ router.post('/runs/:id/prepare-repo', async (req, res) => {
   }
 })
 
-router.post('/runs/:id/plan-work', async (req, res) => {
-  const { id } = req.params
+router.post('/runs/:id/plan-work', requireWorkspaceAccess, async (req, res) => {
+  const id = readRouteParam(req, 'id')
 
   try {
     const goal = readAgentGoal(req.body)
@@ -958,8 +990,9 @@ router.post('/runs/:id/plan-work', async (req, res) => {
   }
 })
 
-router.post('/runs/:id/terminals/:terminalId/capture', async (req, res) => {
-  const { id, terminalId } = req.params
+router.post('/runs/:id/terminals/:terminalId/capture', requireWorkspaceAccess, async (req, res) => {
+  const id = readRouteParam(req, 'id')
+  const terminalId = readRouteParam(req, 'terminalId')
 
   try {
     const { run, terminal, worker } = await readRunTerminalWorker(id, terminalId)
@@ -998,8 +1031,9 @@ router.post('/runs/:id/terminals/:terminalId/capture', async (req, res) => {
   }
 })
 
-router.post('/runs/:id/terminals/:terminalId/send-input', async (req, res) => {
-  const { id, terminalId } = req.params
+router.post('/runs/:id/terminals/:terminalId/send-input', requireWorkspaceAccess, async (req, res) => {
+  const id = readRouteParam(req, 'id')
+  const terminalId = readRouteParam(req, 'terminalId')
 
   try {
     const { run, terminal, worker } = await readRunTerminalWorker(id, terminalId)
@@ -1051,8 +1085,8 @@ router.post('/runs/:id/terminals/:terminalId/send-input', async (req, res) => {
   }
 })
 
-router.post('/runs/:id/start-codex', async (req, res) => {
-  const { id } = req.params
+router.post('/runs/:id/start-codex', requireWorkspaceAccess, async (req, res) => {
+  const id = readRouteParam(req, 'id')
 
   try {
     const goal = readAgentGoal(req.body)
@@ -1121,8 +1155,8 @@ router.post('/runs/:id/start-codex', async (req, res) => {
   }
 })
 
-router.post('/runs/:id/approve-plan', async (req, res) => {
-  const { id } = req.params
+router.post('/runs/:id/approve-plan', requireWorkspaceAccess, async (req, res) => {
+  const id = readRouteParam(req, 'id')
 
   try {
     const db = getDb()
@@ -1184,9 +1218,19 @@ router.post('/runs/:id/approve-plan', async (req, res) => {
 })
 
 router.post('/runs/:id/create-draft-pr', async (req, res) => {
-  const { id } = req.params
+  const id = readRouteParam(req, 'id')
 
   try {
+    const [run] = await getDb().select().from(agentRuns).where(eq(agentRuns.id, id)).limit(1)
+    if (!run) {
+      res.status(404).json({ ok: false, error: 'Agent run not found' })
+      return
+    }
+    if (!await canAccessRun(req, run)) {
+      res.status(403).json({ ok: false, error: 'Not authorized for this agent run' })
+      return
+    }
+
     const title = readOptionalString((req.body as Record<string, unknown> | undefined)?.title)
     const result = await finalizeAgentRunPullRequest({
       runId: id,
@@ -1212,12 +1256,16 @@ router.post('/runs/:id/create-draft-pr', async (req, res) => {
 })
 
 router.post('/runs/:id/sync-pull-request', async (req, res) => {
-  const { id } = req.params
+  const id = readRouteParam(req, 'id')
 
   try {
     const db = getDb()
     const [run] = await db.select().from(agentRuns).where(eq(agentRuns.id, id))
     if (!run) throw new Error('Agent run not found')
+    if (!await canAccessRun(req, run)) {
+      res.status(403).json({ ok: false, error: 'Not authorized for this agent run' })
+      return
+    }
     const githubToken = await readGithubTokenForRepository(run.repositoryId)
     if (!githubToken) throw new Error('No GitHub token available for this repository connection')
     if (!run.repositoryId) throw new Error('Agent run has no repositoryId')
@@ -1259,8 +1307,8 @@ router.post('/runs/:id/sync-pull-request', async (req, res) => {
   }
 })
 
-router.post('/runs/:id/artifacts', async (req, res) => {
-  const { id } = req.params
+router.post('/runs/:id/artifacts', requireWorkspaceAccess, async (req, res) => {
+  const id = readRouteParam(req, 'id')
 
   try {
     const artifacts = readArtifactConfigs(req.body)
@@ -1284,6 +1332,7 @@ router.post('/runs/:id/artifacts', async (req, res) => {
       .insert(agentRunArtifacts)
       .values(
         artifacts.map((artifact) => ({
+          organizationId: run.organizationId,
           runId: run.id,
           issueId: run.issueId,
           kind: artifact.kind ?? 'file',
@@ -1323,7 +1372,8 @@ async function handleAgentTerminalSocket(socket: WebSocket, req: IncomingMessage
     const terminalId = url.searchParams.get('terminalId')
 
     if (!token) throw new Error('Missing auth token')
-    verifyToken(token)
+    const user = verifyToken(token)
+    if (!user.canAccessUnscoped) throw new Error('Not authorized for workspace-level content')
     if (!runId || !terminalId) throw new Error('Missing runId or terminalId')
 
     const { run, terminal, worker } = await readRunTerminalWorker(runId, terminalId)
@@ -1554,6 +1604,19 @@ async function readRunWorker(runId: string) {
   return { run, worker }
 }
 
+function canAccessOrganization(req: Request, organizationId: string | null | undefined) {
+  if (!organizationId) return Boolean(req.user?.canAccessUnscoped)
+  return Boolean(req.user?.organizationIds?.includes(organizationId) || req.user?.canAccessUnscoped)
+}
+
+async function canAccessRun(req: Request, run: typeof agentRuns.$inferSelect) {
+  if (canAccessOrganization(req, run.organizationId)) return true
+  if (!run.issueId) return false
+
+  const [issue] = await getDb().select().from(pmIssues).where(eq(pmIssues.id, run.issueId)).limit(1)
+  return canAccessOrganization(req, issue?.contextCompanyId)
+}
+
 async function appendRunActivity(
   run: typeof agentRuns.$inferSelect,
   summary: string,
@@ -1598,6 +1661,7 @@ async function appendRunProgressReport(
 ) {
   await getDb().insert(agentRunProgressReports).values({
     id: randomUUID(),
+    organizationId: run.organizationId,
     runId: run.id,
     issueId: run.issueId,
     workerId: report.workerId,
@@ -2157,6 +2221,7 @@ async function upsertPullRequest({
 
   const db = getDb()
   const values = {
+    organizationId: run.organizationId,
     repositoryId: run.repositoryId,
     branchId,
     agentRunId: run.id,

@@ -352,6 +352,7 @@ router.post('/runs/:id/pull-request', async (req: AgentWorkerRequest, res) => {
     const number = readRequiredNumber(pr.number, 'pullRequest.number')
     const githubIdValue = pr.id ?? pr.githubId
     const values = {
+      organizationId: run.organizationId,
       repositoryId: run.repositoryId,
       branchId: branch?.id,
       agentRunId: run.id,
@@ -553,6 +554,7 @@ async function appendRunProgressReport(
 ) {
   await getDb().insert(agentRunProgressReports).values({
     id: randomUUID(),
+    organizationId: run.organizationId,
     runId: run.id,
     issueId: run.issueId ?? undefined,
     workerId: report.workerId,

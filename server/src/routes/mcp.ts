@@ -2206,6 +2206,7 @@ async function reportProgress(req: AuthenticatedRequest, args: unknown) {
   if (runId) {
     const [run] = await getDb().select().from(agentRuns).where(eq(agentRuns.id, runId)).limit(1)
     if (!run) throw new Error('Agent run not found')
+    if (!await canAccessAgentRun(req, run)) throw new Error('Not authorized for this agent run')
     if (issueId && run.issueId) {
       const { issue } = await readAccessibleIssue(req, issueId)
       if (run.issueId !== issue.id) throw new Error('Agent run does not belong to this issue')
@@ -2213,6 +2214,7 @@ async function reportProgress(req: AuthenticatedRequest, args: unknown) {
 
     await getDb().insert(agentRunProgressReports).values({
       id: randomUUID(),
+      organizationId: run.organizationId,
       runId: run.id,
       issueId: run.issueId ?? undefined,
       workerId: run.workerId ?? undefined,
@@ -2278,11 +2280,7 @@ async function createGithubPullRequestForRun(req: AuthenticatedRequest, args: un
 
   const [run] = await getDb().select().from(agentRuns).where(eq(agentRuns.id, runId)).limit(1)
   if (!run) throw new Error('Agent run not found')
-  if (run.issueId) {
-    await readAccessibleIssue(req, run.issueId)
-  } else if (!canAccessOrganization(req, null)) {
-    throw new Error('Not authorized for this agent run')
-  }
+  if (!await canAccessAgentRun(req, run)) throw new Error('Not authorized for this agent run')
 
   const result = await finalizeAgentRunPullRequest({
     runId: run.id,
@@ -2320,6 +2318,14 @@ async function readAccessibleIssue(req: AuthenticatedRequest, issueId: string) {
   if (!canAccessIssue(req, issue)) throw new Error('Not authorized for this issue')
 
   return { issue }
+}
+
+async function canAccessAgentRun(req: AuthenticatedRequest, run: typeof agentRuns.$inferSelect) {
+  if (canAccessOrganization(req, run.organizationId)) return true
+  if (!run.issueId) return false
+
+  const [issue] = await getDb().select().from(pmIssues).where(eq(pmIssues.id, run.issueId)).limit(1)
+  return issue ? canAccessIssue(req, issue) : false
 }
 
 function canAccessIssue(req: AuthenticatedRequest, issue: typeof pmIssues.$inferSelect) {

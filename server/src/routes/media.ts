@@ -558,6 +558,7 @@ router.post('/agent-run-input/upload', async (req, res) => {
       .insert(agentRunInputMedia)
       .values({
         id: randomUUID(),
+        organizationId: run.organizationId,
         runId,
         mediaObjectId: mediaObject.id,
         messageId: messageId ?? undefined,

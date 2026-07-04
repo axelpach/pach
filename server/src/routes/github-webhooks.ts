@@ -148,6 +148,7 @@ async function syncPullRequestWebhook({
 
   const state = readPullRequestState(pullRequest)
   const values = {
+    organizationId: run?.organizationId ?? branch?.organizationId,
     repositoryId: repository.id,
     branchId: branch?.id,
     agentRunId: run?.id,
@@ -187,6 +188,7 @@ async function syncPullRequestWebhook({
     await db
       .update(githubBranches)
       .set({
+        organizationId: saved.organizationId,
         status: state === 'merged' ? 'merged' : state === 'closed' ? 'abandoned' : 'pr_opened',
         lastCommitSha: saved.headSha,
         updatedAt: now,

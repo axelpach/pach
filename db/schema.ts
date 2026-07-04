@@ -1089,6 +1089,7 @@ export const organizationRepositories = pgTable('organization_repositories', {
 
 export const agentConversations = pgTable('agent_conversations', {
   id: uuid('id').primaryKey().defaultRandom(),
+  organizationId: uuid('organization_id').references(() => organizations.id),
   issueId: uuid('issue_id').references(() => pmIssues.id),
   title: text('title').notNull(),
   status: text('status').notNull().default('open'),
@@ -1099,6 +1100,7 @@ export const agentConversations = pgTable('agent_conversations', {
 
 export const agentRuns = pgTable('agent_runs', {
   id: uuid('id').primaryKey().defaultRandom(),
+  organizationId: uuid('organization_id').references(() => organizations.id),
   conversationId: uuid('conversation_id').references(() => agentConversations.id),
   parentRunId: uuid('parent_run_id'),
   issueId: uuid('issue_id').references(() => pmIssues.id),
@@ -1126,6 +1128,7 @@ export const agentRuns = pgTable('agent_runs', {
 
 export const agentMessages = pgTable('agent_messages', {
   id: uuid('id').primaryKey().defaultRandom(),
+  organizationId: uuid('organization_id').references(() => organizations.id),
   conversationId: uuid('conversation_id').notNull().references(() => agentConversations.id),
   runId: uuid('run_id').references(() => agentRuns.id),
   role: text('role').notNull(),
@@ -1136,6 +1139,7 @@ export const agentMessages = pgTable('agent_messages', {
 
 export const agentRunInputMedia = pgTable('agent_run_input_media', {
   id: uuid('id').primaryKey().defaultRandom(),
+  organizationId: uuid('organization_id').references(() => organizations.id),
   runId: uuid('run_id').notNull().references(() => agentRuns.id),
   mediaObjectId: uuid('media_object_id').notNull().references(() => agentRunInputMediaObjects.id),
   messageId: uuid('message_id').references(() => agentMessages.id),
@@ -1156,6 +1160,7 @@ export const agentRunInputMedia = pgTable('agent_run_input_media', {
 
 export const agentTerminals = pgTable('agent_terminals', {
   id: uuid('id').primaryKey().defaultRandom(),
+  organizationId: uuid('organization_id').references(() => organizations.id),
   runId: uuid('run_id').notNull().references(() => agentRuns.id),
   name: text('name').notNull(),
   /** agent | app | server | zero | shell | custom */
@@ -1171,6 +1176,7 @@ export const agentTerminals = pgTable('agent_terminals', {
 
 export const agentRunProgressReports = pgTable('agent_run_progress_reports', {
   id: uuid('id').primaryKey().defaultRandom(),
+  organizationId: uuid('organization_id').references(() => organizations.id),
   runId: uuid('run_id').notNull().references(() => agentRuns.id),
   issueId: uuid('issue_id').references(() => pmIssues.id),
   workerId: uuid('worker_id').references(() => agentWorkers.id),
@@ -1184,6 +1190,7 @@ export const agentRunProgressReports = pgTable('agent_run_progress_reports', {
 
 export const agentRunArtifacts = pgTable('agent_run_artifacts', {
   id: uuid('id').primaryKey().defaultRandom(),
+  organizationId: uuid('organization_id').references(() => organizations.id),
   runId: uuid('run_id').notNull().references(() => agentRuns.id),
   issueId: uuid('issue_id').references(() => pmIssues.id),
   /** screenshot | video | trace | log | report | file */
@@ -1200,6 +1207,7 @@ export const agentRunArtifacts = pgTable('agent_run_artifacts', {
 
 export const githubBranches = pgTable('github_branches', {
   id: uuid('id').primaryKey().defaultRandom(),
+  organizationId: uuid('organization_id').references(() => organizations.id),
   repositoryId: uuid('repository_id').notNull().references(() => githubRepositories.id),
   agentRunId: uuid('agent_run_id').references(() => agentRuns.id),
   issueId: uuid('issue_id').references(() => pmIssues.id),
@@ -1214,6 +1222,7 @@ export const githubBranches = pgTable('github_branches', {
 
 export const githubPullRequests = pgTable('github_pull_requests', {
   id: uuid('id').primaryKey().defaultRandom(),
+  organizationId: uuid('organization_id').references(() => organizations.id),
   repositoryId: uuid('repository_id').notNull().references(() => githubRepositories.id),
   branchId: uuid('branch_id').references(() => githubBranches.id),
   agentRunId: uuid('agent_run_id').references(() => agentRuns.id),
