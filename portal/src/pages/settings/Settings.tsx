@@ -228,6 +228,21 @@ export default function SettingsPage() {
     void loadSocialSettings(organizationId)
   }, [organizationId])
 
+  useEffect(() => {
+    const params = new URLSearchParams(location.search)
+    const linkedinStatus = params.get('linkedin')
+    if (!linkedinStatus) return
+
+    if (linkedinStatus === 'connected') {
+      const pages = Number(params.get('pages') ?? '0')
+      flash(pages > 0 ? `linkedin connected · ${pages} page${pages === 1 ? '' : 's'} synced` : 'linkedin connected')
+      if (organizationId) void loadSocialSettings(organizationId)
+    } else if (linkedinStatus === 'failed') {
+      flash(params.get('message') || 'linkedin connection failed')
+    }
+    navigate('/settings/social', { replace: true })
+  }, [location.search, navigate, organizationId])
+
   async function loadApiKeys(nextOrganizationId = organizationId) {
     if (!nextOrganizationId) return
     setLoadingKeys(true)
@@ -348,13 +363,15 @@ export default function SettingsPage() {
 
   async function createLinkedInChannel(payload: { displayName: string; externalId: string; url: string; handle: string; kind: string }) {
     if (!organizationId) return
+    const channelId = crypto.randomUUID()
+    const activeConnection = organizationSocialConnections.find((connection) => connection.provider === 'linkedin' && connection.status === 'active')
     await z.mutate.social_channels.create({
-      id: crypto.randomUUID(),
+      id: channelId,
       organizationId,
       provider: 'linkedin',
       kind: payload.kind,
       displayName: payload.displayName,
-      externalId: payload.externalId,
+      externalId: normalizeLinkedInExternalId(payload.externalId),
       url: payload.url || null,
       handle: payload.handle || null,
       metadata: {
@@ -362,8 +379,21 @@ export default function SettingsPage() {
         oauthStatus: 'pending',
       },
     })
+    if (activeConnection) {
+      await z.mutate.social_channel_connections.create({
+        id: crypto.randomUUID(),
+        organizationId,
+        channelId,
+        connectionId: activeConnection.id,
+        capabilities: ['read_social', 'publish_post'],
+        metadata: {
+          createdVia: 'settings',
+          linkedManually: true,
+        },
+      })
+    }
     setCreateLinkedInChannelOpen(false)
-    flash('linkedin channel registered')
+    flash(activeConnection ? 'linkedin channel registered and linked' : 'linkedin channel registered')
   }
 
   async function deleteSocialChannel(channel: SocialChannelRow) {
@@ -396,6 +426,30 @@ export default function SettingsPage() {
     await readJson(response)
     await loadSocialSettings()
     flash('linkedin app archived')
+  }
+
+  async function connectLinkedIn() {
+    if (!organizationId) return
+    const providerApp = pickLinkedInOAuthProviderApp(socialProviderApps)
+    if (!providerApp) {
+      flash('add a linkedin developer app with a client secret first')
+      return
+    }
+
+    try {
+      const returnTo = `${window.location.origin}/settings/social`
+      const response = await authFetch(
+        `${config.apiUrl}/social/linkedin/oauth/start?organizationId=${encodeURIComponent(organizationId)}&providerAppId=${encodeURIComponent(providerApp.id)}&returnTo=${encodeURIComponent(returnTo)}`,
+      )
+      const payload = await readJson(response)
+      if (typeof payload.authorizationUrl !== 'string' || !payload.authorizationUrl) {
+        throw new Error('LinkedIn authorization URL was not returned.')
+      }
+      window.location.assign(payload.authorizationUrl)
+    } catch (error) {
+      console.error('LinkedIn connect failed', error)
+      flash(error instanceof Error ? error.message : 'linkedin connection failed')
+    }
   }
 
   async function copySecret(secret: string) {
@@ -506,7 +560,7 @@ export default function SettingsPage() {
             connections={organizationSocialConnections}
             channels={organizationSocialChannels}
             channelConnections={organizationSocialChannelConnections}
-            onConnect={() => flash('linkedin oauth is next')}
+            onConnect={() => void connectLinkedIn()}
             onCreateProviderApp={() => setProviderAppModal('new')}
             onEditProviderApp={(providerApp) => setProviderAppModal(providerApp)}
             onArchiveProviderApp={(providerApp) => void archiveProviderApp(providerApp)}
@@ -1612,6 +1666,29 @@ function parseScopesDraft(value: string) {
 
 function optionLabel(options: PachSelectOption[], value: string) {
   return options.find((option) => option.value === value)?.label ?? value.replace(/_/g, ' ')
+}
+
+function pickLinkedInOAuthProviderApp(providerApps: SocialProviderApp[]) {
+  const candidates = providerApps.filter((providerApp) => (
+    providerApp.provider === 'linkedin' &&
+    providerApp.hasClientSecret &&
+    providerApp.status !== 'archived' &&
+    providerApp.status !== 'needs_secret' &&
+    providerApp.status !== 'needs_reconnect'
+  ))
+  return (
+    candidates.find((providerApp) => providerApp.purpose === 'organization_publishing' && providerApp.status === 'ready') ??
+    candidates.find((providerApp) => providerApp.purpose === 'organization_publishing') ??
+    candidates.find((providerApp) => providerApp.status === 'ready') ??
+    candidates[0] ??
+    null
+  )
+}
+
+function normalizeLinkedInExternalId(value: string) {
+  const trimmed = value.trim()
+  if (/^\d+$/.test(trimmed)) return `urn:li:organization:${trimmed}`
+  return trimmed
 }
 
 function formatDate(value: number | null | undefined) {
