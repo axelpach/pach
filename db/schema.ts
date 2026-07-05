@@ -837,6 +837,195 @@ export const mktContentEvents = pgTable('mkt_content_events', {
   eventTypeIdx: index('mkt_content_events_type_idx').on(table.eventType),
 }))
 
+export const mktPublicationConsumers = pgTable('mkt_publication_consumers', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  organizationId: uuid('organization_id').notNull().references(() => organizations.id),
+  publicationId: uuid('publication_id').references(() => mktPublications.id),
+  /** blog | email | rss | public_api | podcast */
+  kind: text('kind').notNull().default('blog'),
+  name: text('name').notNull(),
+  slug: text('slug').notNull(),
+  baseUrl: text('base_url'),
+  status: text('status').notNull().default('active'),
+  metadata: jsonb('metadata').$type<Record<string, unknown>>().notNull().default({}),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+}, (table) => ({
+  organizationIdx: index('mkt_publication_consumers_organization_idx').on(table.organizationId),
+  publicationIdx: index('mkt_publication_consumers_publication_idx').on(table.publicationId),
+  publicationSlugIdx: uniqueIndex('mkt_publication_consumers_publication_slug_idx').on(table.publicationId, table.slug),
+}))
+
+export const mktContentOutputs = pgTable('mkt_content_outputs', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  organizationId: uuid('organization_id').notNull().references(() => organizations.id),
+  contentItemId: uuid('content_item_id').notNull().references(() => mktContentItems.id),
+  consumerId: uuid('consumer_id').references(() => mktPublicationConsumers.id),
+  distributionRunId: uuid('distribution_run_id').references(() => mktDistributionRuns.id),
+  /** blog | email | rss | public_api | podcast */
+  channel: text('channel').notNull().default('blog'),
+  publicUrl: text('public_url'),
+  canonicalUrl: text('canonical_url'),
+  /** draft | scheduled | publishing | published | failed | archived */
+  status: text('status').notNull().default('draft'),
+  scheduledAt: timestamp('scheduled_at', { withTimezone: true }),
+  publishedAt: timestamp('published_at', { withTimezone: true }),
+  metadata: jsonb('metadata').$type<Record<string, unknown>>().notNull().default({}),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+}, (table) => ({
+  organizationIdx: index('mkt_content_outputs_organization_idx').on(table.organizationId),
+  contentItemIdx: index('mkt_content_outputs_content_item_idx').on(table.contentItemId),
+  consumerIdx: index('mkt_content_outputs_consumer_idx').on(table.consumerId),
+  distributionRunIdx: index('mkt_content_outputs_distribution_run_idx').on(table.distributionRunId),
+  channelStatusIdx: index('mkt_content_outputs_channel_status_idx').on(table.channel, table.status),
+}))
+
+/* ─────────────────────── SOCIAL PUBLISHING ─────────────────────── */
+
+export const socialProviderApps = pgTable('social_provider_apps', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  organizationId: uuid('organization_id').notNull().references(() => organizations.id),
+  createdByUserId: uuid('created_by_user_id').references(() => users.id),
+  /** linkedin | instagram | x | facebook */
+  provider: text('provider').notNull().default('linkedin'),
+  /** organization_publishing | member_sharing */
+  purpose: text('purpose').notNull().default('organization_publishing'),
+  name: text('name').notNull(),
+  clientId: text('client_id').notNull(),
+  encryptedClientSecret: text('encrypted_client_secret'),
+  clientSecretLast4: text('client_secret_last4'),
+  redirectUri: text('redirect_uri').notNull(),
+  scopesRequested: jsonb('scopes_requested').$type<string[]>().notNull().default([]),
+  status: text('status').notNull().default('pending_approval'),
+  statusMessage: text('status_message'),
+  metadata: jsonb('metadata').$type<Record<string, unknown>>().notNull().default({}),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+}, (table) => ({
+  organizationIdx: index('social_provider_apps_organization_idx').on(table.organizationId),
+  providerPurposeIdx: index('social_provider_apps_provider_purpose_idx').on(table.provider, table.purpose),
+  statusIdx: index('social_provider_apps_status_idx').on(table.status),
+}))
+
+export const socialConnections = pgTable('social_connections', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  organizationId: uuid('organization_id').notNull().references(() => organizations.id),
+  providerAppId: uuid('provider_app_id').references(() => socialProviderApps.id),
+  connectedByUserId: uuid('connected_by_user_id').references(() => users.id),
+  /** linkedin | instagram | x | facebook */
+  provider: text('provider').notNull().default('linkedin'),
+  providerAccountId: text('provider_account_id'),
+  providerAccountName: text('provider_account_name'),
+  providerAccountUrl: text('provider_account_url'),
+  scopes: jsonb('scopes').$type<string[]>().notNull().default([]),
+  credentialKind: text('credential_kind').notNull().default('oauth2'),
+  encryptedAccessToken: text('encrypted_access_token'),
+  encryptedRefreshToken: text('encrypted_refresh_token'),
+  tokenExpiresAt: timestamp('token_expires_at', { withTimezone: true }),
+  refreshTokenExpiresAt: timestamp('refresh_token_expires_at', { withTimezone: true }),
+  status: text('status').notNull().default('active'),
+  statusMessage: text('status_message'),
+  lastUsedAt: timestamp('last_used_at', { withTimezone: true }),
+  lastRefreshedAt: timestamp('last_refreshed_at', { withTimezone: true }),
+  metadata: jsonb('metadata').$type<Record<string, unknown>>().notNull().default({}),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+}, (table) => ({
+  organizationIdx: index('social_connections_organization_idx').on(table.organizationId),
+  providerAppIdx: index('social_connections_provider_app_idx').on(table.providerAppId),
+  providerAccountIdx: index('social_connections_provider_account_idx').on(table.provider, table.providerAccountId),
+  statusIdx: index('social_connections_status_idx').on(table.status),
+}))
+
+export const socialChannels = pgTable('social_channels', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  organizationId: uuid('organization_id').notNull().references(() => organizations.id),
+  /** linkedin | instagram | x | facebook */
+  provider: text('provider').notNull().default('linkedin'),
+  /** organization | member | page | account */
+  kind: text('kind').notNull().default('organization'),
+  externalId: text('external_id').notNull(),
+  displayName: text('display_name').notNull(),
+  handle: text('handle'),
+  url: text('url'),
+  status: text('status').notNull().default('active'),
+  metadata: jsonb('metadata').$type<Record<string, unknown>>().notNull().default({}),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+}, (table) => ({
+  organizationIdx: index('social_channels_organization_idx').on(table.organizationId),
+  providerExternalIdx: uniqueIndex('social_channels_provider_external_idx').on(table.provider, table.externalId),
+  organizationProviderIdx: index('social_channels_organization_provider_idx').on(table.organizationId, table.provider),
+}))
+
+export const socialChannelConnections = pgTable('social_channel_connections', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  organizationId: uuid('organization_id').notNull().references(() => organizations.id),
+  channelId: uuid('channel_id').notNull().references(() => socialChannels.id),
+  connectionId: uuid('connection_id').notNull().references(() => socialConnections.id),
+  capabilities: jsonb('capabilities').$type<string[]>().notNull().default([]),
+  status: text('status').notNull().default('active'),
+  statusMessage: text('status_message'),
+  lastCheckedAt: timestamp('last_checked_at', { withTimezone: true }),
+  metadata: jsonb('metadata').$type<Record<string, unknown>>().notNull().default({}),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+}, (table) => ({
+  channelConnectionIdx: uniqueIndex('social_channel_connections_channel_connection_idx').on(table.channelId, table.connectionId),
+  organizationIdx: index('social_channel_connections_organization_idx').on(table.organizationId),
+  channelIdx: index('social_channel_connections_channel_idx').on(table.channelId),
+  connectionIdx: index('social_channel_connections_connection_idx').on(table.connectionId),
+}))
+
+export const socialPosts = pgTable('social_posts', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  organizationId: uuid('organization_id').notNull().references(() => organizations.id),
+  contentItemId: uuid('content_item_id').references(() => mktContentItems.id),
+  contentOutputId: uuid('content_output_id').references(() => mktContentOutputs.id),
+  title: text('title'),
+  caption: text('caption').notNull().default(''),
+  linkUrl: text('link_url'),
+  thumbnailUrl: text('thumbnail_url'),
+  /** draft | approved | scheduled | published | archived */
+  status: text('status').notNull().default('draft'),
+  metadata: jsonb('metadata').$type<Record<string, unknown>>().notNull().default({}),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+}, (table) => ({
+  organizationIdx: index('social_posts_organization_idx').on(table.organizationId),
+  contentItemIdx: index('social_posts_content_item_idx').on(table.contentItemId),
+  contentOutputIdx: index('social_posts_content_output_idx').on(table.contentOutputId),
+  statusIdx: index('social_posts_status_idx').on(table.status),
+}))
+
+export const socialPostTargets = pgTable('social_post_targets', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  organizationId: uuid('organization_id').notNull().references(() => organizations.id),
+  socialPostId: uuid('social_post_id').notNull().references(() => socialPosts.id),
+  channelId: uuid('channel_id').notNull().references(() => socialChannels.id),
+  connectionId: uuid('connection_id').references(() => socialConnections.id),
+  /** draft | scheduled | publishing | published | failed | blocked_waiting_for_output | canceled */
+  status: text('status').notNull().default('draft'),
+  scheduledAt: timestamp('scheduled_at', { withTimezone: true }),
+  scheduledTimezone: text('scheduled_timezone').notNull().default('America/Mexico_City'),
+  publishedAt: timestamp('published_at', { withTimezone: true }),
+  providerPostId: text('provider_post_id'),
+  providerPostUrl: text('provider_post_url'),
+  error: text('error'),
+  attemptCount: integer('attempt_count').notNull().default(0),
+  lastAttemptAt: timestamp('last_attempt_at', { withTimezone: true }),
+  metadata: jsonb('metadata').$type<Record<string, unknown>>().notNull().default({}),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+}, (table) => ({
+  organizationIdx: index('social_post_targets_organization_idx').on(table.organizationId),
+  postIdx: index('social_post_targets_post_idx').on(table.socialPostId),
+  channelIdx: index('social_post_targets_channel_idx').on(table.channelId),
+  connectionIdx: index('social_post_targets_connection_idx').on(table.connectionId),
+  statusScheduledIdx: index('social_post_targets_status_scheduled_idx').on(table.status, table.scheduledAt),
+}))
+
 /* ─────────────────────── PROJECT MANAGEMENT ─────────────────────── */
 
 export const pmTeams = pgTable('pm_teams', {

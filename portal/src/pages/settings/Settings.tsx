@@ -1,5 +1,5 @@
 import { useQuery, useZero } from '@rocicorp/zero/react'
-import { Building2, Check, Copy, Github, GitBranch, KeyRound, Link2, Plus, RefreshCw, Settings2, Trash2, Unlink } from 'lucide-react'
+import { Building2, Check, Copy, Edit3, ExternalLink, Github, GitBranch, KeyRound, Link2, Linkedin, Plus, RefreshCw, Settings2, Trash2, Unlink } from 'lucide-react'
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { Button, Panel, StatusPill, TermInput } from '../../components/pach'
@@ -71,10 +71,49 @@ type OrganizationRepository = {
   updatedAt: number
 }
 
-type SettingsSection = 'api-keys' | 'repositories'
+type SocialConnectionRow = Schema['tables']['social_connections']['row']
+type SocialChannelRow = Schema['tables']['social_channels']['row']
+type SocialChannelConnectionRow = Schema['tables']['social_channel_connections']['row']
+
+type SocialProviderApp = {
+  id: string
+  organizationId: string
+  provider: string
+  purpose: string
+  name: string
+  clientId: string
+  hasClientSecret: boolean
+  clientSecretLast4: string | null
+  redirectUri: string
+  scopesRequested: string[]
+  status: string
+  statusMessage: string | null
+  metadata: Record<string, unknown>
+  createdAt: number
+  updatedAt: number
+}
+
+type SocialSettingsDefaults = {
+  linkedinRedirectUri: string
+  organizationScopes: string[]
+  memberScopes: string[]
+}
+
+type ProviderAppFormPayload = {
+  name: string
+  purpose: string
+  clientId: string
+  clientSecret?: string
+  redirectUri: string
+  scopesRequested: string[]
+  status: string
+}
+
+type SettingsSection = 'api-keys' | 'repositories' | 'social'
 
 const SECTIONS: Array<{ id: SettingsSection; label: string }> = [
   { id: 'repositories', label: 'repositories' },
+  { id: 'social', label: 'social' },
   { id: 'api-keys', label: 'api keys' },
 ]
 
@@ -85,21 +124,57 @@ const API_KEY_SCOPES = [
   { value: 'analytics:write', label: 'analytics write' },
 ] as const
 
+const GITHUB_CREDENTIAL_KIND_OPTIONS: PachSelectOption[] = [
+  { value: 'fine_grained_pat', label: 'fine-grained pat' },
+  { value: 'classic_pat', label: 'classic pat' },
+]
+
+const LINKEDIN_CHANNEL_KIND_OPTIONS: PachSelectOption[] = [
+  { value: 'organization', label: 'organization page' },
+  { value: 'member', label: 'member profile' },
+]
+
+const LINKEDIN_PROVIDER_PURPOSE_OPTIONS: PachSelectOption[] = [
+  { value: 'organization_publishing', label: 'organization publishing' },
+  { value: 'member_sharing', label: 'member sharing' },
+]
+
+const LINKEDIN_PROVIDER_STATUS_OPTIONS: PachSelectOption[] = [
+  { value: 'pending_approval', label: 'pending approval' },
+  { value: 'ready', label: 'ready' },
+  { value: 'needs_secret', label: 'needs secret' },
+  { value: 'needs_reconnect', label: 'needs reconnect' },
+]
+
+const SOCIAL_HELP = {
+  developerApp: 'The LinkedIn developer app is the API client: client ID, encrypted secret, redirect URI, scopes, and approval status.',
+  linkedinPage: 'A LinkedIn page is the publishable destination in Pach, such as the Ardia company page or a member profile.',
+  connectLinkedin: 'Connect LinkedIn starts OAuth. A real user signs in and grants Pach permission to publish through an approved developer app.',
+}
+
 export default function SettingsPage() {
   const z = useZero<Schema, Mutators>()
   const { user } = useAuth()
   const navigate = useNavigate()
   const location = useLocation()
   const [organizations] = useQuery(z.query.organizations.orderBy('name', 'asc'))
+  const [socialConnections] = useQuery(z.query.social_connections.orderBy('createdAt', 'desc'))
+  const [socialChannels] = useQuery(z.query.social_channels.orderBy('displayName', 'asc'))
+  const [socialChannelConnections] = useQuery(z.query.social_channel_connections.orderBy('createdAt', 'desc'))
   const [organizationId, setOrganizationId] = useState('')
   const [apiKeys, setApiKeys] = useState<OrganizationApiKey[]>([])
   const [githubConnections, setGithubConnections] = useState<GithubConnection[]>([])
   const [githubRepositories, setGithubRepositories] = useState<GithubRepository[]>([])
   const [organizationRepositories, setOrganizationRepositories] = useState<OrganizationRepository[]>([])
+  const [socialProviderApps, setSocialProviderApps] = useState<SocialProviderApp[]>([])
+  const [socialSettingsDefaults, setSocialSettingsDefaults] = useState<SocialSettingsDefaults | null>(null)
   const [loadingKeys, setLoadingKeys] = useState(false)
   const [loadingGithub, setLoadingGithub] = useState(false)
+  const [loadingSocial, setLoadingSocial] = useState(false)
   const [createModalOpen, setCreateModalOpen] = useState(false)
   const [connectGithubOpen, setConnectGithubOpen] = useState(false)
+  const [createLinkedInChannelOpen, setCreateLinkedInChannelOpen] = useState(false)
+  const [providerAppModal, setProviderAppModal] = useState<SocialProviderApp | 'new' | null>(null)
   const [generatedSecret, setGeneratedSecret] = useState('')
   const [message, setMessage] = useState('')
 
@@ -113,6 +188,18 @@ export default function SettingsPage() {
   const organizationOptions = useMemo<PachSelectOption[]>(
     () => accessibleOrganizations.map((entry) => ({ value: entry.id, label: entry.name })),
     [accessibleOrganizations],
+  )
+  const organizationSocialConnections = useMemo(
+    () => socialConnections.filter((connection) => connection.organizationId === organizationId),
+    [organizationId, socialConnections],
+  )
+  const organizationSocialChannels = useMemo(
+    () => socialChannels.filter((channel) => channel.organizationId === organizationId),
+    [organizationId, socialChannels],
+  )
+  const organizationSocialChannelConnections = useMemo(
+    () => socialChannelConnections.filter((link) => link.organizationId === organizationId),
+    [organizationId, socialChannelConnections],
   )
 
   useEffect(() => {
@@ -132,10 +219,13 @@ export default function SettingsPage() {
       setGithubConnections([])
       setGithubRepositories([])
       setOrganizationRepositories([])
+      setSocialProviderApps([])
+      setSocialSettingsDefaults(null)
       return
     }
     void loadApiKeys(organizationId)
     void loadGithubSettings(organizationId)
+    void loadSocialSettings(organizationId)
   }, [organizationId])
 
   async function loadApiKeys(nextOrganizationId = organizationId) {
@@ -167,6 +257,22 @@ export default function SettingsPage() {
       flash('github settings could not be loaded')
     } finally {
       setLoadingGithub(false)
+    }
+  }
+
+  async function loadSocialSettings(nextOrganizationId = organizationId) {
+    if (!nextOrganizationId) return
+    setLoadingSocial(true)
+    try {
+      const response = await authFetch(`${config.apiUrl}/social/settings?organizationId=${encodeURIComponent(nextOrganizationId)}`)
+      const payload = await readJson(response)
+      setSocialProviderApps(Array.isArray(payload.providerApps) ? payload.providerApps : [])
+      setSocialSettingsDefaults(payload.defaults ?? null)
+    } catch (error) {
+      console.error('Social settings load failed', error)
+      flash('social settings could not be loaded')
+    } finally {
+      setLoadingSocial(false)
     }
   }
 
@@ -238,6 +344,58 @@ export default function SettingsPage() {
     await readJson(response)
     await loadGithubSettings()
     flash('repository unlinked')
+  }
+
+  async function createLinkedInChannel(payload: { displayName: string; externalId: string; url: string; handle: string; kind: string }) {
+    if (!organizationId) return
+    await z.mutate.social_channels.create({
+      id: crypto.randomUUID(),
+      organizationId,
+      provider: 'linkedin',
+      kind: payload.kind,
+      displayName: payload.displayName,
+      externalId: payload.externalId,
+      url: payload.url || null,
+      handle: payload.handle || null,
+      metadata: {
+        createdVia: 'settings',
+        oauthStatus: 'pending',
+      },
+    })
+    setCreateLinkedInChannelOpen(false)
+    flash('linkedin channel registered')
+  }
+
+  async function deleteSocialChannel(channel: SocialChannelRow) {
+    await z.mutate.social_channels.delete({ id: channel.id })
+    flash('social channel removed')
+  }
+
+  async function saveProviderApp(payload: ProviderAppFormPayload, existing?: SocialProviderApp | null) {
+    if (!organizationId) return
+    const response = await authFetch(
+      existing ? `${config.apiUrl}/social/provider-apps/${existing.id}` : `${config.apiUrl}/social/provider-apps`,
+      {
+        method: existing ? 'PATCH' : 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          organizationId,
+          provider: 'linkedin',
+          ...payload,
+        }),
+      },
+    )
+    await readJson(response)
+    setProviderAppModal(null)
+    await loadSocialSettings()
+    flash(existing ? 'linkedin app updated' : 'linkedin app saved')
+  }
+
+  async function archiveProviderApp(providerApp: SocialProviderApp) {
+    const response = await authFetch(`${config.apiUrl}/social/provider-apps/${providerApp.id}`, { method: 'DELETE' })
+    await readJson(response)
+    await loadSocialSettings()
+    flash('linkedin app archived')
   }
 
   async function copySecret(secret: string) {
@@ -339,6 +497,24 @@ export default function SettingsPage() {
           />
         ) : null}
 
+        {section === 'social' ? (
+          <SocialSection
+            organization={organization}
+            providerApps={socialProviderApps}
+            defaults={socialSettingsDefaults}
+            loadingProviderApps={loadingSocial}
+            connections={organizationSocialConnections}
+            channels={organizationSocialChannels}
+            channelConnections={organizationSocialChannelConnections}
+            onConnect={() => flash('linkedin oauth is next')}
+            onCreateProviderApp={() => setProviderAppModal('new')}
+            onEditProviderApp={(providerApp) => setProviderAppModal(providerApp)}
+            onArchiveProviderApp={(providerApp) => void archiveProviderApp(providerApp)}
+            onCreateChannel={() => setCreateLinkedInChannelOpen(true)}
+            onDeleteChannel={(channel) => void deleteSocialChannel(channel)}
+          />
+        ) : null}
+
         {section === 'api-keys' ? (
           <ApiKeysSection
             apiKeys={apiKeys}
@@ -363,6 +539,24 @@ export default function SettingsPage() {
           organization={organization}
           onClose={() => setConnectGithubOpen(false)}
           onSubmit={(payload) => void connectGithub(payload)}
+        />
+      ) : null}
+
+      {createLinkedInChannelOpen ? (
+        <CreateLinkedInChannelModal
+          organization={organization}
+          onClose={() => setCreateLinkedInChannelOpen(false)}
+          onSubmit={(payload) => void createLinkedInChannel(payload)}
+        />
+      ) : null}
+
+      {providerAppModal ? (
+        <LinkedInProviderAppModal
+          organization={organization}
+          providerApp={providerAppModal === 'new' ? null : providerAppModal}
+          defaults={socialSettingsDefaults}
+          onClose={() => setProviderAppModal(null)}
+          onSubmit={(payload) => void saveProviderApp(payload, providerAppModal === 'new' ? null : providerAppModal)}
         />
       ) : null}
     </div>
@@ -529,6 +723,239 @@ function RepositoriesSection({
         {repositories.length === 0 ? (
           <div className="border border-dashed border-edge/15 py-8 text-center font-mono text-sm text-fg-4">
             {loading ? 'loading repositories' : connections.length ? 'no repositories synced yet' : 'connect github to sync repositories'}
+          </div>
+        ) : null}
+      </Panel>
+    </div>
+  )
+}
+
+function SocialSection({
+  organization,
+  providerApps,
+  defaults,
+  loadingProviderApps,
+  connections,
+  channels,
+  channelConnections,
+  onConnect,
+  onCreateProviderApp,
+  onEditProviderApp,
+  onArchiveProviderApp,
+  onCreateChannel,
+  onDeleteChannel,
+}: {
+  organization: OrganizationRow | null
+  providerApps: SocialProviderApp[]
+  defaults: SocialSettingsDefaults | null
+  loadingProviderApps: boolean
+  connections: SocialConnectionRow[]
+  channels: SocialChannelRow[]
+  channelConnections: SocialChannelConnectionRow[]
+  onConnect: () => void
+  onCreateProviderApp: () => void
+  onEditProviderApp: (providerApp: SocialProviderApp) => void
+  onArchiveProviderApp: (providerApp: SocialProviderApp) => void
+  onCreateChannel: () => void
+  onDeleteChannel: (channel: SocialChannelRow) => void
+}) {
+  const linkedinConnections = connections.filter((connection) => connection.provider === 'linkedin')
+  const linkedinChannels = channels.filter((channel) => channel.provider === 'linkedin')
+  const connectionsById = new Map(linkedinConnections.map((connection) => [connection.id, connection]))
+  const channelLinksByChannelId = new Map<string, SocialChannelConnectionRow[]>()
+
+  for (const link of channelConnections) {
+    const current = channelLinksByChannelId.get(link.channelId) ?? []
+    current.push(link)
+    channelLinksByChannelId.set(link.channelId, current)
+  }
+
+  return (
+    <div className="space-y-4">
+      <div className="flex flex-col gap-3 border-b border-edge/15 pb-3 md:flex-row md:items-end md:justify-between">
+        <div>
+          <div className="font-mono text-[10px] uppercase tracking-label text-fg-4">integrations</div>
+          <h1 className="mt-1 font-mono text-2xl font-bold lowercase text-fg-1">social</h1>
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <HelpTooltip label={SOCIAL_HELP.developerApp}>
+            <Button icon={<KeyRound className="h-3.5 w-3.5" />} onClick={onCreateProviderApp} disabled={!organization}>
+              developer app
+            </Button>
+          </HelpTooltip>
+          <HelpTooltip label={SOCIAL_HELP.linkedinPage}>
+            <Button icon={<Plus className="h-3.5 w-3.5" />} onClick={onCreateChannel} disabled={!organization}>
+              linkedin page
+            </Button>
+          </HelpTooltip>
+          <HelpTooltip label={SOCIAL_HELP.connectLinkedin} align="right">
+            <Button kind="primary" icon={<Linkedin className="h-3.5 w-3.5" />} onClick={onConnect} disabled={!organization}>
+              connect linkedin
+            </Button>
+          </HelpTooltip>
+        </div>
+      </div>
+
+      <Panel title={<PanelTitleWithHelp label="linkedin developer apps" help={SOCIAL_HELP.developerApp} />}>
+        {providerApps.length > 0 ? (
+          <div className="overflow-auto">
+            <table className="w-full min-w-[980px] text-left font-mono text-xs">
+              <thead className="text-[10px] uppercase tracking-label text-fg-4">
+                <tr className="border-b border-edge/12">
+                  <th className="pb-2 pr-3 font-normal">app</th>
+                  <th className="pb-2 pr-3 font-normal">purpose</th>
+                  <th className="pb-2 pr-3 font-normal">client id</th>
+                  <th className="pb-2 pr-3 font-normal">secret</th>
+                  <th className="pb-2 pr-3 font-normal">redirect</th>
+                  <th className="pb-2 pr-3 font-normal">status</th>
+                  <th className="pb-2 font-normal">action</th>
+                </tr>
+              </thead>
+              <tbody>
+                {providerApps.map((providerApp) => (
+                  <tr key={providerApp.id} className="border-b border-edge/8 text-fg-2">
+                    <td className="max-w-[180px] truncate py-2.5 pr-3 text-fg-1">{providerApp.name}</td>
+                    <td className="py-2.5 pr-3 text-fg-4">{providerApp.purpose.replace(/_/g, ' ')}</td>
+                    <td className="max-w-[180px] truncate py-2.5 pr-3 text-fg-4">{providerApp.clientId}</td>
+                    <td className="py-2.5 pr-3">
+                      {providerApp.hasClientSecret ? (
+                        <span className="text-fg-3">configured · {providerApp.clientSecretLast4 ?? '••••'}</span>
+                      ) : (
+                        <span className="text-amber">missing</span>
+                      )}
+                    </td>
+                    <td className="max-w-[260px] truncate py-2.5 pr-3 text-fg-4" title={providerApp.redirectUri}>{providerApp.redirectUri}</td>
+                    <td className="py-2.5 pr-3">
+                      <StatusPill kind={providerAppStatusKind(providerApp.status)}>{providerApp.status.replace(/_/g, ' ')}</StatusPill>
+                    </td>
+                    <td className="py-2.5">
+                      <div className="flex items-center gap-2">
+                        <Button className="px-2 py-1 text-[10px]" icon={<Edit3 className="h-3 w-3" />} onClick={() => onEditProviderApp(providerApp)}>
+                          edit
+                        </Button>
+                        <Button kind="danger" className="px-2 py-1 text-[10px]" icon={<Trash2 className="h-3 w-3" />} onClick={() => onArchiveProviderApp(providerApp)}>
+                          archive
+                        </Button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : (
+          <div className="border border-dashed border-edge/15 py-8 text-center font-mono text-sm text-fg-4">
+            {loadingProviderApps ? 'loading linkedin apps' : 'no linkedin developer apps'}
+          </div>
+        )}
+        {defaults?.linkedinRedirectUri ? (
+          <div className="mt-3 flex flex-col gap-2 border border-edge/12 bg-rim px-3 py-2 font-mono text-xs text-fg-3 md:flex-row md:items-center">
+            <span className="text-fg-4">redirect uri</span>
+            <code className="min-w-0 flex-1 truncate text-fg-1">{defaults.linkedinRedirectUri}</code>
+            <Button className="px-2 py-1 text-[10px]" icon={<Copy className="h-3 w-3" />} onClick={() => void navigator.clipboard.writeText(defaults.linkedinRedirectUri)}>
+              copy
+            </Button>
+          </div>
+        ) : null}
+      </Panel>
+
+      <Panel title={<PanelTitleWithHelp label="linkedin connections" help={SOCIAL_HELP.connectLinkedin} />}>
+        {linkedinConnections.length > 0 ? (
+          <div className="grid gap-2 md:grid-cols-2">
+            {linkedinConnections.map((connection) => (
+              <div key={connection.id} className="border border-edge/12 bg-rim px-3 py-3">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <div className="truncate font-mono text-sm text-fg-1">{connection.providerAccountName ?? 'LinkedIn account'}</div>
+                    <div className="mt-1 font-mono text-[11px] text-fg-4">
+                      {connection.credentialKind} · {connection.scopes.join(', ') || 'no scopes'}
+                    </div>
+                  </div>
+                  <StatusPill kind={connection.status === 'active' ? 'ok' : 'warn'}>{connection.status}</StatusPill>
+                </div>
+                <div className="mt-3 flex items-center justify-between gap-2">
+                  <div className="font-mono text-[11px] text-fg-4">expires {formatDate(connection.tokenExpiresAt)}</div>
+                  {connection.providerAccountUrl ? (
+                    <a
+                      href={connection.providerAccountUrl}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="inline-flex items-center gap-1 font-mono text-[10px] uppercase tracking-label text-accent hover:text-fg-1"
+                    >
+                      open <ExternalLink className="h-3 w-3" />
+                    </a>
+                  ) : null}
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <div className="border border-dashed border-edge/15 py-8 text-center font-mono text-sm text-fg-4">
+            no linkedin accounts connected
+          </div>
+        )}
+      </Panel>
+
+      <Panel title={<PanelTitleWithHelp label="linkedin channels" help={SOCIAL_HELP.linkedinPage} />}>
+        <div className="overflow-auto">
+          <table className="w-full min-w-[860px] text-left font-mono text-xs">
+            <thead className="text-[10px] uppercase tracking-label text-fg-4">
+              <tr className="border-b border-edge/12">
+                <th className="pb-2 pr-3 font-normal">destination</th>
+                <th className="pb-2 pr-3 font-normal">type</th>
+                <th className="pb-2 pr-3 font-normal">external id</th>
+                <th className="pb-2 pr-3 font-normal">publishing</th>
+                <th className="pb-2 pr-3 font-normal">status</th>
+                <th className="pb-2 font-normal">action</th>
+              </tr>
+            </thead>
+            <tbody>
+              {linkedinChannels.map((channel) => {
+                const links = channelLinksByChannelId.get(channel.id) ?? []
+                const activeLinks = links.filter((link) => link.status === 'active')
+                const connectionNames = activeLinks
+                  .map((link) => connectionsById.get(link.connectionId)?.providerAccountName ?? 'LinkedIn account')
+                  .join(', ')
+                return (
+                  <tr key={channel.id} className="border-b border-edge/8 text-fg-2">
+                    <td className="max-w-[220px] py-2.5 pr-3">
+                      <div className="flex min-w-0 items-center gap-2">
+                        <Linkedin className="h-3.5 w-3.5 shrink-0 text-accent" />
+                        <span className="truncate text-fg-1">{channel.displayName}</span>
+                      </div>
+                      {channel.url ? (
+                        <a href={channel.url} target="_blank" rel="noreferrer" className="mt-1 block truncate text-[11px] text-fg-4 hover:text-accent">
+                          {channel.url}
+                        </a>
+                      ) : null}
+                    </td>
+                    <td className="py-2.5 pr-3 text-fg-4">{channel.kind}</td>
+                    <td className="max-w-[220px] truncate py-2.5 pr-3 text-fg-4">{channel.externalId}</td>
+                    <td className="py-2.5 pr-3">{connectionNames || <span className="text-fg-4">not connected</span>}</td>
+                    <td className="py-2.5 pr-3">
+                      <StatusPill kind={activeLinks.length > 0 ? 'ok' : channel.status === 'active' ? 'warn' : 'idle'}>
+                        {activeLinks.length > 0 ? 'ready' : channel.status}
+                      </StatusPill>
+                    </td>
+                    <td className="py-2.5">
+                      <Button
+                        kind="danger"
+                        className="px-2 py-1 text-[10px]"
+                        icon={<Trash2 className="h-3 w-3" />}
+                        onClick={() => onDeleteChannel(channel)}
+                      >
+                        remove
+                      </Button>
+                    </td>
+                  </tr>
+                )
+              })}
+            </tbody>
+          </table>
+        </div>
+        {linkedinChannels.length === 0 ? (
+          <div className="border border-dashed border-edge/15 py-8 text-center font-mono text-sm text-fg-4">
+            no linkedin channels
           </div>
         ) : null}
       </Panel>
@@ -774,14 +1201,13 @@ function ConnectGithubModal({
 
           <label className="block">
             <FieldLabel>credential kind</FieldLabel>
-            <select
+            <PachSelect
+              variant="field"
               value={credentialKind}
-              onChange={(event) => setCredentialKind(event.target.value)}
-              className="w-full border border-edge/15 bg-rim px-3 py-2 font-mono text-sm text-fg-1 outline-none transition-colors focus:border-accent focus:shadow-glow-xs"
-            >
-              <option value="fine_grained_pat">fine-grained pat</option>
-              <option value="classic_pat">classic pat</option>
-            </select>
+              onChange={setCredentialKind}
+              options={GITHUB_CREDENTIAL_KIND_OPTIONS}
+              display={optionLabel(GITHUB_CREDENTIAL_KIND_OPTIONS, credentialKind)}
+            />
           </label>
 
           <div className="border border-edge/12 bg-rim px-3 py-2 font-mono text-xs text-fg-3">
@@ -798,6 +1224,274 @@ function ConnectGithubModal({
             disabled={!name.trim() || !token.trim()}
           >
             connect
+          </Button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function CreateLinkedInChannelModal({
+  organization,
+  onClose,
+  onSubmit,
+}: {
+  organization: OrganizationRow | null
+  onClose: () => void
+  onSubmit: (payload: { displayName: string; externalId: string; url: string; handle: string; kind: string }) => void
+}) {
+  const [displayName, setDisplayName] = useState(() => organization ? `${organization.name} LinkedIn Page` : 'LinkedIn Page')
+  const [externalId, setExternalId] = useState('')
+  const [url, setUrl] = useState('')
+  const [handle, setHandle] = useState('')
+  const [kind, setKind] = useState('organization')
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-start justify-center bg-overlay/70 px-4 pt-[10vh] backdrop-blur-sm"
+      onClick={onClose}
+    >
+      <div
+        className="w-full max-w-xl border border-edge/20 bg-pit-2 shadow-terminal-overlay"
+        onClick={(event) => event.stopPropagation()}
+      >
+        <div className="flex items-center justify-between border-b border-edge/12 px-5 py-3">
+          <div className="flex items-center gap-2 font-mono text-xs">
+            <span className="inline-flex items-center gap-1.5 border border-edge/25 bg-accent-fill/5 px-2 py-0.5 font-mono text-[10px] uppercase tracking-label text-accent">
+              settings
+            </span>
+            <span className="text-fg-4">›</span>
+            <span className="text-fg-2 lowercase">linkedin</span>
+          </div>
+          <button
+            onClick={onClose}
+            className="font-mono text-xs uppercase tracking-label text-fg-4 transition hover:text-fg-1"
+            title="close"
+          >
+            [esc]
+          </button>
+        </div>
+
+        <div className="border-b border-edge/12 px-5 py-4">
+          <h2 className="font-mono text-2xl font-bold lowercase text-fg-1">
+            <HelpTooltip label={SOCIAL_HELP.linkedinPage}>linkedin page</HelpTooltip>
+          </h2>
+        </div>
+
+        <div className="space-y-4 px-5 py-5">
+          <label className="block">
+            <FieldLabel>display name</FieldLabel>
+            <TermInput autoFocus value={displayName} onChange={(event) => setDisplayName(event.target.value)} />
+          </label>
+
+          <label className="block">
+            <FieldLabel>external id</FieldLabel>
+            <TermInput
+              value={externalId}
+              onChange={(event) => setExternalId(event.target.value)}
+              placeholder="urn:li:organization:123456"
+              spellCheck={false}
+            />
+          </label>
+
+          <label className="block">
+            <FieldLabel>url</FieldLabel>
+            <TermInput
+              value={url}
+              onChange={(event) => setUrl(event.target.value)}
+              placeholder="https://www.linkedin.com/company/..."
+              spellCheck={false}
+            />
+          </label>
+
+          <div className="grid gap-3 md:grid-cols-2">
+            <label className="block">
+              <FieldLabel>handle</FieldLabel>
+              <TermInput value={handle} onChange={(event) => setHandle(event.target.value)} placeholder="@ardia" spellCheck={false} />
+            </label>
+
+            <label className="block">
+              <FieldLabel>type</FieldLabel>
+              <PachSelect
+                variant="field"
+                value={kind}
+                onChange={setKind}
+                options={LINKEDIN_CHANNEL_KIND_OPTIONS}
+                display={optionLabel(LINKEDIN_CHANNEL_KIND_OPTIONS, kind)}
+              />
+            </label>
+          </div>
+        </div>
+
+        <div className="flex items-center justify-end gap-2 border-t border-edge/12 px-5 py-3">
+          <Button onClick={onClose}>cancel</Button>
+          <Button
+            kind="primary"
+            icon={<Linkedin className="h-3.5 w-3.5" />}
+            onClick={() => onSubmit({ displayName: displayName.trim(), externalId: externalId.trim(), url: url.trim(), handle: handle.trim(), kind })}
+            disabled={!displayName.trim() || !externalId.trim()}
+          >
+            register
+          </Button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function LinkedInProviderAppModal({
+  organization,
+  providerApp,
+  defaults,
+  onClose,
+  onSubmit,
+}: {
+  organization: OrganizationRow | null
+  providerApp: SocialProviderApp | null
+  defaults: SocialSettingsDefaults | null
+  onClose: () => void
+  onSubmit: (payload: ProviderAppFormPayload) => void
+}) {
+  const defaultPurpose = providerApp?.purpose ?? 'organization_publishing'
+  const defaultScopes = providerApp?.scopesRequested?.length
+    ? providerApp.scopesRequested
+    : defaultPurpose === 'member_sharing'
+      ? defaults?.memberScopes ?? ['w_member_social']
+      : defaults?.organizationScopes ?? ['w_organization_social', 'r_organization_social']
+  const [name, setName] = useState(() => providerApp?.name ?? (organization ? `${organization.name} Page Publisher` : 'LinkedIn Page Publisher'))
+  const [purpose, setPurpose] = useState(defaultPurpose)
+  const [clientId, setClientId] = useState(providerApp?.clientId ?? '')
+  const [clientSecret, setClientSecret] = useState('')
+  const [redirectUri, setRedirectUri] = useState(providerApp?.redirectUri ?? defaults?.linkedinRedirectUri ?? '')
+  const [scopes, setScopes] = useState(defaultScopes.join(', '))
+  const [status, setStatus] = useState(providerApp?.status ?? 'pending_approval')
+  const parsedScopes = parseScopesDraft(scopes)
+
+  useEffect(() => {
+    if (providerApp || scopes.trim()) return
+    setScopes((purpose === 'member_sharing' ? defaults?.memberScopes ?? ['w_member_social'] : defaults?.organizationScopes ?? ['w_organization_social', 'r_organization_social']).join(', '))
+  }, [defaults, providerApp, purpose, scopes])
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-start justify-center bg-overlay/70 px-4 pt-[7vh] backdrop-blur-sm"
+      onClick={onClose}
+    >
+      <div
+        className="w-full max-w-2xl border border-edge/20 bg-pit-2 shadow-terminal-overlay"
+        onClick={(event) => event.stopPropagation()}
+      >
+        <div className="flex items-center justify-between border-b border-edge/12 px-5 py-3">
+          <div className="flex items-center gap-2 font-mono text-xs">
+            <span className="inline-flex items-center gap-1.5 border border-edge/25 bg-accent-fill/5 px-2 py-0.5 font-mono text-[10px] uppercase tracking-label text-accent">
+              settings
+            </span>
+            <span className="text-fg-4">›</span>
+            <span className="text-fg-2 lowercase">linkedin app</span>
+          </div>
+          <button
+            onClick={onClose}
+            className="font-mono text-xs uppercase tracking-label text-fg-4 transition hover:text-fg-1"
+            title="close"
+          >
+            [esc]
+          </button>
+        </div>
+
+        <div className="border-b border-edge/12 px-5 py-4">
+          <h2 className="font-mono text-2xl font-bold lowercase text-fg-1">
+            <HelpTooltip label={SOCIAL_HELP.developerApp}>
+              {providerApp ? 'edit developer app' : 'add developer app'}
+            </HelpTooltip>
+          </h2>
+        </div>
+
+        <div className="space-y-4 px-5 py-5">
+          <div className="grid gap-3 md:grid-cols-2">
+            <label className="block">
+              <FieldLabel>name</FieldLabel>
+              <TermInput autoFocus value={name} onChange={(event) => setName(event.target.value)} />
+            </label>
+            <label className="block">
+              <FieldLabel>purpose</FieldLabel>
+              <PachSelect
+                variant="field"
+                value={purpose}
+                onChange={(next) => {
+                  setPurpose(next)
+                  if (!providerApp) setScopes((next === 'member_sharing' ? defaults?.memberScopes ?? ['w_member_social'] : defaults?.organizationScopes ?? ['w_organization_social', 'r_organization_social']).join(', '))
+                }}
+                options={LINKEDIN_PROVIDER_PURPOSE_OPTIONS}
+                display={optionLabel(LINKEDIN_PROVIDER_PURPOSE_OPTIONS, purpose)}
+              />
+            </label>
+          </div>
+
+          <div className="grid gap-3 md:grid-cols-2">
+            <label className="block">
+              <FieldLabel>client id</FieldLabel>
+              <TermInput value={clientId} onChange={(event) => setClientId(event.target.value)} spellCheck={false} />
+            </label>
+            <label className="block">
+              <FieldLabel>{providerApp?.hasClientSecret ? 'rotate secret' : 'client secret'}</FieldLabel>
+              <TermInput
+                type="password"
+                value={clientSecret}
+                onChange={(event) => setClientSecret(event.target.value)}
+                placeholder={providerApp?.hasClientSecret ? 'leave blank to keep existing' : ''}
+                spellCheck={false}
+              />
+            </label>
+          </div>
+
+          <label className="block">
+            <FieldLabel>redirect uri</FieldLabel>
+            <div className="flex gap-2">
+              <TermInput value={redirectUri} onChange={(event) => setRedirectUri(event.target.value)} spellCheck={false} />
+              <Button className="px-2" icon={<Copy className="h-3.5 w-3.5" />} onClick={() => void navigator.clipboard.writeText(redirectUri)} disabled={!redirectUri}>
+                copy
+              </Button>
+            </div>
+          </label>
+
+          <label className="block">
+            <FieldLabel>scopes</FieldLabel>
+            <TermInput value={scopes} onChange={(event) => setScopes(event.target.value)} spellCheck={false} />
+          </label>
+
+          <label className="block">
+            <FieldLabel>status</FieldLabel>
+            <PachSelect
+              variant="field"
+              value={status}
+              onChange={setStatus}
+              options={LINKEDIN_PROVIDER_STATUS_OPTIONS}
+              display={optionLabel(LINKEDIN_PROVIDER_STATUS_OPTIONS, status)}
+            />
+          </label>
+
+          <div className="border border-edge/12 bg-rim px-3 py-2 font-mono text-xs text-fg-3">
+            Pach stores the client secret encrypted at rest and only sends the redirect URI, app status, and non-secret metadata back to the portal.
+          </div>
+        </div>
+
+        <div className="flex items-center justify-end gap-2 border-t border-edge/12 px-5 py-3">
+          <Button onClick={onClose}>cancel</Button>
+          <Button
+            kind="primary"
+            icon={<KeyRound className="h-3.5 w-3.5" />}
+            onClick={() => onSubmit({
+              name: name.trim(),
+              purpose,
+              clientId: clientId.trim(),
+              ...(clientSecret.trim() ? { clientSecret: clientSecret.trim() } : {}),
+              redirectUri: redirectUri.trim(),
+              scopesRequested: parsedScopes,
+              status,
+            })}
+            disabled={!name.trim() || !clientId.trim() || !redirectUri.trim() || parsedScopes.length === 0}
+          >
+            save
           </Button>
         </div>
       </div>
@@ -838,6 +1532,41 @@ function FieldLabel({ children }: { children: ReactNode }) {
   return <div className="mb-1.5 font-mono text-[10px] uppercase tracking-label text-fg-4">{children}</div>
 }
 
+function PanelTitleWithHelp({ label, help }: { label: string; help: string }) {
+  return (
+    <HelpTooltip label={help}>
+      <span>{label}</span>
+    </HelpTooltip>
+  )
+}
+
+function HelpTooltip({
+  label,
+  children,
+  align = 'left',
+}: {
+  label: string
+  children: ReactNode
+  align?: 'left' | 'right'
+}) {
+  return (
+    <span
+      aria-label={label}
+      className="group/help-tooltip relative inline-flex"
+    >
+      {children}
+      <span
+        role="tooltip"
+        className={`pointer-events-none invisible absolute top-[calc(100%+8px)] z-[1200] w-72 border border-edge/25 bg-pit px-3 py-2 font-mono text-[11px] normal-case leading-4 tracking-normal text-fg-2 opacity-0 shadow-terminal-popover transition group-hover/help-tooltip:visible group-hover/help-tooltip:opacity-100 group-focus-within/help-tooltip:visible group-focus-within/help-tooltip:opacity-100 ${
+          align === 'right' ? 'right-0' : 'left-0'
+        }`}
+      >
+        {label}
+      </span>
+    </span>
+  )
+}
+
 function RepositoryWebhookPill({ repository }: { repository: GithubRepository }) {
   const status = readWebhookStatus(repository.webhook)
   const message = readWebhookMessage(repository.webhook)
@@ -868,6 +1597,21 @@ function readWebhookMessage(value: unknown) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null
   const message = (value as Record<string, unknown>).message
   return typeof message === 'string' && message.trim() ? message.trim() : null
+}
+
+function providerAppStatusKind(status: string): 'ok' | 'warn' | 'info' | 'idle' {
+  if (status === 'ready') return 'ok'
+  if (status === 'pending_approval') return 'info'
+  if (status === 'needs_secret' || status === 'needs_reconnect') return 'warn'
+  return 'idle'
+}
+
+function parseScopesDraft(value: string) {
+  return Array.from(new Set(value.split(/[,\s]+/).map((entry) => entry.trim()).filter(Boolean)))
+}
+
+function optionLabel(options: PachSelectOption[], value: string) {
+  return options.find((option) => option.value === value)?.label ?? value.replace(/_/g, ' ')
 }
 
 function formatDate(value: number | null | undefined) {

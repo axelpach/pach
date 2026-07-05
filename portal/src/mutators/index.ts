@@ -598,6 +598,108 @@ export const mutators = {
     },
   },
 
+  mkt_publication_consumers: {
+    async create(tx: Tx, args: any) {
+      const now = Date.now()
+      await tx.mutate.mkt_publication_consumers.insert({ kind: 'blog', status: 'active', metadata: {}, ...args, createdAt: now, updatedAt: now })
+    },
+    async update(tx: Tx, args: any) {
+      const { id, ...updates } = args
+      await tx.mutate.mkt_publication_consumers.update({ id, ...updates, updatedAt: Date.now() })
+    },
+    async delete(tx: Tx, args: { id: string }) {
+      await tx.mutate.mkt_publication_consumers.delete({ id: args.id })
+    },
+  },
+
+  mkt_content_outputs: {
+    async create(tx: Tx, args: any) {
+      const now = Date.now()
+      await tx.mutate.mkt_content_outputs.insert({ channel: 'blog', status: 'draft', metadata: {}, ...args, createdAt: now, updatedAt: now })
+    },
+    async update(tx: Tx, args: any) {
+      const { id, ...updates } = args
+      await tx.mutate.mkt_content_outputs.update({ id, ...updates, updatedAt: Date.now() })
+    },
+    async delete(tx: Tx, args: { id: string }) {
+      await tx.mutate.mkt_content_outputs.delete({ id: args.id })
+    },
+  },
+
+  social_connections: {
+    async update(tx: Tx, args: any) {
+      const { id, ...updates } = args
+      await tx.mutate.social_connections.update({ id, ...updates, updatedAt: Date.now() })
+    },
+    async delete(tx: Tx, args: { id: string }) {
+      await tx.mutate.social_connections.delete({ id: args.id })
+    },
+  },
+
+  social_channels: {
+    async create(tx: Tx, args: any) {
+      const now = Date.now()
+      await tx.mutate.social_channels.insert({ provider: 'linkedin', kind: 'organization', status: 'active', metadata: {}, ...args, createdAt: now, updatedAt: now })
+    },
+    async update(tx: Tx, args: any) {
+      const { id, ...updates } = args
+      await tx.mutate.social_channels.update({ id, ...updates, updatedAt: Date.now() })
+    },
+    async delete(tx: Tx, args: { id: string }) {
+      await tx.mutate.social_channels.delete({ id: args.id })
+    },
+  },
+
+  social_channel_connections: {
+    async create(tx: Tx, args: any) {
+      const now = Date.now()
+      await tx.mutate.social_channel_connections.insert({ capabilities: [], status: 'active', metadata: {}, ...args, createdAt: now, updatedAt: now })
+    },
+    async update(tx: Tx, args: any) {
+      const { id, ...updates } = args
+      await tx.mutate.social_channel_connections.update({ id, ...updates, updatedAt: Date.now() })
+    },
+    async delete(tx: Tx, args: { id: string }) {
+      await tx.mutate.social_channel_connections.delete({ id: args.id })
+    },
+  },
+
+  social_posts: {
+    async create(tx: Tx, args: any) {
+      const now = Date.now()
+      await tx.mutate.social_posts.insert({ caption: '', status: 'draft', metadata: {}, ...args, createdAt: now, updatedAt: now })
+    },
+    async update(tx: Tx, args: any) {
+      const { id, ...updates } = args
+      await tx.mutate.social_posts.update({ id, ...updates, updatedAt: Date.now() })
+    },
+    async delete(tx: Tx, args: { id: string }) {
+      await tx.mutate.social_posts.delete({ id: args.id })
+    },
+  },
+
+  social_post_targets: {
+    async create(tx: Tx, args: any) {
+      const now = Date.now()
+      await tx.mutate.social_post_targets.insert({
+        status: 'draft',
+        scheduledTimezone: 'America/Mexico_City',
+        attemptCount: 0,
+        metadata: {},
+        ...args,
+        createdAt: now,
+        updatedAt: now,
+      })
+    },
+    async update(tx: Tx, args: any) {
+      const { id, ...updates } = args
+      await tx.mutate.social_post_targets.update({ id, ...updates, updatedAt: Date.now() })
+    },
+    async delete(tx: Tx, args: { id: string }) {
+      await tx.mutate.social_post_targets.delete({ id: args.id })
+    },
+  },
+
   pm_teams: {
     async create(tx: Tx, args: { id: string; companyId?: string; key: string; name: string; description?: string; color?: string; icon?: string; position?: number }) {
       const now = Date.now()

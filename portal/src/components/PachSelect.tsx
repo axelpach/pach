@@ -20,7 +20,7 @@ type CommonProps = {
 }
 
 type InlineProps = CommonProps & {
-  variant?: 'inline'
+  variant?: 'inline' | 'field'
   display: string
   triggerClassName?: string
 }
@@ -138,6 +138,8 @@ export function PachSelect(props: Props) {
     open ? setOpen(false) : openMenu()
   }
 
+  const isField = props.variant === 'field'
+
   return (
     <>
       {props.variant === 'button' ? (
@@ -162,11 +164,17 @@ export function PachSelect(props: Props) {
           onClick={handleTriggerClick}
           className={
             props.triggerClassName ??
-            `flex w-full items-center justify-between border px-2 py-1 text-left font-mono text-xs lowercase text-fg-1 transition ${
-              open
-                ? 'border-edge/35 bg-accent-fill/6 shadow-glow-xs'
-                : 'border-transparent hover:border-edge/20 hover:bg-accent-fill/4'
-            }`
+            (isField
+              ? `flex w-full items-center justify-between border bg-rim px-3 py-2 text-left font-mono text-sm lowercase text-fg-1 outline-none transition focus-visible:border-accent focus-visible:shadow-glow-xs ${
+                  open
+                    ? 'border-accent/55 bg-accent-fill/6 shadow-glow-xs'
+                    : 'border-edge/15 hover:border-edge/35 hover:bg-accent-fill/4'
+                }`
+              : `flex w-full items-center justify-between border px-2 py-1 text-left font-mono text-xs lowercase text-fg-1 transition ${
+                  open
+                    ? 'border-edge/35 bg-accent-fill/6 shadow-glow-xs'
+                    : 'border-transparent hover:border-edge/20 hover:bg-accent-fill/4'
+                }`)
           }
         >
           <span className="truncate">{props.display}</span>
@@ -196,7 +204,7 @@ export function PachSelect(props: Props) {
                   onChange(option.value)
                   setOpen(false)
                 }}
-                className={`flex w-full items-center gap-2 px-3 py-1.5 text-left font-mono text-xs lowercase transition ${
+                className={`flex w-full items-center gap-2 px-3 text-left font-mono lowercase transition ${isField ? 'py-2 text-sm' : 'py-1.5 text-xs'} ${
                   isHighlighted
                     ? 'bg-accent-fill/12 text-accent'
                     : isSelected

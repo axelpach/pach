@@ -10,6 +10,7 @@ import {
   mktAudienceSubscriptions,
   mktContentEvents,
   mktContentItems,
+  mktContentOutputs,
   mktCtas,
   mktDistributionRuns,
   mktPublications,
@@ -21,6 +22,7 @@ import {
   extractApiKeyToken,
   validateOrganizationApiKey,
 } from '../lib/organization-api-key.js'
+import type { JWTPayload } from '../lib/auth.js'
 
 const router = Router()
 export const publicMarketingRouter = Router()
@@ -638,8 +640,12 @@ router.post('/content/:id/publish-blog', asyncRoute(async (req, res) => {
     res.status(400).json({ error: 'Content item does not support the blog channel' })
     return
   }
-  const savedRun = await publishBlogContentItem(item.id)
-  res.json({ ok: true, distributionRun: serializeDates(savedRun) })
+  const result = await publishBlogContentItem(item.id, req)
+  res.json({
+    ok: true,
+    distributionRun: serializeDates(result.distributionRun),
+    contentOutput: serializeDates(result.contentOutput),
+  })
 }))
 
 router.post('/distribution-runs/:id/send', asyncRoute(async (req, res) => {
@@ -840,7 +846,7 @@ export async function sendNewsletterRun(runId: string, testOnly: boolean) {
   return { distributionRun: serializeDates(updated), metrics, errors }
 }
 
-export async function publishBlogContentItem(contentItemId: string) {
+export async function publishBlogContentItem(contentItemId: string, req?: Request) {
   const db = getDb()
   const [item] = await db.select().from(mktContentItems).where(eq(mktContentItems.id, contentItemId)).limit(1)
   if (!item) throw new MarketingInputError('Content item not found', 404)
@@ -858,7 +864,7 @@ export async function publishBlogContentItem(contentItemId: string) {
     ))
     .limit(1)
 
-  if (run) return publishBlogRun(run.id)
+  if (run) return publishBlogRun(run.id, req)
 
   const now = new Date()
   const [created] = await db.insert(mktDistributionRuns).values({
@@ -876,10 +882,10 @@ export async function publishBlogContentItem(contentItemId: string) {
     updatedAt: now,
   }).returning()
 
-  return publishBlogRun(created.id)
+  return publishBlogRun(created.id, req)
 }
 
-export async function publishBlogRun(runId: string) {
+export async function publishBlogRun(runId: string, req?: Request) {
   const db = getDb()
   const [run] = await db.select().from(mktDistributionRuns).where(eq(mktDistributionRuns.id, runId)).limit(1)
   if (!run) throw new MarketingInputError('Distribution run not found', 404)
@@ -905,7 +911,45 @@ export async function publishBlogRun(runId: string) {
     .returning()
 
   await db.update(mktContentItems).set({ status: 'ready', updatedAt: now }).where(eq(mktContentItems.id, item.id))
-  return savedRun
+
+  const [organization] = await db.select().from(organizations).where(eq(organizations.id, item.organizationId)).limit(1)
+  const publicUrl = organization ? publicPostUrlForOrganization({ organization, slug: item.slug, req }) : null
+  const [existingOutput] = await db
+    .select()
+    .from(mktContentOutputs)
+    .where(and(
+      eq(mktContentOutputs.organizationId, item.organizationId),
+      eq(mktContentOutputs.contentItemId, item.id),
+      eq(mktContentOutputs.channel, 'blog'),
+    ))
+    .limit(1)
+
+  const outputPayload = {
+    distributionRunId: savedRun.id,
+    publicUrl,
+    canonicalUrl: publicUrl,
+    status: 'published',
+    publishedAt: now,
+    metadata: {
+      ...(existingOutput?.metadata ?? {}),
+      publishedAt: now.toISOString(),
+      source: 'publish-blog',
+    },
+    updatedAt: now,
+  }
+
+  const [contentOutput] = existingOutput
+    ? await db.update(mktContentOutputs).set(outputPayload).where(eq(mktContentOutputs.id, existingOutput.id)).returning()
+    : await db.insert(mktContentOutputs).values({
+      id: crypto.randomUUID(),
+      organizationId: item.organizationId,
+      contentItemId: item.id,
+      channel: 'blog',
+      ...outputPayload,
+      createdAt: now,
+    }).returning()
+
+  return { distributionRun: savedRun, contentOutput }
 }
 
 async function renderNewsletterRun(runId: string) {
@@ -2069,12 +2113,13 @@ async function recordEvent(input: {
   })
 }
 
-function requireOrganizationAccess(req: { user?: { organizationIds?: string[]; canAccessUnscoped?: boolean } }, organizationId: string | null | undefined) {
+function requireOrganizationAccess(req: Request, organizationId: string | null | undefined) {
+  const user = (req as Request & { user?: JWTPayload }).user
   if (!organizationId) {
-    if (req.user?.canAccessUnscoped) return
+    if (user?.canAccessUnscoped) return
     throw new Error('Not authorized')
   }
-  if (!req.user?.organizationIds?.includes(organizationId)) throw new Error('Not authorized')
+  if (!user?.organizationIds?.includes(organizationId)) throw new Error('Not authorized')
 }
 
 function readRequiredString(value: unknown) {
@@ -2111,6 +2156,32 @@ function firstParagraph(markdown: string) {
     .map((line) => line.trim())
     .find((line) => line && !line.startsWith('#') && !line.startsWith(':::') && !line.startsWith('!['))
     ?.slice(0, 280)
+}
+
+function publicPostUrl(req: Request, project: string, slug: string) {
+  const baseUrl =
+    process.env.PUBLIC_MARKETING_BASE_URL ||
+    process.env.PUBLIC_BASE_URL ||
+    `${req.protocol}://${req.get('host')}`
+  return `${baseUrl.replace(/\/+$/, '')}/public/organizations/${encodeURIComponent(project)}/marketing/posts/${encodeURIComponent(slug)}`
+}
+
+function publicPostUrlForOrganization({
+  organization,
+  slug,
+  req,
+}: {
+  organization: typeof organizations.$inferSelect
+  slug: string
+  req?: Request
+}) {
+  if (!organization.project) return null
+  if (req) return publicPostUrl(req, organization.project, slug)
+  const baseUrl =
+    process.env.PUBLIC_MARKETING_BASE_URL ||
+    process.env.PUBLIC_BASE_URL ||
+    publicSiteBase(organization)
+  return `${baseUrl.replace(/\/+$/, '')}/public/organizations/${encodeURIComponent(organization.project)}/marketing/posts/${encodeURIComponent(slug)}`
 }
 
 async function uniqueSlug(input: string, organizationId: string) {

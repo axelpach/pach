@@ -5,6 +5,7 @@ import {
   Edit3,
   ExternalLink,
   Link2,
+  Linkedin,
   Mail,
   Megaphone,
   Plus,
@@ -35,6 +36,10 @@ type AudienceSubscriptionRow = Schema['tables']['mkt_audience_subscriptions']['r
 type DistributionRunRow = Schema['tables']['mkt_distribution_runs']['row']
 type CtaRow = Schema['tables']['mkt_ctas']['row']
 type ContentEventRow = Schema['tables']['mkt_content_events']['row']
+type ContentOutputRow = Schema['tables']['mkt_content_outputs']['row']
+type SocialChannelRow = Schema['tables']['social_channels']['row']
+type SocialPostRow = Schema['tables']['social_posts']['row']
+type SocialPostTargetRow = Schema['tables']['social_post_targets']['row']
 type EmailThemeMode = 'dark' | 'light'
 type EmailRenderWarning = { code: string; message: string; severity: 'info' | 'warning' | 'error' }
 type EmailRenderPreview = { html: string; text: string; warnings: EmailRenderWarning[]; mode?: EmailThemeMode }
@@ -87,8 +92,12 @@ export default function Marketing() {
   const [audienceMembers] = useQuery(z.query.mkt_audience_members.orderBy('updatedAt', 'desc'))
   const [subscriptions] = useQuery(z.query.mkt_audience_subscriptions.orderBy('updatedAt', 'desc'))
   const [distributionRuns] = useQuery(z.query.mkt_distribution_runs.orderBy('updatedAt', 'desc'))
+  const [contentOutputs] = useQuery(z.query.mkt_content_outputs.orderBy('updatedAt', 'desc'))
   const [ctas] = useQuery(z.query.mkt_ctas.orderBy('updatedAt', 'desc'))
   const [events] = useQuery(z.query.mkt_content_events.orderBy('createdAt', 'desc'))
+  const [socialChannels] = useQuery(z.query.social_channels.orderBy('displayName', 'asc'))
+  const [socialPosts] = useQuery(z.query.social_posts.orderBy('updatedAt', 'desc'))
+  const [socialPostTargets] = useQuery(z.query.social_post_targets.orderBy('updatedAt', 'desc'))
 
   const section = sectionFromPath(location.pathname)
   const [organizationId, setOrganizationId] = useState('')
@@ -103,8 +112,12 @@ export default function Marketing() {
   const orgMembers = useMemo(() => byOrganization(audienceMembers, organizationId), [audienceMembers, organizationId])
   const orgSubscriptions = useMemo(() => byOrganization(subscriptions, organizationId), [subscriptions, organizationId])
   const orgRuns = useMemo(() => byOrganization(distributionRuns, organizationId), [distributionRuns, organizationId])
+  const orgContentOutputs = useMemo(() => byOrganization(contentOutputs, organizationId), [contentOutputs, organizationId])
   const orgCtas = useMemo(() => byOrganization(ctas, organizationId), [ctas, organizationId])
   const orgEvents = useMemo(() => byOrganization(events, organizationId), [events, organizationId])
+  const orgSocialChannels = useMemo(() => byOrganization(socialChannels, organizationId), [organizationId, socialChannels])
+  const orgSocialPosts = useMemo(() => byOrganization(socialPosts, organizationId), [organizationId, socialPosts])
+  const orgSocialPostTargets = useMemo(() => byOrganization(socialPostTargets, organizationId), [organizationId, socialPostTargets])
   const selectedContent = orgContentItems.find((item) => item.id === selectedContentId) ?? null
   const selectedPublication = orgPublications.find((item) => item.id === selectedPublicationId) ?? orgPublications[0] ?? null
   const contentItemIdFromUrl = new URLSearchParams(location.search).get('content')
@@ -271,6 +284,10 @@ export default function Marketing() {
               contentItems={orgContentItems}
               ctas={orgCtas}
               runs={orgRuns}
+              contentOutputs={orgContentOutputs}
+              socialChannels={orgSocialChannels}
+              socialPosts={orgSocialPosts}
+              socialPostTargets={orgSocialPostTargets}
               selectedContent={selectedContent}
               onSelectContent={setSelectedContentId}
               onFlash={flash}
@@ -330,6 +347,10 @@ function ContentSection({
   contentItems,
   ctas,
   runs,
+  contentOutputs,
+  socialChannels,
+  socialPosts,
+  socialPostTargets,
   selectedContent,
   onSelectContent,
   onFlash,
@@ -338,6 +359,10 @@ function ContentSection({
   contentItems: ContentItemRow[]
   ctas: CtaRow[]
   runs: DistributionRunRow[]
+  contentOutputs: ContentOutputRow[]
+  socialChannels: SocialChannelRow[]
+  socialPosts: SocialPostRow[]
+  socialPostTargets: SocialPostTargetRow[]
   selectedContent: ContentItemRow | null
   onSelectContent: (id: string) => void
   onFlash: (message: string) => void
@@ -346,6 +371,7 @@ function ContentSection({
   const [blogScheduleTimezone, setBlogScheduleTimezone] = useState(DEFAULT_MARKETING_TIMEZONE)
   const [blogScheduleDraft, setBlogScheduleDraft] = useState('')
   const [blogScheduleError, setBlogScheduleError] = useState('')
+  const [linkedinModalOpen, setLinkedinModalOpen] = useState(false)
 
   const ctaOptions = useMemo<PachSelectOption[]>(
     () => [{ value: '', label: 'no cta' }, ...ctas.map((cta) => ({ value: cta.id, label: cta.label }))],
@@ -362,6 +388,10 @@ function ContentSection({
     setBlogScheduleDraft(dateTimeLocalValue(selectedBlogRun?.scheduledAt, timezone))
     setBlogScheduleError('')
   }, [selectedBlogRun?.id, selectedBlogRun?.scheduledAt, selectedBlogRun?.scheduledTimezone])
+  const linkedinChannels = useMemo(
+    () => socialChannels.filter((channel) => channel.provider === 'linkedin' && channel.status === 'active'),
+    [socialChannels],
+  )
 
   async function snapshotContent(item: ContentItemRow) {
     const response = await authFetch(`${config.apiUrl}/marketing/content/${item.id}/snapshot`, {
@@ -442,6 +472,48 @@ function ContentSection({
     onFlash('blog schedule cleared')
   }
 
+  async function scheduleLinkedInPromotion(payload: { channelId: string; caption: string; scheduledAt: number; timezone: string }) {
+    if (!selectedContent) return
+    const output = blogOutputForContent(selectedContent, contentOutputs)
+    if (!output || !['published', 'scheduled'].includes(output.status) || !output.publicUrl) {
+      onFlash('publish or schedule the blog first')
+      return
+    }
+    if (output.status === 'scheduled' && output.scheduledAt && payload.scheduledAt <= output.scheduledAt) {
+      onFlash('linkedin must be scheduled after blog')
+      return
+    }
+
+    const socialPostId = crypto.randomUUID()
+    await z.mutate.social_posts.create({
+      id: socialPostId,
+      organizationId: selectedContent.organizationId,
+      contentItemId: selectedContent.id,
+      contentOutputId: output.id,
+      title: selectedContent.title,
+      caption: payload.caption,
+      linkUrl: output.publicUrl,
+      status: 'scheduled',
+      metadata: {
+        source: 'marketing-content',
+      },
+    })
+    await z.mutate.social_post_targets.create({
+      id: crypto.randomUUID(),
+      organizationId: selectedContent.organizationId,
+      socialPostId,
+      channelId: payload.channelId,
+      status: 'scheduled',
+      scheduledAt: payload.scheduledAt,
+      scheduledTimezone: payload.timezone,
+      metadata: {
+        blockedUntilOutputPublished: output.status === 'scheduled',
+      },
+    })
+    setLinkedinModalOpen(false)
+    onFlash('linkedin promotion scheduled')
+  }
+
   return (
     <>
       <Panel title="content">
@@ -497,6 +569,36 @@ function ContentSection({
       {selectedContent ? (
         <MarketingAppFrame title={selectedContent.title} eyebrow="content item" onClose={() => onSelectContent('')}>
           <div className="space-y-3">
+            {(() => {
+              const output = blogOutputForContent(selectedContent, contentOutputs)
+              const linkedInTargets = socialTargetsForContent(selectedContent, socialPosts, socialPostTargets)
+              return (
+                <div className="grid gap-2 border border-edge/12 bg-rim px-3 py-3 md:grid-cols-2">
+                  <div>
+                    <div className="font-mono text-[10px] uppercase tracking-label text-fg-4">blog output</div>
+                    <div className="mt-1 flex items-center gap-2">
+                      <StatusPill kind={output?.status === 'published' ? 'ok' : output?.status === 'scheduled' ? 'info' : 'idle'}>
+                        {output?.status ?? 'missing'}
+                      </StatusPill>
+                      {output?.publicUrl ? (
+                        <a href={output.publicUrl} target="_blank" rel="noreferrer" className="truncate font-mono text-[11px] text-accent hover:text-fg-1">
+                          open
+                        </a>
+                      ) : null}
+                    </div>
+                  </div>
+                  <div>
+                    <div className="font-mono text-[10px] uppercase tracking-label text-fg-4">linkedin</div>
+                    <div className="mt-1 flex items-center gap-2">
+                      <StatusPill kind={linkedInTargets.length ? 'info' : 'idle'}>
+                        {linkedInTargets.length ? `${linkedInTargets.length} target${linkedInTargets.length === 1 ? '' : 's'}` : 'not scheduled'}
+                      </StatusPill>
+                    </div>
+                  </div>
+                </div>
+              )
+            })()}
+
             <CommitInput
               label="title"
               value={selectedContent.title}
@@ -582,6 +684,13 @@ function ContentSection({
               <Button kind="primary" icon={<Rss className="h-3.5 w-3.5" />} onClick={() => void publishBlog(selectedContent)} disabled={publishing || !selectedContent.supportedChannels.includes('blog')}>
                 publish blog
               </Button>
+              <Button
+                icon={<Linkedin className="h-3.5 w-3.5" />}
+                onClick={() => setLinkedinModalOpen(true)}
+                disabled={!blogOutputForContent(selectedContent, contentOutputs)?.publicUrl || linkedinChannels.length === 0}
+              >
+                promote
+              </Button>
             </div>
             <div className="border border-edge/12 bg-rim px-3 py-2 font-mono text-[11px] text-fg-3">
               /public/organizations/:project/marketing/posts/{selectedContent.slug}
@@ -589,7 +698,143 @@ function ContentSection({
           </div>
         </MarketingAppFrame>
       ) : null}
+
+      {selectedContent && linkedinModalOpen ? (
+        <LinkedInPromotionModal
+          item={selectedContent}
+          output={blogOutputForContent(selectedContent, contentOutputs)}
+          channels={linkedinChannels}
+          onClose={() => setLinkedinModalOpen(false)}
+          onSubmit={(payload) => void scheduleLinkedInPromotion(payload)}
+        />
+      ) : null}
     </>
+  )
+}
+
+function LinkedInPromotionModal({
+  item,
+  output,
+  channels,
+  onClose,
+  onSubmit,
+}: {
+  item: ContentItemRow
+  output: ContentOutputRow | null
+  channels: SocialChannelRow[]
+  onClose: () => void
+  onSubmit: (payload: { channelId: string; caption: string; scheduledAt: number; timezone: string }) => void
+}) {
+  const [channelId, setChannelId] = useState(channels[0]?.id ?? '')
+  const [caption, setCaption] = useState(() => defaultLinkedInCaption(item))
+  const [scheduledAt, setScheduledAt] = useState(() => toDatetimeLocalValue(defaultSocialScheduleDate(output)))
+  const [timezone, setTimezone] = useState(DEFAULT_MARKETING_TIMEZONE)
+  const scheduledAtMs = Date.parse(scheduledAt)
+  const outputReady = output?.status === 'published' || output?.status === 'scheduled'
+  const afterOutput = !output?.scheduledAt || Number.isNaN(scheduledAtMs) || scheduledAtMs > output.scheduledAt
+  const canSubmit = Boolean(channelId && caption.trim() && outputReady && output?.publicUrl && !Number.isNaN(scheduledAtMs) && afterOutput)
+
+  return createPortal(
+    <div
+      className="fixed inset-0 z-50 flex items-start justify-center bg-overlay/70 px-4 pt-[8vh] backdrop-blur-sm"
+      onClick={onClose}
+    >
+      <div
+        className="w-full max-w-2xl border border-edge/20 bg-pit-2 shadow-terminal-overlay"
+        onClick={(event) => event.stopPropagation()}
+      >
+        <div className="flex items-center justify-between border-b border-edge/12 px-5 py-3">
+          <div className="flex items-center gap-2 font-mono text-xs">
+            <span className="inline-flex items-center gap-1.5 border border-edge/25 bg-accent-fill/5 px-2 py-0.5 font-mono text-[10px] uppercase tracking-label text-accent">
+              marketing
+            </span>
+            <span className="text-fg-4">›</span>
+            <span className="text-fg-2 lowercase">linkedin</span>
+          </div>
+          <button
+            onClick={onClose}
+            className="font-mono text-xs uppercase tracking-label text-fg-4 transition hover:text-fg-1"
+            title="close"
+          >
+            [esc]
+          </button>
+        </div>
+
+        <div className="border-b border-edge/12 px-5 py-4">
+          <h2 className="font-mono text-2xl font-bold lowercase text-fg-1">schedule promotion</h2>
+        </div>
+
+        <div className="grid gap-4 px-5 py-5 lg:grid-cols-[1fr_280px]">
+          <div className="space-y-4">
+            <div>
+              <FieldLabel>post to</FieldLabel>
+              <PachSelect
+                value={channelId}
+                onChange={setChannelId}
+                options={channels.map((channel) => ({ value: channel.id, label: channel.displayName }))}
+                display={channels.find((channel) => channel.id === channelId)?.displayName ?? 'linkedin channel'}
+              />
+            </div>
+
+            <label className="block">
+              <FieldLabel>caption</FieldLabel>
+              <TermTextarea rows={7} value={caption} onChange={(event) => setCaption(event.target.value)} />
+            </label>
+
+            <div className="grid gap-3 md:grid-cols-2">
+              <label className="block">
+                <FieldLabel>date</FieldLabel>
+                <TermInput type="datetime-local" value={scheduledAt} onChange={(event) => setScheduledAt(event.target.value)} />
+              </label>
+              <div>
+                <FieldLabel>timezone</FieldLabel>
+                <PachSelect
+                  value={timezone}
+                  onChange={setTimezone}
+                  options={MARKETING_TIMEZONE_OPTIONS}
+                  display={MARKETING_TIMEZONE_OPTIONS.find((entry) => entry.value === timezone)?.label ?? 'timezone'}
+                />
+              </div>
+            </div>
+
+            {!afterOutput ? (
+              <div className="border border-amber/25 bg-amber/5 px-3 py-2 font-mono text-xs text-amber">
+                linkedin must run after the blog output
+              </div>
+            ) : null}
+          </div>
+
+          <div className="border border-edge/12 bg-rim p-3">
+            <div className="flex items-center gap-2 font-mono text-xs text-fg-1">
+              <Linkedin className="h-4 w-4 text-accent" />
+              {channels.find((channel) => channel.id === channelId)?.displayName ?? 'LinkedIn'}
+            </div>
+            <div className="mt-3 whitespace-pre-wrap font-sans text-sm leading-5 text-fg-2">{caption}</div>
+            <div className="mt-4 overflow-hidden border border-edge/12 bg-pit">
+              <div className="aspect-[1.91/1] bg-accent-fill/8" />
+              <div className="space-y-1 px-3 py-3">
+                <div className="line-clamp-2 font-mono text-xs text-fg-1">{item.title}</div>
+                <div className="line-clamp-2 text-xs text-fg-3">{item.excerpt || firstParagraphText(item.body) || '-'}</div>
+                <div className="truncate font-mono text-[10px] uppercase tracking-label text-fg-4">{output?.publicUrl ?? 'blog output'}</div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div className="flex items-center justify-end gap-2 border-t border-edge/12 px-5 py-3">
+          <Button onClick={onClose}>cancel</Button>
+          <Button
+            kind="primary"
+            icon={<Linkedin className="h-3.5 w-3.5" />}
+            onClick={() => onSubmit({ channelId, caption: caption.trim(), scheduledAt: scheduledAtMs, timezone })}
+            disabled={!canSubmit}
+          >
+            schedule
+          </Button>
+        </div>
+      </div>
+    </div>,
+    document.body,
   )
 }
 
@@ -2546,6 +2791,52 @@ function sectionFromPath(pathname: string): MarketingSection | null {
 function broadcastRunIdFromPath(pathname: string) {
   const parts = pathname.split('/')
   return parts[2] === 'broadcasts' && parts[3] ? decodeURIComponent(parts[3]) : ''
+}
+
+function blogOutputForContent(item: ContentItemRow, outputs: ContentOutputRow[]) {
+  return outputs.find((output) => output.contentItemId === item.id && output.channel === 'blog') ?? null
+}
+
+function socialTargetsForContent(item: ContentItemRow, posts: SocialPostRow[], targets: SocialPostTargetRow[]) {
+  const postIds = new Set(posts.filter((post) => post.contentItemId === item.id).map((post) => post.id))
+  return targets.filter((target) => postIds.has(target.socialPostId))
+}
+
+function defaultLinkedInCaption(item: ContentItemRow) {
+  const excerpt = item.excerpt || firstParagraphText(item.body)
+  return excerpt ? `${item.title}\n\n${excerpt}` : item.title
+}
+
+function firstParagraphText(markdown: string) {
+  return markdown
+    .split('\n')
+    .map((line) => line.trim())
+    .find((line) => line && !line.startsWith('#') && !line.startsWith(':::') && !line.startsWith('!['))
+    ?.slice(0, 280)
+}
+
+function defaultSocialScheduleDate(output: ContentOutputRow | null) {
+  const base = output?.scheduledAt && output.scheduledAt > Date.now()
+    ? new Date(output.scheduledAt + 60 * 60 * 1000)
+    : new Date(Date.now() + 24 * 60 * 60 * 1000)
+  base.setMinutes(0, 0, 0)
+  if (!output?.scheduledAt || output.scheduledAt <= Date.now()) base.setHours(9, 0, 0, 0)
+  return base
+}
+
+function toDatetimeLocalValue(date: Date) {
+  const pad = (value: number) => String(value).padStart(2, '0')
+  return [
+    date.getFullYear(),
+    '-',
+    pad(date.getMonth() + 1),
+    '-',
+    pad(date.getDate()),
+    'T',
+    pad(date.getHours()),
+    ':',
+    pad(date.getMinutes()),
+  ].join('')
 }
 
 function byOrganization<T extends { organizationId: string }>(rows: T[], organizationId: string) {

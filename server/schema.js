@@ -628,6 +628,130 @@ const mktContentEvents = table('mkt_content_events')
     createdAt: number().from('created_at'),
 })
     .primaryKey('id');
+const mktPublicationConsumers = table('mkt_publication_consumers')
+    .columns({
+    id: string(),
+    organizationId: string().from('organization_id'),
+    publicationId: string().optional().from('publication_id'),
+    kind: string(),
+    name: string(),
+    slug: string(),
+    baseUrl: string().optional().from('base_url'),
+    status: string(),
+    metadata: json(),
+    createdAt: number().from('created_at'),
+    updatedAt: number().from('updated_at'),
+})
+    .primaryKey('id');
+const mktContentOutputs = table('mkt_content_outputs')
+    .columns({
+    id: string(),
+    organizationId: string().from('organization_id'),
+    contentItemId: string().from('content_item_id'),
+    consumerId: string().optional().from('consumer_id'),
+    distributionRunId: string().optional().from('distribution_run_id'),
+    channel: string(),
+    publicUrl: string().optional().from('public_url'),
+    canonicalUrl: string().optional().from('canonical_url'),
+    status: string(),
+    scheduledAt: number().optional().from('scheduled_at'),
+    publishedAt: number().optional().from('published_at'),
+    metadata: json(),
+    createdAt: number().from('created_at'),
+    updatedAt: number().from('updated_at'),
+})
+    .primaryKey('id');
+const socialConnections = table('social_connections')
+    .columns({
+    id: string(),
+    organizationId: string().from('organization_id'),
+    providerAppId: string().optional().from('provider_app_id'),
+    connectedByUserId: string().optional().from('connected_by_user_id'),
+    provider: string(),
+    providerAccountId: string().optional().from('provider_account_id'),
+    providerAccountName: string().optional().from('provider_account_name'),
+    providerAccountUrl: string().optional().from('provider_account_url'),
+    scopes: json(),
+    credentialKind: string().from('credential_kind'),
+    tokenExpiresAt: number().optional().from('token_expires_at'),
+    refreshTokenExpiresAt: number().optional().from('refresh_token_expires_at'),
+    status: string(),
+    statusMessage: string().optional().from('status_message'),
+    lastUsedAt: number().optional().from('last_used_at'),
+    lastRefreshedAt: number().optional().from('last_refreshed_at'),
+    metadata: json(),
+    createdAt: number().from('created_at'),
+    updatedAt: number().from('updated_at'),
+})
+    .primaryKey('id');
+const socialChannels = table('social_channels')
+    .columns({
+    id: string(),
+    organizationId: string().from('organization_id'),
+    provider: string(),
+    kind: string(),
+    externalId: string().from('external_id'),
+    displayName: string().from('display_name'),
+    handle: string().optional(),
+    url: string().optional(),
+    status: string(),
+    metadata: json(),
+    createdAt: number().from('created_at'),
+    updatedAt: number().from('updated_at'),
+})
+    .primaryKey('id');
+const socialChannelConnections = table('social_channel_connections')
+    .columns({
+    id: string(),
+    organizationId: string().from('organization_id'),
+    channelId: string().from('channel_id'),
+    connectionId: string().from('connection_id'),
+    capabilities: json(),
+    status: string(),
+    statusMessage: string().optional().from('status_message'),
+    lastCheckedAt: number().optional().from('last_checked_at'),
+    metadata: json(),
+    createdAt: number().from('created_at'),
+    updatedAt: number().from('updated_at'),
+})
+    .primaryKey('id');
+const socialPosts = table('social_posts')
+    .columns({
+    id: string(),
+    organizationId: string().from('organization_id'),
+    contentItemId: string().optional().from('content_item_id'),
+    contentOutputId: string().optional().from('content_output_id'),
+    title: string().optional(),
+    caption: string(),
+    linkUrl: string().optional().from('link_url'),
+    thumbnailUrl: string().optional().from('thumbnail_url'),
+    status: string(),
+    metadata: json(),
+    createdAt: number().from('created_at'),
+    updatedAt: number().from('updated_at'),
+})
+    .primaryKey('id');
+const socialPostTargets = table('social_post_targets')
+    .columns({
+    id: string(),
+    organizationId: string().from('organization_id'),
+    socialPostId: string().from('social_post_id'),
+    channelId: string().from('channel_id'),
+    connectionId: string().optional().from('connection_id'),
+    status: string(),
+    scheduledAt: number().optional().from('scheduled_at'),
+    scheduledTimezone: string().from('scheduled_timezone'),
+    publishedAt: number().optional().from('published_at'),
+    providerPostId: string().optional().from('provider_post_id'),
+    providerPostUrl: string().optional().from('provider_post_url'),
+    error: string().optional(),
+    attemptCount: number().from('attempt_count'),
+    lastAttemptAt: number().optional().from('last_attempt_at'),
+    metadata: json(),
+    createdAt: number().from('created_at'),
+    updatedAt: number().from('updated_at'),
+})
+    .primaryKey('id');
 const pmTeams = table('pm_teams')
     .columns({
     id: string(),
@@ -1114,6 +1238,13 @@ export const schema = createSchema({
         mktSegmentMembers,
         mktDistributionRuns,
         mktContentEvents,
+        mktPublicationConsumers,
+        mktContentOutputs,
+        socialConnections,
+        socialChannels,
+        socialChannelConnections,
+        socialPosts,
+        socialPostTargets,
         pmTeams,
         pmProjects,
         pmStatuses,
@@ -1205,6 +1336,13 @@ export const permissions = definePermissions(schema, () => {
         mkt_segment_members: organizationScoped(),
         mkt_distribution_runs: organizationScoped(),
         mkt_content_events: organizationScoped(),
+        mkt_publication_consumers: organizationScoped(),
+        mkt_content_outputs: organizationScoped(),
+        social_connections: organizationScoped(),
+        social_channels: organizationScoped(),
+        social_channel_connections: organizationScoped(),
+        social_posts: organizationScoped(),
+        social_post_targets: organizationScoped(),
         pm_teams: authenticatedReadOnly,
         pm_projects: organizationScoped('companyId'),
         pm_statuses: authenticatedReadOnly,

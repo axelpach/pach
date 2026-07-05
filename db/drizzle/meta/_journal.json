@@ -330,6 +330,20 @@
       "when": 1782651600000,
       "tag": "0046_github_connections",
       "breakpoints": true
+    },
+    {
+      "idx": 47,
+      "version": "7",
+      "when": 1782655200000,
+      "tag": "0047_social_publishing",
+      "breakpoints": true
+    },
+    {
+      "idx": 48,
+      "version": "7",
+      "when": 1782658800000,
+      "tag": "0048_social_provider_apps",
+      "breakpoints": true
     }
   ]
 }
