@@ -815,6 +815,12 @@ function SocialSection({
 }) {
   const linkedinConnections = connections.filter((connection) => connection.provider === 'linkedin')
   const linkedinChannels = channels.filter((channel) => channel.provider === 'linkedin')
+  const linkedinProviderApps = providerApps.filter((providerApp) => providerApp.provider === 'linkedin')
+  const linkedinProviderApp = pickLinkedInOAuthProviderApp(linkedinProviderApps)
+  const firstLinkedinProviderApp = linkedinProviderApps[0] ?? null
+  const activeLinkedinConnections = linkedinConnections.filter((connection) => connection.status === 'active')
+  const linkedinRedirectUri = firstLinkedinProviderApp?.redirectUri ?? defaults?.linkedinRedirectUri ?? ''
+  const linkedinRedirectUriLabel = firstLinkedinProviderApp ? 'active redirect uri' : 'default redirect uri'
   const connectionsById = new Map(linkedinConnections.map((connection) => [connection.id, connection]))
   const channelLinksByChannelId = new Map<string, SocialChannelConnectionRow[]>()
 
@@ -824,6 +830,24 @@ function SocialSection({
     channelLinksByChannelId.set(link.channelId, current)
   }
 
+  const readyLinkedinChannels = linkedinChannels.filter((channel) => (
+    (channelLinksByChannelId.get(channel.id) ?? []).some((link) => link.status === 'active')
+  ))
+  const linkedinSetup = linkedinSetupState({
+    providerApps: linkedinProviderApps,
+    usableProviderApp: linkedinProviderApp,
+    activeConnections: activeLinkedinConnections,
+    readyChannels: readyLinkedinChannels,
+  })
+  const primaryAction = linkedinPrimaryAction({
+    setup: linkedinSetup,
+    firstProviderApp: firstLinkedinProviderApp,
+    onCreateProviderApp,
+    onEditProviderApp,
+    onConnect,
+    onCreateChannel,
+  })
+
   return (
     <div className="space-y-4">
       <div className="flex flex-col gap-3 border-b border-edge/15 pb-3 md:flex-row md:items-end md:justify-between">
@@ -831,27 +855,73 @@ function SocialSection({
           <div className="font-mono text-[10px] uppercase tracking-label text-fg-4">integrations</div>
           <h1 className="mt-1 font-mono text-2xl font-bold lowercase text-fg-1">social</h1>
         </div>
-        <div className="flex flex-wrap items-center gap-2">
-          <HelpTooltip label={SOCIAL_HELP.developerApp}>
-            <Button icon={<KeyRound className="h-3.5 w-3.5" />} onClick={onCreateProviderApp} disabled={!organization}>
-              developer app
-            </Button>
-          </HelpTooltip>
-          <HelpTooltip label={SOCIAL_HELP.linkedinPage}>
-            <Button icon={<Plus className="h-3.5 w-3.5" />} onClick={onCreateChannel} disabled={!organization}>
-              linkedin page
-            </Button>
-          </HelpTooltip>
-          <HelpTooltip label={SOCIAL_HELP.connectLinkedin} align="right">
-            <Button kind="primary" icon={<Linkedin className="h-3.5 w-3.5" />} onClick={onConnect} disabled={!organization}>
-              connect linkedin
-            </Button>
-          </HelpTooltip>
-        </div>
       </div>
 
-      <Panel title={<PanelTitleWithHelp label="linkedin developer apps" help={SOCIAL_HELP.developerApp} />}>
-        {providerApps.length > 0 ? (
+      <Panel className="border-accent/25 bg-accent-fill/3">
+        <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+          <div className="min-w-0 flex-1">
+            <div className="flex flex-wrap items-center gap-2">
+              <div className="inline-flex h-8 w-8 items-center justify-center border border-accent/35 bg-accent-fill/8 text-accent">
+                <Linkedin className="h-4 w-4" />
+              </div>
+              <div>
+                <div className="font-mono text-base font-bold lowercase text-fg-1">linkedin</div>
+                <div className="mt-0.5 font-mono text-[10px] uppercase tracking-label text-fg-4">organization publishing</div>
+              </div>
+              <StatusPill kind={linkedinSetup.kind}>{linkedinSetup.label}</StatusPill>
+            </div>
+
+            <div className="mt-4 overflow-hidden border border-edge/15 bg-rim divide-y divide-edge/12 md:grid md:grid-cols-3 md:divide-x md:divide-y-0">
+              <LinkedInSetupStep
+                label="developer app"
+                value={firstLinkedinProviderApp ? firstLinkedinProviderApp.status.replace(/_/g, ' ') : 'not configured'}
+                done={Boolean(linkedinProviderApp)}
+                warning={Boolean(firstLinkedinProviderApp && !linkedinProviderApp)}
+                help={SOCIAL_HELP.developerApp}
+              />
+              <LinkedInSetupStep
+                label="account connection"
+                value={activeLinkedinConnections.length ? `${activeLinkedinConnections.length} active` : 'not connected'}
+                done={activeLinkedinConnections.length > 0}
+                help={SOCIAL_HELP.connectLinkedin}
+              />
+              <LinkedInSetupStep
+                label="destinations"
+                value={readyLinkedinChannels.length ? `${readyLinkedinChannels.length} ready` : linkedinChannels.length ? 'needs connection' : 'none'}
+                done={readyLinkedinChannels.length > 0}
+                warning={linkedinChannels.length > 0 && readyLinkedinChannels.length === 0}
+                help={SOCIAL_HELP.linkedinPage}
+              />
+            </div>
+          </div>
+
+          <div className="flex shrink-0 flex-wrap gap-2 lg:justify-end">
+            <Button
+              kind="primary"
+              icon={primaryAction.icon}
+              onClick={primaryAction.onClick}
+              disabled={!organization}
+            >
+              {primaryAction.label}
+            </Button>
+            {linkedinSetup.stage === 'ready' ? (
+              <Button icon={<Linkedin className="h-3.5 w-3.5" />} onClick={onConnect} disabled={!organization}>
+                connect another
+              </Button>
+            ) : null}
+          </div>
+        </div>
+      </Panel>
+
+      <Panel
+        title={<PanelTitleWithHelp label="linkedin developer apps" help={SOCIAL_HELP.developerApp} />}
+        right={
+          <Button className="px-2 py-1 text-[10px]" icon={<Plus className="h-3 w-3" />} onClick={onCreateProviderApp} disabled={!organization}>
+            add
+          </Button>
+        }
+      >
+        {linkedinProviderApps.length > 0 ? (
           <div className="overflow-auto">
             <table className="w-full min-w-[980px] text-left font-mono text-xs">
               <thead className="text-[10px] uppercase tracking-label text-fg-4">
@@ -866,7 +936,7 @@ function SocialSection({
                 </tr>
               </thead>
               <tbody>
-                {providerApps.map((providerApp) => (
+                {linkedinProviderApps.map((providerApp) => (
                   <tr key={providerApp.id} className="border-b border-edge/8 text-fg-2">
                     <td className="max-w-[180px] truncate py-2.5 pr-3 text-fg-1">{providerApp.name}</td>
                     <td className="py-2.5 pr-3 text-fg-4">{providerApp.purpose.replace(/_/g, ' ')}</td>
@@ -902,18 +972,25 @@ function SocialSection({
             {loadingProviderApps ? 'loading linkedin apps' : 'no linkedin developer apps'}
           </div>
         )}
-        {defaults?.linkedinRedirectUri ? (
+        {linkedinRedirectUri ? (
           <div className="mt-3 flex flex-col gap-2 border border-edge/12 bg-rim px-3 py-2 font-mono text-xs text-fg-3 md:flex-row md:items-center">
-            <span className="text-fg-4">redirect uri</span>
-            <code className="min-w-0 flex-1 truncate text-fg-1">{defaults.linkedinRedirectUri}</code>
-            <Button className="px-2 py-1 text-[10px]" icon={<Copy className="h-3 w-3" />} onClick={() => void navigator.clipboard.writeText(defaults.linkedinRedirectUri)}>
+            <span className="text-fg-4">{linkedinRedirectUriLabel}</span>
+            <code className="min-w-0 flex-1 truncate text-fg-1">{linkedinRedirectUri}</code>
+            <Button className="px-2 py-1 text-[10px]" icon={<Copy className="h-3 w-3" />} onClick={() => void navigator.clipboard.writeText(linkedinRedirectUri)}>
               copy
             </Button>
           </div>
         ) : null}
       </Panel>
 
-      <Panel title={<PanelTitleWithHelp label="linkedin connections" help={SOCIAL_HELP.connectLinkedin} />}>
+      <Panel
+        title={<PanelTitleWithHelp label="linkedin connections" help={SOCIAL_HELP.connectLinkedin} />}
+        right={
+          <Button className="px-2 py-1 text-[10px]" icon={<Linkedin className="h-3 w-3" />} onClick={onConnect} disabled={!organization || !linkedinProviderApp}>
+            connect
+          </Button>
+        }
+      >
         {linkedinConnections.length > 0 ? (
           <div className="grid gap-2 md:grid-cols-2">
             {linkedinConnections.map((connection) => (
@@ -950,7 +1027,14 @@ function SocialSection({
         )}
       </Panel>
 
-      <Panel title={<PanelTitleWithHelp label="linkedin channels" help={SOCIAL_HELP.linkedinPage} />}>
+      <Panel
+        title={<PanelTitleWithHelp label="linkedin channels" help={SOCIAL_HELP.linkedinPage} />}
+        right={
+          <Button className="px-2 py-1 text-[10px]" icon={<Plus className="h-3 w-3" />} onClick={onCreateChannel} disabled={!organization}>
+            add
+          </Button>
+        }
+      >
         <div className="overflow-auto">
           <table className="w-full min-w-[860px] text-left font-mono text-xs">
             <thead className="text-[10px] uppercase tracking-label text-fg-4">
@@ -1015,6 +1099,100 @@ function SocialSection({
       </Panel>
     </div>
   )
+}
+
+type LinkedInSetupStage = 'app' | 'app_status' | 'connect' | 'destination' | 'ready'
+
+type LinkedInSetupState = {
+  stage: LinkedInSetupStage
+  label: string
+  kind: 'ok' | 'warn' | 'fail' | 'info' | 'idle'
+}
+
+function LinkedInSetupStep({
+  label,
+  value,
+  done,
+  warning = false,
+  help,
+}: {
+  label: string
+  value: string
+  done: boolean
+  warning?: boolean
+  help: string
+}) {
+  const kind = done ? 'ok' : warning ? 'warn' : 'idle'
+  return (
+    <HelpTooltip label={help} block>
+      <div
+        className={`flex min-h-[88px] w-full flex-col px-3 py-2.5 ${
+          done
+            ? 'bg-ok/4'
+            : warning
+              ? 'bg-warn/4'
+              : 'bg-transparent'
+        }`}
+      >
+        <div>
+          <div className="font-mono text-[10px] uppercase tracking-label text-fg-4">{label}</div>
+          <div className="mt-2">
+            <StatusPill kind={kind}>{done ? 'done' : warning ? 'attention' : 'pending'}</StatusPill>
+          </div>
+        </div>
+        <div className="mt-auto truncate pt-3 font-mono text-xs text-fg-2">{value}</div>
+      </div>
+    </HelpTooltip>
+  )
+}
+
+function linkedinSetupState({
+  providerApps,
+  usableProviderApp,
+  activeConnections,
+  readyChannels,
+}: {
+  providerApps: SocialProviderApp[]
+  usableProviderApp: SocialProviderApp | null
+  activeConnections: SocialConnectionRow[]
+  readyChannels: SocialChannelRow[]
+}): LinkedInSetupState {
+  if (providerApps.length === 0) return { stage: 'app', label: 'setup needed', kind: 'idle' }
+  if (!usableProviderApp) return { stage: 'app_status', label: 'app attention', kind: 'warn' }
+  if (activeConnections.length === 0) return { stage: 'connect', label: 'connect account', kind: 'info' }
+  if (readyChannels.length === 0) return { stage: 'destination', label: 'add destination', kind: 'warn' }
+  return { stage: 'ready', label: 'ready', kind: 'ok' }
+}
+
+function linkedinPrimaryAction({
+  setup,
+  firstProviderApp,
+  onCreateProviderApp,
+  onEditProviderApp,
+  onConnect,
+  onCreateChannel,
+}: {
+  setup: LinkedInSetupState
+  firstProviderApp: SocialProviderApp | null
+  onCreateProviderApp: () => void
+  onEditProviderApp: (providerApp: SocialProviderApp) => void
+  onConnect: () => void
+  onCreateChannel: () => void
+}) {
+  if (setup.stage === 'app') {
+    return { label: 'configure app', icon: <KeyRound className="h-3.5 w-3.5" />, onClick: onCreateProviderApp }
+  }
+  if (setup.stage === 'app_status') {
+    return {
+      label: 'update app',
+      icon: <KeyRound className="h-3.5 w-3.5" />,
+      onClick: () => firstProviderApp ? onEditProviderApp(firstProviderApp) : onCreateProviderApp(),
+    }
+  }
+  if (setup.stage === 'connect') {
+    return { label: 'connect linkedin', icon: <Linkedin className="h-3.5 w-3.5" />, onClick: onConnect }
+  }
+  return { label: 'add destination', icon: <Plus className="h-3.5 w-3.5" />, onClick: onCreateChannel }
 }
 
 function ApiKeysSection({
@@ -1598,15 +1776,17 @@ function HelpTooltip({
   label,
   children,
   align = 'left',
+  block = false,
 }: {
   label: string
   children: ReactNode
   align?: 'left' | 'right'
+  block?: boolean
 }) {
   return (
     <span
       aria-label={label}
-      className="group/help-tooltip relative inline-flex"
+      className={`group/help-tooltip relative ${block ? 'flex h-full min-w-0' : 'inline-flex'}`}
     >
       {children}
       <span
