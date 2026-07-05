@@ -140,7 +140,7 @@ const LINKEDIN_PROVIDER_PURPOSE_OPTIONS: PachSelectOption[] = [
 ]
 
 const LINKEDIN_PROVIDER_STATUS_OPTIONS: PachSelectOption[] = [
-  { value: 'pending_approval', label: 'pending approval' },
+  { value: 'pending_approval', label: 'community access pending' },
   { value: 'ready', label: 'ready' },
   { value: 'needs_secret', label: 'needs secret' },
   { value: 'needs_reconnect', label: 'needs reconnect' },
@@ -432,7 +432,8 @@ export default function SettingsPage() {
     if (!organizationId) return
     const providerApp = pickLinkedInOAuthProviderApp(socialProviderApps)
     if (!providerApp) {
-      flash('add a linkedin developer app with a client secret first')
+      const linkedinApp = socialProviderApps.find((app) => app.provider === 'linkedin')
+      flash(linkedinApp ? 'linkedin community access is not ready yet' : 'add a linkedin developer app with a client secret first')
       return
     }
 
@@ -874,7 +875,7 @@ function SocialSection({
             <div className="mt-4 overflow-hidden border border-edge/15 bg-rim divide-y divide-edge/12 md:grid md:grid-cols-3 md:divide-x md:divide-y-0">
               <LinkedInSetupStep
                 label="developer app"
-                value={firstLinkedinProviderApp ? firstLinkedinProviderApp.status.replace(/_/g, ' ') : 'not configured'}
+                value={firstLinkedinProviderApp ? providerAppStatusLabel(firstLinkedinProviderApp.status) : 'not configured'}
                 done={Boolean(linkedinProviderApp)}
                 warning={Boolean(firstLinkedinProviderApp && !linkedinProviderApp)}
                 help={SOCIAL_HELP.developerApp}
@@ -950,7 +951,7 @@ function SocialSection({
                     </td>
                     <td className="max-w-[260px] truncate py-2.5 pr-3 text-fg-4" title={providerApp.redirectUri}>{providerApp.redirectUri}</td>
                     <td className="py-2.5 pr-3">
-                      <StatusPill kind={providerAppStatusKind(providerApp.status)}>{providerApp.status.replace(/_/g, ' ')}</StatusPill>
+                      <StatusPill kind={providerAppStatusKind(providerApp.status)}>{providerAppStatusLabel(providerApp.status)}</StatusPill>
                     </td>
                     <td className="py-2.5">
                       <div className="flex items-center gap-2">
@@ -1158,7 +1159,14 @@ function linkedinSetupState({
   readyChannels: SocialChannelRow[]
 }): LinkedInSetupState {
   if (providerApps.length === 0) return { stage: 'app', label: 'setup needed', kind: 'idle' }
-  if (!usableProviderApp) return { stage: 'app_status', label: 'app attention', kind: 'warn' }
+  if (!usableProviderApp) {
+    const firstStatus = providerApps[0]?.status
+    return {
+      stage: 'app_status',
+      label: firstStatus === 'pending_approval' ? 'community access pending' : 'app attention',
+      kind: 'warn',
+    }
+  }
   if (activeConnections.length === 0) return { stage: 'connect', label: 'connect account', kind: 'info' }
   if (readyChannels.length === 0) return { stage: 'destination', label: 'add destination', kind: 'warn' }
   return { stage: 'ready', label: 'ready', kind: 'ok' }
@@ -1184,7 +1192,7 @@ function linkedinPrimaryAction({
   }
   if (setup.stage === 'app_status') {
     return {
-      label: 'update app',
+      label: firstProviderApp?.status === 'pending_approval' ? 'review access' : 'update app',
       icon: <KeyRound className="h-3.5 w-3.5" />,
       onClick: () => firstProviderApp ? onEditProviderApp(firstProviderApp) : onCreateProviderApp(),
     }
@@ -1840,6 +1848,11 @@ function providerAppStatusKind(status: string): 'ok' | 'warn' | 'info' | 'idle' 
   return 'idle'
 }
 
+function providerAppStatusLabel(status: string) {
+  if (status === 'pending_approval') return 'community access pending'
+  return status.replace(/_/g, ' ')
+}
+
 function parseScopesDraft(value: string) {
   return Array.from(new Set(value.split(/[,\s]+/).map((entry) => entry.trim()).filter(Boolean)))
 }
@@ -1852,14 +1865,11 @@ function pickLinkedInOAuthProviderApp(providerApps: SocialProviderApp[]) {
   const candidates = providerApps.filter((providerApp) => (
     providerApp.provider === 'linkedin' &&
     providerApp.hasClientSecret &&
-    providerApp.status !== 'archived' &&
-    providerApp.status !== 'needs_secret' &&
-    providerApp.status !== 'needs_reconnect'
+    providerApp.status === 'ready'
   ))
   return (
     candidates.find((providerApp) => providerApp.purpose === 'organization_publishing' && providerApp.status === 'ready') ??
     candidates.find((providerApp) => providerApp.purpose === 'organization_publishing') ??
-    candidates.find((providerApp) => providerApp.status === 'ready') ??
     candidates[0] ??
     null
   )

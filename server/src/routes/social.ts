@@ -658,6 +658,9 @@ function validateLinkedInProviderAppForOAuth(
     throw new ValidationError('Add the LinkedIn client secret before connecting LinkedIn.')
   }
   if (providerApp.status === 'needs_reconnect') throw new ValidationError('Resolve this LinkedIn developer app before starting a new connection.')
+  if (providerApp.status !== 'ready') {
+    throw new ValidationError('LinkedIn has not approved this developer app yet. Mark it ready after Community Management access is approved.')
+  }
 }
 
 function scopesForProviderApp(providerApp: typeof socialProviderApps.$inferSelect) {
