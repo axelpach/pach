@@ -84,7 +84,8 @@ export function AgentConversationView({
   const conversationEndRef = useRef<HTMLDivElement | null>(null)
   const feedbackFileInputRef = useRef<HTMLInputElement | null>(null)
   const onlineWorkers = workers.filter((worker) => worker.status !== 'offline')
-  const canCreateRun = allowCreateRun && !run
+  const runIsFinal = isAgentRunFinal(run)
+  const canCreateRun = allowCreateRun && (!run || runIsFinal)
   const canCancelRun = Boolean(run && !['completed', 'failed', 'canceled'].includes(run.status))
   const runIsWorking = isRunWorking(run)
   const streamItems = buildAgentConversationStream({ progressReports, legacyProgressActivity, messages })
@@ -161,7 +162,7 @@ export function AgentConversationView({
                   onCreateDraftPullRequest={onCreateDraftPullRequest}
                 />
               ) : null}
-              {!run && allowCreateRun ? (
+              {allowCreateRun && (!run || runIsFinal) ? (
                 <button
                   type="button"
                   onClick={() => {
@@ -171,7 +172,7 @@ export function AgentConversationView({
                   className="inline-flex h-8 items-center gap-1.5 border border-edge/20 bg-accent-fill/8 px-3 font-mono text-[10px] uppercase tracking-label text-accent transition hover:border-accent disabled:cursor-not-allowed disabled:opacity-40"
                 >
                   <TerminalSquare className="h-3.5 w-3.5" />
-                  do task
+                  {runIsFinal ? 'new run' : 'do task'}
                 </button>
               ) : null}
               {canCancelRun ? (
@@ -689,6 +690,10 @@ function AgentWorkingIndicator({ status }: { status: string }) {
 
 function isRunWorking(run: Schema['tables']['agent_runs']['row'] | null) {
   return Boolean(run && ['queued', 'reserved', 'bootstrapping', 'running'].includes(run.status))
+}
+
+function isAgentRunFinal(run: Schema['tables']['agent_runs']['row'] | null) {
+  return Boolean(run && ['completed', 'failed', 'canceled'].includes(run.status))
 }
 
 function readMetadataString(metadata: unknown, key: string) {

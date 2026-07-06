@@ -1075,9 +1075,9 @@ function AgentSidebarCard({
   onOpenFullView: () => void
 }) {
   const onlineWorkers = workers.filter((worker) => worker.status !== 'offline')
-  const canCreateRun = allowCreateRun && !run
+  const canCreateRun = allowCreateRun && (!run || isAgentRunFinal(run))
   const runIsActive = Boolean(run && !['completed', 'failed', 'canceled'].includes(run.status))
-  const runIsFinal = Boolean(run && ['completed', 'failed', 'canceled'].includes(run.status))
+  const runIsFinal = isAgentRunFinal(run)
   const canCancelRun = Boolean(run && !runIsFinal)
   const finalProgressReport = progressReports.find((report) => report.phase === 'final_result')
   const finalLegacyProgress = legacyProgressActivity.find((entry) => readMetadataString(entry.metadata, 'phase') === 'final_result')
@@ -1112,7 +1112,7 @@ function AgentSidebarCard({
               <Maximize2 className="h-3.5 w-3.5" />
             </button>
           ) : null}
-          {!run && allowCreateRun ? (
+          {allowCreateRun && (!run || runIsFinal) ? (
             <button
               type="button"
               onClick={() => {
@@ -1123,7 +1123,7 @@ function AgentSidebarCard({
               title={canCreateRun ? 'queue agent run' : 'agent run unavailable'}
             >
               <TerminalSquare className="h-3 w-3" />
-              do task
+              {runIsFinal ? 'new run' : 'do task'}
             </button>
           ) : null}
           {canCancelRun ? (
@@ -1402,7 +1402,8 @@ function AgentRunPanel({
   actionMessage: string | null
 }) {
   const onlineWorkers = workers.filter((worker) => worker.status !== 'offline')
-  const canCreateRun = !run
+  const runIsFinal = isAgentRunFinal(run)
+  const canCreateRun = !run || runIsFinal
   const executionClass = readMetadataString(run?.metadata, 'executionClass')
   const handler = readMetadataString(run?.metadata, 'handler')
   const isGeneralRun = executionClass === 'general'
@@ -1440,7 +1441,6 @@ function AgentRunPanel({
     null
   const agentTerminal = terminals.find((terminal) => terminal.role === 'agent') ?? terminals[0] ?? null
   const workflowPhase = readMetadataString(run?.metadata, 'workflowPhase')
-  const runIsFinal = Boolean(run && ['completed', 'failed', 'canceled'].includes(run.status))
   const finalProgressReports = progressReports.filter((report) => report.phase === 'final_result')
   const finalLegacyProgressActivity = legacyProgressActivity.filter((entry) => readMetadataString(entry.metadata, 'phase') === 'final_result')
   const visibleProgressReports = runIsFinal && !showFullProgressLog && finalProgressReports.length > 0
@@ -1769,7 +1769,7 @@ function AgentRunPanel({
           <Bot className="h-3.5 w-3.5 text-accent" />
           agent run
         </span>
-        {!run ? (
+        {!run || runIsFinal ? (
           <button
             onClick={() => {
               void onCreateRun()
@@ -1779,7 +1779,7 @@ function AgentRunPanel({
             title={canCreateRun ? 'queue agent run' : 'agent run unavailable'}
           >
             <TerminalSquare className="h-3 w-3" />
-            go solve
+            {runIsFinal ? 'new run' : 'go solve'}
           </button>
         ) : null}
       </div>
@@ -2333,6 +2333,10 @@ function isTextEntryTarget(target: EventTarget | null) {
 function isRunScopedAgentActivity(entry: Schema['tables']['activity_events']['row']) {
   if (!readMetadataString(entry.metadata, 'runId')) return false
   return ['agent_progress', 'agent_run_claimed', 'agent_run_completed', 'agent_run_failed', 'agent_run_canceled'].includes(entry.eventType)
+}
+
+function isAgentRunFinal(run: Schema['tables']['agent_runs']['row'] | null) {
+  return Boolean(run && ['completed', 'failed', 'canceled'].includes(run.status))
 }
 
 function legacyProgressPhase(type: string) {
