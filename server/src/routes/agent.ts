@@ -480,8 +480,10 @@ router.post('/runs/:id/follow-up', async (req, res) => {
       res.status(400).json({ ok: false, error: 'Agent run is not linked to an issue' })
       return
     }
-    if (!parentRun.repositoryId) {
-      res.status(400).json({ ok: false, error: 'Agent run is not linked to a repository' })
+    const runMetadata = parentRun.metadata ?? {}
+    const existingExecutionMode = readMetadataString(runMetadata, 'executionMode')
+    if (existingExecutionMode === 'code_worktree' && !parentRun.repositoryId) {
+      res.status(400).json({ ok: false, error: 'Code worktree agent run is not linked to a repository' })
       return
     }
 
@@ -515,9 +517,7 @@ router.post('/runs/:id/follow-up', async (req, res) => {
         .where(eq(agentConversations.id, conversationId))
     }
 
-    const runMetadata = parentRun.metadata ?? {}
     const followUpCount = readMetadataNumber(runMetadata, 'followUpCount') + 1
-    const existingExecutionMode = readMetadataString(runMetadata, 'executionMode')
     const existingHandler = readMetadataString(runMetadata, 'handler')
     const existingIntent = readMetadataString(runMetadata, 'intent')
     const [run] = await db
