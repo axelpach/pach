@@ -171,13 +171,20 @@ const FileAttachment = Node.create({
     return [{ tag: '[data-attachment-kind="file"]' }]
   },
 
-  renderHTML({ HTMLAttributes }) {
+  renderHTML({ node }) {
+    const attrs = node.attrs as {
+      storageKey?: string | null
+      fileName?: string | null
+      mimeType?: string | null
+      readUrl?: string | null
+      sizeBytes?: number | string | null
+    }
     return fileAttachmentDomSpec({
-      fileName: String(HTMLAttributes.fileName ?? 'file'),
-      key: String(HTMLAttributes.storageKey ?? ''),
-      mimeType: String(HTMLAttributes.mimeType ?? 'application/octet-stream'),
-      readUrl: String(HTMLAttributes.readUrl ?? ''),
-      sizeBytes: Number(HTMLAttributes.sizeBytes ?? 0),
+      fileName: attrs.fileName ?? 'file',
+      key: attrs.storageKey ?? '',
+      mimeType: attrs.mimeType ?? 'application/octet-stream',
+      readUrl: attrs.readUrl ?? '',
+      sizeBytes: Number(attrs.sizeBytes ?? 0),
     })
   },
 })
