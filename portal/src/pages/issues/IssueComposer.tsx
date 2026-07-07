@@ -1,12 +1,19 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useQuery, useZero } from '@rocicorp/zero/react'
 import { useNavigate } from 'react-router-dom'
-import { Building2, FolderKanban, Plus } from 'lucide-react'
+import { Bot, Building2, FolderKanban, Plus } from 'lucide-react'
 import { PachSelect } from '../../components/PachSelect'
 import { RichEditor } from '../../components/rich-editor/RichEditor'
-import { useAuth } from '../../lib/auth'
+import { authFetch, useAuth } from '../../lib/auth'
 import type { Mutators } from '../../mutators'
 import type { Schema } from '../../zero-schema'
+import { config } from '../../config'
+import {
+  AgentModeChoiceModal,
+  type AgentMode,
+  type AgentModeChoice,
+  type AgentRepositoryPreview,
+} from './AgentModeChoiceModal'
 import { PRIORITY_META, PriorityIcon } from './PriorityIcon'
 import { StatusIcon } from './StatusIcon'
 
@@ -20,6 +27,13 @@ type Foundation = {
   defaultTeamId: string
   defaultStatusId: string
   defaultProjectId?: string
+}
+
+type QueueAgentRunPayload = {
+  code?: string
+  error?: string
+  route?: { mode?: string; reason?: string; confidence?: number }
+  engineeringRepository?: AgentRepositoryPreview | null
 }
 
 export function requestGlobalIssueComposer() {
@@ -66,7 +80,13 @@ export function GlobalIssueComposer() {
   const [priority, setPriority] = useState<number>(2)
   const [estimate, setEstimate] = useState<number>(4)
   const [createMore, setCreateMore] = useState(false)
+  const [doTask, setDoTask] = useState(false)
   const [creating, setCreating] = useState(false)
+  const [agentRunMessage, setAgentRunMessage] = useState<string | null>(null)
+  const [composerToast, setComposerToast] = useState<string | null>(null)
+  const [agentModeChoice, setAgentModeChoice] = useState<AgentModeChoice | null>(null)
+  const [agentModeBusy, setAgentModeBusy] = useState<AgentMode | null>(null)
+  const composerToastTimerRef = useRef<number | null>(null)
 
   const selectedTeam = teams.find((team) => team.id === teamId) ?? teams[0] ?? null
   const teamProjects = selectedTeam ? projects.filter((project) => project.teamId === selectedTeam.id) : []
@@ -137,6 +157,21 @@ export function GlobalIssueComposer() {
     window.addEventListener('keydown', handleEscape)
     return () => window.removeEventListener('keydown', handleEscape)
   }, [open])
+
+  useEffect(() => {
+    return () => {
+      if (composerToastTimerRef.current != null) window.clearTimeout(composerToastTimerRef.current)
+    }
+  }, [])
+
+  function showComposerToast(message: string) {
+    setComposerToast(message)
+    if (composerToastTimerRef.current != null) window.clearTimeout(composerToastTimerRef.current)
+    composerToastTimerRef.current = window.setTimeout(() => {
+      setComposerToast(null)
+      composerToastTimerRef.current = null
+    }, 3600)
+  }
 
   function getTopSortOrder(nextPriority: number, nextStatusId: string) {
     const bucket = scopedIssues
@@ -232,11 +267,55 @@ export function GlobalIssueComposer() {
     })
   }
 
+  function resetIssueDraft() {
+    setIssueId(crypto.randomUUID())
+    setTitle('')
+    setDescription('')
+    setAgentRunMessage(null)
+  }
+
+  function finishCreatedIssue() {
+    resetIssueDraft()
+    if (!createMore) setOpen(false)
+  }
+
+  async function queueAgentRunForIssue(nextIssueId: string, identifier: string, nextTitle: string, modeOverride?: AgentMode) {
+    const response = await authFetch(`${config.apiUrl}/agent/issues/${nextIssueId}/runs/queue`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        source: 'issue_do_task',
+        modeOverride,
+      }),
+    })
+    const payload = await response.json().catch(() => ({})) as QueueAgentRunPayload
+    if (response.status === 409 && payload.code === 'ROUTE_NEEDS_CLARIFICATION') {
+      setAgentModeChoice({
+        issueId: nextIssueId,
+        issueLabel: identifier,
+        issueTitle: nextTitle,
+        reason: payload.route?.reason ?? payload.error ?? 'Pach could not confidently choose an agent mode.',
+        confidence: payload.route?.confidence,
+        engineeringRepository: payload.engineeringRepository ?? null,
+      })
+      setAgentRunMessage('choose agent mode to start the run')
+      return false
+    }
+    if (!response.ok) throw new Error(payload.error ?? 'Failed to queue agent run')
+    const mode = payload.route?.mode?.replace('_', ' ') ?? 'agent'
+    setAgentRunMessage(`queued ${mode} run`)
+    showComposerToast(`queued ${mode} run`)
+    setAgentModeChoice(null)
+    return true
+  }
+
   async function createIssue() {
     if (!title.trim() || !user) return
     if (!companyId && !canAccessUnscoped) return
 
     setCreating(true)
+    setAgentRunMessage(null)
+    let createdIssue = false
     try {
       const foundation = await ensureWorkspaceFoundation()
       const nextTeamId = teamId || foundation.defaultTeamId
@@ -254,6 +333,7 @@ export function GlobalIssueComposer() {
       const nextNumber =
         scopedIssues.filter((issue) => issue.teamId === nextTeamId).reduce((max, issue) => Math.max(max, issue.number), 0) + 1
       const identifier = `${team.key}-${nextNumber}`
+      const nextTitle = title.trim()
 
       await z.mutate.pm_issues.create({
         id: issueId,
@@ -265,7 +345,7 @@ export function GlobalIssueComposer() {
         creatorId: user.id,
         identifier,
         number: nextNumber,
-        title: title.trim(),
+        title: nextTitle,
         description: description.trim() || undefined,
         priority,
         estimate,
@@ -273,55 +353,102 @@ export function GlobalIssueComposer() {
       })
 
       await logActivity(issueId, identifier, companyId || undefined)
-      setIssueId(crypto.randomUUID())
-      setTitle('')
-      setDescription('')
-      if (!createMore) setOpen(false)
+      createdIssue = true
+      if (doTask) {
+        setAgentRunMessage('starting agent run...')
+        const queued = await queueAgentRunForIssue(issueId, identifier, nextTitle)
+        if (!queued) return
+      }
+      finishCreatedIssue()
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed to create issue'
+      setAgentRunMessage(message)
+      showComposerToast(message)
+      if (createdIssue) finishCreatedIssue()
     } finally {
       setCreating(false)
     }
   }
 
-  if (!open) return null
+  function chooseAgentMode(mode: AgentMode) {
+    const choice = agentModeChoice
+    if (!choice || agentModeBusy) return
+    setAgentModeBusy(mode)
+    setAgentRunMessage(`starting ${mode.replace('_', ' ')} run...`)
+    void queueAgentRunForIssue(choice.issueId, choice.issueLabel, choice.issueTitle, mode)
+      .then((queued) => {
+        if (queued) finishCreatedIssue()
+      })
+      .catch((error) => {
+        const message = error instanceof Error ? error.message : 'Failed to queue agent run'
+        setAgentRunMessage(message)
+        showComposerToast(message)
+      })
+      .finally(() => setAgentModeBusy(null))
+  }
 
   return (
-    <IssueComposerModal
-      issueId={issueId}
-      title={title}
-      onTitleChange={setTitle}
-      description={description}
-      onDescriptionChange={setDescription}
-      companyId={companyId}
-      onCompanyChange={setCompanyId}
-      teamId={teamId}
-      onTeamChange={setTeamId}
-      projectId={projectId}
-      onProjectChange={setProjectId}
-      statusId={statusId}
-      onStatusChange={setStatusId}
-      assigneeId={assigneeId}
-      onAssigneeChange={setAssigneeId}
-      priority={priority}
-      onPriorityChange={setPriority}
-      estimate={estimate}
-      onEstimateChange={setEstimate}
-      createMore={createMore}
-      onCreateMoreChange={setCreateMore}
-      companies={scopedCompanies}
-      teams={teams}
-      projects={teamProjects}
-      statuses={workspaceStatuses}
-      users={assignableUsers}
-      documents={documents}
-      issues={scopedIssues}
-      team={selectedTeam}
-      creating={creating}
-      organizationRequired={!canAccessUnscoped}
-      onOpenDocument={(id) => navigate(`/docs/${id}`)}
-      onOpenIssue={(id) => navigate(`/issues/${id}`)}
-      onClose={() => setOpen(false)}
-      onCreate={createIssue}
-    />
+    <>
+      {open ? (
+        <IssueComposerModal
+          issueId={issueId}
+          title={title}
+          onTitleChange={setTitle}
+          description={description}
+          onDescriptionChange={setDescription}
+          companyId={companyId}
+          onCompanyChange={setCompanyId}
+          teamId={teamId}
+          onTeamChange={setTeamId}
+          projectId={projectId}
+          onProjectChange={setProjectId}
+          statusId={statusId}
+          onStatusChange={setStatusId}
+          assigneeId={assigneeId}
+          onAssigneeChange={setAssigneeId}
+          priority={priority}
+          onPriorityChange={setPriority}
+          estimate={estimate}
+          onEstimateChange={setEstimate}
+          createMore={createMore}
+          onCreateMoreChange={setCreateMore}
+          doTask={doTask}
+          onDoTaskChange={setDoTask}
+          companies={scopedCompanies}
+          teams={teams}
+          projects={teamProjects}
+          statuses={workspaceStatuses}
+          users={assignableUsers}
+          documents={documents}
+          issues={scopedIssues}
+          team={selectedTeam}
+          creating={creating}
+          agentRunMessage={agentRunMessage}
+          organizationRequired={!canAccessUnscoped}
+          onOpenDocument={(id) => navigate(`/docs/${id}`)}
+          onOpenIssue={(id) => navigate(`/issues/${id}`)}
+          onClose={() => setOpen(false)}
+          onCreate={createIssue}
+        />
+      ) : null}
+      {agentModeChoice ? (
+        <AgentModeChoiceModal
+          choice={agentModeChoice}
+          busyMode={agentModeBusy}
+          onChoose={chooseAgentMode}
+          onCancel={() => {
+            setAgentModeChoice(null)
+            setAgentModeBusy(null)
+            finishCreatedIssue()
+          }}
+        />
+      ) : null}
+      {composerToast ? (
+        <div className="fixed bottom-4 right-4 z-[980] border border-edge/20 bg-pit-2 px-3 py-2 font-mono text-xs text-fg-2 shadow-terminal-overlay">
+          {composerToast}
+        </div>
+      ) : null}
+    </>
   )
 }
 
@@ -347,6 +474,8 @@ function IssueComposerModal({
   onEstimateChange,
   createMore,
   onCreateMoreChange,
+  doTask,
+  onDoTaskChange,
   companies,
   teams,
   projects,
@@ -356,6 +485,7 @@ function IssueComposerModal({
   issues,
   team,
   creating,
+  agentRunMessage,
   organizationRequired,
   onOpenDocument,
   onOpenIssue,
@@ -383,6 +513,8 @@ function IssueComposerModal({
   onEstimateChange: (value: number) => void
   createMore: boolean
   onCreateMoreChange: (value: boolean) => void
+  doTask: boolean
+  onDoTaskChange: (value: boolean) => void
   companies: Schema['tables']['organizations']['row'][]
   teams: Schema['tables']['pm_teams']['row'][]
   projects: Schema['tables']['pm_projects']['row'][]
@@ -392,6 +524,7 @@ function IssueComposerModal({
   issues: Schema['tables']['pm_issues']['row'][]
   team: Schema['tables']['pm_teams']['row'] | null
   creating: boolean
+  agentRunMessage: string | null
   organizationRequired: boolean
   onOpenDocument: (id: string) => void
   onOpenIssue: (id: string) => void
@@ -596,32 +729,57 @@ function IssueComposerModal({
             [cancel]
           </button>
           <div className="flex items-center gap-4">
-            <button
-              type="button"
-              onClick={() => onCreateMoreChange(!createMore)}
-              className="inline-flex items-center gap-2 font-mono text-[10px] uppercase tracking-label text-fg-3 transition hover:text-fg-1"
-              title="keep modal open after creating"
-            >
-              <span className={`flex h-3.5 w-3.5 items-center justify-center border transition ${
-                createMore ? 'border-accent bg-accent-fill/20' : 'border-edge/25'
-              }`}
+            <div className="flex items-center gap-3">
+              {agentRunMessage ? (
+                <span className="max-w-[220px] truncate font-mono text-[10px] uppercase tracking-label text-fg-3">
+                  {agentRunMessage}
+                </span>
+              ) : null}
+              <button
+                type="button"
+                onClick={() => onDoTaskChange(!doTask)}
+                disabled={creating}
+                className="inline-flex items-center gap-2 font-mono text-[10px] uppercase tracking-label text-fg-3 transition hover:text-fg-1 disabled:cursor-wait disabled:opacity-50"
+                title="start an agent run after creating"
               >
-                {createMore ? <span className="text-[10px] leading-none text-accent">x</span> : null}
-              </span>
-              create more
-            </button>
+                <CheckboxBox checked={doTask} />
+                <Bot className="h-3.5 w-3.5 text-accent" />
+                do task
+              </button>
+              <button
+                type="button"
+                onClick={() => onCreateMoreChange(!createMore)}
+                disabled={creating}
+                className="inline-flex items-center gap-2 font-mono text-[10px] uppercase tracking-label text-fg-3 transition hover:text-fg-1 disabled:cursor-wait disabled:opacity-50"
+                title="keep modal open after creating"
+              >
+                <CheckboxBox checked={createMore} />
+                create more
+              </button>
+            </div>
             <button
               onClick={onCreate}
               disabled={!title.trim() || (organizationRequired && !companyId) || creating}
               className="inline-flex items-center gap-2 border border-edge/30 bg-accent-fill/8 px-3 py-1.5 font-mono text-xs uppercase tracking-label text-accent transition hover:bg-accent-fill/16 hover:shadow-glow-xs disabled:opacity-40 disabled:hover:bg-accent-fill/8 disabled:hover:shadow-none"
             >
               <Plus className="h-3.5 w-3.5" />
-              {creating ? 'creating...' : 'create issue'}
+              {creating ? (doTask ? 'creating + starting...' : 'creating...') : 'create issue'}
             </button>
           </div>
         </div>
       </div>
     </div>
+  )
+}
+
+function CheckboxBox({ checked }: { checked: boolean }) {
+  return (
+    <span className={`flex h-3.5 w-3.5 items-center justify-center border transition ${
+      checked ? 'border-accent bg-accent-fill/20' : 'border-edge/25'
+    }`}
+    >
+      {checked ? <span className="text-[10px] leading-none text-accent">x</span> : null}
+    </span>
   )
 }
 
