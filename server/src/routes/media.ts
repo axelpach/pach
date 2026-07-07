@@ -188,6 +188,7 @@ router.post('/upload', async (req, res) => {
     res.status(201).json({
       key,
       readUrl: await signedReadUrl(key),
+      previewUrl: isPdfFile(fileName, mimeType) ? await signedReadUrl(key, { disposition: 'inline', fileName, contentType: 'application/pdf' }) : undefined,
     })
   } catch (error) {
     console.error('Document media upload failed', error)
@@ -260,6 +261,7 @@ router.post('/presign-upload', async (req, res) => {
     res.status(201).json({
       key,
       readUrl,
+      previewUrl: isPdfFile(fileName, mimeType) ? await signedReadUrl(key, { disposition: 'inline', fileName, contentType: 'application/pdf' }) : undefined,
       uploadUrl,
       headers: { 'Content-Type': mimeType },
     })
@@ -293,7 +295,16 @@ router.post('/presign-read', async (req, res) => {
       return
     }
 
-    res.json({ readUrl: await signedReadUrl(key) })
+    const fileName = fileNameFromKey(key)
+    const mimeType = typeof req.body?.mimeType === 'string' ? req.body.mimeType : ''
+    const wantsInlinePreview = req.body?.preview === 'inline' && isPdfFile(fileName, mimeType)
+
+    res.json({
+      readUrl: await signedReadUrl(key),
+      previewUrl: wantsInlinePreview
+        ? await signedReadUrl(key, { disposition: 'inline', fileName, contentType: 'application/pdf' })
+        : undefined,
+    })
   } catch (error) {
     console.error('Document media read presign failed', error)
     res.status(500).json({
@@ -688,15 +699,26 @@ function authenticatedUser(req: Request) {
   return (req as Request & { user?: JWTPayload }).user
 }
 
-function signedReadUrl(key: string) {
+function signedReadUrl(
+  key: string,
+  options: { disposition?: 'inline' | 'attachment'; fileName?: string; contentType?: string } = {},
+) {
   return getSignedUrl(
     getS3Client(),
     new GetObjectCommand({
       Bucket: getBucketName(),
       Key: key,
+      ...(options.disposition && options.fileName
+        ? { ResponseContentDisposition: `${options.disposition}; filename="${sanitizeContentDispositionFileName(options.fileName)}"` }
+        : {}),
+      ...(options.contentType ? { ResponseContentType: options.contentType } : {}),
     }),
     { expiresIn: SIGNED_READ_SECONDS },
   )
+}
+
+function isPdfFile(fileName: string, mimeType: string) {
+  return mimeType.toLowerCase() === 'application/pdf' || fileName.toLowerCase().endsWith('.pdf')
 }
 
 function getS3Client() {

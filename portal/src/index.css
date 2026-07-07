@@ -293,23 +293,26 @@ input::placeholder, textarea::placeholder { color: var(--fg-4); }
 .doc-editor [data-attachment-download='true'],
 .doc-editor [data-attachment-delete='true'] {
   align-items: center;
-  background: transparent;
-  border: 1px solid transparent;
-  color: var(--fg-3);
+  background: rgb(var(--accent-fill-rgb) / 0.07);
+  border: 1px solid rgb(var(--edge-rgb) / 0.22);
+  color: var(--fg-1);
   cursor: pointer;
   display: flex;
   flex: 0 0 auto;
   height: 2rem;
   justify-content: center;
-  transition: color var(--t-base) var(--ease-out), opacity var(--t-base) var(--ease-out), border-color var(--t-base) var(--ease-out);
+  transition: background var(--t-base) var(--ease-out), color var(--t-base) var(--ease-out), border-color var(--t-base) var(--ease-out);
   width: 2rem;
 }
 
 .doc-editor [data-attachment-download='true']:hover {
+  background: rgb(var(--accent-fill-rgb) / 0.13);
+  border-color: rgb(var(--accent-rgb) / 0.35);
   color: var(--accent);
 }
 
 .doc-editor [data-attachment-delete='true']:hover {
+  background: rgb(var(--fail-rgb) / 0.08);
   border-color: var(--border-fault);
   color: var(--fail);
 }
