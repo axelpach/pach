@@ -257,6 +257,10 @@ export default function Marketing() {
                     />
                   </div>
                 </div>
+                <MarketingMobileSectionMenu
+                  section={section}
+                  onSelect={(nextSection) => navigate(`/marketing/${nextSection}`)}
+                />
               </div>
               {section !== 'analytics' ? (
                 <div className="grid grid-cols-2 gap-2 md:grid-cols-4 lg:min-w-[520px]">
@@ -338,6 +342,33 @@ export default function Marketing() {
           ) : null}
         </div>
       </main>
+    </div>
+  )
+}
+
+function MarketingMobileSectionMenu({
+  section,
+  onSelect,
+}: {
+  section: MarketingSection
+  onSelect: (section: MarketingSection) => void
+}) {
+  return (
+    <div className="mt-3 grid grid-cols-5 gap-1 font-mono text-[10px] uppercase tracking-label">
+      {SECTIONS.map((entry) => (
+        <button
+          key={entry.id}
+          type="button"
+          onClick={() => onSelect(entry.id)}
+          className={`min-w-0 border px-1.5 py-2 text-center transition ${
+            section === entry.id
+              ? 'border-edge/45 bg-accent-fill/8 text-accent'
+              : 'border-edge/12 text-fg-3 hover:border-edge/24 hover:text-fg-1'
+          }`}
+        >
+          <span className="block truncate">{entry.label}</span>
+        </button>
+      ))}
     </div>
   )
 }
