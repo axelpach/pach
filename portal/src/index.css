@@ -237,6 +237,10 @@ input::placeholder, textarea::placeholder { color: var(--fg-4); }
   transition: background var(--t-base) var(--ease-out), border-color var(--t-base) var(--ease-out);
 }
 
+.doc-editor [data-attachment-kind='file'][data-attachment-openable='true'] {
+  cursor: pointer;
+}
+
 .doc-editor [data-attachment-kind='file']:hover,
 .doc-editor [data-attachment-kind='file']:focus-within {
   background: rgb(var(--accent-fill-rgb) / 0.045);
@@ -299,15 +303,6 @@ input::placeholder, textarea::placeholder { color: var(--fg-4); }
   justify-content: center;
   transition: color var(--t-base) var(--ease-out), opacity var(--t-base) var(--ease-out), border-color var(--t-base) var(--ease-out);
   width: 2rem;
-}
-
-.doc-editor [data-attachment-delete='true'] {
-  opacity: 0;
-}
-
-.doc-editor [data-attachment-kind='file']:hover [data-attachment-delete='true'],
-.doc-editor [data-attachment-kind='file']:focus-within [data-attachment-delete='true'] {
-  opacity: 1;
 }
 
 .doc-editor [data-attachment-download='true']:hover {

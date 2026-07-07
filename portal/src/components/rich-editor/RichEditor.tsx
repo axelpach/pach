@@ -329,13 +329,29 @@ export const RichEditor = forwardRef<RichEditorHandle, RichEditorProps>(function
           return true
         }
 
+        const attachmentDownload = target?.closest('[data-attachment-download]') as HTMLAnchorElement | null
+        if (attachmentDownload) {
+          if (attachmentDownload.href) return false
+          event.preventDefault()
+          return true
+        }
+
         const anchor = target?.closest('a[href]') as HTMLAnchorElement | null
-        if (!anchor) return false
+        if (anchor) {
+          event.preventDefault()
+          const parsed = parsePachHref(anchor.getAttribute('href') ?? '')
+          if (parsed?.type === 'document') onOpenDocument(parsed.id)
+          else if (parsed?.type === 'issue') onOpenIssue(parsed.id)
+          else window.open(anchor.href, '_blank', 'noopener,noreferrer')
+          return true
+        }
+
+        const attachment = target?.closest('[data-attachment-kind="file"]') as HTMLElement | null
+        if (!attachment || !isPdfAttachment(attachment)) return false
+        const readUrl = attachmentReadUrl(attachment)
+        if (!readUrl) return false
         event.preventDefault()
-        const parsed = parsePachHref(anchor.getAttribute('href') ?? '')
-        if (parsed?.type === 'document') onOpenDocument(parsed.id)
-        else if (parsed?.type === 'issue') onOpenIssue(parsed.id)
-        else window.open(anchor.href, '_blank', 'noopener,noreferrer')
+        window.open(readUrl, '_blank', 'noopener,noreferrer')
         return true
       },
       handleKeyDown: (_view, event) => {
@@ -1511,6 +1527,17 @@ function attachmentElementToMarkdown(element: HTMLElement) {
   return `::file[${escapeMarkdownLabel(fileName)}](s3://${key}){size=${Number.isFinite(sizeBytes) ? sizeBytes : 0} type=${encodeURIComponent(mimeType)}}`
 }
 
+function isPdfAttachment(attachment: HTMLElement) {
+  const mimeType = attachment.dataset.mimeType?.toLowerCase() ?? ''
+  const fileName = attachment.dataset.fileName?.toLowerCase() ?? ''
+  return isPdfFile(fileName, mimeType)
+}
+
+function attachmentReadUrl(attachment: HTMLElement) {
+  const link = attachment.querySelector('[data-attachment-download][href]') as HTMLAnchorElement | null
+  return link?.href ?? ''
+}
+
 function mediaElementToMarkdown(element: HTMLElement) {
   const image = element.matches('img') ? element as HTMLImageElement : null
   if (!(image instanceof HTMLImageElement)) return null
@@ -1615,6 +1642,7 @@ function fileAttachmentDomSpec({
   const linkAttrs = readUrl
     ? { href: readUrl, download: safeName, target: '_blank', rel: 'noreferrer', title: 'download file', 'data-attachment-download': 'true' }
     : { download: safeName, title: 'download file', 'data-attachment-download': 'true' }
+  const isPdf = isPdfFile(safeName, mimeType)
   return [
     'div',
     {
@@ -1623,6 +1651,7 @@ function fileAttachmentDomSpec({
       'data-file-name': safeName,
       'data-file-size': String(sizeBytes),
       'data-mime-type': mimeType || 'application/octet-stream',
+      ...(isPdf ? { 'data-attachment-openable': 'true' } : {}),
       contenteditable: 'false',
       tabindex: '0',
     },
@@ -1651,7 +1680,12 @@ function fileAttachmentHtmlFromData({
 }) {
   const safeName = fileName || 'file'
   const href = readUrl ? ` href="${escapeAttribute(readUrl)}"` : ''
-  return `<div data-attachment-kind="file" data-storage-key="${escapeAttribute(key)}" data-file-name="${escapeAttribute(safeName)}" data-file-size="${String(sizeBytes)}" data-mime-type="${escapeAttribute(mimeType || 'application/octet-stream')}" contenteditable="false" tabindex="0"><span data-attachment-icon="true">${fileIconSvg()}</span><span data-attachment-copy="true"><span data-attachment-name="true">${escapeHtml(safeName)}</span><span data-attachment-size="true">${formatBytes(sizeBytes)}</span></span><a data-attachment-download="true"${href} download="${escapeAttribute(safeName)}" target="_blank" rel="noreferrer" title="download file">${downloadIconSvg()}</a><button type="button" data-attachment-delete="true" title="delete file">${trashIconSvg()}</button></div>`
+  const openable = isPdfFile(safeName, mimeType) ? ' data-attachment-openable="true"' : ''
+  return `<div data-attachment-kind="file" data-storage-key="${escapeAttribute(key)}" data-file-name="${escapeAttribute(safeName)}" data-file-size="${String(sizeBytes)}" data-mime-type="${escapeAttribute(mimeType || 'application/octet-stream')}"${openable} contenteditable="false" tabindex="0"><span data-attachment-icon="true">${fileIconSvg()}</span><span data-attachment-copy="true"><span data-attachment-name="true">${escapeHtml(safeName)}</span><span data-attachment-size="true">${formatBytes(sizeBytes)}</span></span><a data-attachment-download="true"${href} download="${escapeAttribute(safeName)}" target="_blank" rel="noreferrer" title="download file">${downloadIconSvg()}</a><button type="button" data-attachment-delete="true" title="delete file">${trashIconSvg()}</button></div>`
+}
+
+function isPdfFile(fileName: string, mimeType: string) {
+  return mimeType.toLowerCase() === 'application/pdf' || fileName.toLowerCase().endsWith('.pdf')
 }
 
 function escapeHtml(value: string) {
