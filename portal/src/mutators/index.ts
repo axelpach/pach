@@ -464,7 +464,7 @@ export const mutators = {
   mkt_publications: {
     async create(tx: Tx, args: any) {
       const now = Date.now()
-      await tx.mutate.mkt_publications.insert({ type: 'newsletter', status: 'active', metadata: {}, ...args, createdAt: now, updatedAt: now })
+      await tx.mutate.mkt_publications.insert({ type: 'newsletter', status: 'active', editorialProfile: {}, metadata: {}, ...args, createdAt: now, updatedAt: now })
     },
     async update(tx: Tx, args: any) {
       const { id, ...updates } = args

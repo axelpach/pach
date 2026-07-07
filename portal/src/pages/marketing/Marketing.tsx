@@ -26,8 +26,11 @@ import { authFetch } from '../../lib/auth'
 import { config } from '../../config'
 import type { Mutators } from '../../mutators'
 import type { Schema } from '../../zero-schema'
+import { RichEditor, type RichEditorHandle } from '../../components/rich-editor/RichEditor'
 
 type OrganizationRow = Schema['tables']['organizations']['row']
+type DocumentRow = Schema['tables']['documents']['row']
+type IssueRow = Schema['tables']['pm_issues']['row']
 type ContentItemRow = Schema['tables']['mkt_content_items']['row']
 type PublicationRow = Schema['tables']['mkt_publications']['row']
 type SenderProfileRow = Schema['tables']['mkt_sender_profiles']['row']
@@ -95,6 +98,8 @@ export default function Marketing() {
   const [contentOutputs] = useQuery(z.query.mkt_content_outputs.orderBy('updatedAt', 'desc'))
   const [ctas] = useQuery(z.query.mkt_ctas.orderBy('updatedAt', 'desc'))
   const [events] = useQuery(z.query.mkt_content_events.orderBy('createdAt', 'desc'))
+  const [documents] = useQuery(z.query.documents.orderBy('updatedAt', 'desc'))
+  const [issues] = useQuery(z.query.pm_issues.orderBy('updatedAt', 'desc'))
   const [socialChannels] = useQuery(z.query.social_channels.orderBy('displayName', 'asc'))
   const [socialPosts] = useQuery(z.query.social_posts.orderBy('updatedAt', 'desc'))
   const [socialPostTargets] = useQuery(z.query.social_post_targets.orderBy('updatedAt', 'desc'))
@@ -309,6 +314,8 @@ export default function Marketing() {
               ctas={orgCtas}
               members={orgMembers}
               subscriptions={orgSubscriptions}
+              documents={documents}
+              issues={issues}
               onCreateSenderProfile={createSenderProfile}
               onFlash={flash}
             />
@@ -880,6 +887,8 @@ function NewslettersSection({
   ctas,
   members,
   subscriptions,
+  documents,
+  issues,
   onCreateSenderProfile,
   onFlash,
 }: {
@@ -893,17 +902,23 @@ function NewslettersSection({
   ctas: CtaRow[]
   members: AudienceMemberRow[]
   subscriptions: AudienceSubscriptionRow[]
+  documents: DocumentRow[]
+  issues: IssueRow[]
   onCreateSenderProfile: () => Promise<void>
   onFlash: (message: string) => void
 }) {
+  const navigate = useNavigate()
   const [tab, setTab] = useState<'publications' | 'subscribers'>('publications')
   const [editingPublicationId, setEditingPublicationId] = useState('')
+  const [guidelinesEditorPublicationId, setGuidelinesEditorPublicationId] = useState('')
+  const [guidelinesDraft, setGuidelinesDraft] = useState('')
   const [publicationModalOpen, setPublicationModalOpen] = useState(false)
   const [subscriberModalOpen, setSubscriberModalOpen] = useState(false)
   const [publicationDraft, setPublicationDraft] = useState({ name: '', slug: '', defaultSenderProfileId: '' })
   const [publicationSlugTouched, setPublicationSlugTouched] = useState(false)
   const [subscriberDraft, setSubscriberDraft] = useState({ publicationId: '', name: '', email: '', company: '', role: '', whatsappPhone: '' })
   const [subscriberFilters, setSubscriberFilters] = useState<ActiveFilters>({})
+  const guidelinesEditorRef = useRef<RichEditorHandle | null>(null)
 
   const publicationOptions = useMemo(() => publications.map((publication) => ({ value: publication.id, label: publication.name })), [publications])
   const senderOptions = [
@@ -935,6 +950,8 @@ function NewslettersSection({
   const editingPublicationThemeMode = publicationEmailThemeMode(editingPublication)
   const editingPublicationCadence = publicationCadenceConfig(editingPublication)
   const editingPublicationMetadata = readRecord(editingPublication?.metadata)
+  const editingPublicationGuidelines = publicationNewsletterGuidelines(editingPublication)
+  const guidelinesEditorPublication = publications.find((publication) => publication.id === guidelinesEditorPublicationId) ?? null
   const subscriberRows = useMemo(() => subscriptions
     .filter((subscription) => subscription.channel === 'newsletter' && subscription.status === 'subscribed')
     .filter((subscription) => selectedPublicationFilterIds.length === 0 || selectedPublicationFilterIds.includes(subscription.publicationId))
@@ -951,6 +968,13 @@ function NewslettersSection({
     if (!editingPublicationId || publications.some((publication) => publication.id === editingPublicationId)) return
     setEditingPublicationId('')
   }, [editingPublicationId, publications])
+
+  useEffect(() => {
+    if (!guidelinesEditorPublicationId) return
+    if (publications.some((publication) => publication.id === guidelinesEditorPublicationId)) return
+    setGuidelinesEditorPublicationId('')
+    setGuidelinesDraft('')
+  }, [guidelinesEditorPublicationId, publications])
 
   function openPublicationModal() {
     const name = organization?.project === 'ardia' && publications.length === 0 ? 'Real Estate Developers' : 'New Publication'
@@ -981,6 +1005,9 @@ function NewslettersSection({
           emailThemeMode: 'light',
           emailWrapper: emailWrapperPayload(defaultEmailWrapper()),
         },
+        editorialProfile: {
+          newsletterGuidelines: '',
+        },
       })
       onSelectPublication(id)
       setEditingPublicationId(id)
@@ -1000,6 +1027,25 @@ function NewslettersSection({
   function openPublicationEditor(publicationId: string) {
     onSelectPublication(publicationId)
     setEditingPublicationId(publicationId)
+  }
+
+  function openGuidelinesEditor(publication: PublicationRow) {
+    setGuidelinesDraft(publicationNewsletterGuidelines(publication))
+    setGuidelinesEditorPublicationId(publication.id)
+    setEditingPublicationId('')
+    requestAnimationFrame(() => guidelinesEditorRef.current?.focus())
+  }
+
+  function closeGuidelinesEditor() {
+    setGuidelinesEditorPublicationId('')
+    setGuidelinesDraft('')
+  }
+
+  async function saveGuidelinesEditor() {
+    if (!guidelinesEditorPublication) return
+    await updatePublicationGuidelines(guidelinesEditorPublication, guidelinesDraft)
+    closeGuidelinesEditor()
+    onFlash('editorial profile saved')
   }
 
   async function updatePublicationEmailWrapper(updates: Partial<PublicationEmailWrapper>) {
@@ -1037,6 +1083,16 @@ function NewslettersSection({
       metadata: {
         ...metadata,
         marketingCadence: publicationCadencePayload(next),
+      },
+    })
+  }
+
+  async function updatePublicationGuidelines(publication: PublicationRow, newsletterGuidelines: string) {
+    await z.mutate.mkt_publications.update({
+      id: publication.id,
+      editorialProfile: {
+        ...readRecord(publication.editorialProfile),
+        newsletterGuidelines,
       },
     })
   }
@@ -1252,6 +1308,24 @@ function NewslettersSection({
             </div>
 
             <div className="border-t border-edge/12 pt-4">
+              <div className="mb-2 flex items-center justify-between gap-3">
+                <FieldLabel>newsletter guidelines</FieldLabel>
+                <Button className="px-2 py-1 text-[10px]" icon={<Edit3 className="h-3 w-3" />} onClick={() => openGuidelinesEditor(editingPublication)}>
+                  edit
+                </Button>
+              </div>
+              <button
+                type="button"
+                onClick={() => openGuidelinesEditor(editingPublication)}
+                className="block w-full border border-edge/12 bg-rim px-3 py-3 text-left font-mono text-xs leading-relaxed text-fg-3 transition hover:border-accent/45 hover:text-fg-1"
+              >
+                <span className="line-clamp-5 whitespace-pre-wrap">
+                  {editingPublicationGuidelines.trim() || 'No publication-specific editorial guidance yet.'}
+                </span>
+              </button>
+            </div>
+
+            <div className="border-t border-edge/12 pt-4">
               <FieldLabel>email wrapper</FieldLabel>
               <div className="space-y-3">
                 <div>
@@ -1374,6 +1448,61 @@ function NewslettersSection({
             </div>
           </div>
         </MarketingAppFrame>
+      ) : null}
+
+      {guidelinesEditorPublication ? (
+        <div
+          className="fixed inset-0 z-[70] flex items-start justify-center overflow-auto bg-overlay/75 px-4 py-8 backdrop-blur-sm"
+          onClick={closeGuidelinesEditor}
+        >
+          <div
+            className="flex max-h-[calc(100vh-4rem)] w-full max-w-4xl flex-col border border-edge/25 bg-pit shadow-terminal-popover"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="flex items-start justify-between gap-4 border-b border-edge/12 px-4 py-3">
+              <div className="min-w-0">
+                <div className="font-mono text-[10px] uppercase tracking-label text-fg-4">editorial profile</div>
+                <div className="mt-1 truncate font-mono text-base font-bold lowercase text-fg-1">
+                  {guidelinesEditorPublication.name}
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={closeGuidelinesEditor}
+                className="border border-edge/20 p-2 text-fg-3 transition hover:border-accent hover:text-accent"
+                aria-label="Close editorial profile editor"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            <div className="min-h-0 flex-1 overflow-auto px-4 py-4">
+              <RichEditor
+                ref={guidelinesEditorRef}
+                key={guidelinesEditorPublication.id}
+                owner={{ type: 'publication', id: guidelinesEditorPublication.id }}
+                value={guidelinesDraft}
+                documents={documents}
+                issues={issues}
+                organizationId={guidelinesEditorPublication.organizationId}
+                onChange={setGuidelinesDraft}
+                onOpenDocument={(id) => navigate(`/docs/${id}`)}
+                onOpenIssue={(id) => navigate(`/issues/${id}`)}
+                enableUploads={false}
+                placeholder="Write publication-specific voice, structure, audience, and newsletter rules..."
+                className="min-h-[48vh]"
+                wrapperClassName="relative mt-0"
+              />
+            </div>
+
+            <div className="flex justify-end gap-2 border-t border-edge/12 px-4 py-3">
+              <Button onClick={closeGuidelinesEditor}>cancel</Button>
+              <Button kind="primary" icon={<Check className="h-3.5 w-3.5" />} onClick={() => void saveGuidelinesEditor()}>
+                save
+              </Button>
+            </div>
+          </div>
+        </div>
       ) : null}
 
       {publicationModalOpen ? (
@@ -2690,10 +2819,12 @@ function CommitTextarea({
   value,
   onCommit,
   label,
+  rows = 4,
 }: {
   value: string
   onCommit: (next: string) => void | Promise<void>
   label?: string
+  rows?: number
 }) {
   const [draft, setDraft] = useState(value)
   useEffect(() => setDraft(value), [value])
@@ -2704,7 +2835,7 @@ function CommitTextarea({
   return (
     <label className="block">
       {label ? <FieldLabel>{label}</FieldLabel> : null}
-      <TermTextarea rows={4} value={draft} onChange={(event) => setDraft(event.target.value)} onBlur={() => void commit()} />
+      <TermTextarea rows={rows} value={draft} onChange={(event) => setDraft(event.target.value)} onBlur={() => void commit()} />
     </label>
   )
 }
@@ -2908,6 +3039,11 @@ function publicationCadenceConfig(publication: PublicationRow | null): Publicati
     lookaheadDays: positiveInteger(cadence.lookaheadDays, fallback.lookaheadDays),
     cooldownDays: positiveInteger(cadence.cooldownDays, fallback.cooldownDays),
   }
+}
+
+function publicationNewsletterGuidelines(publication: PublicationRow | null) {
+  const editorialProfile = readRecord(publication?.editorialProfile)
+  return typeof editorialProfile.newsletterGuidelines === 'string' ? editorialProfile.newsletterGuidelines : ''
 }
 
 function publicationCadencePayload(cadence: PublicationCadenceConfig) {
