@@ -76,7 +76,7 @@ type MenuPosition = {
   height?: number
 }
 
-export type RichEditorOwner = { type: 'document' | 'issue'; id: string }
+export type RichEditorOwner = { type: 'document' | 'issue' | 'publication'; id: string }
 export type RichEditorHandle = { focus: () => void }
 
 type RichEditorProps = {
@@ -89,6 +89,7 @@ type RichEditorProps = {
   onOpenDocument: (id: string) => void
   onOpenIssue: (id: string) => void
   onCreateChildDocument?: (parentId: string) => Promise<{ id: string; title: string } | null>
+  enableUploads?: boolean
   placeholder?: string
   className?: string
   wrapperClassName?: string
@@ -192,6 +193,7 @@ export const RichEditor = forwardRef<RichEditorHandle, RichEditorProps>(function
     onOpenDocument,
     onOpenIssue,
     onCreateChildDocument,
+    enableUploads = true,
     placeholder = 'Type / for commands',
     className = 'min-h-[52vh]',
     wrapperClassName = 'relative mt-7',
@@ -225,6 +227,7 @@ export const RichEditor = forwardRef<RichEditorHandle, RichEditorProps>(function
     return SLASH_COMMANDS
       .filter((command) => {
         if (command.id === 'create-child-document' && (owner.type !== 'document' || !onCreateChildDocument)) return false
+        if (!enableUploads && (command.id === 'media' || command.id === 'file')) return false
         if (!q) return true
         const haystack = [command.label, command.hint, ...(command.aliases ?? [])]
           .filter(Boolean)
@@ -232,7 +235,7 @@ export const RichEditor = forwardRef<RichEditorHandle, RichEditorProps>(function
         return haystack.some((entry) => entry.includes(q))
       })
       .sort((a, b) => slashCommandScore(a, q) - slashCommandScore(b, q))
-  }, [onCreateChildDocument, owner.type, slashMenu])
+  }, [enableUploads, onCreateChildDocument, owner.type, slashMenu])
 
   const linkTargets = useMemo<LinkTarget[]>(() => {
     if (!linkSearch) return []
