@@ -22,6 +22,7 @@ export const OPEN_ISSUE_COMPOSER_EVENT = 'pach:open-issue-composer'
 const ESTIMATES = [1, 2, 4, 8, 16]
 const SORT_ORDER_BASE = 1000
 const SORT_ORDER_STEP = 1024
+const ISSUE_SYNC_RETRY_DELAYS_MS = [0, 250, 600, 1200, 2000]
 
 type Foundation = {
   defaultTeamId: string
@@ -280,33 +281,43 @@ export function GlobalIssueComposer() {
   }
 
   async function queueAgentRunForIssue(nextIssueId: string, identifier: string, nextTitle: string, modeOverride?: AgentMode) {
-    const response = await authFetch(`${config.apiUrl}/agent/issues/${nextIssueId}/runs/queue`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        source: 'issue_do_task',
-        modeOverride,
-      }),
-    })
-    const payload = await response.json().catch(() => ({})) as QueueAgentRunPayload
-    if (response.status === 409 && payload.code === 'ROUTE_NEEDS_CLARIFICATION') {
-      setAgentModeChoice({
-        issueId: nextIssueId,
-        issueLabel: identifier,
-        issueTitle: nextTitle,
-        reason: payload.route?.reason ?? payload.error ?? 'Pach could not confidently choose an agent mode.',
-        confidence: payload.route?.confidence,
-        engineeringRepository: payload.engineeringRepository ?? null,
+    for (const [attempt, delayMs] of ISSUE_SYNC_RETRY_DELAYS_MS.entries()) {
+      if (delayMs > 0) {
+        setAgentRunMessage('waiting for issue sync...')
+        await wait(delayMs)
+      }
+
+      const response = await authFetch(`${config.apiUrl}/agent/issues/${nextIssueId}/runs/queue`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          source: 'issue_do_task',
+          modeOverride,
+        }),
       })
-      setAgentRunMessage('choose agent mode to start the run')
-      return false
+      const payload = await response.json().catch(() => ({})) as QueueAgentRunPayload
+      if (response.status === 404 && attempt < ISSUE_SYNC_RETRY_DELAYS_MS.length - 1) continue
+      if (response.status === 409 && payload.code === 'ROUTE_NEEDS_CLARIFICATION') {
+        setAgentModeChoice({
+          issueId: nextIssueId,
+          issueLabel: identifier,
+          issueTitle: nextTitle,
+          reason: payload.route?.reason ?? payload.error ?? 'Pach could not confidently choose an agent mode.',
+          confidence: payload.route?.confidence,
+          engineeringRepository: payload.engineeringRepository ?? null,
+        })
+        setAgentRunMessage('choose agent mode to start the run')
+        return false
+      }
+      if (!response.ok) throw new Error(payload.error ?? 'Failed to queue agent run')
+      const mode = payload.route?.mode?.replace('_', ' ') ?? 'agent'
+      setAgentRunMessage(`queued ${mode} run`)
+      showComposerToast(`queued ${mode} run`)
+      setAgentModeChoice(null)
+      return true
     }
-    if (!response.ok) throw new Error(payload.error ?? 'Failed to queue agent run')
-    const mode = payload.route?.mode?.replace('_', ' ') ?? 'agent'
-    setAgentRunMessage(`queued ${mode} run`)
-    showComposerToast(`queued ${mode} run`)
-    setAgentModeChoice(null)
-    return true
+
+    throw new Error('Issue was created, but Pach could not find it yet to queue the agent run.')
   }
 
   async function createIssue() {
@@ -781,6 +792,10 @@ function CheckboxBox({ checked }: { checked: boolean }) {
       {checked ? <span className="text-[10px] leading-none text-accent">x</span> : null}
     </span>
   )
+}
+
+function wait(ms: number) {
+  return new Promise<void>((resolve) => window.setTimeout(resolve, ms))
 }
 
 function ComposerPill({ icon, label }: { icon: React.ReactNode; label: string }) {
