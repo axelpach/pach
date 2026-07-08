@@ -5,6 +5,7 @@ import {
   ChevronDown,
   ChevronRight,
   FileText,
+  GripVertical,
   History,
   ListTree,
   Menu,
@@ -14,7 +15,7 @@ import {
   Trash2,
   X,
 } from 'lucide-react'
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { type DragEvent, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { PachSelect, type PachSelectOption } from '../../components/PachSelect'
 import { RichEditor, type RichEditorHandle } from '../../components/rich-editor/RichEditor'
@@ -29,6 +30,16 @@ type OrganizationRow = Schema['tables']['organizations']['row']
 type DocumentTreeNode = {
   document: DocumentRow
   children: DocumentTreeNode[]
+}
+type DocumentDragState = {
+  documentId: string
+  parentId: string | null
+}
+type DocumentDropPosition = 'before' | 'after'
+type DocumentDropTarget = {
+  documentId: string
+  parentId: string | null
+  position: DocumentDropPosition
 }
 
 const NO_ORGANIZATION = '__none__'
@@ -58,6 +69,8 @@ export default function Docs() {
   const [versionsFrameOpen, setVersionsFrameOpen] = useState(false)
   const [mobileDocsOpen, setMobileDocsOpen] = useState(false)
   const [expandedDocumentIds, setExpandedDocumentIds] = useState<Set<string>>(() => new Set())
+  const [documentDrag, setDocumentDrag] = useState<DocumentDragState | null>(null)
+  const [documentDropTarget, setDocumentDropTarget] = useState<DocumentDropTarget | null>(null)
   const [archiveConfirmDocument, setArchiveConfirmDocument] = useState<DocumentRow | null>(null)
   const [marketingContentConfirmDocument, setMarketingContentConfirmDocument] = useState<DocumentRow | null>(null)
   const [creatingMarketingContent, setCreatingMarketingContent] = useState(false)
@@ -278,6 +291,7 @@ export default function Docs() {
       slug: uniqueSlug(title, documents, organizationId ?? null),
       body: '',
       format: 'markdown',
+      sortOrder: nextDocumentSortOrder(parent?.id ?? null, organizationId ?? null),
     })
     if (parent) setExpandedDocumentIds((current) => new Set([...current, parent.id]))
     navigate(`/docs/${id}`)
@@ -300,6 +314,7 @@ export default function Docs() {
       slug: uniqueSlug(title, documents, organizationId ?? null),
       body: '',
       format: 'markdown',
+      sortOrder: nextDocumentSortOrder(parent.id, organizationId ?? null),
     })
     setExpandedDocumentIds((current) => new Set([...current, parent.id]))
     return { id, title }
@@ -320,13 +335,94 @@ export default function Docs() {
       .filter((entry) => entry.status !== 'archived')
       .filter((entry) => canAccessOrganization(entry.organizationId))
       .filter((entry) => documentMatchesOrganizationFilter(entry, nextOrganizationId))
-      .sort((a, b) => b.updatedAt - a.updatedAt)[0]
+      .sort(compareDocumentsForTree)[0]
     navigate(next ? `/docs/${next.id}` : '/docs')
+  }
+
+  function nextDocumentSortOrder(parentId: string | null, organizationId: string | null) {
+    const maxSortOrder = documents
+      .filter((entry) => entry.status !== 'archived')
+      .filter((entry) => (entry.organizationId ?? null) === organizationId)
+      .filter((entry) => (entry.parentId ?? null) === parentId)
+      .reduce((max, entry) => Math.max(max, entry.sortOrder ?? 0), 0)
+    return maxSortOrder + 1000
   }
 
   function openDocument(id: string) {
     setMobileDocsOpen(false)
     navigate(`/docs/${id}`)
+  }
+
+  async function reorderDocument(
+    draggedDocumentId: string,
+    targetDocumentId: string,
+    targetParentId: string | null,
+    position: DocumentDropPosition,
+  ) {
+    if (draggedDocumentId === targetDocumentId) return
+    const dragged = documentsInSelectedOrganization.find((entry) => entry.id === draggedDocumentId)
+    const target = documentsInSelectedOrganization.find((entry) => entry.id === targetDocumentId)
+    if (!dragged || !target) return
+    if ((dragged.parentId ?? null) !== targetParentId || (target.parentId ?? null) !== targetParentId) return
+
+    const siblings = documentsInSelectedOrganization
+      .filter((entry) => (entry.parentId ?? null) === targetParentId)
+      .sort(compareDocumentsForTree)
+    const withoutDragged = siblings.filter((entry) => entry.id !== draggedDocumentId)
+    const targetIndex = withoutDragged.findIndex((entry) => entry.id === targetDocumentId)
+    if (targetIndex === -1) return
+
+    const nextIndex = position === 'before' ? targetIndex : targetIndex + 1
+    const nextSiblings = [...withoutDragged]
+    nextSiblings.splice(nextIndex, 0, dragged)
+
+    await Promise.all(
+      nextSiblings.map((entry, index) => {
+        const sortOrder = (index + 1) * 1000
+        if (entry.sortOrder === sortOrder) return Promise.resolve()
+        return z.mutate.documents.update({ id: entry.id, sortOrder })
+      }),
+    )
+  }
+
+  function handleDocumentDragStart(event: DragEvent, entry: DocumentRow) {
+    if (search.trim()) return
+    event.dataTransfer.effectAllowed = 'move'
+    event.dataTransfer.setData('text/plain', entry.id)
+    setDocumentDrag({ documentId: entry.id, parentId: entry.parentId ?? null })
+    setDocumentDropTarget(null)
+  }
+
+  function handleDocumentDragOver(event: DragEvent, entry: DocumentRow) {
+    if (!documentDrag) return
+    const parentId = entry.parentId ?? null
+    if (documentDrag.documentId === entry.id || documentDrag.parentId !== parentId) return
+    event.preventDefault()
+    event.dataTransfer.dropEffect = 'move'
+    const rect = event.currentTarget.getBoundingClientRect()
+    const position: DocumentDropPosition = event.clientY < rect.top + rect.height / 2 ? 'before' : 'after'
+    setDocumentDropTarget({ documentId: entry.id, parentId, position })
+  }
+
+  function handleDocumentDragLeave(event: DragEvent, entry: DocumentRow) {
+    if (!documentDropTarget || documentDropTarget.documentId !== entry.id) return
+    const nextTarget = event.relatedTarget
+    if (nextTarget instanceof Node && event.currentTarget.contains(nextTarget)) return
+    setDocumentDropTarget(null)
+  }
+
+  async function handleDocumentDrop(event: DragEvent, entry: DocumentRow) {
+    if (!documentDrag || !documentDropTarget || documentDropTarget.documentId !== entry.id) return
+    event.preventDefault()
+    const target = documentDropTarget
+    setDocumentDrag(null)
+    setDocumentDropTarget(null)
+    await reorderDocument(documentDrag.documentId, target.documentId, target.parentId, target.position)
+  }
+
+  function handleDocumentDragEnd() {
+    setDocumentDrag(null)
+    setDocumentDropTarget(null)
   }
 
   async function archiveDocument(entry: DocumentRow) {
@@ -522,6 +618,14 @@ export default function Docs() {
                 onToggle={toggleDocumentExpanded}
                 onOpen={(id) => navigate(`/docs/${id}`)}
                 onCreateChild={(parent) => void createDocument('Untitled', parent)}
+                dragState={documentDrag}
+                dropTarget={documentDropTarget}
+                dragDisabled={Boolean(search.trim())}
+                onDragStart={handleDocumentDragStart}
+                onDragOver={handleDocumentDragOver}
+                onDragLeave={handleDocumentDragLeave}
+                onDrop={(event, entry) => void handleDocumentDrop(event, entry)}
+                onDragEnd={handleDocumentDragEnd}
                 forceExpanded={Boolean(search.trim())}
               />
             ))
@@ -783,6 +887,14 @@ export default function Docs() {
                     onToggle={toggleDocumentExpanded}
                     onOpen={openDocument}
                     onCreateChild={(parent) => void createDocument('Untitled', parent)}
+                    dragState={documentDrag}
+                    dropTarget={documentDropTarget}
+                    dragDisabled={Boolean(search.trim())}
+                    onDragStart={handleDocumentDragStart}
+                    onDragOver={handleDocumentDragOver}
+                    onDragLeave={handleDocumentDragLeave}
+                    onDrop={(event, entry) => void handleDocumentDrop(event, entry)}
+                    onDragEnd={handleDocumentDragEnd}
                     forceExpanded={Boolean(search.trim())}
                   />
                 ))
@@ -1109,9 +1221,17 @@ function DocumentTreeItem({
   selectedDocumentId,
   organizations,
   forceExpanded,
+  dragState,
+  dropTarget,
+  dragDisabled,
   onToggle,
   onOpen,
   onCreateChild,
+  onDragStart,
+  onDragOver,
+  onDragLeave,
+  onDrop,
+  onDragEnd,
 }: {
   node: DocumentTreeNode
   depth: number
@@ -1119,25 +1239,65 @@ function DocumentTreeItem({
   selectedDocumentId: string | null
   organizations: OrganizationRow[]
   forceExpanded: boolean
+  dragState: DocumentDragState | null
+  dropTarget: DocumentDropTarget | null
+  dragDisabled: boolean
   onToggle: (id: string) => void
   onOpen: (id: string) => void
   onCreateChild: (parent: DocumentRow) => void
+  onDragStart: (event: DragEvent, entry: DocumentRow) => void
+  onDragOver: (event: DragEvent, entry: DocumentRow) => void
+  onDragLeave: (event: DragEvent, entry: DocumentRow) => void
+  onDrop: (event: DragEvent, entry: DocumentRow) => void
+  onDragEnd: () => void
 }) {
   const hasChildren = node.children.length > 0
   const expanded = forceExpanded || expandedIds.has(node.document.id)
   const selected = selectedDocumentId === node.document.id
   const indent = Math.min(depth, 8) * 14
+  const isDragging = dragState?.documentId === node.document.id
+  const isDropTarget = dropTarget?.documentId === node.document.id
+  const canDropHere = Boolean(
+    dragState &&
+    dragState.documentId !== node.document.id &&
+    dragState.parentId === (node.document.parentId ?? null),
+  )
 
   return (
     <div className="mb-0.5">
       <div
-        className={`group flex items-center gap-1 px-1.5 py-1.5 transition ${
+        onDragOver={(event) => onDragOver(event, node.document)}
+        onDragLeave={(event) => onDragLeave(event, node.document)}
+        onDrop={(event) => onDrop(event, node.document)}
+        className={`group relative flex items-center gap-1 px-1.5 py-1.5 transition ${
           selected
             ? 'bg-accent-fill/8 text-accent ring-1 ring-inset ring-edge/20'
             : 'text-fg-2 hover:bg-accent-fill/4 hover:text-fg-1'
+        } ${isDragging ? 'opacity-45' : ''} ${
+          canDropHere && !isDropTarget ? 'ring-1 ring-inset ring-edge/10' : ''
         }`}
         style={{ paddingLeft: 6 + indent }}
       >
+        {isDropTarget ? (
+          <span
+            className={`pointer-events-none absolute left-1 right-1 h-px bg-accent shadow-glow-xs ${
+              dropTarget.position === 'before' ? 'top-0' : 'bottom-0'
+            }`}
+          />
+        ) : null}
+        <button
+          type="button"
+          draggable={!dragDisabled}
+          onDragStart={(event) => onDragStart(event, node.document)}
+          onDragEnd={onDragEnd}
+          className={`flex h-5 w-4 shrink-0 cursor-grab items-center justify-center text-fg-4 opacity-0 transition hover:text-accent active:cursor-grabbing group-hover:opacity-100 ${
+            dragDisabled ? 'pointer-events-none opacity-0' : ''
+          } ${isDragging ? 'opacity-100 text-accent' : ''}`}
+          title={dragDisabled ? undefined : 'drag to reorder'}
+          aria-label="Drag to reorder document"
+        >
+          <GripVertical className="h-3.5 w-3.5" />
+        </button>
         <button
           type="button"
           onClick={() => hasChildren ? onToggle(node.document.id) : onOpen(node.document.id)}
@@ -1188,9 +1348,17 @@ function DocumentTreeItem({
               selectedDocumentId={selectedDocumentId}
               organizations={organizations}
               forceExpanded={forceExpanded}
+              dragState={dragState}
+              dropTarget={dropTarget}
+              dragDisabled={dragDisabled}
               onToggle={onToggle}
               onOpen={onOpen}
               onCreateChild={onCreateChild}
+              onDragStart={onDragStart}
+              onDragOver={onDragOver}
+              onDragLeave={onDragLeave}
+              onDrop={onDrop}
+              onDragEnd={onDragEnd}
             />
           ))}
         </div>
