@@ -523,18 +523,66 @@ export default function IssueDetail() {
     if (!issue || !activeRun) return
     const trimmed = feedback.trim()
     if (!trimmed) return
-    if (inputMedia.length > 0) {
-      throw new Error('Follow-up attachments are not supported for server-queued runs yet.')
-    }
 
     const response = await authFetch(`${config.apiUrl}/agent/runs/${activeRun.id}/follow-up`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ feedback: trimmed }),
+      body: JSON.stringify({ feedback: trimmed, pendingInputMediaCount: inputMedia.length }),
     })
-    const payload = await response.json().catch(() => ({}))
+    const payload = await response.json().catch(() => ({})) as {
+      run?: { id?: string }
+      message?: { id?: string } | string
+      error?: string
+    }
     if (!response.ok) {
-      throw new Error(readString(payload.error) ?? readString(payload.message) ?? 'Failed to queue follow-up')
+      const responseMessage = typeof payload.message === 'string' ? payload.message : null
+      throw new Error(readString(payload.error) ?? readString(responseMessage) ?? 'Failed to queue follow-up')
+    }
+
+    const runId = readString(payload.run?.id) ?? activeRun.id
+    const messageId = typeof payload.message === 'object' ? readString(payload.message.id) ?? null : null
+    if (!inputMedia.length) return
+
+    try {
+      await uploadAgentInputMedia(runId, inputMedia, messageId)
+      await z.mutate.agent_runs.update({
+        id: runId,
+        status: 'queued',
+        statusMessage: activeRun.workerId ? 'queued for same agent worker' : 'queued for agent worker',
+      })
+    } catch (error) {
+      await z.mutate.agent_runs.update({
+        id: runId,
+        status: 'failed',
+        statusMessage: error instanceof Error ? error.message : 'Failed to upload follow-up attachments',
+        completedAt: Date.now(),
+      })
+      throw error
+    }
+  }
+
+  async function uploadAgentInputMedia(agentRunId: string, mediaItems: PendingAgentInputMedia[], messageId: string | null) {
+    for (const item of mediaItems) {
+      const contentBase64 = await readFileAsBase64(item.file)
+      const response = await authFetch(`${config.apiUrl}/media/agent-run-input/upload`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          runId: agentRunId,
+          messageId,
+          name: item.name,
+          fileName: item.file.name,
+          mimeType: item.file.type || 'application/octet-stream',
+          contentBase64,
+          width: item.dimensions?.width,
+          height: item.dimensions?.height,
+          kind: item.file.type.startsWith('image/') ? 'screenshot' : 'file',
+        }),
+      })
+      if (!response.ok) {
+        const payload = await response.json().catch(() => ({}))
+        throw new Error(readString(payload.message) ?? readString(payload.error) ?? `could not upload ${item.name}`)
+      }
     }
   }
 
