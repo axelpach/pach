@@ -160,7 +160,7 @@ router.post('/upload', async (req, res) => {
       return
     }
 
-    const owner = await getAccessibleMediaOwner(ownerType, ownerId, user)
+    const owner = await getAccessibleMediaOwner(ownerType, ownerId, user, organizationId)
     if (!owner) {
       res.status(404).json({ error: 'NOT_FOUND', message: 'Media owner not found.' })
       return
@@ -228,7 +228,7 @@ router.post('/presign-upload', async (req, res) => {
       return
     }
 
-    const owner = await getAccessibleMediaOwner(ownerType, ownerId, user)
+    const owner = await getAccessibleMediaOwner(ownerType, ownerId, user, organizationId)
     if (!owner) {
       res.status(404).json({ error: 'NOT_FOUND', message: 'Media owner not found.' })
       return
@@ -647,10 +647,21 @@ async function getAccessibleOrganization(organizationId: string, user: JWTPayloa
   return user?.organizationIds.includes(organization.id) || user?.canAccessUnscoped ? organization : null
 }
 
-async function getAccessibleMediaOwner(ownerType: MediaOwnerType, ownerId: string, user: JWTPayload | undefined) {
+async function getAccessibleMediaOwner(
+  ownerType: MediaOwnerType,
+  ownerId: string,
+  user: JWTPayload | undefined,
+  draftOrganizationId?: string | null,
+) {
   if (ownerType === 'issue') {
     const issue = await getAccessibleIssue(ownerId, user)
-    return issue ? { organizationId: issue.contextCompanyId ?? null } : null
+    if (issue) return { organizationId: issue.contextCompanyId ?? null }
+    if (!isUuid(ownerId)) return null
+    if (draftOrganizationId) {
+      const organization = await getAccessibleOrganization(draftOrganizationId, user)
+      return organization ? { organizationId: organization.id } : null
+    }
+    return user?.canAccessUnscoped ? { organizationId: null } : null
   }
 
   const document = await getAccessibleDocument(ownerId, user)
@@ -928,6 +939,10 @@ function isOwnerFolder(value: string | undefined): value is 'documents' | 'issue
 
 function ownerTypeFromFolder(folder: 'documents' | 'issues'): MediaOwnerType {
   return folder === 'issues' ? 'issue' : 'document'
+}
+
+function isUuid(value: string) {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value)
 }
 
 function decodeBase64Payload(value: string) {
