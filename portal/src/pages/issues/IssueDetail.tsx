@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type DragEvent } from 'react'
+import { useCallback, useEffect, useRef, useState, type DragEvent } from 'react'
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { useQuery, useZero } from '@rocicorp/zero/react'
 import { Terminal as XTerm } from '@xterm/xterm'
@@ -290,12 +290,30 @@ export default function IssueDetail() {
   const titleRef = useRef<HTMLTextAreaElement | null>(null)
   const descSaveTimerRef = useRef<number | null>(null)
 
-  useEffect(() => {
+  const resizeTitleTextarea = useCallback(() => {
     const el = titleRef.current
     if (!el) return
     el.style.height = 'auto'
     el.style.height = `${el.scrollHeight}px`
-  }, [titleDraft])
+  }, [])
+
+  useEffect(() => {
+    resizeTitleTextarea()
+  }, [resizeTitleTextarea, titleDraft])
+
+  useEffect(() => {
+    const el = titleRef.current
+    if (!el) return
+
+    const resizeTarget = el.parentElement ?? el
+    const observer = new ResizeObserver(() => resizeTitleTextarea())
+    observer.observe(resizeTarget)
+    window.addEventListener('resize', resizeTitleTextarea)
+    return () => {
+      observer.disconnect()
+      window.removeEventListener('resize', resizeTitleTextarea)
+    }
+  }, [resizeTitleTextarea])
 
   useEffect(() => {
     if (!issue) return
@@ -794,7 +812,7 @@ export default function IssueDetail() {
                 }}
                 rows={1}
                 placeholder="issue title"
-                className="block w-full resize-none overflow-hidden bg-transparent font-mono text-2xl font-bold leading-tight text-fg-1 outline-none placeholder:text-fg-4 focus:bg-accent-fill/3 px-2 py-1 -ml-2"
+                className="block w-full resize-none overflow-hidden whitespace-pre-wrap break-words bg-transparent font-mono text-2xl font-bold leading-tight text-fg-1 outline-none placeholder:text-fg-4 focus:bg-accent-fill/3 px-2 py-1 -ml-2"
               />
 
               <RichEditor
