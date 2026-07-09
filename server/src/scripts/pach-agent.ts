@@ -1052,12 +1052,12 @@ function shellQuote(value: string) {
 }
 
 function summarizeCodexOutput(output: string) {
-  const lines = output
-    .split('\n')
-    .map((line) => line.trim())
-    .filter(Boolean)
+  const summary = output
+    .replace(/\r\n/g, '\n')
+    .replace(/\r/g, '\n')
+    .trim()
 
-  return truncateText(lines.at(-1) ?? '', 320)
+  return truncateText(summary, 4_000)
 }
 
 function readCodexSessionId(stdout: string, stderr: string) {
