@@ -465,6 +465,7 @@ router.post('/runs/:id/follow-up', async (req, res) => {
 
   try {
     const feedback = readOptionalString(req.body?.feedback)
+    const pendingInputMediaCount = readOptionalCount(req.body?.pendingInputMediaCount)
     if (!feedback) {
       res.status(400).json({ ok: false, error: 'feedback is required' })
       return
@@ -524,8 +525,10 @@ router.post('/runs/:id/follow-up', async (req, res) => {
       .update(agentRuns)
       .set({
         conversationId,
-        status: 'queued',
-        statusMessage: parentRun.workerId ? 'queued for same agent worker' : 'queued for agent worker',
+        status: pendingInputMediaCount > 0 ? 'reserved' : 'queued',
+        statusMessage: pendingInputMediaCount > 0
+          ? 'uploading input media'
+          : parentRun.workerId ? 'queued for same agent worker' : 'queued for agent worker',
         completedAt: null,
         metadata: {
           ...runMetadata,
@@ -538,7 +541,7 @@ router.post('/runs/:id/follow-up', async (req, res) => {
           conversationId,
           feedbackMessageId: messageId,
           feedback,
-          pendingInputMediaCount: 0,
+          pendingInputMediaCount,
           codexSessionId,
           preferredWorkerId: parentRun.workerId,
           followUpCount,
@@ -573,7 +576,7 @@ router.post('/runs/:id/follow-up', async (req, res) => {
       parentRunId: parentRun.id,
       workerId: parentRun.workerId,
       codexSessionId,
-      inputMediaCount: 0,
+      inputMediaCount: pendingInputMediaCount,
     })
 
     res.status(201).json({ ok: true, run, message })
@@ -1695,6 +1698,12 @@ function readString(value: unknown, field: string, subject = 'worker') {
 
 function readOptionalString(value: unknown) {
   return typeof value === 'string' && value.trim() ? value.trim() : undefined
+}
+
+function readOptionalCount(value: unknown) {
+  if (value == null) return 0
+  const parsed = Number(value)
+  return Number.isInteger(parsed) && parsed > 0 ? Math.min(parsed, 8) : 0
 }
 
 function readPositiveInteger(value: unknown, fallback: number, min: number, max: number) {
