@@ -224,7 +224,7 @@ function formatInputMediaPrompt(metadata: unknown) {
 
 function formatInputMediaAttachment(value: Record<string, unknown>, index: number) {
   const name = readObjectString(value.name) ?? readObjectString(value.fileName) ?? `attachment ${index + 1}`
-  const url = readObjectString(value.url)
+  const url = readObjectString(value.stableUrl) ?? readObjectString(value.url)
   if (!url) return null
 
   const kind = readObjectString(value.kind) ?? 'file'

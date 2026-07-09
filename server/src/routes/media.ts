@@ -79,6 +79,58 @@ publicMediaRouter.get('/design-assets/:id/file', async (req, res) => {
   }
 })
 
+publicMediaRouter.get('/agent-run-input/:id/file', async (req, res) => {
+  try {
+    const attachmentId = typeof req.params.id === 'string' ? req.params.id : ''
+    if (!attachmentId) {
+      res.status(400).type('text/plain').send('Missing attachment id.')
+      return
+    }
+
+    const db = getDb()
+    const [attachment] = await db.select().from(agentRunInputMedia).where(eq(agentRunInputMedia.id, attachmentId)).limit(1)
+    if (!attachment) {
+      res.status(404).type('text/plain').send('Agent input media not found.')
+      return
+    }
+
+    const [mediaObject] = await db
+      .select()
+      .from(agentRunInputMediaObjects)
+      .where(eq(agentRunInputMediaObjects.id, attachment.mediaObjectId))
+      .limit(1)
+    if (!mediaObject?.storageKey) {
+      res.status(404).type('text/plain').send('Agent input media file not found.')
+      return
+    }
+
+    const object = await getS3Client().send(new GetObjectCommand({
+      Bucket: getBucketName(),
+      Key: mediaObject.storageKey,
+    }))
+    const mimeType = mediaObject.mimeType || object.ContentType || 'application/octet-stream'
+    const fileName = mediaObject.fileName || mediaObject.name || fileNameFromKey(mediaObject.storageKey)
+
+    res.setHeader('Content-Type', mimeType)
+    res.setHeader('Cache-Control', 'private, max-age=300, stale-while-revalidate=3600')
+    res.setHeader('Access-Control-Allow-Origin', '*')
+    if (object.ContentLength != null) res.setHeader('Content-Length', String(object.ContentLength))
+    if (object.ETag) res.setHeader('ETag', object.ETag)
+    res.setHeader('Content-Disposition', `${mediaObject.kind === 'file' ? 'attachment' : 'inline'}; filename="${sanitizeContentDispositionFileName(fileName)}"`)
+
+    const body = object.Body as { pipe?: (destination: typeof res) => void } | undefined
+    if (body?.pipe) {
+      body.pipe(res)
+      return
+    }
+
+    res.status(500).type('text/plain').send('Agent input media body is not streamable.')
+  } catch (error) {
+    console.error('Agent input media public read failed', error)
+    res.status(500).type('text/plain').send('Could not load agent input media.')
+  }
+})
+
 publicMediaRouter.get('/marketing-assets', async (req, res) => {
   try {
     const key = typeof req.query.key === 'string' ? req.query.key : ''
@@ -527,12 +579,15 @@ router.post('/agent-run-input/upload', async (req, res) => {
     }))
 
     const now = new Date()
+    const mediaObjectId = randomUUID()
+    const attachmentId = randomUUID()
     const publicUrl = publicReadUrl(key)
+    const stableUrl = stableAgentInputMediaUrl(req, attachmentId)
     const db = getDb()
     const [mediaObject] = await db
       .insert(agentRunInputMediaObjects)
       .values({
-        id: randomUUID(),
+        id: mediaObjectId,
         organizationId: organizationId ?? undefined,
         kind,
         name: displayName,
@@ -542,12 +597,13 @@ router.post('/agent-run-input/upload', async (req, res) => {
         width: width ?? undefined,
         height: height ?? undefined,
         storageKey: key,
-        url: publicUrl,
+        url: stableUrl,
         source: 'agent_run_upload',
         metadata: {
           caption,
           aspectRatio: width && height ? Number((width / height).toFixed(4)) : undefined,
           uploadedVia: 'agent_run_input',
+          originalUrl: publicUrl,
         },
         createdAt: now,
         updatedAt: now,
@@ -557,7 +613,7 @@ router.post('/agent-run-input/upload', async (req, res) => {
     const [attachment] = await db
       .insert(agentRunInputMedia)
       .values({
-        id: randomUUID(),
+        id: attachmentId,
         runId,
         mediaObjectId: mediaObject.id,
         messageId: messageId ?? undefined,
@@ -585,6 +641,8 @@ router.post('/agent-run-input/upload', async (req, res) => {
       width: mediaObject.width,
       height: mediaObject.height,
       url: mediaObject.url,
+      stableUrl,
+      originalUrl: publicUrl,
       storageKey: mediaObject.storageKey,
       caption: attachment.caption,
       uploadedAt: now.toISOString(),
@@ -607,7 +665,7 @@ router.post('/agent-run-input/upload', async (req, res) => {
       attachment,
       mediaObject,
       summary,
-      readUrl: publicUrl,
+      readUrl: stableUrl,
       signedReadUrl: await signedReadUrl(key),
     })
   } catch (error) {
@@ -799,6 +857,10 @@ function publicReadUrl(key: string) {
 
 function stableDesignAssetUrl(req: Request, assetId: string) {
   return `${requestOrigin(req)}/media/design-assets/${encodeURIComponent(assetId)}/file`
+}
+
+function stableAgentInputMediaUrl(req: Request, attachmentId: string) {
+  return `${requestOrigin(req)}/media/agent-run-input/${encodeURIComponent(attachmentId)}/file`
 }
 
 function requestOrigin(req: Request) {
