@@ -379,6 +379,21 @@ export const RichEditor = forwardRef<RichEditorHandle, RichEditorProps>(function
         }
         return false
       },
+      handleDrop: (view, event) => {
+        const imageFiles = imageFilesFromDataTransfer(event.dataTransfer)
+        if (imageFiles.length === 0) return false
+
+        event.preventDefault()
+        if (!enableUploads) {
+          setMediaStatus('uploads disabled')
+          return true
+        }
+
+        const dropPos = view.posAtCoords({ left: event.clientX, top: event.clientY })?.pos ?? view.state.selection.from
+        closeMenus()
+        void handleMediaFiles(imageFiles, dropPos)
+        return true
+      },
     },
     onUpdate: ({ editor: currentEditor }) => {
       const next = htmlToMarkdown(currentEditor.view.dom as HTMLElement)
@@ -648,7 +663,13 @@ export const RichEditor = forwardRef<RichEditorHandle, RichEditorProps>(function
     closeMenus()
   }
 
-  async function handleMediaFile(file: File | undefined) {
+  async function handleMediaFiles(files: File[], insertPos?: number) {
+    for (const [index, file] of files.entries()) {
+      await handleMediaFile(file, index === 0 ? insertPos : undefined)
+    }
+  }
+
+  async function handleMediaFile(file: File | undefined, insertPos?: number) {
     if (!file) {
       mediaInsertPosRef.current = null
       return
@@ -689,6 +710,7 @@ export const RichEditor = forwardRef<RichEditorHandle, RichEditorProps>(function
         alt: file.name,
         key: upload.key,
         readUrl: upload.readUrl,
+        insertPos,
       })
       setMediaStatus(null)
     } catch (error) {
@@ -750,13 +772,23 @@ export const RichEditor = forwardRef<RichEditorHandle, RichEditorProps>(function
     }
   }
 
-  function insertMediaImage({ alt, key, readUrl }: { alt: string; key: string; readUrl: string }) {
+  function insertMediaImage({
+    alt,
+    key,
+    readUrl,
+    insertPos,
+  }: {
+    alt: string
+    key: string
+    readUrl: string
+    insertPos?: number
+  }) {
     if (!editor) return
-    const pos = mediaInsertPosRef.current ?? editor.state.selection.from
+    const pos = insertPos ?? mediaInsertPosRef.current ?? editor.state.selection.from
     editor.chain().focus().insertContentAt(pos, [
       { type: 'image', attrs: { src: readUrl, alt, title: alt, storageKey: key } },
       { type: 'paragraph' },
-    ]).run()
+    ], { updateSelection: true }).run()
     mediaInsertPosRef.current = null
   }
 
@@ -1367,6 +1399,11 @@ function handleCodeBlockTab(editor: TiptapEditor, shiftKey: boolean) {
 
   if (tr.docChanged) view.dispatch(tr.scrollIntoView())
   return true
+}
+
+function imageFilesFromDataTransfer(dataTransfer: DataTransfer | null) {
+  if (!dataTransfer) return []
+  return Array.from(dataTransfer.files).filter((file) => file.type.startsWith('image/'))
 }
 
 function mediaMarkdownToHtml(alt: string, src: string) {
