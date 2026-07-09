@@ -577,6 +577,7 @@ router.post('/agent-run-input/upload', async (req, res) => {
     const summary = {
       id: attachment.id,
       mediaObjectId: mediaObject.id,
+      messageId: attachment.messageId,
       name: mediaObject.name,
       fileName: mediaObject.fileName,
       kind: mediaObject.kind,

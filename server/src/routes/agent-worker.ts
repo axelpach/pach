@@ -5,6 +5,7 @@ import { and, desc, eq, inArray, isNull, or } from 'drizzle-orm'
 import { agentRunProgressReports, agentRuns, agentWorkers, githubBranches, githubPullRequests, mcpTokens, pmIssues } from '../../../db/schema.js'
 import { getDb } from '../db.js'
 import { buildAgentRunSpec, buildGeneralMcpPrompt } from '../lib/agent-run-prompt.js'
+import { hydrateAgentInputMediaMetadata } from '../lib/agent-input-media.js'
 import { insertIssueActivityEvent } from '../lib/activity-events.js'
 import { readGithubCredentialForRepository } from '../lib/github-credentials.js'
 import { hashMcpToken, hasMcpCapability, type McpAuthContext, type McpCapability } from '../lib/mcp-token.js'
@@ -191,11 +192,16 @@ router.post('/runs/claim', async (req: AgentWorkerRequest, res) => {
         },
       })
 
+      const promptRun = {
+        ...claimed,
+        metadata: await hydrateAgentInputMediaMetadata(claimed.metadata),
+      }
+
       res.json({
         ok: true,
         run: claimed,
         worker,
-        executionPrompt: buildGeneralMcpPrompt(claimed),
+        executionPrompt: buildGeneralMcpPrompt(promptRun),
         executionPromptSource: 'server',
         runSpec,
       })

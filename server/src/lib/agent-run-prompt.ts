@@ -1,3 +1,8 @@
+import {
+  buildFollowUpContinuationPrompt,
+  formatAgentInputMediaPrompt,
+} from './agent-input-media.js'
+
 export type AgentRunPromptRecord = {
   id: string
   issueId?: string | null
@@ -74,13 +79,21 @@ export function buildAgentRunSpec(run: AgentRunPromptRecord): AgentRunSpec {
 }
 
 export function buildGeneralMcpPrompt(run: AgentRunPromptRecord) {
+  const feedback = readMetadataString(run.metadata, 'feedback')
+  const codexSessionId = readMetadataString(run.metadata, 'codexSessionId')
+  if (feedback && codexSessionId) {
+    return buildFollowUpContinuationPrompt({
+      feedback,
+      metadata: run.metadata,
+    })
+  }
+
   if (run.subjectType === 'design_template_run') return buildDesignTemplateMcpPrompt(run)
   if (readMetadataString(run.metadata, 'handler') === 'editorial-mcp') return buildEditorialMcpPrompt(run)
 
   const runSpec = buildAgentRunSpec(run)
-  const feedback = readMetadataString(run.metadata, 'feedback')
   const parentRunId = readMetadataString(run.metadata, 'parentRunId')
-  const attachments = formatInputMediaPrompt(run.metadata)
+  const attachments = formatAgentInputMediaPrompt(run.metadata)
   const codeWorktree = runSpec.executionMode === 'code_worktree'
   return [
     codeWorktree ? 'You are Pach engineering issue worker.' : 'You are Pach general MCP issue worker.',
@@ -128,7 +141,7 @@ function buildEditorialMcpPrompt(run: AgentRunPromptRecord) {
   const runSpec = buildAgentRunSpec(run)
   const feedback = readMetadataString(run.metadata, 'feedback')
   const parentRunId = readMetadataString(run.metadata, 'parentRunId')
-  const attachments = formatInputMediaPrompt(run.metadata)
+  const attachments = formatAgentInputMediaPrompt(run.metadata)
   const editorialWorkflow = readMetadataString(run.metadata, 'editorialWorkflow')
   const editorialIntent = readMetadataString(run.metadata, 'editorialIntent')
   const guidelinesPolicy = readMetadataString(run.metadata, 'guidelinesPolicy') ?? 'none'
@@ -237,7 +250,7 @@ function buildDesignTemplateMcpPrompt(run: AgentRunPromptRecord) {
   const templateId = readMetadataString(run.metadata, 'designTemplateId')
   const organizationProject = readMetadataString(run.metadata, 'organizationProject')
   const designTemplateRunId = readMetadataString(run.metadata, 'designTemplateRunId') ?? run.subjectId ?? undefined
-  const attachments = formatInputMediaPrompt(run.metadata)
+  const attachments = formatAgentInputMediaPrompt(run.metadata)
   return [
     'You are Pach design template MCP worker.',
     '',
@@ -276,52 +289,4 @@ function readMetadataNumber(metadata: unknown, key: string) {
   if (!metadata || typeof metadata !== 'object') return null
   const value = (metadata as Record<string, unknown>)[key]
   return typeof value === 'number' && Number.isFinite(value) ? value : null
-}
-
-function formatInputMediaPrompt(metadata: unknown) {
-  const attachments = readMetadataArray(metadata, 'attachments')
-    .map((attachment, index) => formatInputMediaAttachment(attachment, index))
-    .filter(Boolean)
-
-  if (!attachments.length) return null
-
-  return [
-    'Attached context media:',
-    ...attachments,
-    '',
-    'Use these attachments as user-provided context. For images/screenshots, inspect the URL directly when useful; preserve exact visual details the user is pointing at.',
-  ].join('\n')
-}
-
-function formatInputMediaAttachment(value: Record<string, unknown>, index: number) {
-  const name = readObjectString(value.name) ?? readObjectString(value.fileName) ?? `attachment ${index + 1}`
-  const url = readObjectString(value.url)
-  if (!url) return null
-
-  const kind = readObjectString(value.kind) ?? 'file'
-  const mimeType = readObjectString(value.mimeType)
-  const caption = readObjectString(value.caption)
-  const width = typeof value.width === 'number' ? value.width : null
-  const height = typeof value.height === 'number' ? value.height : null
-  const dimensions = width && height ? `${width}x${height}` : null
-  const details = [
-    kind,
-    mimeType,
-    dimensions,
-    caption ? `caption: ${caption}` : null,
-  ].filter(Boolean).join(', ')
-
-  return `- ${index + 1}. ${name}${details ? ` (${details})` : ''}: ${url}`
-}
-
-function readMetadataArray(metadata: unknown, key: string) {
-  if (!metadata || typeof metadata !== 'object') return []
-  const value = (metadata as Record<string, unknown>)[key]
-  return Array.isArray(value)
-    ? value.filter((entry): entry is Record<string, unknown> => Boolean(entry && typeof entry === 'object' && !Array.isArray(entry)))
-    : []
-}
-
-function readObjectString(value: unknown) {
-  return typeof value === 'string' && value.trim() ? value.trim() : null
 }

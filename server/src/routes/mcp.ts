@@ -6,6 +6,8 @@ import type { Request } from 'express'
 import { and, asc, desc, eq, gte, ilike, inArray, isNull, lte, or, type SQL } from 'drizzle-orm'
 import {
   activityEvents,
+  agentRunInputMedia,
+  agentRunInputMediaObjects,
   agentRunProgressReports,
   designAssets,
   agentRuns,
@@ -46,6 +48,11 @@ import {
 } from '../lib/mcp-token.js'
 import { getFallbackDesignSystemForOrganization, mergeDesignSystemWithFallback } from '../design-systems/fallback.js'
 import { finalizeAgentRunPullRequest } from '../lib/agent-pr-finalizer.js'
+import {
+  SIGNED_READ_SECONDS as AGENT_INPUT_MEDIA_SIGNED_READ_SECONDS,
+  formatAgentInputMediaPrompt,
+  hydrateAgentInputMediaAttachment,
+} from '../lib/agent-input-media.js'
 import {
   createEditorialIdea,
   fulfillPublicationSlot,
@@ -805,6 +812,25 @@ const tools: ToolDefinition[] = [
     },
   },
   {
+    name: 'pach.agent_run.input_media.list',
+    description: 'List user-provided input media for an agent run and return fresh signed read URLs. Use this if an attached screenshot/file URL has expired or is inaccessible.',
+    inputSchema: {
+      type: 'object',
+      additionalProperties: false,
+      required: ['runId'],
+      properties: {
+        runId: {
+          type: 'string',
+          description: 'Agent run UUID.',
+        },
+        messageId: {
+          type: 'string',
+          description: 'Optional feedback message UUID to limit results to one follow-up message.',
+        },
+      },
+    },
+  },
+  {
     name: 'pach.github.pull_request.create',
     description: 'Finalize the working branch for an agent run using Pach-held GitHub credentials, then create or reuse a ready-for-review GitHub pull request.',
     inputSchema: {
@@ -1080,6 +1106,9 @@ async function callTool(req: AuthenticatedRequest, params: unknown) {
       case 'pach.progress.report':
         requireMcpCapability(req, 'pach.progress.report')
         return toolResult(await reportProgress(req, args))
+      case 'pach.agent_run.input_media.list':
+        requireMcpCapability(req, 'pach.issue.read')
+        return toolResult(await listAgentRunInputMedia(req, args))
       case 'pach.github.pull_request.create':
         requireMcpCapability(req, 'pach.progress.report')
         return toolResult(await createGithubPullRequestForRun(req, args))
@@ -2684,6 +2713,63 @@ async function reportProgress(req: AuthenticatedRequest, args: unknown) {
   }
 }
 
+async function listAgentRunInputMedia(req: AuthenticatedRequest, args: unknown) {
+  const body = ensureObject(args)
+  const runId = readRequiredString(body, 'runId')
+  const messageId = readOptionalString(body.messageId)
+  const run = await readAccessibleAgentRunForMedia(req, runId)
+  const db = getDb()
+  const mediaLinks = await db
+    .select()
+    .from(agentRunInputMedia)
+    .where(messageId
+      ? and(eq(agentRunInputMedia.runId, run.id), eq(agentRunInputMedia.messageId, messageId))
+      : eq(agentRunInputMedia.runId, run.id))
+    .orderBy(asc(agentRunInputMedia.sortOrder), asc(agentRunInputMedia.createdAt))
+  const mediaObjectIds = uniqueStrings(mediaLinks.map((link) => link.mediaObjectId))
+  const mediaObjects = mediaObjectIds.length > 0
+    ? await db
+      .select()
+      .from(agentRunInputMediaObjects)
+      .where(inArray(agentRunInputMediaObjects.id, mediaObjectIds))
+    : []
+  const mediaObjectById = new Map(mediaObjects.map((mediaObject) => [mediaObject.id, mediaObject]))
+  const attachments = []
+  for (const link of mediaLinks) {
+    const mediaObject = mediaObjectById.get(link.mediaObjectId)
+    if (!mediaObject) continue
+    const hydrated = await hydrateAgentInputMediaAttachment({
+      id: link.id,
+      mediaObjectId: mediaObject.id,
+      messageId: link.messageId ?? null,
+      name: mediaObject.name,
+      fileName: mediaObject.fileName,
+      kind: mediaObject.kind,
+      mimeType: mediaObject.mimeType,
+      sizeBytes: mediaObject.sizeBytes ?? undefined,
+      width: mediaObject.width ?? undefined,
+      height: mediaObject.height ?? undefined,
+      url: mediaObject.url ?? undefined,
+      storageKey: mediaObject.storageKey,
+      caption: link.caption,
+      uploadedAt: link.createdAt.toISOString(),
+    })
+    attachments.push(hydrated)
+  }
+
+  return {
+    ok: true,
+    runId: run.id,
+    issueId: run.issueId,
+    subjectType: run.subjectType,
+    subjectId: run.subjectId,
+    messageId: messageId ?? null,
+    expiresInSeconds: AGENT_INPUT_MEDIA_SIGNED_READ_SECONDS,
+    attachments,
+    promptBlock: formatAgentInputMediaPrompt({ attachments, feedbackMessageId: messageId }),
+  }
+}
+
 async function createGithubPullRequestForRun(req: AuthenticatedRequest, args: unknown) {
   const body = ensureObject(args)
   const runId = readRequiredString(body, 'runId')
@@ -2733,6 +2819,28 @@ async function readAccessibleIssue(req: AuthenticatedRequest, issueId: string) {
   if (!canAccessIssue(req, issue)) throw new Error('Not authorized for this issue')
 
   return { issue }
+}
+
+async function readAccessibleAgentRunForMedia(req: AuthenticatedRequest, runId: string) {
+  const normalizedRunId = runId.trim()
+  if (!normalizedRunId) throw new Error('Missing runId')
+
+  const [run] = await getDb()
+    .select()
+    .from(agentRuns)
+    .where(eq(agentRuns.id, normalizedRunId))
+    .limit(1)
+  if (!run) throw new Error('Agent run not found')
+
+  if (run.issueId) {
+    await readAccessibleIssue(req, run.issueId)
+    return run
+  }
+
+  const organizationId = readMetadataString(run.metadata, 'organizationId')
+  if (canAccessOrganization(req, organizationId)) return run
+
+  throw new Error('Not authorized for this agent run')
 }
 
 function canAccessIssue(req: AuthenticatedRequest, issue: typeof pmIssues.$inferSelect) {
