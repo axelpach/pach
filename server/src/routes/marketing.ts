@@ -23,6 +23,7 @@ import {
   validateOrganizationApiKey,
 } from '../lib/organization-api-key.js'
 import type { JWTPayload } from '../lib/auth.js'
+import { markPublicationSlotForDistributionRun } from '../services/marketing-autonomy.js'
 
 const router = Router()
 export const publicMarketingRouter = Router()
@@ -726,6 +727,7 @@ export async function sendNewsletterRun(runId: string, testOnly: boolean) {
   const now = new Date()
   if (!testOnly) {
     await db.update(mktDistributionRuns).set({ status: 'sending', startedAt: now, error: null, updatedAt: now }).where(eq(mktDistributionRuns.id, run.id))
+    await markPublicationSlotForDistributionRun(run.id, 'sending')
   }
 
   let sent = 0
@@ -806,6 +808,7 @@ export async function sendNewsletterRun(runId: string, testOnly: boolean) {
       .returning()
 
   if (!testOnly) {
+    await markPublicationSlotForDistributionRun(run.id, status === 'sent' ? 'sent' : 'failed', errors[0] ?? null)
     const label = run.name || run.subject || item.title
     const eventType = status === 'sent' ? 'sent' : 'failed'
     const severity = status === 'sent' ? (failed > 0 ? 'warning' : 'info') : 'error'

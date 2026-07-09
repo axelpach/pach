@@ -35,11 +35,13 @@ type ScopedTable =
   | 'mkt_publications'
   | 'mkt_ctas'
   | 'mkt_content_items'
+  | 'mkt_editorial_ideas'
   | 'mkt_audience_members'
   | 'mkt_audience_subscriptions'
   | 'mkt_segments'
   | 'mkt_segment_members'
   | 'mkt_distribution_runs'
+  | 'mkt_publication_slots'
   | 'mkt_content_events'
   | 'mkt_publication_consumers'
   | 'mkt_content_outputs'
@@ -91,11 +93,13 @@ const ORG_COLUMN_BY_TABLE: Record<ScopedTable, string> = {
   mkt_publications: 'organization_id',
   mkt_ctas: 'organization_id',
   mkt_content_items: 'organization_id',
+  mkt_editorial_ideas: 'organization_id',
   mkt_audience_members: 'organization_id',
   mkt_audience_subscriptions: 'organization_id',
   mkt_segments: 'organization_id',
   mkt_segment_members: 'organization_id',
   mkt_distribution_runs: 'organization_id',
+  mkt_publication_slots: 'organization_id',
   mkt_content_events: 'organization_id',
   mkt_publication_consumers: 'organization_id',
   mkt_content_outputs: 'organization_id',
@@ -907,6 +911,37 @@ export function createServerMutators(authData?: JWTPayload) {
       },
     },
 
+    mkt_editorial_ideas: {
+      async create(tx: Tx, args: any) {
+        requireOrganizationAccess(args.organizationId)
+        await requireExistingOrganizationAccess(tx, 'mkt_publications', args.publicationId)
+        if (args.documentId) await requireExistingOrganizationAccess(tx, 'documents', args.documentId)
+        if (args.contentItemId) await requireExistingOrganizationAccess(tx, 'mkt_content_items', args.contentItemId)
+        const now = Date.now()
+        await tx.mutate.mkt_editorial_ideas.insert({
+          status: 'available',
+          priority: 0,
+          metadata: {},
+          ...args,
+          createdAt: now,
+          updatedAt: now,
+        })
+      },
+      async update(tx: Tx, args: any) {
+        await requireExistingOrganizationAccess(tx, 'mkt_editorial_ideas', args.id)
+        if ('organizationId' in args) requireOrganizationAccess(args.organizationId)
+        if (args.publicationId) await requireExistingOrganizationAccess(tx, 'mkt_publications', args.publicationId)
+        if (args.documentId) await requireExistingOrganizationAccess(tx, 'documents', args.documentId)
+        if (args.contentItemId) await requireExistingOrganizationAccess(tx, 'mkt_content_items', args.contentItemId)
+        const { id, ...updates } = args
+        await tx.mutate.mkt_editorial_ideas.update({ id, ...updates, updatedAt: Date.now() })
+      },
+      async delete(tx: Tx, args: { id: string }) {
+        await requireExistingOrganizationAccess(tx, 'mkt_editorial_ideas', args.id)
+        await tx.mutate.mkt_editorial_ideas.delete({ id: args.id })
+      },
+    },
+
     mkt_audience_members: {
       async create(tx: Tx, args: any) {
         requireOrganizationAccess(args.organizationId)
@@ -1011,6 +1046,41 @@ export function createServerMutators(authData?: JWTPayload) {
           await tx.mutate.mkt_content_events.delete({ id: event.id as string })
         }
         await tx.mutate.mkt_distribution_runs.delete({ id: args.id })
+      },
+    },
+
+    mkt_publication_slots: {
+      async create(tx: Tx, args: any) {
+        requireOrganizationAccess(args.organizationId)
+        await requireExistingOrganizationAccess(tx, 'mkt_publications', args.publicationId)
+        if (args.ideaId) await requireExistingOrganizationAccess(tx, 'mkt_editorial_ideas', args.ideaId)
+        if (args.documentId) await requireExistingOrganizationAccess(tx, 'documents', args.documentId)
+        if (args.contentItemId) await requireExistingOrganizationAccess(tx, 'mkt_content_items', args.contentItemId)
+        if (args.distributionRunId) await requireExistingOrganizationAccess(tx, 'mkt_distribution_runs', args.distributionRunId)
+        const now = Date.now()
+        await tx.mutate.mkt_publication_slots.insert({
+          status: 'planned',
+          scheduledTimezone: 'America/Mexico_City',
+          metadata: {},
+          ...args,
+          createdAt: now,
+          updatedAt: now,
+        })
+      },
+      async update(tx: Tx, args: any) {
+        await requireExistingOrganizationAccess(tx, 'mkt_publication_slots', args.id)
+        if ('organizationId' in args) requireOrganizationAccess(args.organizationId)
+        if (args.publicationId) await requireExistingOrganizationAccess(tx, 'mkt_publications', args.publicationId)
+        if (args.ideaId) await requireExistingOrganizationAccess(tx, 'mkt_editorial_ideas', args.ideaId)
+        if (args.documentId) await requireExistingOrganizationAccess(tx, 'documents', args.documentId)
+        if (args.contentItemId) await requireExistingOrganizationAccess(tx, 'mkt_content_items', args.contentItemId)
+        if (args.distributionRunId) await requireExistingOrganizationAccess(tx, 'mkt_distribution_runs', args.distributionRunId)
+        const { id, ...updates } = args
+        await tx.mutate.mkt_publication_slots.update({ id, ...updates, updatedAt: Date.now() })
+      },
+      async delete(tx: Tx, args: { id: string }) {
+        await requireExistingOrganizationAccess(tx, 'mkt_publication_slots', args.id)
+        await tx.mutate.mkt_publication_slots.delete({ id: args.id })
       },
     },
 

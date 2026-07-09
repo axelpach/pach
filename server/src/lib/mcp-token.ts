@@ -12,6 +12,8 @@ export const MCP_CAPABILITIES = [
   'pach.design.read',
   'pach.design.write',
   'pach.finance.read',
+  'pach.marketing.read',
+  'pach.marketing.write',
   'pach.progress.report',
   'agent.worker.heartbeat',
   'agent.run.claim',

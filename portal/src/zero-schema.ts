@@ -556,6 +556,28 @@ const mktContentItems = table('mkt_content_items')
   })
   .primaryKey('id')
 
+const mktEditorialIdeas = table('mkt_editorial_ideas')
+  .columns({
+    id: string(),
+    organizationId: string().from('organization_id'),
+    publicationId: string().from('publication_id'),
+    documentId: string().optional().from('document_id'),
+    contentItemId: string().optional().from('content_item_id'),
+    agentRunId: string().optional().from('agent_run_id'),
+    title: string(),
+    angle: string().optional(),
+    sourceNotes: string().optional().from('source_notes'),
+    dedupeKey: string().from('dedupe_key'),
+    status: string(),
+    priority: number(),
+    reservedAt: number().optional().from('reserved_at'),
+    usedAt: number().optional().from('used_at'),
+    metadata: json(),
+    createdAt: number().from('created_at'),
+    updatedAt: number().from('updated_at'),
+  })
+  .primaryKey('id')
+
 const mktAudienceMembers = table('mkt_audience_members')
   .columns({
     id: string(),
@@ -645,6 +667,28 @@ const mktDistributionRuns = table('mkt_distribution_runs')
     metrics: json<Record<string, unknown>>(),
     error: string().optional(),
     metadata: json<Record<string, unknown>>(),
+    createdAt: number().from('created_at'),
+    updatedAt: number().from('updated_at'),
+  })
+  .primaryKey('id')
+
+const mktPublicationSlots = table('mkt_publication_slots')
+  .columns({
+    id: string(),
+    organizationId: string().from('organization_id'),
+    publicationId: string().from('publication_id'),
+    ideaId: string().optional().from('idea_id'),
+    documentId: string().optional().from('document_id'),
+    contentItemId: string().optional().from('content_item_id'),
+    distributionRunId: string().optional().from('distribution_run_id'),
+    agentRunId: string().optional().from('agent_run_id'),
+    slotKey: string().from('slot_key'),
+    status: string(),
+    scheduledAt: number().from('scheduled_at'),
+    scheduledTimezone: string().from('scheduled_timezone'),
+    lockedAt: number().optional().from('locked_at'),
+    error: string().optional(),
+    metadata: json(),
     createdAt: number().from('created_at'),
     updatedAt: number().from('updated_at'),
   })
@@ -1364,11 +1408,13 @@ export const schema = createSchema({
     mktPublications,
     mktCtas,
     mktContentItems,
+    mktEditorialIdeas,
     mktAudienceMembers,
     mktAudienceSubscriptions,
     mktSegments,
     mktSegmentMembers,
     mktDistributionRuns,
+    mktPublicationSlots,
     mktContentEvents,
     mktPublicationConsumers,
     mktContentOutputs,

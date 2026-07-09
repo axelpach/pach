@@ -21,6 +21,7 @@ import {
   ChevronRight,
   Edit3,
   ExternalLink,
+  Info,
   Link2,
   Linkedin,
   Mail,
@@ -58,6 +59,8 @@ type SenderProfileRow = Schema['tables']['mkt_sender_profiles']['row']
 type AudienceMemberRow = Schema['tables']['mkt_audience_members']['row']
 type AudienceSubscriptionRow = Schema['tables']['mkt_audience_subscriptions']['row']
 type DistributionRunRow = Schema['tables']['mkt_distribution_runs']['row']
+type EditorialIdeaRow = Schema['tables']['mkt_editorial_ideas']['row']
+type PublicationSlotRow = Schema['tables']['mkt_publication_slots']['row']
 type CtaRow = Schema['tables']['mkt_ctas']['row']
 type ContentEventRow = Schema['tables']['mkt_content_events']['row']
 type ContentOutputRow = Schema['tables']['mkt_content_outputs']['row']
@@ -81,8 +84,15 @@ type PublicationEmailWrapper = {
 }
 type PublicationCadenceConfig = {
   enabled: boolean
+  mode: 'autonomous' | 'issue'
+  frequency: 'weekly' | 'monthly' | 'quarterly'
   lookaheadDays: number
   cooldownDays: number
+  timezone: string
+  time: string
+  dayOfWeek: number
+  dayOfMonth: number
+  minIdeaBacklog: number
 }
 type LinkedInAdPromotionDraftPayload = {
   adAccountExternalId: string
@@ -178,6 +188,24 @@ const MARKETING_TIMEZONE_OPTIONS: PachSelectOption[] = MARKETING_TIMEZONES.map((
   value: timezone.value,
   label: timezone.label,
 }))
+const CADENCE_MODE_OPTIONS: PachSelectOption[] = [
+  { value: 'autonomous', label: 'autonomous' },
+  { value: 'issue', label: 'issue' },
+]
+const CADENCE_FREQUENCY_OPTIONS: PachSelectOption[] = [
+  { value: 'weekly', label: 'weekly' },
+  { value: 'monthly', label: 'monthly' },
+  { value: 'quarterly', label: 'quarterly' },
+]
+const WEEKDAY_OPTIONS: PachSelectOption[] = [
+  { value: '0', label: 'sunday' },
+  { value: '1', label: 'monday' },
+  { value: '2', label: 'tuesday' },
+  { value: '3', label: 'wednesday' },
+  { value: '4', label: 'thursday' },
+  { value: '5', label: 'friday' },
+  { value: '6', label: 'saturday' },
+]
 
 export default function Marketing() {
   const z = useZero<Schema, Mutators>()
@@ -191,6 +219,8 @@ export default function Marketing() {
   const [audienceMembers] = useQuery(z.query.mkt_audience_members.orderBy('updatedAt', 'desc'))
   const [subscriptions] = useQuery(z.query.mkt_audience_subscriptions.orderBy('updatedAt', 'desc'))
   const [distributionRuns] = useQuery(z.query.mkt_distribution_runs.orderBy('updatedAt', 'desc'))
+  const [editorialIdeas] = useQuery(z.query.mkt_editorial_ideas.orderBy('updatedAt', 'desc'))
+  const [publicationSlots] = useQuery(z.query.mkt_publication_slots.orderBy('scheduledAt', 'asc'))
   const [contentOutputs] = useQuery(z.query.mkt_content_outputs.orderBy('updatedAt', 'desc'))
   const [ctas] = useQuery(z.query.mkt_ctas.orderBy('updatedAt', 'desc'))
   const [events] = useQuery(z.query.mkt_content_events.orderBy('createdAt', 'desc'))
@@ -228,7 +258,11 @@ export default function Marketing() {
   const selectedPublication = orgPublications.find((item) => item.id === selectedPublicationId) ?? orgPublications[0] ?? null
   const contentItemIdFromUrl = new URLSearchParams(location.search).get('content')
   const broadcastRunIdFromUrl = broadcastRunIdFromPath(location.pathname)
+  const publicationIdFromUrl = publicationIdFromPath(location.pathname)
+  const publicationDetail = publicationIdFromUrl ? publications.find((entry) => entry.id === publicationIdFromUrl) ?? null : null
   const isBroadcastDetail = section === 'newsletters' && newsletterTab === 'broadcasts' && Boolean(broadcastRunIdFromUrl)
+  const isPublicationDetail = section === 'newsletters' && newsletterTab === 'publications' && Boolean(publicationIdFromUrl)
+  const isMarketingDetail = isBroadcastDetail || isPublicationDetail
 
   const organizationOptions = useMemo<PachSelectOption[]>(
     () => organizations.map((entry) => ({ value: entry.id, label: entry.name })),
@@ -264,6 +298,11 @@ export default function Marketing() {
     const run = distributionRuns.find((entry) => entry.id === broadcastRunIdFromUrl)
     if (run && run.organizationId !== organizationId) setOrganizationId(run.organizationId)
   }, [broadcastRunIdFromUrl, distributionRuns, organizationId])
+
+  useEffect(() => {
+    if (!publicationDetail) return
+    if (publicationDetail.organizationId !== organizationId) setOrganizationId(publicationDetail.organizationId)
+  }, [organizationId, publicationDetail])
 
   useEffect(() => {
     if (!selectedPublicationId || orgPublications.some((item) => item.id === selectedPublicationId)) return
@@ -347,7 +386,7 @@ export default function Marketing() {
       </aside>
 
       <main className={`min-w-0 flex-1 ${isCalendarSection ? 'flex min-h-0 flex-col overflow-hidden' : 'overflow-auto'}`}>
-        {!isBroadcastDetail ? (
+        {!isMarketingDetail ? (
           <div className="border-b border-edge/12 px-5 py-4 md:px-8">
             <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
               <div className="md:hidden">
@@ -392,17 +431,40 @@ export default function Marketing() {
           </div>
         ) : null}
 
-        <div className={isBroadcastDetail ? 'min-h-full' : isCalendarSection ? 'min-h-0 flex-1' : 'px-5 py-5 md:px-8'}>
+        <div className={isMarketingDetail ? 'min-h-full' : isCalendarSection ? 'min-h-0 flex-1' : 'px-5 py-5 md:px-8'}>
           {section === 'newsletters' ? (
-            <div className={isBroadcastDetail ? 'min-h-full' : 'space-y-4'}>
-              {!isBroadcastDetail ? (
+            <div className={isMarketingDetail ? 'min-h-full' : 'space-y-4'}>
+              {isPublicationDetail ? (
+                <PublicationDetailPage
+                  z={z}
+                  publication={publicationDetail}
+                  organization={publicationDetail ? organizations.find((entry) => entry.id === publicationDetail.organizationId) ?? organization : organization}
+                  senderProfiles={publicationDetail ? senderProfiles.filter((profile) => profile.organizationId === publicationDetail.organizationId) : orgSenderProfiles}
+                  ctas={publicationDetail ? ctas.filter((cta) => cta.organizationId === publicationDetail.organizationId) : orgCtas}
+                  subscriptions={publicationDetail ? subscriptions.filter((subscription) => subscription.organizationId === publicationDetail.organizationId) : orgSubscriptions}
+                  ideas={publicationDetail ? editorialIdeas.filter((idea) => idea.publicationId === publicationDetail.id) : []}
+                  slots={publicationDetail ? publicationSlots.filter((slot) => slot.publicationId === publicationDetail.id) : []}
+                  contentItems={publicationDetail ? contentItems.filter((item) => item.organizationId === publicationDetail.organizationId) : orgContentItems}
+                  runs={publicationDetail ? distributionRuns.filter((run) => run.publicationId === publicationDetail.id) : []}
+                  documents={documents}
+                  issues={issues}
+                  onBack={() => navigate('/marketing/newsletters/publications')}
+                  onShowSubscribers={(publicationId) => {
+                    setSelectedPublicationId(publicationId)
+                    navigate('/marketing/newsletters/subscribers')
+                  }}
+                  onCreateSenderProfile={createSenderProfile}
+                  onFlash={flash}
+                />
+              ) : null}
+              {!isMarketingDetail ? (
                 <MarketingSubtabMenu
                   tabs={NEWSLETTER_TABS}
                   value={newsletterTab}
                   onChange={(tab) => navigate(`/marketing/newsletters/${tab}`)}
                 />
               ) : null}
-              {newsletterTab === 'content' ? (
+              {!isPublicationDetail && newsletterTab === 'content' ? (
                 <ContentSection
                   z={z}
                   contentItems={orgContentItems}
@@ -419,7 +481,7 @@ export default function Marketing() {
                   onFlash={flash}
                 />
               ) : null}
-              {newsletterTab === 'publications' || newsletterTab === 'subscribers' ? (
+              {!isPublicationDetail && (newsletterTab === 'publications' || newsletterTab === 'subscribers') ? (
                 <NewslettersSection
                   z={z}
                   organization={organization}
@@ -438,7 +500,7 @@ export default function Marketing() {
                   onFlash={flash}
                 />
               ) : null}
-              {newsletterTab === 'broadcasts' ? (
+              {!isPublicationDetail && newsletterTab === 'broadcasts' ? (
                 <BroadcastsSection
                   z={z}
                   organizationId={organizationId}
@@ -454,7 +516,7 @@ export default function Marketing() {
                   onFlash={flash}
                 />
               ) : null}
-              {newsletterTab === 'ctas' ? (
+              {!isPublicationDetail && newsletterTab === 'ctas' ? (
                 <CtasSection z={z} organizationId={organizationId} ctas={orgCtas} onFlash={flash} />
               ) : null}
             </div>
@@ -569,6 +631,20 @@ function MarketingHeaderMetrics({
       <Metric label="broadcasts" value={runs.filter((run) => run.channel === 'newsletter').length} />
       <Metric label="conversations" value={countEvents(events, 'reply')} />
     </div>
+  )
+}
+
+function InfoTitle({ label, info }: { label: string; info: string }) {
+  return (
+    <span className="inline-flex min-w-0 items-center gap-1.5">
+      <span className="truncate">{label}</span>
+      <span className="group relative inline-flex">
+        <Info className="h-3 w-3 text-fg-4 transition group-hover:text-accent" />
+        <span className="pointer-events-none absolute left-1/2 top-full z-30 mt-2 hidden w-60 -translate-x-1/2 border border-edge/25 bg-pit px-3 py-2 text-left font-mono text-[10px] normal-case leading-relaxed tracking-normal text-fg-2 shadow-terminal-popover group-hover:block">
+          {info}
+        </span>
+      </span>
+    </span>
   )
 }
 
@@ -1568,13 +1644,14 @@ function NewslettersSection({
           emailWrapper: emailWrapperPayload(defaultEmailWrapper()),
         },
         editorialProfile: {
+          ideaGuidelines: '',
           newsletterGuidelines: '',
         },
       })
       onSelectPublication(id)
-      setEditingPublicationId(id)
       setPublicationModalOpen(false)
       onFlash('publication created')
+      navigate(`/marketing/newsletters/publications/${id}`)
     } catch (error) {
       console.error('Publication create failed', error)
       onFlash('publication could not be created')
@@ -1589,7 +1666,7 @@ function NewslettersSection({
 
   function openPublicationEditor(publicationId: string) {
     onSelectPublication(publicationId)
-    setEditingPublicationId(publicationId)
+    navigate(`/marketing/newsletters/publications/${publicationId}`)
   }
 
   function openGuidelinesEditor(publication: PublicationRow) {
@@ -1722,19 +1799,9 @@ function NewslettersSection({
   return (
     <div className="space-y-4">
       <div className="flex flex-col gap-3 border-b border-edge/15 md:flex-row md:items-end md:justify-between">
-        <div className="flex gap-0">
-          <MarketingTabButton active={tab === 'publications'} onClick={() => {
-            setTab('publications')
-            navigate('/marketing/newsletters/publications')
-          }}>
-            publications
-          </MarketingTabButton>
-          <MarketingTabButton active={tab === 'subscribers'} onClick={() => {
-            setTab('subscribers')
-            navigate('/marketing/newsletters/subscribers')
-          }}>
-            subscribers
-          </MarketingTabButton>
+        <div className="pb-2">
+          <div className="font-mono text-[10px] uppercase tracking-label text-fg-4">newsletter</div>
+          <div className="mt-1 font-mono text-base font-bold lowercase text-fg-1">{tab}</div>
         </div>
         <div className="pb-2">
           {tab === 'publications' ? (
@@ -1750,7 +1817,7 @@ function NewslettersSection({
       </div>
 
       {tab === 'publications' ? (
-        <Panel title="publications">
+        <Panel title={<InfoTitle label="publications" info="Newsletter publications. Click a row to open the publication detail page for cadence, guidelines, ideas, and slots." />}>
           <div className="overflow-auto">
             <table className="w-full min-w-[820px] text-left font-mono text-xs">
               <thead className="text-[10px] uppercase tracking-label text-fg-4">
@@ -1767,19 +1834,29 @@ function NewslettersSection({
                 {publications.map((publication) => {
                   const sender = senderProfiles.find((profile) => profile.id === publication.defaultSenderProfileId)
                   return (
-                    <tr key={publication.id} className="border-b border-edge/8 text-fg-2 transition hover:bg-accent-fill/4">
-                      <td className="max-w-[220px] truncate py-2.5 pr-3">{publication.name}</td>
+                    <tr
+                      key={publication.id}
+                      className="cursor-pointer border-b border-edge/8 text-fg-2 transition hover:bg-accent-fill/4"
+                      onClick={() => openPublicationEditor(publication.id)}
+                    >
+                      <td className="max-w-[220px] py-2.5 pr-3">
+                        <div className="max-w-full truncate text-fg-1">{publication.name}</div>
+                      </td>
                       <td className="py-2.5 pr-3 text-fg-4">{publication.slug}</td>
                       <td className="max-w-[220px] truncate py-2.5 pr-3">{sender?.fromEmail ?? '-'}</td>
                       <td className="py-2.5 pr-3">{subscriberCounts.get(publication.id) ?? 0}</td>
                       <td className="py-2.5 pr-3"><StatusPill kind={statusKind(publication.status)}>{publication.status}</StatusPill></td>
                       <td className="py-2.5">
                         <div className="flex gap-2">
-                          <Button className="px-2 py-1 text-[10px]" icon={<Users className="h-3 w-3" />} onClick={() => showSubscribers(publication.id)}>
+                          <Button
+                            className="px-2 py-1 text-[10px]"
+                            icon={<Users className="h-3 w-3" />}
+                            onClick={(event) => {
+                              event.stopPropagation()
+                              showSubscribers(publication.id)
+                            }}
+                          >
                             subscribers
-                          </Button>
-                          <Button className="px-2 py-1 text-[10px]" icon={<Edit3 className="h-3 w-3" />} onClick={() => openPublicationEditor(publication.id)}>
-                            edit
                           </Button>
                         </div>
                       </td>
@@ -1792,7 +1869,7 @@ function NewslettersSection({
           {publications.length === 0 ? <EmptyState label="no publications" /> : null}
         </Panel>
       ) : (
-        <Panel title="subscribers">
+        <Panel title={<InfoTitle label="subscribers" info="People subscribed to newsletter publications, filtered by publication when needed." />}>
           <div className="mb-4 flex flex-wrap items-center gap-3">
             <FilterButton
               activeFilters={subscriberFilters}
@@ -1941,6 +2018,61 @@ function NewslettersSection({
                   value={editingPublicationCadence.enabled}
                   onChange={(enabled) => void updatePublicationCadence({ enabled })}
                 />
+                <div>
+                  <FieldLabel>mode</FieldLabel>
+                  <PachSelect
+                    value={editingPublicationCadence.mode}
+                    onChange={(mode) => void updatePublicationCadence({ mode: mode === 'issue' ? 'issue' : 'autonomous' })}
+                    options={CADENCE_MODE_OPTIONS}
+                    display={editingPublicationCadence.mode}
+                  />
+                </div>
+                <div>
+                  <FieldLabel>frequency</FieldLabel>
+                  <PachSelect
+                    value={editingPublicationCadence.frequency}
+                    onChange={(frequency) => void updatePublicationCadence({
+                      frequency: frequency === 'monthly' || frequency === 'quarterly' ? frequency : 'weekly',
+                    })}
+                    options={CADENCE_FREQUENCY_OPTIONS}
+                    display={editingPublicationCadence.frequency}
+                  />
+                </div>
+                {editingPublicationCadence.frequency === 'weekly' ? (
+                  <div>
+                    <FieldLabel>day</FieldLabel>
+                    <PachSelect
+                      value={String(editingPublicationCadence.dayOfWeek)}
+                      onChange={(dayOfWeek) => void updatePublicationCadence({ dayOfWeek: boundedInteger(dayOfWeek, 1, 0, 6) })}
+                      options={WEEKDAY_OPTIONS}
+                      display={WEEKDAY_OPTIONS.find((entry) => entry.value === String(editingPublicationCadence.dayOfWeek))?.label ?? 'day'}
+                    />
+                  </div>
+                ) : (
+                  <CommitInput
+                    label="day"
+                    type="number"
+                    value={String(editingPublicationCadence.dayOfMonth)}
+                    onCommit={(dayOfMonth) => updatePublicationCadence({ dayOfMonth: boundedInteger(dayOfMonth, 1, 1, 31) })}
+                  />
+                )}
+                <div className="grid grid-cols-2 gap-2">
+                  <CommitInput
+                    label="time"
+                    type="time"
+                    value={editingPublicationCadence.time}
+                    onCommit={(time) => updatePublicationCadence({ time: time || '09:00' })}
+                  />
+                  <div>
+                    <FieldLabel>timezone</FieldLabel>
+                    <PachSelect
+                      value={editingPublicationCadence.timezone}
+                      onChange={(timezone) => void updatePublicationCadence({ timezone })}
+                      options={MARKETING_TIMEZONE_OPTIONS}
+                      display={timezoneLabel(editingPublicationCadence.timezone)}
+                    />
+                  </div>
+                </div>
                 <div className="grid grid-cols-2 gap-2">
                   <CommitInput
                     label="lookahead days"
@@ -1955,6 +2087,12 @@ function NewslettersSection({
                     onCommit={(cooldownDays) => updatePublicationCadence({ cooldownDays: positiveInteger(cooldownDays, 7) })}
                   />
                 </div>
+                <CommitInput
+                  label="idea backlog"
+                  type="number"
+                  value={String(editingPublicationCadence.minIdeaBacklog)}
+                  onCommit={(minIdeaBacklog) => updatePublicationCadence({ minIdeaBacklog: positiveInteger(minIdeaBacklog, 4) })}
+                />
                 <div className="grid grid-cols-2 gap-2">
                   <div className="border border-edge/12 bg-rim px-3 py-2 font-mono">
                     <div className="text-[10px] uppercase tracking-label text-fg-4">last issue</div>
@@ -2205,6 +2343,499 @@ function NewslettersSection({
               <Button onClick={() => setSubscriberModalOpen(false)}>cancel</Button>
               <Button kind="primary" icon={<Plus className="h-3.5 w-3.5" />} onClick={() => void createSubscriberFromModal()} disabled={!subscriberDraft.publicationId || !subscriberDraft.email.trim()}>
                 add
+              </Button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+    </div>
+  )
+}
+
+function PublicationDetailPage({
+  z,
+  publication,
+  organization,
+  senderProfiles,
+  ctas,
+  subscriptions,
+  ideas,
+  slots,
+  contentItems,
+  runs,
+  documents,
+  issues,
+  onBack,
+  onShowSubscribers,
+  onCreateSenderProfile,
+  onFlash,
+}: {
+  z: ReturnType<typeof useZero<Schema, Mutators>>
+  publication: PublicationRow | null
+  organization: OrganizationRow | null
+  senderProfiles: SenderProfileRow[]
+  ctas: CtaRow[]
+  subscriptions: AudienceSubscriptionRow[]
+  ideas: EditorialIdeaRow[]
+  slots: PublicationSlotRow[]
+  contentItems: ContentItemRow[]
+  runs: DistributionRunRow[]
+  documents: DocumentRow[]
+  issues: IssueRow[]
+  onBack: () => void
+  onShowSubscribers: (publicationId: string) => void
+  onCreateSenderProfile: () => Promise<void>
+  onFlash: (message: string) => void
+}) {
+  const navigate = useNavigate()
+  const [guidelinesEditorKind, setGuidelinesEditorKind] = useState<'idea' | 'newsletter' | null>(null)
+  const [guidelinesDraft, setGuidelinesDraft] = useState('')
+  const guidelinesEditorRef = useRef<RichEditorHandle | null>(null)
+
+  if (!publication) {
+    return (
+      <div className="flex min-h-full flex-col bg-pit text-fg-1">
+        <div className="flex items-center justify-between gap-3 border-b border-edge/15 bg-pit/60 px-5 py-3 backdrop-blur-sm md:px-8">
+          <Button icon={<ChevronLeft className="h-3.5 w-3.5" />} onClick={onBack}>publications</Button>
+        </div>
+        <div className="flex flex-1 items-center justify-center px-5 py-12">
+          <EmptyState label="publication not found" />
+        </div>
+      </div>
+    )
+  }
+
+  const subscriberCount = newsletterSubscriberCount(subscriptions.filter((subscription) => subscription.publicationId === publication.id))
+  const availableIdeaCount = ideas.filter((idea) => idea.status === 'available').length
+  const reservedIdeaCount = ideas.filter((idea) => idea.status === 'reserved').length
+  const upcomingSlots = [...slots]
+    .sort((a, b) => a.scheduledAt - b.scheduledAt)
+    .slice(0, 12)
+  const scheduledRunCount = runs.filter((run) => ['scheduled', 'sending'].includes(run.status)).length
+  const senderOptions = [
+    { value: '', label: 'no sender' },
+    ...senderProfiles.map((profile) => ({ value: profile.id, label: `${profile.name} · ${profile.fromEmail}` })),
+  ]
+  const wrapper = publicationEmailWrapper(publication)
+  const themeMode = publicationEmailThemeMode(publication)
+  const cadence = publicationCadenceConfig(publication)
+  const metadata = readRecord(publication.metadata)
+  const newsletterGuidelines = publicationNewsletterGuidelines(publication)
+  const ideaGuidelines = publicationIdeaGuidelines(publication)
+
+  async function updateEmailWrapper(updates: Partial<PublicationEmailWrapper>) {
+    const current = publicationEmailWrapper(publication)
+    const next = { ...current, ...updates }
+    await z.mutate.mkt_publications.update({
+      id: publication.id,
+      metadata: {
+        ...readRecord(publication.metadata),
+        emailWrapper: emailWrapperPayload(next),
+      },
+    })
+  }
+
+  async function updateThemeMode(emailThemeMode: EmailThemeMode) {
+    await z.mutate.mkt_publications.update({
+      id: publication.id,
+      metadata: {
+        ...readRecord(publication.metadata),
+        emailThemeMode,
+      },
+    })
+  }
+
+  async function updateCadence(updates: Partial<PublicationCadenceConfig>) {
+    const current = publicationCadenceConfig(publication)
+    const next = { ...current, ...updates }
+    await z.mutate.mkt_publications.update({
+      id: publication.id,
+      metadata: {
+        ...readRecord(publication.metadata),
+        marketingCadence: publicationCadencePayload(next),
+      },
+    })
+  }
+
+  function openIdeaGuidelinesEditor() {
+    setGuidelinesDraft(ideaGuidelines)
+    setGuidelinesEditorKind('idea')
+    requestAnimationFrame(() => guidelinesEditorRef.current?.focus())
+  }
+
+  function openNewsletterGuidelinesEditor() {
+    setGuidelinesDraft(newsletterGuidelines)
+    setGuidelinesEditorKind('newsletter')
+    requestAnimationFrame(() => guidelinesEditorRef.current?.focus())
+  }
+
+  async function saveGuidelinesEditor() {
+    if (!guidelinesEditorKind) return
+    await z.mutate.mkt_publications.update({
+      id: publication.id,
+      editorialProfile: {
+        ...readRecord(publication.editorialProfile),
+        [guidelinesEditorKind === 'idea' ? 'ideaGuidelines' : 'newsletterGuidelines']: guidelinesDraft,
+      },
+    })
+    setGuidelinesEditorKind(null)
+    onFlash('editorial profile saved')
+  }
+
+  const guidelinesEditorTitle = guidelinesEditorKind === 'idea' ? 'idea guidelines' : 'newsletter guidelines'
+  const guidelinesEditorPlaceholder = guidelinesEditorKind === 'idea'
+    ? 'Write rules for what ideas the editorial agent should generate, avoid, prioritize, or revisit...'
+    : 'Write publication-specific voice, structure, audience, and newsletter rules...'
+
+  return (
+    <div className="flex min-h-full flex-col bg-pit text-fg-1">
+      <div className="border-b border-edge/15 bg-pit/60 px-5 py-3 backdrop-blur-sm md:px-8">
+        <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+          <div className="min-w-0">
+            <button
+              type="button"
+              onClick={onBack}
+              className="mb-2 inline-flex items-center gap-1.5 font-mono text-[10px] uppercase tracking-label text-fg-4 transition hover:text-accent"
+            >
+              <ChevronLeft className="h-3.5 w-3.5" />
+              publications
+            </button>
+            <div className="flex min-w-0 items-center gap-3">
+              <h1 className="truncate font-mono text-2xl font-bold lowercase text-fg-1">{publication.name}</h1>
+              <StatusPill kind={statusKind(publication.status)}>{publication.status}</StatusPill>
+            </div>
+            <div className="mt-1 truncate font-mono text-xs text-fg-4">{organization?.name ?? 'organization'} / {publication.slug}</div>
+          </div>
+          <div className="grid grid-cols-2 gap-2 md:grid-cols-4">
+            <Metric label="subscribers" value={subscriberCount} />
+            <Metric label="ideas" value={availableIdeaCount} />
+            <Metric label="reserved" value={reservedIdeaCount} />
+            <Metric label="scheduled" value={scheduledRunCount} />
+          </div>
+        </div>
+      </div>
+
+      <div className="flex-1 overflow-auto px-5 py-5 md:px-8">
+        <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_360px]">
+          <div className="space-y-4">
+            <Panel title={<InfoTitle label="editorial ideas" info="Unused, reserved, and used topics the autonomous editor can draft from without repeating prior newsletter work." />}>
+              <div className="overflow-auto">
+                <table className="w-full min-w-[760px] text-left font-mono text-xs">
+                  <thead className="text-[10px] uppercase tracking-label text-fg-4">
+                    <tr className="border-b border-edge/12">
+                      <th className="pb-2 pr-3 font-normal">status</th>
+                      <th className="pb-2 pr-3 font-normal">title</th>
+                      <th className="pb-2 pr-3 font-normal">angle</th>
+                      <th className="pb-2 pr-3 font-normal">document</th>
+                      <th className="pb-2 font-normal">updated</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {ideas.slice(0, 80).map((idea) => {
+                      const document = idea.documentId ? documents.find((entry) => entry.id === idea.documentId) : null
+                      return (
+                        <tr key={idea.id} className="border-b border-edge/8 text-fg-2">
+                          <td className="py-2.5 pr-3"><StatusPill kind={statusKind(idea.status)}>{idea.status}</StatusPill></td>
+                          <td className="max-w-[260px] py-2.5 pr-3">
+                            <div className="truncate text-fg-1">{idea.title}</div>
+                            <div className="mt-1 truncate text-[10px] text-fg-4">{idea.dedupeKey}</div>
+                          </td>
+                          <td className="max-w-[280px] truncate py-2.5 pr-3 text-fg-3">{idea.angle || '-'}</td>
+                          <td className="py-2.5 pr-3">
+                            {document ? (
+                              <button
+                                type="button"
+                                className="inline-flex items-center gap-1 text-fg-3 transition hover:text-accent"
+                                onClick={() => navigate(`/docs/${document.id}`)}
+                              >
+                                <ExternalLink className="h-3 w-3" />
+                                {document.title}
+                              </button>
+                            ) : '-'}
+                          </td>
+                          <td className="py-2.5 text-fg-4">{formatDate(idea.updatedAt)}</td>
+                        </tr>
+                      )
+                    })}
+                  </tbody>
+                </table>
+              </div>
+              {ideas.length === 0 ? <EmptyState label="no ideas yet" /> : null}
+            </Panel>
+
+            <Panel title={<InfoTitle label="publication slots" info="Upcoming cadence windows the automation keeps filled with a draft document, content snapshot, and scheduled newsletter run." />}>
+              <div className="overflow-auto">
+                <table className="w-full min-w-[760px] text-left font-mono text-xs">
+                  <thead className="text-[10px] uppercase tracking-label text-fg-4">
+                    <tr className="border-b border-edge/12">
+                      <th className="pb-2 pr-3 font-normal">time</th>
+                      <th className="pb-2 pr-3 font-normal">status</th>
+                      <th className="pb-2 pr-3 font-normal">idea</th>
+                      <th className="pb-2 pr-3 font-normal">content</th>
+                      <th className="pb-2 font-normal">run</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {upcomingSlots.map((slot) => {
+                      const idea = slot.ideaId ? ideas.find((entry) => entry.id === slot.ideaId) : null
+                      const contentItem = slot.contentItemId ? contentItems.find((entry) => entry.id === slot.contentItemId) : null
+                      const run = slot.distributionRunId ? runs.find((entry) => entry.id === slot.distributionRunId) : null
+                      return (
+                        <tr key={slot.id} className="border-b border-edge/8 text-fg-2">
+                          <td className="py-2.5 pr-3">{formatScheduledDate(slot.scheduledAt, slot.scheduledTimezone)}</td>
+                          <td className="py-2.5 pr-3"><StatusPill kind={statusKind(slot.status)}>{slot.status}</StatusPill></td>
+                          <td className="max-w-[260px] truncate py-2.5 pr-3">{idea?.title ?? '-'}</td>
+                          <td className="max-w-[220px] py-2.5 pr-3">
+                            {contentItem ? (
+                              <button
+                                type="button"
+                                className="truncate text-fg-3 transition hover:text-accent"
+                                onClick={() => navigate(`/marketing/newsletters/content?content=${contentItem.id}`)}
+                              >
+                                {contentItem.title}
+                              </button>
+                            ) : '-'}
+                          </td>
+                          <td className="py-2.5 text-fg-4">{run ? run.status : '-'}</td>
+                        </tr>
+                      )
+                    })}
+                  </tbody>
+                </table>
+              </div>
+              {slots.length === 0 ? <EmptyState label="no slots yet" /> : null}
+            </Panel>
+
+            <div className="grid gap-4 lg:grid-cols-2">
+              <Panel title={<InfoTitle label="idea guidelines" info="Guidance for generating new editorial ideas: themes, sources, angles to prefer, and topics to avoid." />}>
+                <div className="mb-3 flex justify-end">
+                  <Button className="px-2 py-1 text-[10px]" icon={<Edit3 className="h-3 w-3" />} onClick={openIdeaGuidelinesEditor}>
+                    edit
+                  </Button>
+                </div>
+                <button
+                  type="button"
+                  onClick={openIdeaGuidelinesEditor}
+                  className="block min-h-[120px] w-full border border-edge/12 bg-rim px-3 py-3 text-left font-mono text-xs leading-relaxed text-fg-2 transition hover:border-accent/45 hover:text-fg-1"
+                >
+                  <span className="line-clamp-6 whitespace-pre-wrap">
+                    {ideaGuidelines.trim() || 'No idea-specific guidance yet.'}
+                  </span>
+                </button>
+              </Panel>
+              <Panel title={<InfoTitle label="newsletter guidelines" info="Guidance for writing the actual newsletter article: audience, voice, structure, claims, and publishing standards." />}>
+                <div className="mb-3 flex justify-end">
+                  <Button className="px-2 py-1 text-[10px]" icon={<Edit3 className="h-3 w-3" />} onClick={openNewsletterGuidelinesEditor}>
+                    edit
+                  </Button>
+                </div>
+                <button
+                  type="button"
+                  onClick={openNewsletterGuidelinesEditor}
+                  className="block min-h-[120px] w-full border border-edge/12 bg-rim px-3 py-3 text-left font-mono text-xs leading-relaxed text-fg-2 transition hover:border-accent/45 hover:text-fg-1"
+                >
+                  <span className="line-clamp-6 whitespace-pre-wrap">
+                    {newsletterGuidelines.trim() || 'No publication-specific editorial guidance yet.'}
+                  </span>
+                </button>
+              </Panel>
+            </div>
+
+            <Panel title={<InfoTitle label="email wrapper" info="Reusable header, CTA, theme, and footer blocks applied when article content is rendered into a newsletter email." />}>
+              <div className="grid gap-3 lg:grid-cols-2">
+                <div>
+                  <FieldLabel>default mode</FieldLabel>
+                  <EmailThemeModeControl value={themeMode} onChange={(emailThemeMode) => void updateThemeMode(emailThemeMode)} />
+                </div>
+                <div>
+                  <FieldLabel>header logo</FieldLabel>
+                  <EmailBinaryControl value={wrapper.headerLogoEnabled} onChange={(headerLogoEnabled) => void updateEmailWrapper({ headerLogoEnabled })} />
+                </div>
+                <CommitTextarea label="header" value={wrapper.header} onCommit={(header) => updateEmailWrapper({ header })} />
+                <CommitTextarea label="before content" value={wrapper.beforeContent} onCommit={(beforeContent) => updateEmailWrapper({ beforeContent })} />
+                <div className="lg:col-span-2">
+                  <EmailWrapperCtaSelect wrapper={wrapper} ctas={ctas} onChange={updateEmailWrapper} />
+                </div>
+                <div className="lg:col-span-2">
+                  <CommitTextarea label="footer" value={wrapper.footer} onCommit={(footer) => updateEmailWrapper({ footer })} />
+                </div>
+              </div>
+            </Panel>
+          </div>
+
+          <aside className="space-y-4">
+            <Panel title={<InfoTitle label="publication" info="Core newsletter identity, sender, status, and subscriber access for this publication." />}>
+              <div className="space-y-3">
+                <CommitInput label="name" value={publication.name} onCommit={(name) => { void z.mutate.mkt_publications.update({ id: publication.id, name }) }} />
+                <CommitInput label="slug" value={publication.slug} onCommit={(slug) => { void z.mutate.mkt_publications.update({ id: publication.id, slug: slugify(slug) }) }} />
+                <div>
+                  <FieldLabel>default sender</FieldLabel>
+                  <PachSelect
+                    value={publication.defaultSenderProfileId ?? ''}
+                    onChange={(defaultSenderProfileId) => void z.mutate.mkt_publications.update({ id: publication.id, defaultSenderProfileId: defaultSenderProfileId || null })}
+                    options={senderOptions}
+                    display={senderOptions.find((entry) => entry.value === (publication.defaultSenderProfileId ?? ''))?.label ?? 'sender'}
+                  />
+                </div>
+                <div>
+                  <FieldLabel>status</FieldLabel>
+                  <PachSelect
+                    value={publication.status}
+                    onChange={(status) => void z.mutate.mkt_publications.update({ id: publication.id, status })}
+                    options={['active', 'paused', 'archived'].map((status) => ({ value: status, label: status }))}
+                    display={publication.status}
+                  />
+                </div>
+                <Button icon={<Users className="h-3.5 w-3.5" />} onClick={() => onShowSubscribers(publication.id)}>
+                  subscribers
+                </Button>
+              </div>
+            </Panel>
+
+            <Panel title={<InfoTitle label="cadence" info="The autonomous schedule policy: when to publish, how far ahead to fill slots, and how many ideas to keep ready." />}>
+              <div className="space-y-3">
+                <EmailBinaryControl value={cadence.enabled} onChange={(enabled) => void updateCadence({ enabled })} />
+                <div>
+                  <FieldLabel>mode</FieldLabel>
+                  <PachSelect
+                    value={cadence.mode}
+                    onChange={(mode) => void updateCadence({ mode: mode === 'issue' ? 'issue' : 'autonomous' })}
+                    options={CADENCE_MODE_OPTIONS}
+                    display={cadence.mode}
+                  />
+                </div>
+                <div>
+                  <FieldLabel>frequency</FieldLabel>
+                  <PachSelect
+                    value={cadence.frequency}
+                    onChange={(frequency) => void updateCadence({ frequency: frequency === 'monthly' || frequency === 'quarterly' ? frequency : 'weekly' })}
+                    options={CADENCE_FREQUENCY_OPTIONS}
+                    display={cadence.frequency}
+                  />
+                </div>
+                {cadence.frequency === 'weekly' ? (
+                  <div>
+                    <FieldLabel>day</FieldLabel>
+                    <PachSelect
+                      value={String(cadence.dayOfWeek)}
+                      onChange={(dayOfWeek) => void updateCadence({ dayOfWeek: boundedInteger(dayOfWeek, 1, 0, 6) })}
+                      options={WEEKDAY_OPTIONS}
+                      display={WEEKDAY_OPTIONS.find((entry) => entry.value === String(cadence.dayOfWeek))?.label ?? 'day'}
+                    />
+                  </div>
+                ) : (
+                  <CommitInput label="day" type="number" value={String(cadence.dayOfMonth)} onCommit={(dayOfMonth) => updateCadence({ dayOfMonth: boundedInteger(dayOfMonth, 1, 1, 31) })} />
+                )}
+                <div className="grid grid-cols-2 gap-2">
+                  <CommitInput label="time" type="time" value={cadence.time} onCommit={(time) => updateCadence({ time: time || '09:00' })} />
+                  <div>
+                    <FieldLabel>timezone</FieldLabel>
+                    <PachSelect
+                      value={cadence.timezone}
+                      onChange={(timezone) => void updateCadence({ timezone })}
+                      options={MARKETING_TIMEZONE_OPTIONS}
+                      display={timezoneLabel(cadence.timezone)}
+                    />
+                  </div>
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  <CommitInput label="lookahead days" type="number" value={String(cadence.lookaheadDays)} onCommit={(lookaheadDays) => updateCadence({ lookaheadDays: positiveInteger(lookaheadDays, 14) })} />
+                  <CommitInput label="cooldown days" type="number" value={String(cadence.cooldownDays)} onCommit={(cooldownDays) => updateCadence({ cooldownDays: positiveInteger(cooldownDays, 7) })} />
+                </div>
+                <CommitInput label="idea backlog" type="number" value={String(cadence.minIdeaBacklog)} onCommit={(minIdeaBacklog) => updateCadence({ minIdeaBacklog: positiveInteger(minIdeaBacklog, 4) })} />
+                <div className="grid grid-cols-2 gap-2">
+                  <div className="border border-edge/12 bg-rim px-3 py-2 font-mono">
+                    <div className="text-[10px] uppercase tracking-label text-fg-4">last issue</div>
+                    <div className="mt-1 truncate text-sm text-fg-2">{String(metadata.marketingCadenceLastIssueIdentifier ?? '-')}</div>
+                  </div>
+                  <div className="border border-edge/12 bg-rim px-3 py-2 font-mono">
+                    <div className="text-[10px] uppercase tracking-label text-fg-4">last issue at</div>
+                    <div className="mt-1 truncate text-sm text-fg-2">{formatIsoDate(metadata.marketingCadenceLastIssueAt)}</div>
+                  </div>
+                </div>
+              </div>
+            </Panel>
+
+            <Panel title={<InfoTitle label="sender profiles" info="Email identities available for broadcasts; the selected sender becomes the default for this publication." />}>
+              <div className="mb-3 flex justify-end">
+                <Button className="px-2 py-1 text-[10px]" icon={<Plus className="h-3 w-3" />} onClick={() => void onCreateSenderProfile()} disabled={!organization}>
+                  sender
+                </Button>
+              </div>
+              <div className="space-y-2">
+                {senderProfiles.map((profile) => {
+                  const selected = publication.defaultSenderProfileId === profile.id
+                  return (
+                    <button
+                      key={profile.id}
+                      type="button"
+                      onClick={() => void z.mutate.mkt_publications.update({ id: publication.id, defaultSenderProfileId: profile.id })}
+                      className={`w-full border px-3 py-2 text-left font-mono text-xs transition ${
+                        selected
+                          ? 'border-accent/50 bg-accent-fill/10 text-accent'
+                          : 'border-edge/12 bg-rim text-fg-2 hover:border-edge/30 hover:text-fg-1'
+                      }`}
+                    >
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="truncate">{profile.name}</span>
+                        {selected ? <Check className="h-3.5 w-3.5" /> : null}
+                      </div>
+                      <div className="mt-1 truncate text-[11px] text-fg-4">{profile.fromName} · {profile.fromEmail}</div>
+                    </button>
+                  )
+                })}
+                {senderProfiles.length === 0 ? <EmptyState label="no sender profiles" /> : null}
+              </div>
+            </Panel>
+          </aside>
+        </div>
+      </div>
+
+      {guidelinesEditorKind ? (
+        <div
+          className="fixed inset-0 z-[70] flex items-start justify-center overflow-auto bg-overlay/75 px-4 py-8 backdrop-blur-sm"
+          onClick={() => setGuidelinesEditorKind(null)}
+        >
+          <div
+            className="flex max-h-[calc(100vh-4rem)] w-full max-w-4xl flex-col border border-edge/25 bg-pit shadow-terminal-popover"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="flex items-start justify-between gap-4 border-b border-edge/12 px-4 py-3">
+              <div className="min-w-0">
+                <div className="font-mono text-[10px] uppercase tracking-label text-fg-4">{guidelinesEditorTitle}</div>
+                <div className="mt-1 truncate font-mono text-base font-bold lowercase text-fg-1">{publication.name}</div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setGuidelinesEditorKind(null)}
+                className="border border-edge/20 p-2 text-fg-3 transition hover:border-accent hover:text-accent"
+                aria-label="Close editorial profile editor"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+            <div className="min-h-0 flex-1 overflow-auto px-4 py-4">
+              <RichEditor
+                ref={guidelinesEditorRef}
+                key={`${publication.id}:${guidelinesEditorKind}`}
+                owner={{ type: 'publication', id: publication.id }}
+                value={guidelinesDraft}
+                documents={documents}
+                issues={issues}
+                organizationId={publication.organizationId}
+                onChange={setGuidelinesDraft}
+                onOpenDocument={(id) => navigate(`/docs/${id}`)}
+                onOpenIssue={(id) => navigate(`/issues/${id}`)}
+                enableUploads={false}
+                placeholder={guidelinesEditorPlaceholder}
+                className="min-h-[48vh]"
+                wrapperClassName="relative mt-0"
+              />
+            </div>
+            <div className="flex justify-end gap-2 border-t border-edge/12 px-4 py-3">
+              <Button onClick={() => setGuidelinesEditorKind(null)}>cancel</Button>
+              <Button kind="primary" icon={<Check className="h-3.5 w-3.5" />} onClick={() => void saveGuidelinesEditor()}>
+                save
               </Button>
             </div>
           </div>
@@ -3966,6 +4597,12 @@ function broadcastRunIdFromPath(pathname: string) {
   return ''
 }
 
+function publicationIdFromPath(pathname: string) {
+  const parts = pathname.split('/')
+  if (parts[2] === 'newsletters' && parts[3] === 'publications' && parts[4]) return decodeURIComponent(parts[4])
+  return ''
+}
+
 function blogOutputForContent(item: ContentItemRow, outputs: ContentOutputRow[]) {
   return outputs.find((output) => output.contentItemId === item.id && output.channel === 'blog') ?? null
 }
@@ -4404,8 +5041,15 @@ function defaultEmailWrapper(): PublicationEmailWrapper {
 function defaultPublicationCadence(): PublicationCadenceConfig {
   return {
     enabled: false,
+    mode: 'autonomous',
+    frequency: 'weekly',
     lookaheadDays: 14,
     cooldownDays: 7,
+    timezone: DEFAULT_MARKETING_TIMEZONE,
+    time: '09:00',
+    dayOfWeek: 1,
+    dayOfMonth: 1,
+    minIdeaBacklog: 4,
   }
 }
 
@@ -4415,8 +5059,15 @@ function publicationCadenceConfig(publication: PublicationRow | null): Publicati
   const fallback = defaultPublicationCadence()
   return {
     enabled: cadence.enabled === true,
+    mode: cadence.mode === 'issue' ? 'issue' : fallback.mode,
+    frequency: cadence.frequency === 'monthly' || cadence.frequency === 'quarterly' ? cadence.frequency : fallback.frequency,
     lookaheadDays: positiveInteger(cadence.lookaheadDays, fallback.lookaheadDays),
     cooldownDays: positiveInteger(cadence.cooldownDays, fallback.cooldownDays),
+    timezone: typeof cadence.timezone === 'string' && cadence.timezone.trim() ? cadence.timezone : fallback.timezone,
+    time: typeof cadence.time === 'string' && /^\d{1,2}:\d{2}$/.test(cadence.time) ? cadence.time : fallback.time,
+    dayOfWeek: boundedInteger(cadence.dayOfWeek, fallback.dayOfWeek, 0, 6),
+    dayOfMonth: boundedInteger(cadence.dayOfMonth, fallback.dayOfMonth, 1, 31),
+    minIdeaBacklog: positiveInteger(cadence.minIdeaBacklog, fallback.minIdeaBacklog),
   }
 }
 
@@ -4425,11 +5076,25 @@ function publicationNewsletterGuidelines(publication: PublicationRow | null) {
   return typeof editorialProfile.newsletterGuidelines === 'string' ? editorialProfile.newsletterGuidelines : ''
 }
 
+function publicationIdeaGuidelines(publication: PublicationRow | null) {
+  const editorialProfile = readRecord(publication?.editorialProfile)
+  if (typeof editorialProfile.ideaGuidelines === 'string') return editorialProfile.ideaGuidelines
+  if (typeof editorialProfile.editorialIdeaGuidelines === 'string') return editorialProfile.editorialIdeaGuidelines
+  return ''
+}
+
 function publicationCadencePayload(cadence: PublicationCadenceConfig) {
   return {
     enabled: cadence.enabled,
+    mode: cadence.mode,
+    frequency: cadence.frequency,
     lookaheadDays: positiveInteger(cadence.lookaheadDays, 14),
     cooldownDays: positiveInteger(cadence.cooldownDays, 7),
+    timezone: cadence.timezone || DEFAULT_MARKETING_TIMEZONE,
+    time: cadence.time || '09:00',
+    dayOfWeek: boundedInteger(cadence.dayOfWeek, 1, 0, 6),
+    dayOfMonth: boundedInteger(cadence.dayOfMonth, 1, 1, 31),
+    minIdeaBacklog: positiveInteger(cadence.minIdeaBacklog, 4),
   }
 }
 
@@ -4664,6 +5329,12 @@ function positiveInteger(value: unknown, fallback: number) {
   const number = typeof value === 'number' ? value : Number(value)
   if (!Number.isFinite(number) || number <= 0) return fallback
   return Math.trunc(number)
+}
+
+function boundedInteger(value: unknown, fallback: number, min: number, max: number) {
+  const number = typeof value === 'number' ? value : Number(value)
+  if (!Number.isFinite(number)) return fallback
+  return Math.min(max, Math.max(min, Math.trunc(number)))
 }
 
 function uniqueSlug(input: string, existing: Array<{ slug: string }>) {

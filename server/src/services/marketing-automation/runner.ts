@@ -11,6 +11,13 @@ import {
 import { getDb } from '../../db.js'
 import { insertIssueActivityEvent } from '../../lib/activity-events.js'
 import { publishBlogRun, sendNewsletterRun } from '../../routes/marketing.js'
+import {
+  cadencePayload,
+  markPublicationSlotForDistributionRun,
+  readMarketingCadenceConfig,
+  runAutonomousPublicationChecks,
+  type MarketingCadenceConfig,
+} from '../marketing-autonomy.js'
 
 type MarketingAutomationSummary = {
   scheduled: {
@@ -25,34 +32,31 @@ type MarketingAutomationSummary = {
     skipped: number
     failed: number
   }
-}
-
-type MarketingCadenceConfig = {
-  enabled: boolean
-  lookaheadDays: number
-  cooldownDays: number
-  teamId?: string
-  statusId?: string
-  assigneeId?: string
-  creatorId?: string
-  projectId?: string
+  autonomy: {
+    checked: number
+    slotsCreated: number
+    slotsLinked: number
+    ideaRunsQueued: number
+    slotRunsQueued: number
+    skipped: number
+    failed: number
+  }
 }
 
 type PublicationRow = typeof mktPublications.$inferSelect
 
 const DEFAULT_BROADCAST_LIMIT = 20
 const DEFAULT_CADENCE_LIMIT = 50
-const DEFAULT_LOOKAHEAD_DAYS = 14
-const DEFAULT_COOLDOWN_DAYS = 7
 const ONE_DAY_MS = 24 * 60 * 60 * 1000
 
 export async function runDueMarketingAutomation(params: { now?: Date; limit?: number } = {}): Promise<MarketingAutomationSummary> {
   const now = params.now ?? new Date()
-  const [scheduled, cadence] = await Promise.all([
+  const [scheduled, cadence, autonomy] = await Promise.all([
     runDueScheduledMarketing({ now, limit: params.limit }),
     runMarketingCadenceChecks({ now, limit: params.limit }),
+    runAutonomousPublicationChecks({ now, limit: params.limit }),
   ])
-  return { scheduled, cadence }
+  return { scheduled, cadence, autonomy }
 }
 
 export async function runDueNewsletterBroadcasts(params: { now?: Date; limit?: number } = {}) {
@@ -93,6 +97,7 @@ export async function runDueScheduledMarketing(params: { now?: Date; limit?: num
         continue
       }
 
+      await markPublicationSlotForDistributionRun(run.id, 'sending')
       if (run.channel === 'newsletter') {
         await sendNewsletterRun(run.id, false)
       } else if (run.channel === 'blog') {
@@ -100,10 +105,12 @@ export async function runDueScheduledMarketing(params: { now?: Date; limit?: num
       } else {
         throw new Error(`Unsupported scheduled marketing channel: ${run.channel}`)
       }
+      await markPublicationSlotForDistributionRun(run.id, 'sent')
       summary.sent += 1
     } catch (error) {
       summary.failed += 1
       console.error(`[marketing-automation] Failed scheduled ${run.channel} run ${run.id}:`, error)
+      await markPublicationSlotForDistributionRun(run.id, 'failed', error instanceof Error ? error.message : String(error))
       await db
         .update(mktDistributionRuns)
         .set({
@@ -136,8 +143,8 @@ export async function runMarketingCadenceChecks(params: { now?: Date; limit?: nu
   }
 
   for (const publication of publications) {
-    const cadence = readCadenceConfig(publication.metadata)
-    if (!cadence.enabled) continue
+    const cadence = readMarketingCadenceConfig(publication.metadata)
+    if (!cadence.enabled || cadence.mode !== 'issue') continue
 
     summary.checked += 1
     try {
@@ -383,45 +390,8 @@ async function findAxelUser(tx: any) {
   )
 }
 
-function readCadenceConfig(metadata: Record<string, unknown>): MarketingCadenceConfig {
-  const raw = readRecord(metadata.marketingCadence)
-  return {
-    enabled: raw.enabled === true,
-    lookaheadDays: clampPositiveInteger(raw.lookaheadDays, DEFAULT_LOOKAHEAD_DAYS),
-    cooldownDays: clampPositiveInteger(raw.cooldownDays, DEFAULT_COOLDOWN_DAYS),
-    teamId: readOptionalString(raw.teamId),
-    statusId: readOptionalString(raw.statusId),
-    assigneeId: readOptionalString(raw.assigneeId),
-    creatorId: readOptionalString(raw.creatorId),
-    projectId: readOptionalString(raw.projectId),
-  }
-}
-
-function cadencePayload(cadence: MarketingCadenceConfig) {
-  return {
-    enabled: cadence.enabled,
-    lookaheadDays: cadence.lookaheadDays,
-    cooldownDays: cadence.cooldownDays,
-    teamId: cadence.teamId,
-    statusId: cadence.statusId,
-    assigneeId: cadence.assigneeId,
-    creatorId: cadence.creatorId,
-    projectId: cadence.projectId,
-  }
-}
-
 function readRecord(value: unknown): Record<string, unknown> {
   return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {}
-}
-
-function readOptionalString(value: unknown) {
-  return typeof value === 'string' && value.trim() ? value.trim() : undefined
-}
-
-function clampPositiveInteger(value: unknown, fallback: number) {
-  const number = typeof value === 'number' ? value : Number(value)
-  if (!Number.isFinite(number) || number <= 0) return fallback
-  return Math.trunc(number)
 }
 
 function parseDate(value: unknown) {
@@ -450,12 +420,16 @@ export function startMarketingAutomationRunner() {
 
   const runCadence = (label: string) => {
     lastCadenceRunAt = Date.now()
-    void runMarketingCadenceChecks()
-      .then((summary) => {
-        if (summary.checked > 0) console.log(`[marketing-automation] ${label} cadence`, summary)
+    void Promise.all([
+      runMarketingCadenceChecks(),
+      runAutonomousPublicationChecks(),
+    ])
+      .then(([cadence, autonomy]) => {
+        if (cadence.checked > 0) console.log(`[marketing-automation] ${label} cadence`, cadence)
+        if (autonomy.checked > 0) console.log(`[marketing-automation] ${label} autonomy`, autonomy)
       })
       .catch((error) => {
-        console.error(`[marketing-automation] ${label} cadence run failed:`, error)
+        console.error(`[marketing-automation] ${label} publication maintenance failed:`, error)
       })
   }
 

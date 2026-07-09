@@ -514,6 +514,27 @@ export const mutators = {
     },
   },
 
+  mkt_editorial_ideas: {
+    async create(tx: Tx, args: any) {
+      const now = Date.now()
+      await tx.mutate.mkt_editorial_ideas.insert({
+        status: 'available',
+        priority: 0,
+        metadata: {},
+        ...args,
+        createdAt: now,
+        updatedAt: now,
+      })
+    },
+    async update(tx: Tx, args: any) {
+      const { id, ...updates } = args
+      await tx.mutate.mkt_editorial_ideas.update({ id, ...updates, updatedAt: Date.now() })
+    },
+    async delete(tx: Tx, args: { id: string }) {
+      await tx.mutate.mkt_editorial_ideas.delete({ id: args.id })
+    },
+  },
+
   mkt_audience_members: {
     async create(tx: Tx, args: any) {
       const now = Date.now()
@@ -586,6 +607,27 @@ export const mutators = {
     },
     async delete(tx: Tx, args: { id: string }) {
       await tx.mutate.mkt_distribution_runs.delete({ id: args.id })
+    },
+  },
+
+  mkt_publication_slots: {
+    async create(tx: Tx, args: any) {
+      const now = Date.now()
+      await tx.mutate.mkt_publication_slots.insert({
+        status: 'planned',
+        scheduledTimezone: 'America/Mexico_City',
+        metadata: {},
+        ...args,
+        createdAt: now,
+        updatedAt: now,
+      })
+    },
+    async update(tx: Tx, args: any) {
+      const { id, ...updates } = args
+      await tx.mutate.mkt_publication_slots.update({ id, ...updates, updatedAt: Date.now() })
+    },
+    async delete(tx: Tx, args: { id: string }) {
+      await tx.mutate.mkt_publication_slots.delete({ id: args.id })
     },
   },
 

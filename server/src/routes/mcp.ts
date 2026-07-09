@@ -3,7 +3,7 @@ import { GetObjectCommand, S3Client } from '@aws-sdk/client-s3'
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner'
 import { Router } from 'express'
 import type { Request } from 'express'
-import { and, desc, eq, gte, ilike, inArray, isNull, lte, or, type SQL } from 'drizzle-orm'
+import { and, asc, desc, eq, gte, ilike, inArray, isNull, lte, or, type SQL } from 'drizzle-orm'
 import {
   activityEvents,
   agentRunProgressReports,
@@ -19,6 +19,10 @@ import {
   finCategories,
   finMovements,
   mcpTokens,
+  mktContentItems,
+  mktDistributionRuns,
+  mktEditorialIdeas,
+  mktPublicationSlots,
   mktPublications,
   organizations,
   pmIssueLabels,
@@ -42,6 +46,11 @@ import {
 } from '../lib/mcp-token.js'
 import { getFallbackDesignSystemForOrganization, mergeDesignSystemWithFallback } from '../design-systems/fallback.js'
 import { finalizeAgentRunPullRequest } from '../lib/agent-pr-finalizer.js'
+import {
+  createEditorialIdea,
+  fulfillPublicationSlot,
+  readMarketingCadenceConfig,
+} from '../services/marketing-autonomy.js'
 
 const router = Router()
 const SIGNED_READ_SECONDS = 60 * 60
@@ -623,6 +632,92 @@ const tools: ToolDefinition[] = [
     },
   },
   {
+    name: 'pach.marketing.idea.list',
+    description: 'List newsletter editorial ideas for an accessible marketing publication. Use this before drafting so already-used ideas are not repeated.',
+    inputSchema: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        organizationId: { type: 'string' },
+        organizationName: { type: 'string' },
+        organizationProject: { type: 'string' },
+        publicationId: { type: 'string' },
+        publicationSlug: { type: 'string' },
+        statuses: { type: 'array', items: { type: 'string' }, description: 'Defaults to available and reserved.' },
+        limit: { type: 'number', description: 'Defaults to 25, maximum 100.' },
+      },
+    },
+  },
+  {
+    name: 'pach.marketing.idea.create',
+    description: 'Create a deduped newsletter editorial idea for a publication. If the dedupe key already exists, returns the existing idea.',
+    inputSchema: {
+      type: 'object',
+      additionalProperties: false,
+      required: ['publicationId', 'title'],
+      properties: {
+        organizationId: { type: 'string' },
+        publicationId: { type: 'string' },
+        title: { type: 'string' },
+        angle: { type: 'string' },
+        sourceNotes: { type: 'string' },
+        dedupeKey: { type: 'string' },
+        status: { type: 'string', description: 'Defaults to available.' },
+        priority: { type: 'number' },
+        runId: { type: 'string', description: 'Optional agent run id creating the idea.' },
+        metadata: { type: 'object', additionalProperties: true },
+      },
+    },
+  },
+  {
+    name: 'pach.marketing.slot.get',
+    description: 'Read one autonomous newsletter publication slot with publication, idea, document, content item, distribution run, and available ideas.',
+    inputSchema: {
+      type: 'object',
+      additionalProperties: false,
+      required: ['slotId'],
+      properties: {
+        slotId: { type: 'string' },
+        availableIdeaLimit: { type: 'number', description: 'Defaults to 10, maximum 50.' },
+      },
+    },
+  },
+  {
+    name: 'pach.marketing.slot.list',
+    description: 'List autonomous newsletter slots for an accessible publication or organization.',
+    inputSchema: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        organizationId: { type: 'string' },
+        organizationName: { type: 'string' },
+        organizationProject: { type: 'string' },
+        publicationId: { type: 'string' },
+        publicationSlug: { type: 'string' },
+        statuses: { type: 'array', items: { type: 'string' } },
+        limit: { type: 'number', description: 'Defaults to 25, maximum 100.' },
+      },
+    },
+  },
+  {
+    name: 'pach.marketing.slot.fulfill',
+    description: 'Convert a source document into newsletter content, create or update the scheduled broadcast for a slot, link idea/document/content/run, and mark the slot scheduled. This is the safe way for editorial agents to schedule autonomous newsletters.',
+    inputSchema: {
+      type: 'object',
+      additionalProperties: false,
+      required: ['slotId', 'documentId'],
+      properties: {
+        slotId: { type: 'string' },
+        documentId: { type: 'string' },
+        ideaId: { type: 'string' },
+        runId: { type: 'string', description: 'Agent run id fulfilling the slot.' },
+        subject: { type: 'string' },
+        preheader: { type: 'string' },
+        metadata: { type: 'object', additionalProperties: true },
+      },
+    },
+  },
+  {
     name: 'pach.design.template.list',
     description: 'List design templates the caller can access, including code-bundle metadata and current version ids.',
     inputSchema: {
@@ -958,6 +1053,21 @@ async function callTool(req: AuthenticatedRequest, params: unknown) {
       case 'pach.editorial.profile.update':
         requireMcpCapability(req, 'pach.document.write')
         return toolResult(await updateEditorialProfile(req, args))
+      case 'pach.marketing.idea.list':
+        requireMcpCapability(req, 'pach.marketing.read')
+        return toolResult(await listMarketingIdeas(req, args))
+      case 'pach.marketing.idea.create':
+        requireMcpCapability(req, 'pach.marketing.write')
+        return toolResult(await createMarketingIdea(req, args))
+      case 'pach.marketing.slot.get':
+        requireMcpCapability(req, 'pach.marketing.read')
+        return toolResult(await getMarketingSlot(req, args))
+      case 'pach.marketing.slot.list':
+        requireMcpCapability(req, 'pach.marketing.read')
+        return toolResult(await listMarketingSlots(req, args))
+      case 'pach.marketing.slot.fulfill':
+        requireMcpCapability(req, 'pach.marketing.write')
+        return toolResult(await fulfillMarketingSlot(req, args))
       case 'pach.design.template.list':
         requireMcpCapability(req, 'pach.design.read')
         return toolResult(await listDesignTemplates(req, args))
@@ -1956,6 +2066,309 @@ async function updateEditorialProfile(req: AuthenticatedRequest, args: unknown) 
       project: updated.project,
       editorialProfile: updated.editorialProfile ?? {},
     },
+  }
+}
+
+async function listMarketingIdeas(req: AuthenticatedRequest, args: unknown) {
+  const body = ensureObject(args)
+  const { publication } = await resolveMarketingPublicationTarget(req, body, true)
+  const statuses = readStringFilters(body.status, body.statuses)
+  const limit = readPositiveInteger(body.limit, 25, 1, 100)
+  const rows = await getDb()
+    .select()
+    .from(mktEditorialIdeas)
+    .where(eq(mktEditorialIdeas.publicationId, publication.id))
+    .orderBy(desc(mktEditorialIdeas.priority), asc(mktEditorialIdeas.createdAt))
+    .limit(500)
+  const filtered = statuses.length > 0
+    ? rows.filter((idea) => statuses.includes(idea.status))
+    : rows.filter((idea) => ['available', 'reserved'].includes(idea.status))
+  return {
+    ok: true,
+    publication: serializeMarketingPublication(publication),
+    ideas: filtered.slice(0, limit).map(serializeMarketingIdea),
+  }
+}
+
+async function createMarketingIdea(req: AuthenticatedRequest, args: unknown) {
+  const body = ensureObject(args)
+  const publicationId = readRequiredString(body, 'publicationId')
+  const [publication] = await getDb().select().from(mktPublications).where(eq(mktPublications.id, publicationId)).limit(1)
+  if (!publication || !canAccessOrganization(req, publication.organizationId)) throw new Error('Publication not found')
+
+  const result = await createEditorialIdea({
+    organizationId: publication.organizationId,
+    publicationId: publication.id,
+    title: readRequiredString(body, 'title'),
+    angle: readOptionalString(body.angle) ?? undefined,
+    sourceNotes: readOptionalString(body.sourceNotes) ?? undefined,
+    dedupeKey: readOptionalString(body.dedupeKey) ?? undefined,
+    status: readOptionalString(body.status) ?? undefined,
+    priority: typeof body.priority === 'number' && Number.isFinite(body.priority) ? Math.trunc(body.priority) : undefined,
+    agentRunId: readOptionalString(body.runId) ?? undefined,
+    metadata: isObject(body.metadata) ? body.metadata : undefined,
+  })
+
+  return {
+    ok: true,
+    alreadyExists: result.alreadyExists,
+    publication: serializeMarketingPublication(publication),
+    idea: serializeMarketingIdea(result.idea),
+  }
+}
+
+async function getMarketingSlot(req: AuthenticatedRequest, args: unknown) {
+  const body = ensureObject(args)
+  const slotId = readRequiredString(body, 'slotId')
+  const [slot] = await getDb().select().from(mktPublicationSlots).where(eq(mktPublicationSlots.id, slotId)).limit(1)
+  if (!slot || !canAccessOrganization(req, slot.organizationId)) throw new Error('Publication slot not found')
+  return serializeMarketingSlotContext(slot, readPositiveInteger(body.availableIdeaLimit, 10, 0, 50))
+}
+
+async function listMarketingSlots(req: AuthenticatedRequest, args: unknown) {
+  const body = ensureObject(args)
+  const { organization, publication } = await resolveMarketingPublicationTarget(req, body, false)
+  const statuses = readStringFilters(body.status, body.statuses)
+  const limit = readPositiveInteger(body.limit, 25, 1, 100)
+  const rows = publication
+    ? await getDb()
+      .select()
+      .from(mktPublicationSlots)
+      .where(eq(mktPublicationSlots.publicationId, publication.id))
+      .orderBy(asc(mktPublicationSlots.scheduledAt))
+      .limit(500)
+    : organization
+      ? await getDb()
+        .select()
+        .from(mktPublicationSlots)
+        .where(eq(mktPublicationSlots.organizationId, organization.id))
+        .orderBy(asc(mktPublicationSlots.scheduledAt))
+        .limit(500)
+      : await getDb()
+        .select()
+        .from(mktPublicationSlots)
+        .orderBy(asc(mktPublicationSlots.scheduledAt))
+        .limit(500)
+  const filtered = rows
+    .filter((slot) => canAccessOrganization(req, slot.organizationId))
+    .filter((slot) => statuses.length === 0 || statuses.includes(slot.status))
+  return {
+    ok: true,
+    organization: organization ? serializeMarketingOrganization(organization) : null,
+    publication: publication ? serializeMarketingPublication(publication) : null,
+    slots: filtered.slice(0, limit).map(serializeMarketingSlot),
+  }
+}
+
+async function fulfillMarketingSlot(req: AuthenticatedRequest, args: unknown) {
+  const body = ensureObject(args)
+  const slotId = readRequiredString(body, 'slotId')
+  const [slot] = await getDb().select().from(mktPublicationSlots).where(eq(mktPublicationSlots.id, slotId)).limit(1)
+  if (!slot || !canAccessOrganization(req, slot.organizationId)) throw new Error('Publication slot not found')
+  const result = await fulfillPublicationSlot({
+    slotId,
+    documentId: readRequiredString(body, 'documentId'),
+    ideaId: readOptionalString(body.ideaId) ?? undefined,
+    runId: readOptionalString(body.runId) ?? undefined,
+    subject: readOptionalString(body.subject) ?? undefined,
+    preheader: readOptionalString(body.preheader) ?? undefined,
+    metadata: isObject(body.metadata) ? body.metadata : undefined,
+  })
+  return {
+    ok: true,
+    slot: serializeMarketingSlot(result.slot),
+    publication: serializeMarketingPublication(result.publication),
+    idea: result.idea ? serializeMarketingIdea(result.idea) : null,
+    document: serializeDocumentReference(result.document),
+    contentItem: serializeMarketingContentItem(result.contentItem),
+    distributionRun: serializeMarketingDistributionRun(result.distributionRun),
+  }
+}
+
+async function resolveMarketingPublicationTarget(req: AuthenticatedRequest, args: unknown, requirePublication: true): Promise<{ organization: typeof organizations.$inferSelect; publication: typeof mktPublications.$inferSelect }>
+async function resolveMarketingPublicationTarget(req: AuthenticatedRequest, args: unknown, requirePublication?: false): Promise<{ organization: typeof organizations.$inferSelect | null; publication: typeof mktPublications.$inferSelect | null }>
+async function resolveMarketingPublicationTarget(req: AuthenticatedRequest, args: unknown, requirePublication = false) {
+  const body = ensureObject(args)
+  const publicationId = readOptionalString(body.publicationId)
+  const publicationSlug = readOptionalString(body.publicationSlug)
+  const hasOrganizationSelector = Boolean(
+    readOptionalString(body.organizationId) ||
+    readOptionalString(body.organizationName) ||
+    readOptionalString(body.organizationProject),
+  )
+
+  if (publicationId) {
+    const [publication] = await getDb().select().from(mktPublications).where(eq(mktPublications.id, publicationId)).limit(1)
+    if (!publication || !canAccessOrganization(req, publication.organizationId)) throw new Error('Publication not found')
+    const [organization] = await getDb().select().from(organizations).where(eq(organizations.id, publication.organizationId)).limit(1)
+    if (!organization) throw new Error('Publication organization not found')
+    return { organization, publication }
+  }
+
+  const organization = hasOrganizationSelector
+    ? await resolveOrganizationForDocumentCreate(req, body)
+    : null
+
+  if (publicationSlug) {
+    const candidates = await getDb()
+      .select()
+      .from(mktPublications)
+      .where(eq(mktPublications.slug, publicationSlug))
+      .limit(50)
+    const matches = candidates
+      .filter((publication) => canAccessOrganization(req, publication.organizationId))
+      .filter((publication) => !organization || publication.organizationId === organization.id)
+    if (matches.length === 0) throw new Error('Publication not found')
+    if (matches.length > 1) throw new Error('Publication selector is ambiguous. Provide publicationId or organizationId.')
+    const [matchOrganization] = await getDb().select().from(organizations).where(eq(organizations.id, matches[0].organizationId)).limit(1)
+    if (!matchOrganization) throw new Error('Publication organization not found')
+    return { organization: matchOrganization, publication: matches[0] }
+  }
+
+  if (requirePublication) throw new Error('Provide publicationId or publicationSlug')
+  return { organization, publication: null }
+}
+
+async function serializeMarketingSlotContext(slot: typeof mktPublicationSlots.$inferSelect, availableIdeaLimit: number) {
+  const db = getDb()
+  const [publication] = await db.select().from(mktPublications).where(eq(mktPublications.id, slot.publicationId)).limit(1)
+  const [organization] = await db.select().from(organizations).where(eq(organizations.id, slot.organizationId)).limit(1)
+  const [idea] = slot.ideaId ? await db.select().from(mktEditorialIdeas).where(eq(mktEditorialIdeas.id, slot.ideaId)).limit(1) : []
+  const [document] = slot.documentId ? await db.select().from(documents).where(eq(documents.id, slot.documentId)).limit(1) : []
+  const [contentItem] = slot.contentItemId ? await db.select().from(mktContentItems).where(eq(mktContentItems.id, slot.contentItemId)).limit(1) : []
+  const [distributionRun] = slot.distributionRunId ? await db.select().from(mktDistributionRuns).where(eq(mktDistributionRuns.id, slot.distributionRunId)).limit(1) : []
+  const availableIdeas = availableIdeaLimit > 0
+    ? await db
+      .select()
+      .from(mktEditorialIdeas)
+      .where(and(eq(mktEditorialIdeas.publicationId, slot.publicationId), eq(mktEditorialIdeas.status, 'available')))
+      .orderBy(desc(mktEditorialIdeas.priority), asc(mktEditorialIdeas.createdAt))
+      .limit(availableIdeaLimit)
+    : []
+  return {
+    ok: true,
+    organization: organization ? serializeMarketingOrganization(organization) : null,
+    publication: publication ? {
+      ...serializeMarketingPublication(publication),
+      cadence: readMarketingCadenceConfig(publication.metadata),
+    } : null,
+    slot: serializeMarketingSlot(slot),
+    idea: idea ? serializeMarketingIdea(idea) : null,
+    document: document ? serializeDocumentReference(document) : null,
+    contentItem: contentItem ? serializeMarketingContentItem(contentItem) : null,
+    distributionRun: distributionRun ? serializeMarketingDistributionRun(distributionRun) : null,
+    availableIdeas: availableIdeas.map(serializeMarketingIdea),
+    workflow: {
+      createDocumentTool: 'pach.document.create',
+      fulfillTool: 'pach.marketing.slot.fulfill',
+      note: 'Create or select an idea, create the article document, then call pach.marketing.slot.fulfill with slotId, documentId, optional ideaId, subject, preheader, and runId.',
+    },
+  }
+}
+
+function serializeMarketingOrganization(organization: typeof organizations.$inferSelect) {
+  return {
+    id: organization.id,
+    name: organization.name,
+    project: organization.project,
+  }
+}
+
+function serializeMarketingPublication(publication: typeof mktPublications.$inferSelect) {
+  return {
+    id: publication.id,
+    organizationId: publication.organizationId,
+    name: publication.name,
+    slug: publication.slug,
+    type: publication.type,
+    status: publication.status,
+    audienceDescription: publication.audienceDescription,
+    editorialProfile: publication.editorialProfile ?? {},
+    metadata: publication.metadata ?? {},
+  }
+}
+
+function serializeMarketingIdea(idea: typeof mktEditorialIdeas.$inferSelect) {
+  return {
+    id: idea.id,
+    organizationId: idea.organizationId,
+    publicationId: idea.publicationId,
+    documentId: idea.documentId,
+    contentItemId: idea.contentItemId,
+    agentRunId: idea.agentRunId,
+    title: idea.title,
+    angle: idea.angle,
+    sourceNotes: idea.sourceNotes,
+    dedupeKey: idea.dedupeKey,
+    status: idea.status,
+    priority: idea.priority,
+    reservedAt: idea.reservedAt?.getTime() ?? null,
+    usedAt: idea.usedAt?.getTime() ?? null,
+    metadata: idea.metadata ?? {},
+    createdAt: idea.createdAt.getTime(),
+    updatedAt: idea.updatedAt.getTime(),
+  }
+}
+
+function serializeMarketingSlot(slot: typeof mktPublicationSlots.$inferSelect) {
+  return {
+    id: slot.id,
+    organizationId: slot.organizationId,
+    publicationId: slot.publicationId,
+    ideaId: slot.ideaId,
+    documentId: slot.documentId,
+    contentItemId: slot.contentItemId,
+    distributionRunId: slot.distributionRunId,
+    agentRunId: slot.agentRunId,
+    slotKey: slot.slotKey,
+    status: slot.status,
+    scheduledAt: slot.scheduledAt.getTime(),
+    scheduledTimezone: slot.scheduledTimezone,
+    lockedAt: slot.lockedAt?.getTime() ?? null,
+    error: slot.error,
+    metadata: slot.metadata ?? {},
+    createdAt: slot.createdAt.getTime(),
+    updatedAt: slot.updatedAt.getTime(),
+  }
+}
+
+function serializeMarketingContentItem(item: typeof mktContentItems.$inferSelect) {
+  return {
+    id: item.id,
+    organizationId: item.organizationId,
+    sourceDocumentId: item.sourceDocumentId,
+    title: item.title,
+    slug: item.slug,
+    excerpt: item.excerpt,
+    contentKind: item.contentKind,
+    supportedChannels: item.supportedChannels,
+    status: item.status,
+    format: item.format,
+    tags: item.tags,
+    metadata: item.metadata ?? {},
+    createdAt: item.createdAt.getTime(),
+    updatedAt: item.updatedAt.getTime(),
+  }
+}
+
+function serializeMarketingDistributionRun(run: typeof mktDistributionRuns.$inferSelect) {
+  return {
+    id: run.id,
+    organizationId: run.organizationId,
+    publicationId: run.publicationId,
+    contentItemId: run.contentItemId,
+    channel: run.channel,
+    distributionType: run.distributionType,
+    name: run.name,
+    subject: run.subject,
+    preheader: run.preheader,
+    status: run.status,
+    scheduledAt: run.scheduledAt?.getTime() ?? null,
+    scheduledTimezone: run.scheduledTimezone,
+    startedAt: run.startedAt?.getTime() ?? null,
+    completedAt: run.completedAt?.getTime() ?? null,
+    error: run.error,
+    metadata: run.metadata ?? {},
   }
 }
 

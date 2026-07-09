@@ -129,9 +129,13 @@ function buildEditorialMcpPrompt(run: AgentRunPromptRecord) {
   const feedback = readMetadataString(run.metadata, 'feedback')
   const parentRunId = readMetadataString(run.metadata, 'parentRunId')
   const attachments = formatInputMediaPrompt(run.metadata)
+  const editorialWorkflow = readMetadataString(run.metadata, 'editorialWorkflow')
   const editorialIntent = readMetadataString(run.metadata, 'editorialIntent')
   const guidelinesPolicy = readMetadataString(run.metadata, 'guidelinesPolicy') ?? 'none'
   const routeReason = readMetadataString(run.metadata, 'routeReason')
+
+  if (editorialWorkflow === 'newsletter_idea_backlog') return buildNewsletterIdeaBacklogPrompt(run)
+  if (editorialWorkflow === 'newsletter_slot_fulfillment') return buildNewsletterSlotFulfillmentPrompt(run)
 
   return [
     'You are Pach editorial MCP issue worker.',
@@ -163,6 +167,67 @@ function buildEditorialMcpPrompt(run: AgentRunPromptRecord) {
     '',
     'Keep the final result concise and useful inside the Pach run progress stream.',
     `Run spec profile: ${runSpec.agentProfile}`,
+  ].filter((line): line is string => Boolean(line)).join('\n')
+}
+
+function buildNewsletterIdeaBacklogPrompt(run: AgentRunPromptRecord) {
+  const publicationId = readMetadataString(run.metadata, 'publicationId')
+  const publicationSlug = readMetadataString(run.metadata, 'publicationSlug')
+  const neededIdeas = readMetadataNumber(run.metadata, 'neededIdeas') ?? 4
+  const minIdeaBacklog = readMetadataNumber(run.metadata, 'minIdeaBacklog') ?? neededIdeas
+
+  return [
+    'You are Pach autonomous newsletter editorial worker.',
+    '',
+    'Use Pach MCP tools for Pach state. You may call Pach MCP tools directly and repeatedly as needed.',
+    'This run creates editorial ideas only. Do not create documents, content items, broadcasts, or external publications.',
+    `Agent run id: ${run.id}`,
+    publicationId ? `Publication id: ${publicationId}` : null,
+    publicationSlug ? `Publication slug: ${publicationSlug}` : null,
+    `Needed ideas: ${neededIdeas}`,
+    `Target available backlog: ${minIdeaBacklog}`,
+    '',
+    'Workflow:',
+    '1. Report progress with pach.progress.report using this run id.',
+    '2. Read pach.editorial.profile.get for the publication. Use effectiveProfile.ideaGuidelines when present, and otherwise match the newsletter guidelines.',
+    '3. Read pach.marketing.idea.list for the publication. Avoid repeating available, reserved, used, or rejected ideas.',
+    `4. Create at least ${neededIdeas} distinct ideas with pach.marketing.idea.create. Use useful titles, concrete angles, sourceNotes when relevant, and stable dedupeKey values.`,
+    '5. Put the final result in pach.progress.report with phase "final_result", including the ideas created and any duplicates skipped.',
+    '',
+    'Keep the final result concise and useful inside the Pach activity stream.',
+  ].filter((line): line is string => Boolean(line)).join('\n')
+}
+
+function buildNewsletterSlotFulfillmentPrompt(run: AgentRunPromptRecord) {
+  const slotId = readMetadataString(run.metadata, 'slotId') ?? run.subjectId ?? ''
+  const publicationId = readMetadataString(run.metadata, 'publicationId')
+  const publicationSlug = readMetadataString(run.metadata, 'publicationSlug')
+  const ideaId = readMetadataString(run.metadata, 'ideaId')
+  const scheduledAt = readMetadataString(run.metadata, 'scheduledAt')
+  const scheduledTimezone = readMetadataString(run.metadata, 'scheduledTimezone')
+
+  return [
+    'You are Pach autonomous newsletter editorial worker.',
+    '',
+    'Use Pach MCP tools for Pach state. You may call Pach MCP tools directly and repeatedly as needed.',
+    'This run is allowed to schedule a newsletter only by calling pach.marketing.slot.fulfill. Do not send the newsletter now and do not use raw database writes.',
+    `Agent run id: ${run.id}`,
+    slotId ? `Publication slot id: ${slotId}` : null,
+    publicationId ? `Publication id: ${publicationId}` : null,
+    publicationSlug ? `Publication slug: ${publicationSlug}` : null,
+    ideaId ? `Reserved idea id: ${ideaId}` : null,
+    scheduledAt ? `Scheduled at: ${scheduledAt}` : null,
+    scheduledTimezone ? `Scheduled timezone: ${scheduledTimezone}` : null,
+    '',
+    'Workflow:',
+    '1. Report progress with pach.progress.report using this run id.',
+    '2. Read pach.marketing.slot.get for the slot. Use its linked idea if present; otherwise list/create an idea with pach.marketing.idea.list and pach.marketing.idea.create.',
+    '3. Read pach.document.format.get and pach.editorial.profile.get for the publication. Use effectiveProfile.newsletterGuidelines when present.',
+    '4. Create one publishable article document with pach.document.create. Set metadata with source "newsletter_autonomy", publicationSlotId, editorialIdeaId when present, and agentRunId.',
+    '5. Call pach.marketing.slot.fulfill with slotId, documentId, ideaId when present, runId, subject, and preheader. This snapshots the document into marketing content and schedules the broadcast.',
+    '6. Put the final result in pach.progress.report with phase "final_result", including the document id/link, content item id, distribution run id, scheduled time, and whether guidelines were used.',
+    '',
+    'The article should be ready to send without human approval, but keep the document cleanly editable because Axel may still revise and resnapshot before the scheduled send.',
   ].filter((line): line is string => Boolean(line)).join('\n')
 }
 
@@ -205,6 +270,12 @@ function readMetadataString(metadata: unknown, key: string) {
   if (!metadata || typeof metadata !== 'object') return null
   const value = (metadata as Record<string, unknown>)[key]
   return typeof value === 'string' && value.trim() ? value.trim() : null
+}
+
+function readMetadataNumber(metadata: unknown, key: string) {
+  if (!metadata || typeof metadata !== 'object') return null
+  const value = (metadata as Record<string, unknown>)[key]
+  return typeof value === 'number' && Number.isFinite(value) ? value : null
 }
 
 function formatInputMediaPrompt(metadata: unknown) {
