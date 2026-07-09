@@ -700,6 +700,58 @@ export const mutators = {
     },
   },
 
+  mkt_ad_promotions: {
+    async create(tx: Tx, args: any) {
+      const now = Date.now()
+      await tx.mutate.mkt_ad_promotions.insert({
+        provider: 'linkedin',
+        objective: 'website_visits',
+        status: 'draft',
+        currencyCode: 'MXN',
+        targeting: {},
+        creative: {},
+        metadata: {},
+        ...args,
+        createdAt: now,
+        updatedAt: now,
+      })
+    },
+    async update(tx: Tx, args: any) {
+      const { id, ...updates } = args
+      await tx.mutate.mkt_ad_promotions.update({ id, ...updates, updatedAt: Date.now() })
+    },
+    async delete(tx: Tx, args: { id: string }) {
+      await tx.mutate.mkt_ad_promotions.delete({ id: args.id })
+    },
+  },
+
+  mkt_ad_metric_snapshots: {
+    async create(tx: Tx, args: any) {
+      await tx.mutate.mkt_ad_metric_snapshots.insert({
+        provider: 'linkedin',
+        entityKind: 'promotion',
+        granularity: 'daily',
+        impressions: 0,
+        clicks: 0,
+        reactions: 0,
+        comments: 0,
+        shares: 0,
+        follows: 0,
+        leads: 0,
+        conversions: 0,
+        spendMinor: 0,
+        currencyCode: 'MXN',
+        rawMetrics: {},
+        fetchedAt: Date.now(),
+        createdAt: Date.now(),
+        ...args,
+      })
+    },
+    async delete(tx: Tx, args: { id: string }) {
+      await tx.mutate.mkt_ad_metric_snapshots.delete({ id: args.id })
+    },
+  },
+
   pm_teams: {
     async create(tx: Tx, args: { id: string; companyId?: string; key: string; name: string; description?: string; color?: string; icon?: string; position?: number }) {
       const now = Date.now()

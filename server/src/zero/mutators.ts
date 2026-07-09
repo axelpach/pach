@@ -49,6 +49,8 @@ type ScopedTable =
   | 'social_channel_connections'
   | 'social_posts'
   | 'social_post_targets'
+  | 'mkt_ad_promotions'
+  | 'mkt_ad_metric_snapshots'
   | 'pm_teams'
   | 'pm_projects'
   | 'pm_statuses'
@@ -103,6 +105,8 @@ const ORG_COLUMN_BY_TABLE: Record<ScopedTable, string> = {
   social_channel_connections: 'organization_id',
   social_posts: 'organization_id',
   social_post_targets: 'organization_id',
+  mkt_ad_promotions: 'organization_id',
+  mkt_ad_metric_snapshots: 'organization_id',
   pm_teams: 'company_id',
   pm_projects: 'company_id',
   pm_statuses: 'company_id',
@@ -1170,6 +1174,74 @@ export function createServerMutators(authData?: JWTPayload) {
       async delete(tx: Tx, args: { id: string }) {
         await requireExistingOrganizationAccess(tx, 'social_post_targets', args.id)
         await tx.mutate.social_post_targets.delete({ id: args.id })
+      },
+    },
+
+    mkt_ad_promotions: {
+      async create(tx: Tx, args: any) {
+        requireOrganizationAccess(args.organizationId)
+        await requireExistingOrganizationAccess(tx, 'mkt_content_items', args.contentItemId)
+        if (args.contentOutputId) await requireExistingOrganizationAccess(tx, 'mkt_content_outputs', args.contentOutputId)
+        if (args.socialPostId) await requireExistingOrganizationAccess(tx, 'social_posts', args.socialPostId)
+        if (args.socialPostTargetId) await requireExistingOrganizationAccess(tx, 'social_post_targets', args.socialPostTargetId)
+        const now = Date.now()
+        await tx.mutate.mkt_ad_promotions.insert({
+          provider: 'linkedin',
+          objective: 'website_visits',
+          status: 'draft',
+          currencyCode: 'MXN',
+          targeting: {},
+          creative: {},
+          metadata: {},
+          ...args,
+          createdAt: now,
+          updatedAt: now,
+        })
+      },
+      async update(tx: Tx, args: any) {
+        await requireExistingOrganizationAccess(tx, 'mkt_ad_promotions', args.id)
+        if ('organizationId' in args) requireOrganizationAccess(args.organizationId)
+        if (args.contentItemId) await requireExistingOrganizationAccess(tx, 'mkt_content_items', args.contentItemId)
+        if (args.contentOutputId) await requireExistingOrganizationAccess(tx, 'mkt_content_outputs', args.contentOutputId)
+        if (args.socialPostId) await requireExistingOrganizationAccess(tx, 'social_posts', args.socialPostId)
+        if (args.socialPostTargetId) await requireExistingOrganizationAccess(tx, 'social_post_targets', args.socialPostTargetId)
+        const { id, ...updates } = args
+        await tx.mutate.mkt_ad_promotions.update({ id, ...updates, updatedAt: Date.now() })
+      },
+      async delete(tx: Tx, args: { id: string }) {
+        await requireExistingOrganizationAccess(tx, 'mkt_ad_promotions', args.id)
+        await tx.mutate.mkt_ad_promotions.delete({ id: args.id })
+      },
+    },
+
+    mkt_ad_metric_snapshots: {
+      async create(tx: Tx, args: any) {
+        requireOrganizationAccess(args.organizationId)
+        if (args.promotionId) await requireExistingOrganizationAccess(tx, 'mkt_ad_promotions', args.promotionId)
+        const now = Date.now()
+        await tx.mutate.mkt_ad_metric_snapshots.insert({
+          provider: 'linkedin',
+          entityKind: 'promotion',
+          granularity: 'daily',
+          impressions: 0,
+          clicks: 0,
+          reactions: 0,
+          comments: 0,
+          shares: 0,
+          follows: 0,
+          leads: 0,
+          conversions: 0,
+          spendMinor: 0,
+          currencyCode: 'MXN',
+          rawMetrics: {},
+          fetchedAt: now,
+          createdAt: now,
+          ...args,
+        })
+      },
+      async delete(tx: Tx, args: { id: string }) {
+        await requireExistingOrganizationAccess(tx, 'mkt_ad_metric_snapshots', args.id)
+        await tx.mutate.mkt_ad_metric_snapshots.delete({ id: args.id })
       },
     },
 

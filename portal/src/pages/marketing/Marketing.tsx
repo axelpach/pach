@@ -1,15 +1,35 @@
 import { useQuery, useZero } from '@rocicorp/zero/react'
+import FullCalendar from '@fullcalendar/react'
+import dayGridPlugin from '@fullcalendar/daygrid'
+import interactionPlugin from '@fullcalendar/interaction'
+import listPlugin from '@fullcalendar/list'
+import timeGridPlugin from '@fullcalendar/timegrid'
+import type {
+  DatesSetArg,
+  DayCellContentArg,
+  DayCellMountArg,
+  EventClickArg,
+  EventContentArg,
+  EventInput,
+  EventMountArg,
+} from '@fullcalendar/core'
 import {
   Building2,
+  CalendarDays,
   Check,
+  ChevronLeft,
+  ChevronRight,
   Edit3,
   ExternalLink,
   Link2,
   Linkedin,
   Mail,
   Megaphone,
+  Newspaper,
   Plus,
+  Radio,
   RefreshCw,
+  Search,
   Rss,
   Send,
   Trash2,
@@ -27,6 +47,7 @@ import { config } from '../../config'
 import type { Mutators } from '../../mutators'
 import type { Schema } from '../../zero-schema'
 import { RichEditor, type RichEditorHandle } from '../../components/rich-editor/RichEditor'
+import '../calendar/Calendar.css'
 
 type OrganizationRow = Schema['tables']['organizations']['row']
 type DocumentRow = Schema['tables']['documents']['row']
@@ -40,6 +61,8 @@ type DistributionRunRow = Schema['tables']['mkt_distribution_runs']['row']
 type CtaRow = Schema['tables']['mkt_ctas']['row']
 type ContentEventRow = Schema['tables']['mkt_content_events']['row']
 type ContentOutputRow = Schema['tables']['mkt_content_outputs']['row']
+type AdPromotionRow = Schema['tables']['mkt_ad_promotions']['row']
+type AdMetricSnapshotRow = Schema['tables']['mkt_ad_metric_snapshots']['row']
 type SocialChannelRow = Schema['tables']['social_channels']['row']
 type SocialPostRow = Schema['tables']['social_posts']['row']
 type SocialPostTargetRow = Schema['tables']['social_post_targets']['row']
@@ -61,19 +84,92 @@ type PublicationCadenceConfig = {
   lookaheadDays: number
   cooldownDays: number
 }
+type LinkedInAdPromotionDraftPayload = {
+  adAccountExternalId: string
+  objective: string
+  audiencePreset: string
+  budgetMinor?: number
+  currencyCode: string
+  startsAt?: number
+  endsAt?: number
+  headline: string
+  primaryText: string
+  ctaLabel: string
+}
 
-type MarketingSection = 'content' | 'newsletters' | 'broadcasts' | 'ctas' | 'analytics'
+type MarketingSection = 'newsletters' | 'social' | 'calendar' | 'analytics'
+type NewsletterTab = 'content' | 'publications' | 'subscribers' | 'broadcasts' | 'ctas'
+type MarketingCalendarView = 'dayGridMonth' | 'timeGridWeek' | 'timeGridDay' | 'listWeek'
+type MarketingCalendarEventTone = 'ok' | 'warn' | 'fail' | 'info' | 'idle'
+type MarketingCalendarEvent = {
+  id: string
+  type: string
+  title: string
+  startsAt: number
+  endsAt: number
+  status: string
+  channelName: string
+  destinationKey: string
+  destinationName: string
+  contentTitle: string
+  timezone: string
+  href: string
+  tone: MarketingCalendarEventTone
+}
+type StoredMarketingCalendarState = {
+  view: MarketingCalendarView
+  currentDate: number | null
+  filters: ActiveFilters
+  searchQuery: string
+}
 
 const SECTIONS: Array<{ id: MarketingSection; label: string }> = [
-  { id: 'content', label: 'content' },
   { id: 'newsletters', label: 'newsletters' },
+  { id: 'social', label: 'social' },
+  { id: 'calendar', label: 'calendar' },
+  { id: 'analytics', label: 'analytics' },
+]
+
+const NEWSLETTER_TABS: Array<{ id: NewsletterTab; label: string }> = [
+  { id: 'content', label: 'content' },
+  { id: 'publications', label: 'publications' },
+  { id: 'subscribers', label: 'subscribers' },
   { id: 'broadcasts', label: 'broadcasts' },
   { id: 'ctas', label: 'ctas' },
-  { id: 'analytics', label: 'analytics' },
 ]
 
 const CONTENT_CHANNELS = ['blog', 'newsletter'] as const
 const DEFAULT_MARKETING_TIMEZONE = 'America/Mexico_City'
+const MARKETING_CALENDAR_STATE_STORAGE_KEY = 'pach.marketing.calendar.state'
+const MARKETING_CALENDAR_EVENT_DURATION_MS = 30 * 60 * 1000
+const MARKETING_CALENDAR_VIEW_OPTIONS: Array<{ value: MarketingCalendarView; label: string }> = [
+  { value: 'dayGridMonth', label: 'month' },
+  { value: 'timeGridWeek', label: 'week' },
+  { value: 'timeGridDay', label: 'day' },
+  { value: 'listWeek', label: 'agenda' },
+]
+const MARKETING_CALENDAR_STATUS_ORDER = [
+  'scheduled',
+  'publishing',
+  'published',
+  'sent',
+  'sending',
+  'active',
+  'ready',
+  'draft',
+  'paused',
+  'completed',
+  'failed',
+  'canceled',
+  'blocked_waiting_for_output',
+  'archived',
+]
+const EMPTY_MARKETING_CALENDAR_FILTERS: ActiveFilters = {
+  eventType: [],
+  channel: [],
+  status: [],
+  destination: [],
+}
 const MARKETING_TIMEZONES = [
   { value: 'America/Mexico_City', label: 'Mexico City' },
   { value: 'Europe/Madrid', label: 'Madrid' },
@@ -103,8 +199,11 @@ export default function Marketing() {
   const [socialChannels] = useQuery(z.query.social_channels.orderBy('displayName', 'asc'))
   const [socialPosts] = useQuery(z.query.social_posts.orderBy('updatedAt', 'desc'))
   const [socialPostTargets] = useQuery(z.query.social_post_targets.orderBy('updatedAt', 'desc'))
+  const [adPromotions] = useQuery(z.query.mkt_ad_promotions.orderBy('updatedAt', 'desc'))
+  const [adMetricSnapshots] = useQuery(z.query.mkt_ad_metric_snapshots.orderBy('periodEnd', 'desc'))
 
   const section = sectionFromPath(location.pathname)
+  const newsletterTab = newsletterTabFromPath(location.pathname)
   const [organizationId, setOrganizationId] = useState('')
   const [selectedContentId, setSelectedContentId] = useState('')
   const [selectedPublicationId, setSelectedPublicationId] = useState('')
@@ -123,11 +222,13 @@ export default function Marketing() {
   const orgSocialChannels = useMemo(() => byOrganization(socialChannels, organizationId), [organizationId, socialChannels])
   const orgSocialPosts = useMemo(() => byOrganization(socialPosts, organizationId), [organizationId, socialPosts])
   const orgSocialPostTargets = useMemo(() => byOrganization(socialPostTargets, organizationId), [organizationId, socialPostTargets])
+  const orgAdPromotions = useMemo(() => byOrganization(adPromotions, organizationId), [adPromotions, organizationId])
+  const orgAdMetricSnapshots = useMemo(() => byOrganization(adMetricSnapshots, organizationId), [adMetricSnapshots, organizationId])
   const selectedContent = orgContentItems.find((item) => item.id === selectedContentId) ?? null
   const selectedPublication = orgPublications.find((item) => item.id === selectedPublicationId) ?? orgPublications[0] ?? null
   const contentItemIdFromUrl = new URLSearchParams(location.search).get('content')
   const broadcastRunIdFromUrl = broadcastRunIdFromPath(location.pathname)
-  const isBroadcastDetail = section === 'broadcasts' && Boolean(broadcastRunIdFromUrl)
+  const isBroadcastDetail = section === 'newsletters' && newsletterTab === 'broadcasts' && Boolean(broadcastRunIdFromUrl)
 
   const organizationOptions = useMemo<PachSelectOption[]>(
     () => organizations.map((entry) => ({ value: entry.id, label: entry.name })),
@@ -136,7 +237,7 @@ export default function Marketing() {
 
   useEffect(() => {
     if (section) return
-    navigate('/marketing/content', { replace: true })
+    navigate('/marketing/newsletters/content', { replace: true })
   }, [navigate, section])
 
   useEffect(() => {
@@ -204,6 +305,7 @@ export default function Marketing() {
   }
 
   if (!section) return null
+  const isCalendarSection = section === 'calendar'
 
   return (
     <div className="flex h-full min-h-0 bg-pit text-fg-1">
@@ -238,13 +340,13 @@ export default function Marketing() {
               key={entry.id}
               active={section === entry.id}
               label={entry.label}
-              onClick={() => navigate(`/marketing/${entry.id}`)}
+              onClick={() => navigate(marketingSectionPath(entry.id))}
             />
           ))}
         </div>
       </aside>
 
-      <main className="min-w-0 flex-1 overflow-auto">
+      <main className={`min-w-0 flex-1 ${isCalendarSection ? 'flex min-h-0 flex-col overflow-hidden' : 'overflow-auto'}`}>
         {!isBroadcastDetail ? (
           <div className="border-b border-edge/12 px-5 py-4 md:px-8">
             <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
@@ -264,16 +366,20 @@ export default function Marketing() {
                 </div>
                 <MarketingMobileSectionMenu
                   section={section}
-                  onSelect={(nextSection) => navigate(`/marketing/${nextSection}`)}
+                  onSelect={(nextSection) => navigate(marketingSectionPath(nextSection))}
                 />
               </div>
               {section !== 'analytics' ? (
-                <div className="grid grid-cols-2 gap-2 md:grid-cols-4 lg:min-w-[520px]">
-                  <Metric label="content" value={orgContentItems.length} />
-                  <Metric label="subscribers" value={newsletterSubscriberCount(orgSubscriptions)} />
-                  <Metric label="runs" value={orgRuns.length} />
-                  <Metric label="conversations" value={countEvents(orgEvents, 'reply')} />
-                </div>
+                <MarketingHeaderMetrics
+                  section={section}
+                  contentItems={orgContentItems}
+                  subscriptions={orgSubscriptions}
+                  runs={orgRuns}
+                  events={orgEvents}
+                  socialChannels={orgSocialChannels}
+                  socialPostTargets={orgSocialPostTargets}
+                  adPromotions={orgAdPromotions}
+                />
               ) : null}
             </div>
             {message ? (
@@ -286,57 +392,91 @@ export default function Marketing() {
           </div>
         ) : null}
 
-        <div className={isBroadcastDetail ? 'min-h-full' : 'px-5 py-5 md:px-8'}>
-          {section === 'content' ? (
-            <ContentSection
-              z={z}
+        <div className={isBroadcastDetail ? 'min-h-full' : isCalendarSection ? 'min-h-0 flex-1' : 'px-5 py-5 md:px-8'}>
+          {section === 'newsletters' ? (
+            <div className={isBroadcastDetail ? 'min-h-full' : 'space-y-4'}>
+              {!isBroadcastDetail ? (
+                <MarketingSubtabMenu
+                  tabs={NEWSLETTER_TABS}
+                  value={newsletterTab}
+                  onChange={(tab) => navigate(`/marketing/newsletters/${tab}`)}
+                />
+              ) : null}
+              {newsletterTab === 'content' ? (
+                <ContentSection
+                  z={z}
+                  contentItems={orgContentItems}
+                  ctas={orgCtas}
+                  runs={orgRuns}
+                  contentOutputs={orgContentOutputs}
+                  socialChannels={orgSocialChannels}
+                  socialPosts={orgSocialPosts}
+                  socialPostTargets={orgSocialPostTargets}
+                  adPromotions={orgAdPromotions}
+                  adMetricSnapshots={orgAdMetricSnapshots}
+                  selectedContent={selectedContent}
+                  onSelectContent={setSelectedContentId}
+                  onFlash={flash}
+                />
+              ) : null}
+              {newsletterTab === 'publications' || newsletterTab === 'subscribers' ? (
+                <NewslettersSection
+                  z={z}
+                  organization={organization}
+                  organizationId={organizationId}
+                  publications={orgPublications}
+                  selectedPublication={selectedPublication}
+                  onSelectPublication={setSelectedPublicationId}
+                  senderProfiles={orgSenderProfiles}
+                  ctas={orgCtas}
+                  members={orgMembers}
+                  subscriptions={orgSubscriptions}
+                  documents={documents}
+                  issues={issues}
+                  initialTab={newsletterTab}
+                  onCreateSenderProfile={createSenderProfile}
+                  onFlash={flash}
+                />
+              ) : null}
+              {newsletterTab === 'broadcasts' ? (
+                <BroadcastsSection
+                  z={z}
+                  organizationId={organizationId}
+                  publications={orgPublications}
+                  senderProfiles={orgSenderProfiles}
+                  ctas={orgCtas}
+                  contentItems={orgContentItems}
+                  runs={orgRuns}
+                  selectedPublication={selectedPublication}
+                  selectedRunId={broadcastRunIdFromUrl}
+                  basePath="/marketing/newsletters/broadcasts"
+                  onSelectPublication={setSelectedPublicationId}
+                  onFlash={flash}
+                />
+              ) : null}
+              {newsletterTab === 'ctas' ? (
+                <CtasSection z={z} organizationId={organizationId} ctas={orgCtas} onFlash={flash} />
+              ) : null}
+            </div>
+          ) : null}
+          {section === 'social' ? (
+            <SocialSection
               contentItems={orgContentItems}
-              ctas={orgCtas}
-              runs={orgRuns}
               contentOutputs={orgContentOutputs}
               socialChannels={orgSocialChannels}
               socialPosts={orgSocialPosts}
               socialPostTargets={orgSocialPostTargets}
-              selectedContent={selectedContent}
-              onSelectContent={setSelectedContentId}
-              onFlash={flash}
             />
           ) : null}
-          {section === 'newsletters' ? (
-            <NewslettersSection
-              z={z}
-              organization={organization}
-              organizationId={organizationId}
-              publications={orgPublications}
-              selectedPublication={selectedPublication}
-              onSelectPublication={setSelectedPublicationId}
-              senderProfiles={orgSenderProfiles}
-              ctas={orgCtas}
-              members={orgMembers}
-              subscriptions={orgSubscriptions}
-              documents={documents}
-              issues={issues}
-              onCreateSenderProfile={createSenderProfile}
-              onFlash={flash}
-            />
-          ) : null}
-          {section === 'broadcasts' ? (
-            <BroadcastsSection
-              z={z}
-              organizationId={organizationId}
-              publications={orgPublications}
-              senderProfiles={orgSenderProfiles}
-              ctas={orgCtas}
+          {section === 'calendar' ? (
+            <MarketingCalendarSection
               contentItems={orgContentItems}
               runs={orgRuns}
-              selectedPublication={selectedPublication}
-              selectedRunId={broadcastRunIdFromUrl}
-              onSelectPublication={setSelectedPublicationId}
-              onFlash={flash}
+              socialChannels={orgSocialChannels}
+              socialPosts={orgSocialPosts}
+              socialPostTargets={orgSocialPostTargets}
+              adPromotions={orgAdPromotions}
             />
-          ) : null}
-          {section === 'ctas' ? (
-            <CtasSection z={z} organizationId={organizationId} ctas={orgCtas} onFlash={flash} />
           ) : null}
           {section === 'analytics' ? (
             <AnalyticsSection
@@ -345,6 +485,8 @@ export default function Marketing() {
               events={orgEvents}
               subscriptions={orgSubscriptions}
               ctas={orgCtas}
+              socialPostTargets={orgSocialPostTargets}
+              adMetricSnapshots={orgAdMetricSnapshots}
             />
           ) : null}
         </div>
@@ -361,7 +503,7 @@ function MarketingMobileSectionMenu({
   onSelect: (section: MarketingSection) => void
 }) {
   return (
-    <div className="mt-3 grid grid-cols-5 gap-1 font-mono text-[10px] uppercase tracking-label">
+    <div className="mt-3 grid grid-cols-4 gap-1 font-mono text-[10px] uppercase tracking-label">
       {SECTIONS.map((entry) => (
         <button
           key={entry.id}
@@ -380,6 +522,85 @@ function MarketingMobileSectionMenu({
   )
 }
 
+function MarketingHeaderMetrics({
+  section,
+  contentItems,
+  subscriptions,
+  runs,
+  events,
+  socialChannels,
+  socialPostTargets,
+  adPromotions,
+}: {
+  section: MarketingSection
+  contentItems: ContentItemRow[]
+  subscriptions: AudienceSubscriptionRow[]
+  runs: DistributionRunRow[]
+  events: ContentEventRow[]
+  socialChannels: SocialChannelRow[]
+  socialPostTargets: SocialPostTargetRow[]
+  adPromotions: AdPromotionRow[]
+}) {
+  if (section === 'social') {
+    return (
+      <div className="grid grid-cols-2 gap-2 md:grid-cols-4 lg:min-w-[520px]">
+        <Metric label="posts" value={socialPostTargets.length} />
+        <Metric label="published" value={socialPostTargets.filter((target) => target.status === 'published').length} />
+        <Metric label="destinations" value={socialChannels.length} />
+        <Metric label="ad drafts" value={adPromotions.length} />
+      </div>
+    )
+  }
+  if (section === 'calendar') {
+    const scheduledRuns = runs.filter((run) => run.scheduledAt)
+    return (
+      <div className="grid grid-cols-2 gap-2 md:grid-cols-4 lg:min-w-[520px]">
+        <Metric label="scheduled" value={scheduledRuns.length + socialPostTargets.filter((target) => target.scheduledAt).length} />
+        <Metric label="blog" value={scheduledRuns.filter((run) => run.channel === 'blog').length} />
+        <Metric label="newsletter" value={scheduledRuns.filter((run) => run.channel === 'newsletter').length} />
+        <Metric label="social" value={socialPostTargets.filter((target) => target.scheduledAt).length} />
+      </div>
+    )
+  }
+  return (
+    <div className="grid grid-cols-2 gap-2 md:grid-cols-4 lg:min-w-[520px]">
+      <Metric label="content" value={contentItems.length} />
+      <Metric label="subscribers" value={newsletterSubscriberCount(subscriptions)} />
+      <Metric label="broadcasts" value={runs.filter((run) => run.channel === 'newsletter').length} />
+      <Metric label="conversations" value={countEvents(events, 'reply')} />
+    </div>
+  )
+}
+
+function MarketingSubtabMenu<T extends string>({
+  tabs,
+  value,
+  onChange,
+}: {
+  tabs: Array<{ id: T; label: string }>
+  value: T
+  onChange: (value: T) => void
+}) {
+  return (
+    <div className="flex flex-wrap gap-1 border-b border-edge/12 font-mono text-[10px] uppercase tracking-label">
+      {tabs.map((tab) => (
+        <button
+          key={tab.id}
+          type="button"
+          onClick={() => onChange(tab.id)}
+          className={`-mb-px border-b-2 px-3 py-2 transition ${
+            value === tab.id
+              ? 'border-accent text-accent glow'
+              : 'border-transparent text-fg-4 hover:text-fg-1'
+          }`}
+        >
+          {tab.label}
+        </button>
+      ))}
+    </div>
+  )
+}
+
 function ContentSection({
   z,
   contentItems,
@@ -389,6 +610,8 @@ function ContentSection({
   socialChannels,
   socialPosts,
   socialPostTargets,
+  adPromotions,
+  adMetricSnapshots,
   selectedContent,
   onSelectContent,
   onFlash,
@@ -401,6 +624,8 @@ function ContentSection({
   socialChannels: SocialChannelRow[]
   socialPosts: SocialPostRow[]
   socialPostTargets: SocialPostTargetRow[]
+  adPromotions: AdPromotionRow[]
+  adMetricSnapshots: AdMetricSnapshotRow[]
   selectedContent: ContentItemRow | null
   onSelectContent: (id: string) => void
   onFlash: (message: string) => void
@@ -410,6 +635,7 @@ function ContentSection({
   const [blogScheduleDraft, setBlogScheduleDraft] = useState('')
   const [blogScheduleError, setBlogScheduleError] = useState('')
   const [linkedinModalOpen, setLinkedinModalOpen] = useState(false)
+  const [linkedinAdModalOpen, setLinkedinAdModalOpen] = useState(false)
 
   const ctaOptions = useMemo<PachSelectOption[]>(
     () => [{ value: '', label: 'no cta' }, ...ctas.map((cta) => ({ value: cta.id, label: cta.label }))],
@@ -549,7 +775,50 @@ function ContentSection({
       },
     })
     setLinkedinModalOpen(false)
-    onFlash('linkedin promotion scheduled')
+    onFlash('linkedin post scheduled')
+  }
+
+  async function createLinkedInAdPromotion(payload: LinkedInAdPromotionDraftPayload) {
+    if (!selectedContent) return
+    const output = blogOutputForContent(selectedContent, contentOutputs)
+    if (!output || !output.publicUrl) {
+      onFlash('publish or schedule the blog first')
+      return
+    }
+    const post = socialPostsForContent(selectedContent, socialPosts)[0] ?? null
+    const target = post ? socialPostTargets.find((entry) => entry.socialPostId === post.id) ?? null : null
+    await z.mutate.mkt_ad_promotions.create({
+      id: crypto.randomUUID(),
+      organizationId: selectedContent.organizationId,
+      contentItemId: selectedContent.id,
+      contentOutputId: output.id,
+      socialPostId: post?.id,
+      socialPostTargetId: target?.id,
+      provider: 'linkedin',
+      adAccountExternalId: payload.adAccountExternalId || undefined,
+      landingUrl: output.publicUrl,
+      objective: payload.objective,
+      status: 'draft',
+      budgetMinor: payload.budgetMinor,
+      currencyCode: payload.currencyCode,
+      startsAt: payload.startsAt,
+      endsAt: payload.endsAt,
+      targeting: {
+        preset: payload.audiencePreset,
+      },
+      creative: {
+        headline: payload.headline,
+        primaryText: payload.primaryText,
+        ctaLabel: payload.ctaLabel,
+      },
+      metadata: {
+        source: 'marketing-content',
+        requiresPublishedPagePost: target?.status !== 'published',
+        organicTargetStatus: target?.status ?? null,
+      },
+    })
+    setLinkedinAdModalOpen(false)
+    onFlash('linkedin ad draft created')
   }
 
   return (
@@ -610,8 +879,10 @@ function ContentSection({
             {(() => {
               const output = blogOutputForContent(selectedContent, contentOutputs)
               const linkedInTargets = socialTargetsForContent(selectedContent, socialPosts, socialPostTargets)
+              const promotions = adPromotionsForContent(selectedContent, adPromotions)
+              const paidMetrics = sumAdMetricSnapshots(adMetricSnapshotsForPromotions(promotions, adMetricSnapshots))
               return (
-                <div className="grid gap-2 border border-edge/12 bg-rim px-3 py-3 md:grid-cols-2">
+                <div className="grid gap-2 border border-edge/12 bg-rim px-3 py-3 md:grid-cols-3">
                   <div>
                     <div className="font-mono text-[10px] uppercase tracking-label text-fg-4">blog output</div>
                     <div className="mt-1 flex items-center gap-2">
@@ -626,11 +897,22 @@ function ContentSection({
                     </div>
                   </div>
                   <div>
-                    <div className="font-mono text-[10px] uppercase tracking-label text-fg-4">linkedin</div>
+                    <div className="font-mono text-[10px] uppercase tracking-label text-fg-4">linkedin post</div>
                     <div className="mt-1 flex items-center gap-2">
                       <StatusPill kind={linkedInTargets.length ? 'info' : 'idle'}>
                         {linkedInTargets.length ? `${linkedInTargets.length} target${linkedInTargets.length === 1 ? '' : 's'}` : 'not scheduled'}
                       </StatusPill>
+                    </div>
+                  </div>
+                  <div>
+                    <div className="font-mono text-[10px] uppercase tracking-label text-fg-4">linkedin ads</div>
+                    <div className="mt-1 flex items-center gap-2">
+                      <StatusPill kind={promotions.length ? 'info' : 'idle'}>
+                        {promotions.length ? `${promotions.length} draft${promotions.length === 1 ? '' : 's'}` : 'no draft'}
+                      </StatusPill>
+                      {paidMetrics.impressions ? (
+                        <span className="font-mono text-[11px] text-fg-3">{formatCompactNumber(paidMetrics.impressions)} impressions</span>
+                      ) : null}
                     </div>
                   </div>
                 </div>
@@ -727,9 +1009,45 @@ function ContentSection({
                 onClick={() => setLinkedinModalOpen(true)}
                 disabled={!blogOutputForContent(selectedContent, contentOutputs)?.publicUrl || linkedinChannels.length === 0}
               >
-                promote
+                schedule linkedin
+              </Button>
+              <Button
+                icon={<Megaphone className="h-3.5 w-3.5" />}
+                onClick={() => setLinkedinAdModalOpen(true)}
+                disabled={!blogOutputForContent(selectedContent, contentOutputs)?.publicUrl}
+              >
+                ad draft
               </Button>
             </div>
+            {(() => {
+              const promotions = adPromotionsForContent(selectedContent, adPromotions)
+              if (!promotions.length) return null
+              return (
+                <div className="border border-edge/12 bg-rim px-3 py-3">
+                  <div className="mb-2 font-mono text-[10px] uppercase tracking-label text-fg-4">linkedin ad promotion drafts</div>
+                  <div className="divide-y divide-edge/10">
+                    {promotions.map((promotion) => {
+                      const metrics = sumAdMetricSnapshots(adMetricSnapshotsForPromotions([promotion], adMetricSnapshots))
+                      return (
+                        <div key={promotion.id} className="grid gap-2 py-2 font-mono text-xs text-fg-2 md:grid-cols-[1fr_auto_auto] md:items-center">
+                          <div className="min-w-0">
+                            <div className="truncate text-fg-1">{adPromotionHeadline(promotion) || selectedContent.title}</div>
+                            <div className="mt-0.5 truncate text-[10px] uppercase tracking-label text-fg-4">
+                              {promotion.objective.replace(/_/g, ' ')} · {promotion.adAccountExternalId || 'ad account pending'}
+                            </div>
+                          </div>
+                          <StatusPill kind={statusKind(promotion.status)}>{promotion.status}</StatusPill>
+                          <div className="text-right text-[11px] text-fg-3">
+                            {promotion.budgetMinor ? `${formatMoneyMinor(promotion.budgetMinor, promotion.currencyCode)} budget` : 'budget pending'}
+                            {metrics.impressions ? ` · ${formatCompactNumber(metrics.impressions)} views` : ''}
+                          </div>
+                        </div>
+                      )
+                    })}
+                  </div>
+                </div>
+              )
+            })()}
             <div className="border border-edge/12 bg-rim px-3 py-2 font-mono text-[11px] text-fg-3">
               /public/organizations/:project/marketing/posts/{selectedContent.slug}
             </div>
@@ -744,6 +1062,16 @@ function ContentSection({
           channels={linkedinChannels}
           onClose={() => setLinkedinModalOpen(false)}
           onSubmit={(payload) => void scheduleLinkedInPromotion(payload)}
+        />
+      ) : null}
+
+      {selectedContent && linkedinAdModalOpen ? (
+        <LinkedInAdPromotionModal
+          item={selectedContent}
+          output={blogOutputForContent(selectedContent, contentOutputs)}
+          hasLinkedInPost={socialTargetsForContent(selectedContent, socialPosts, socialPostTargets).length > 0}
+          onClose={() => setLinkedinAdModalOpen(false)}
+          onSubmit={(payload) => void createLinkedInAdPromotion(payload)}
         />
       ) : null}
     </>
@@ -876,6 +1204,234 @@ function LinkedInPromotionModal({
   )
 }
 
+function LinkedInAdPromotionModal({
+  item,
+  output,
+  hasLinkedInPost,
+  onClose,
+  onSubmit,
+}: {
+  item: ContentItemRow
+  output: ContentOutputRow | null
+  hasLinkedInPost: boolean
+  onClose: () => void
+  onSubmit: (payload: LinkedInAdPromotionDraftPayload) => void
+}) {
+  const startDate = defaultSocialScheduleDate(output)
+  const endDate = new Date(startDate.getTime() + 7 * 24 * 60 * 60 * 1000)
+  const [adAccountExternalId, setAdAccountExternalId] = useState('')
+  const [objective, setObjective] = useState('website_visits')
+  const [audiencePreset, setAudiencePreset] = useState('real_estate_developers_mx')
+  const [budgetMajor, setBudgetMajor] = useState('1000')
+  const [currencyCode, setCurrencyCode] = useState('MXN')
+  const [startsAt, setStartsAt] = useState(() => toDatetimeLocalValue(startDate))
+  const [endsAt, setEndsAt] = useState(() => toDatetimeLocalValue(endDate))
+  const [headline, setHeadline] = useState(item.title)
+  const [primaryText, setPrimaryText] = useState(() => defaultLinkedInCaption(item))
+  const [ctaLabel, setCtaLabel] = useState('LEARN_MORE')
+
+  const startsAtMs = startsAt ? Date.parse(startsAt) : undefined
+  const endsAtMs = endsAt ? Date.parse(endsAt) : undefined
+  const budgetNumber = budgetMajor.trim() ? Number(budgetMajor) : undefined
+  const budgetMinor = typeof budgetNumber === 'number' && Number.isFinite(budgetNumber) && budgetNumber > 0
+    ? Math.round(budgetNumber * 100)
+    : undefined
+  const invalidBudget = Boolean(budgetMajor.trim()) && !budgetMinor
+  const invalidDates = (startsAt && (!startsAtMs || Number.isNaN(startsAtMs)))
+    || (endsAt && (!endsAtMs || Number.isNaN(endsAtMs)))
+    || (startsAtMs && endsAtMs ? endsAtMs <= startsAtMs : false)
+  const canSubmit = Boolean(output?.publicUrl && headline.trim() && primaryText.trim() && !invalidBudget && !invalidDates)
+
+  const objectiveOptions: PachSelectOption[] = [
+    { value: 'website_visits', label: 'website visits' },
+    { value: 'lead_generation', label: 'lead generation' },
+    { value: 'brand_awareness', label: 'brand awareness' },
+  ]
+  const audienceOptions: PachSelectOption[] = [
+    { value: 'real_estate_developers_mx', label: 'real estate developers mx' },
+    { value: 'founders_and_operators_latam', label: 'founders/operators latam' },
+    { value: 'remarketing', label: 'remarketing' },
+  ]
+  const currencyOptions: PachSelectOption[] = [
+    { value: 'MXN', label: 'MXN' },
+    { value: 'USD', label: 'USD' },
+  ]
+  const ctaOptions: PachSelectOption[] = [
+    { value: 'LEARN_MORE', label: 'learn more' },
+    { value: 'SIGN_UP', label: 'sign up' },
+    { value: 'CONTACT_US', label: 'contact us' },
+  ]
+
+  return createPortal(
+    <div
+      className="fixed inset-0 z-50 flex items-start justify-center bg-overlay/70 px-4 pt-[5vh] backdrop-blur-sm"
+      onClick={onClose}
+    >
+      <div
+        className="w-full max-w-4xl border border-edge/20 bg-pit-2 shadow-terminal-overlay"
+        onClick={(event) => event.stopPropagation()}
+      >
+        <div className="flex items-center justify-between border-b border-edge/12 px-5 py-3">
+          <div className="flex items-center gap-2 font-mono text-xs">
+            <span className="inline-flex items-center gap-1.5 border border-edge/25 bg-accent-fill/5 px-2 py-0.5 font-mono text-[10px] uppercase tracking-label text-accent">
+              marketing
+            </span>
+            <span className="text-fg-4">›</span>
+            <span className="text-fg-2 lowercase">linkedin ads</span>
+          </div>
+          <button
+            onClick={onClose}
+            className="font-mono text-xs uppercase tracking-label text-fg-4 transition hover:text-fg-1"
+            title="close"
+          >
+            [esc]
+          </button>
+        </div>
+
+        <div className="border-b border-edge/12 px-5 py-4">
+          <h2 className="font-mono text-2xl font-bold lowercase text-fg-1">create ad draft</h2>
+        </div>
+
+        <div className="grid max-h-[72vh] gap-4 overflow-y-auto px-5 py-5 lg:grid-cols-[1fr_320px]">
+          <div className="space-y-4">
+            {!hasLinkedInPost ? (
+              <div className="border border-amber/25 bg-amber/5 px-3 py-2 font-mono text-xs text-amber">
+                this draft can be prepared now, but activation should wait until the linkedin page post exists
+              </div>
+            ) : null}
+
+            <div className="grid gap-3 md:grid-cols-2">
+              <label className="block">
+                <FieldLabel>ad account id</FieldLabel>
+                <TermInput
+                  value={adAccountExternalId}
+                  onChange={(event) => setAdAccountExternalId(event.target.value)}
+                  placeholder="optional until ad account sync exists"
+                />
+              </label>
+              <div>
+                <FieldLabel>objective</FieldLabel>
+                <PachSelect
+                  value={objective}
+                  onChange={setObjective}
+                  options={objectiveOptions}
+                  display={objectiveOptions.find((entry) => entry.value === objective)?.label ?? 'objective'}
+                />
+              </div>
+            </div>
+
+            <div className="grid gap-3 md:grid-cols-3">
+              <div className="md:col-span-2">
+                <FieldLabel>audience</FieldLabel>
+                <PachSelect
+                  value={audiencePreset}
+                  onChange={setAudiencePreset}
+                  options={audienceOptions}
+                  display={audienceOptions.find((entry) => entry.value === audiencePreset)?.label ?? 'audience'}
+                />
+              </div>
+              <div>
+                <FieldLabel>currency</FieldLabel>
+                <PachSelect
+                  value={currencyCode}
+                  onChange={setCurrencyCode}
+                  options={currencyOptions}
+                  display={currencyCode}
+                />
+              </div>
+            </div>
+
+            <div className="grid gap-3 md:grid-cols-3">
+              <label className="block">
+                <FieldLabel>budget</FieldLabel>
+                <TermInput type="number" min="0" step="100" value={budgetMajor} onChange={(event) => setBudgetMajor(event.target.value)} />
+              </label>
+              <label className="block">
+                <FieldLabel>starts</FieldLabel>
+                <TermInput type="datetime-local" value={startsAt} onChange={(event) => setStartsAt(event.target.value)} />
+              </label>
+              <label className="block">
+                <FieldLabel>ends</FieldLabel>
+                <TermInput type="datetime-local" value={endsAt} onChange={(event) => setEndsAt(event.target.value)} />
+              </label>
+            </div>
+
+            <label className="block">
+              <FieldLabel>headline</FieldLabel>
+              <TermInput value={headline} onChange={(event) => setHeadline(event.target.value)} />
+            </label>
+
+            <label className="block">
+              <FieldLabel>primary text</FieldLabel>
+              <TermTextarea rows={6} value={primaryText} onChange={(event) => setPrimaryText(event.target.value)} />
+            </label>
+
+            <div>
+              <FieldLabel>cta</FieldLabel>
+              <PachSelect
+                value={ctaLabel}
+                onChange={setCtaLabel}
+                options={ctaOptions}
+                display={ctaOptions.find((entry) => entry.value === ctaLabel)?.label ?? 'cta'}
+              />
+            </div>
+
+            {invalidBudget || invalidDates ? (
+              <div className="border border-fail/25 bg-fail/5 px-3 py-2 font-mono text-xs text-fail">
+                {invalidBudget ? 'budget must be a positive amount' : 'end date must be after start date'}
+              </div>
+            ) : null}
+          </div>
+
+          <div className="border border-edge/12 bg-rim p-3">
+            <div className="flex items-center gap-2 font-mono text-xs text-fg-1">
+              <Megaphone className="h-4 w-4 text-accent" />
+              LinkedIn sponsored post
+            </div>
+            <div className="mt-3 whitespace-pre-wrap font-sans text-sm leading-5 text-fg-2">{primaryText}</div>
+            <div className="mt-4 overflow-hidden border border-edge/12 bg-pit">
+              <div className="aspect-[1.91/1] bg-accent-fill/8" />
+              <div className="space-y-1 px-3 py-3">
+                <div className="line-clamp-2 font-mono text-xs text-fg-1">{headline || item.title}</div>
+                <div className="line-clamp-2 text-xs text-fg-3">{item.excerpt || firstParagraphText(item.body) || '-'}</div>
+                <div className="truncate font-mono text-[10px] uppercase tracking-label text-fg-4">{output?.publicUrl ?? 'blog output'}</div>
+              </div>
+            </div>
+            <div className="mt-3 grid grid-cols-2 gap-2 font-mono text-[10px] uppercase tracking-label text-fg-4">
+              <div className="border border-edge/12 px-2 py-1.5">{objective.replace(/_/g, ' ')}</div>
+              <div className="border border-edge/12 px-2 py-1.5">{budgetMinor ? formatMoneyMinor(budgetMinor, currencyCode) : 'no budget'}</div>
+            </div>
+          </div>
+        </div>
+
+        <div className="flex items-center justify-end gap-2 border-t border-edge/12 px-5 py-3">
+          <Button onClick={onClose}>cancel</Button>
+          <Button
+            kind="primary"
+            icon={<Megaphone className="h-3.5 w-3.5" />}
+            onClick={() => onSubmit({
+              adAccountExternalId: adAccountExternalId.trim(),
+              objective,
+              audiencePreset,
+              budgetMinor,
+              currencyCode,
+              startsAt: startsAtMs,
+              endsAt: endsAtMs,
+              headline: headline.trim(),
+              primaryText: primaryText.trim(),
+              ctaLabel,
+            })}
+            disabled={!canSubmit}
+          >
+            create draft
+          </Button>
+        </div>
+      </div>
+    </div>,
+    document.body,
+  )
+}
+
 function NewslettersSection({
   z,
   organization,
@@ -889,6 +1445,7 @@ function NewslettersSection({
   subscriptions,
   documents,
   issues,
+  initialTab,
   onCreateSenderProfile,
   onFlash,
 }: {
@@ -904,11 +1461,12 @@ function NewslettersSection({
   subscriptions: AudienceSubscriptionRow[]
   documents: DocumentRow[]
   issues: IssueRow[]
+  initialTab: 'publications' | 'subscribers'
   onCreateSenderProfile: () => Promise<void>
   onFlash: (message: string) => void
 }) {
   const navigate = useNavigate()
-  const [tab, setTab] = useState<'publications' | 'subscribers'>('publications')
+  const [tab, setTab] = useState<'publications' | 'subscribers'>(initialTab)
   const [editingPublicationId, setEditingPublicationId] = useState('')
   const [guidelinesEditorPublicationId, setGuidelinesEditorPublicationId] = useState('')
   const [guidelinesDraft, setGuidelinesDraft] = useState('')
@@ -963,6 +1521,10 @@ function NewslettersSection({
     .filter((row): row is { subscription: AudienceSubscriptionRow; member: AudienceMemberRow; publication: PublicationRow } => Boolean(row)),
     [members, publications, selectedPublicationFilterIds, subscriptions],
   )
+
+  useEffect(() => {
+    setTab(initialTab)
+  }, [initialTab])
 
   useEffect(() => {
     if (!editingPublicationId || publications.some((publication) => publication.id === editingPublicationId)) return
@@ -1022,6 +1584,7 @@ function NewslettersSection({
   function showSubscribers(publicationId: string) {
     setSubscriberFilters({ publication: [publicationId] })
     setTab('subscribers')
+    navigate('/marketing/newsletters/subscribers')
   }
 
   function openPublicationEditor(publicationId: string) {
@@ -1160,10 +1723,16 @@ function NewslettersSection({
     <div className="space-y-4">
       <div className="flex flex-col gap-3 border-b border-edge/15 md:flex-row md:items-end md:justify-between">
         <div className="flex gap-0">
-          <MarketingTabButton active={tab === 'publications'} onClick={() => setTab('publications')}>
+          <MarketingTabButton active={tab === 'publications'} onClick={() => {
+            setTab('publications')
+            navigate('/marketing/newsletters/publications')
+          }}>
             publications
           </MarketingTabButton>
-          <MarketingTabButton active={tab === 'subscribers'} onClick={() => setTab('subscribers')}>
+          <MarketingTabButton active={tab === 'subscribers'} onClick={() => {
+            setTab('subscribers')
+            navigate('/marketing/newsletters/subscribers')
+          }}>
             subscribers
           </MarketingTabButton>
         </div>
@@ -1655,6 +2224,7 @@ function BroadcastsSection({
   runs,
   selectedPublication,
   selectedRunId,
+  basePath = '/marketing/newsletters/broadcasts',
   onSelectPublication,
   onFlash,
 }: {
@@ -1667,6 +2237,7 @@ function BroadcastsSection({
   runs: DistributionRunRow[]
   selectedPublication: PublicationRow | null
   selectedRunId: string
+  basePath?: string
   onSelectPublication: (id: string) => void
   onFlash: (message: string) => void
 }) {
@@ -1737,13 +2308,13 @@ function BroadcastsSection({
       scheduledTimezone: DEFAULT_MARKETING_TIMEZONE,
     })
     onFlash(scheduledAt ? 'broadcast scheduled' : 'broadcast created')
-    navigate(`/marketing/broadcasts/${id}`)
+    navigate(`${basePath}/${id}`)
   }
 
   async function deleteRun(run: DistributionRunRow) {
     if (run.status !== 'draft') return
     await z.mutate.mkt_distribution_runs.delete({ id: run.id })
-    navigate('/marketing/broadcasts')
+    navigate(basePath)
     onFlash('draft deleted')
   }
 
@@ -1766,7 +2337,7 @@ function BroadcastsSection({
     if (!selectedRun) {
       return (
         <div className="space-y-4">
-          <Button onClick={() => navigate('/marketing/broadcasts')}>back to broadcasts</Button>
+          <Button onClick={() => navigate(basePath)}>back to broadcasts</Button>
           <EmptyState label="broadcast not found" />
         </div>
       )
@@ -1783,7 +2354,7 @@ function BroadcastsSection({
         publicationOptions={publicationOptions}
         senderOptions={senderOptions}
         sending={sendingId === selectedRun.id}
-        onBack={() => navigate('/marketing/broadcasts')}
+        onBack={() => navigate(basePath)}
         onDelete={() => void deleteRun(selectedRun)}
         onSend={(testOnly) => void sendRun(selectedRun, testOnly)}
       />
@@ -1820,7 +2391,7 @@ function BroadcastsSection({
                   <tr
                     key={run.id}
                     className="cursor-pointer border-b border-edge/8 text-fg-2 transition hover:bg-accent-fill/4 hover:text-fg-1"
-                    onClick={() => navigate(`/marketing/broadcasts/${run.id}`)}
+                    onClick={() => navigate(`${basePath}/${run.id}`)}
                   >
                     <td className="max-w-[260px] truncate py-2.5 pr-3">{run.name}</td>
                     <td className="max-w-[260px] truncate py-2.5 pr-3">{item?.title ?? '-'}</td>
@@ -2386,6 +2957,421 @@ function BroadcastDetailView({
   )
 }
 
+function SocialSection({
+  contentItems,
+  contentOutputs,
+  socialChannels,
+  socialPosts,
+  socialPostTargets,
+}: {
+  contentItems: ContentItemRow[]
+  contentOutputs: ContentOutputRow[]
+  socialChannels: SocialChannelRow[]
+  socialPosts: SocialPostRow[]
+  socialPostTargets: SocialPostTargetRow[]
+}) {
+  const rows = socialPostTargets
+    .map((target) => {
+      const post = socialPosts.find((entry) => entry.id === target.socialPostId) ?? null
+      const channel = socialChannels.find((entry) => entry.id === target.channelId) ?? null
+      const item = post?.contentItemId ? contentItems.find((entry) => entry.id === post.contentItemId) ?? null : null
+      const output = post?.contentOutputId ? contentOutputs.find((entry) => entry.id === post.contentOutputId) ?? null : null
+      return { target, post, channel, item, output }
+    })
+    .sort((a, b) => socialTargetSortTime(b.target, b.post) - socialTargetSortTime(a.target, a.post))
+
+  return (
+    <div className="space-y-4">
+      <Panel title="social posts">
+        <div className="overflow-auto">
+          <table className="w-full min-w-[1120px] text-left font-mono text-xs">
+            <thead className="text-[10px] uppercase tracking-label text-fg-4">
+              <tr className="border-b border-edge/12">
+                <th className="pb-2 pr-3 font-normal">content</th>
+                <th className="pb-2 pr-3 font-normal">destination</th>
+                <th className="pb-2 pr-3 font-normal">caption</th>
+                <th className="pb-2 pr-3 font-normal">status</th>
+                <th className="pb-2 pr-3 font-normal">scheduled</th>
+                <th className="pb-2 pr-3 font-normal">published</th>
+                <th className="pb-2 font-normal">link</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map(({ target, post, channel, item, output }) => (
+                <tr key={target.id} className="border-b border-edge/8 text-fg-2">
+                  <td className="max-w-[260px] py-2.5 pr-3">
+                    <div className="truncate text-fg-1">{post?.title || item?.title || '-'}</div>
+                    <div className="mt-0.5 truncate text-[10px] uppercase tracking-label text-fg-4">
+                      {item?.contentKind ?? 'social'} · {output?.channel || post?.linkUrl ? 'linked output' : 'native post'}
+                    </div>
+                  </td>
+                  <td className="py-2.5 pr-3">
+                    <div className="flex items-center gap-2">
+                      {channel?.provider === 'linkedin' ? <Linkedin className="h-3.5 w-3.5 text-accent" /> : <Link2 className="h-3.5 w-3.5 text-fg-4" />}
+                      <div className="min-w-0">
+                        <div className="truncate text-fg-1">{channel?.displayName ?? 'destination missing'}</div>
+                        <div className="mt-0.5 truncate text-[10px] uppercase tracking-label text-fg-4">{channel?.provider ?? 'social'} · {channel?.kind ?? '-'}</div>
+                      </div>
+                    </div>
+                  </td>
+                  <td className="max-w-[320px] truncate py-2.5 pr-3">{post?.caption ?? '-'}</td>
+                  <td className="py-2.5 pr-3"><StatusPill kind={statusKind(target.status)}>{target.status}</StatusPill></td>
+                  <td className="py-2.5 pr-3 text-fg-4">{formatScheduledDate(target.scheduledAt, target.scheduledTimezone)}</td>
+                  <td className="py-2.5 pr-3 text-fg-4">{formatDate(target.publishedAt)}</td>
+                  <td className="py-2.5">
+                    {target.providerPostUrl || post?.linkUrl ? (
+                      <a
+                        href={target.providerPostUrl || post?.linkUrl || '#'}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="inline-flex items-center gap-1 text-fg-2 transition hover:text-accent"
+                      >
+                        open
+                        <ExternalLink className="h-3 w-3" />
+                      </a>
+                    ) : (
+                      <span className="text-fg-4">-</span>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        {rows.length === 0 ? <EmptyState label="no social posts" /> : null}
+      </Panel>
+    </div>
+  )
+}
+
+function MarketingCalendarSection({
+  contentItems,
+  runs,
+  socialChannels,
+  socialPosts,
+  socialPostTargets,
+  adPromotions,
+}: {
+  contentItems: ContentItemRow[]
+  runs: DistributionRunRow[]
+  socialChannels: SocialChannelRow[]
+  socialPosts: SocialPostRow[]
+  socialPostTargets: SocialPostTargetRow[]
+  adPromotions: AdPromotionRow[]
+}) {
+  const navigate = useNavigate()
+  const calendarRef = useRef<FullCalendar | null>(null)
+  const dayCellCleanupRef = useRef(new WeakMap<HTMLElement, () => void>())
+  const initialCalendarStateRef = useRef<StoredMarketingCalendarState | null>(null)
+  const pendingCalendarNavigationRef = useRef<{ view: MarketingCalendarView; date: number } | null>(null)
+
+  if (!initialCalendarStateRef.current) {
+    initialCalendarStateRef.current = readStoredMarketingCalendarState()
+  }
+
+  const initialCalendarState = initialCalendarStateRef.current
+  const [calendarTitle, setCalendarTitle] = useState('')
+  const [visibleRange, setVisibleRange] = useState<{ start: number; end: number } | null>(null)
+  const [view, setView] = useState<MarketingCalendarView>(initialCalendarState.view)
+  const [currentDate, setCurrentDate] = useState<number | null>(initialCalendarState.currentDate)
+  const [searchQuery, setSearchQuery] = useState(initialCalendarState.searchQuery)
+  const [activeFilters, setActiveFilters] = useState<ActiveFilters>(initialCalendarState.filters)
+
+  const calendarEvents = useMemo(
+    () => buildMarketingCalendarEvents({
+      contentItems,
+      runs,
+      socialChannels,
+      socialPosts,
+      socialPostTargets,
+      adPromotions,
+    }),
+    [adPromotions, contentItems, runs, socialChannels, socialPostTargets, socialPosts],
+  )
+  const filterConfigs = useMemo(() => buildMarketingCalendarFilterConfigs(calendarEvents), [calendarEvents])
+  const filteredEvents = useMemo(
+    () => filterMarketingCalendarEvents(calendarEvents, activeFilters, searchQuery),
+    [activeFilters, calendarEvents, searchQuery],
+  )
+  const fullCalendarEvents = useMemo<EventInput[]>(
+    () => filteredEvents.map(toMarketingFullCalendarEvent),
+    [filteredEvents],
+  )
+  const rangeEvents = useMemo(
+    () => visibleRange
+      ? filteredEvents.filter((event) => event.startsAt >= visibleRange.start && event.startsAt < visibleRange.end)
+      : filteredEvents,
+    [filteredEvents, visibleRange],
+  )
+  const upcomingEvents = useMemo(
+    () => filteredEvents.filter((event) => event.startsAt >= Date.now()).slice(0, 5),
+    [filteredEvents],
+  )
+
+  useEffect(() => {
+    writeStoredMarketingCalendarState({ view, currentDate, filters: activeFilters, searchQuery })
+  }, [activeFilters, currentDate, searchQuery, view])
+
+  function setFilterField(field: string, values: string[]) {
+    setActiveFilters((current) => ({ ...current, [field]: values }))
+  }
+
+  function clearAllFilters() {
+    setActiveFilters({ ...EMPTY_MARKETING_CALENDAR_FILTERS })
+    setSearchQuery('')
+  }
+
+  function changeView(nextView: MarketingCalendarView) {
+    pendingCalendarNavigationRef.current = null
+    setView(nextView)
+    calendarRef.current?.getApi().changeView(nextView)
+  }
+
+  function moveCalendar(direction: 'prev' | 'next' | 'today') {
+    const api = calendarRef.current?.getApi()
+    if (!api) return
+    pendingCalendarNavigationRef.current = null
+    if (direction === 'prev') api.prev()
+    if (direction === 'next') api.next()
+    if (direction === 'today') api.today()
+  }
+
+  function handleDatesSet(arg: DatesSetArg) {
+    const nextView = readMarketingCalendarView(arg.view.type) ?? 'timeGridWeek'
+    const nextDate = calendarRef.current?.getApi().getDate() ?? arg.view.currentStart
+    const pendingNavigation = pendingCalendarNavigationRef.current
+    if (pendingNavigation && pendingNavigation.view !== nextView) return
+
+    setCalendarTitle(arg.view.title)
+    setVisibleRange({ start: arg.start.getTime(), end: arg.end.getTime() })
+    setView(nextView)
+    setCurrentDate(pendingNavigation?.date ?? nextDate.getTime())
+    if (pendingNavigation?.view === nextView) {
+      pendingCalendarNavigationRef.current = null
+    }
+  }
+
+  function openMonthDay(date: Date) {
+    const api = calendarRef.current?.getApi()
+    if (!api || api.view.type !== 'dayGridMonth') return
+    pendingCalendarNavigationRef.current = { view: 'timeGridDay', date: date.getTime() }
+    setView('timeGridDay')
+    setCurrentDate(date.getTime())
+    api.changeView('timeGridDay', date)
+  }
+
+  function handleDayCellDidMount(arg: DayCellMountArg) {
+    if (arg.view.type !== 'dayGridMonth') return
+
+    dayCellCleanupRef.current.get(arg.el)?.()
+
+    const dayButton = arg.el.querySelector<HTMLElement>('.pach-calendar-day-number[data-calendar-date]')
+    if (!dayButton) return
+
+    const handlePointerDown = (event: PointerEvent) => {
+      openMonthDayFromPointer(arg.date, event)
+    }
+
+    dayButton.addEventListener('pointerdown', handlePointerDown, true)
+    dayCellCleanupRef.current.set(arg.el, () => {
+      dayButton.removeEventListener('pointerdown', handlePointerDown, true)
+    })
+  }
+
+  function handleDayCellWillUnmount(arg: DayCellMountArg) {
+    dayCellCleanupRef.current.get(arg.el)?.()
+    dayCellCleanupRef.current.delete(arg.el)
+  }
+
+  function openMonthDayFromPointer(date: Date, event: PointerEvent) {
+    const api = calendarRef.current?.getApi()
+    if (!api || api.view.type !== 'dayGridMonth') return
+
+    event.preventDefault()
+    event.stopPropagation()
+    event.stopImmediatePropagation()
+    pendingCalendarNavigationRef.current = { view: 'timeGridDay', date: date.getTime() }
+    window.setTimeout(() => {
+      setView('timeGridDay')
+      setCurrentDate(date.getTime())
+      api.changeView('timeGridDay', date)
+    }, 0)
+  }
+
+  function handleEventClick(arg: EventClickArg) {
+    const href = String(arg.event.extendedProps.href ?? '')
+    if (!href) return
+    arg.jsEvent.preventDefault()
+    navigate(href)
+  }
+
+  return (
+    <div className="flex h-full min-h-0 flex-col overflow-hidden bg-pit text-fg-1">
+      <header className="relative z-[120] shrink-0 border-b border-edge/12 bg-pit/80 px-4 py-3 backdrop-blur-sm md:px-5">
+        <div className="flex flex-col gap-3">
+          <div className="flex flex-wrap items-center gap-3">
+            <div className="min-w-0">
+              <div className="font-mono text-[10px] uppercase tracking-label text-fg-4">marketing calendar</div>
+              <h2 className="mt-0.5 truncate font-mono text-xl font-bold lowercase text-fg-1 md:text-2xl">
+                {calendarTitle || 'schedule'}
+              </h2>
+            </div>
+
+            <div className="ml-auto flex items-center gap-1">
+              <button
+                type="button"
+                onClick={() => moveCalendar('prev')}
+                className="flex h-8 w-8 items-center justify-center border border-edge/18 bg-pit-3 text-fg-3 transition hover:border-accent hover:text-accent"
+                aria-label="Previous marketing calendar range"
+                title="previous"
+              >
+                <ChevronLeft className="h-4 w-4" />
+              </button>
+              <button
+                type="button"
+                onClick={() => moveCalendar('today')}
+                className="h-8 border border-edge/18 bg-pit-3 px-3 font-mono text-[10px] uppercase tracking-label text-fg-2 transition hover:border-accent hover:text-accent"
+              >
+                today
+              </button>
+              <button
+                type="button"
+                onClick={() => moveCalendar('next')}
+                className="flex h-8 w-8 items-center justify-center border border-edge/18 bg-pit-3 text-fg-3 transition hover:border-accent hover:text-accent"
+                aria-label="Next marketing calendar range"
+                title="next"
+              >
+                <ChevronRight className="h-4 w-4" />
+              </button>
+            </div>
+          </div>
+
+          <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
+            <div className="relative z-[130] flex flex-wrap items-center gap-2">
+              <FilterButton
+                activeFilters={activeFilters}
+                filterConfigs={filterConfigs}
+                onFilterChange={setFilterField}
+                onClearAll={clearAllFilters}
+                buttonClassName="h-8 px-4 py-0"
+              />
+              <div className="relative">
+                <Search className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-fg-4" />
+                <input
+                  value={searchQuery}
+                  onChange={(event) => setSearchQuery(event.target.value)}
+                  placeholder="$ search marketing"
+                  className="h-8 w-[min(72vw,260px)] border border-edge/15 bg-pit-3 pl-8 pr-3 font-mono text-xs text-fg-1 outline-none transition placeholder:text-fg-4 focus:border-accent focus:shadow-glow-xs"
+                />
+              </div>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-3">
+              <div className="flex border border-edge/18 bg-pit-3">
+                {MARKETING_CALENDAR_VIEW_OPTIONS.map((option) => (
+                  <button
+                    key={option.value}
+                    type="button"
+                    onClick={() => changeView(option.value)}
+                    className={`h-8 min-w-[72px] border-r border-edge/12 px-3 font-mono text-[10px] uppercase tracking-label transition last:border-r-0 ${
+                      view === option.value
+                        ? 'bg-accent-fill/10 text-accent'
+                        : 'text-fg-3 hover:bg-accent-fill/5 hover:text-fg-1'
+                    }`}
+                  >
+                    {option.label}
+                  </button>
+                ))}
+              </div>
+              <div className="hidden items-center gap-3 font-mono text-[10px] uppercase tracking-label text-fg-4 sm:flex">
+                <span><span className="text-accent">{rangeEvents.length}</span> in view</span>
+                <span><span className="text-accent">{filteredEvents.length}</span> total</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </header>
+
+      <main className="grid min-h-0 flex-1 grid-cols-1 overflow-hidden xl:grid-cols-[minmax(0,1fr)_300px]">
+        <section className="pach-calendar-shell relative min-h-0 overflow-hidden border-edge/12 xl:border-r">
+          <FullCalendar
+            ref={calendarRef}
+            plugins={[dayGridPlugin, timeGridPlugin, listPlugin, interactionPlugin]}
+            initialView={view}
+            initialDate={currentDate ? new Date(currentDate) : undefined}
+            headerToolbar={false}
+            height="100%"
+            events={fullCalendarEvents}
+            datesSet={handleDatesSet}
+            eventClick={handleEventClick}
+            eventContent={renderMarketingCalendarEventContent}
+            eventDidMount={handleMarketingCalendarEventMount}
+            dayCellContent={(arg) => renderMarketingCalendarDayCellContent(arg, openMonthDay)}
+            dayCellDidMount={handleDayCellDidMount}
+            dayCellWillUnmount={handleDayCellWillUnmount}
+            eventClassNames={(arg) => [`pach-calendar-event--${String(arg.event.extendedProps.tone ?? 'idle')}`]}
+            nowIndicator
+            expandRows
+            dayMaxEvents={3}
+            eventMinHeight={64}
+            eventShortHeight={48}
+            slotMinTime="06:00:00"
+            slotMaxTime="22:00:00"
+            scrollTime="08:00:00"
+            allDaySlot={false}
+            firstDay={1}
+            timeZone="local"
+            displayEventTime={false}
+            eventTimeFormat={{ hour: '2-digit', minute: '2-digit', meridiem: false }}
+          />
+          {filteredEvents.length === 0 ? (
+            <div className="pointer-events-none absolute inset-x-4 top-20 border border-edge/16 bg-pit-2/95 px-4 py-6 text-center shadow-terminal-overlay md:left-1/2 md:w-[420px] md:-translate-x-1/2">
+              <div className="font-mono text-xs uppercase tracking-label text-fg-3">// no scheduled marketing</div>
+              <div className="mt-2 text-sm text-fg-4">
+                {calendarEvents.length === 0 ? 'newsletter, social, and ad schedules will appear here' : 'no events match the current filters'}
+              </div>
+            </div>
+          ) : null}
+        </section>
+
+        <aside className="hidden min-h-0 overflow-auto bg-pit-2/55 px-4 py-4 xl:block">
+          <div className="border-b border-edge/12 pb-3">
+            <div className="font-mono text-[10px] uppercase tracking-label text-fg-4">upcoming</div>
+            <div className="mt-1 font-mono text-lg font-bold lowercase text-fg-1">{upcomingEvents.length}</div>
+          </div>
+          <div className="mt-4 space-y-2">
+            {upcomingEvents.length === 0 ? (
+              <div className="font-mono text-xs text-fg-4">// no upcoming marketing</div>
+            ) : (
+              upcomingEvents.map((event) => (
+                <button
+                  key={event.id}
+                  type="button"
+                  onClick={() => navigate(event.href)}
+                  className="w-full border border-edge/12 bg-pit px-3 py-2 text-left transition hover:border-accent hover:bg-accent-fill/5"
+                >
+                  <div className="flex items-center justify-between gap-3">
+                    <span className="truncate font-mono text-xs font-bold lowercase text-fg-1">{event.title}</span>
+                    <span className={`shrink-0 font-mono text-[10px] uppercase tracking-label ${marketingCalendarStatusTextClass(event.tone)}`}>
+                      {event.status}
+                    </span>
+                  </div>
+                  <div className="mt-2 font-mono text-[10px] uppercase tracking-label text-fg-4">
+                    {formatScheduledDate(event.startsAt, event.timezone)}
+                  </div>
+                  <div className="mt-1 truncate text-xs text-fg-3">
+                    {event.channelName} · {event.destinationName}
+                  </div>
+                </button>
+              ))
+            )}
+          </div>
+        </aside>
+      </main>
+    </div>
+  )
+}
+
 function CtasSection({
   z,
   organizationId,
@@ -2535,25 +3521,32 @@ function AnalyticsSection({
   events,
   subscriptions,
   ctas,
+  socialPostTargets,
+  adMetricSnapshots,
 }: {
   contentItems: ContentItemRow[]
   audienceMembers: AudienceMemberRow[]
   events: ContentEventRow[]
   subscriptions: AudienceSubscriptionRow[]
   ctas: CtaRow[]
+  socialPostTargets: SocialPostTargetRow[]
+  adMetricSnapshots: AdMetricSnapshotRow[]
 }) {
+  const adTotals = sumAdMetricSnapshots(adMetricSnapshots)
   return (
     <div className="space-y-4">
-      <div className="grid gap-2 md:grid-cols-6">
+      <div className="grid gap-2 md:grid-cols-4 xl:grid-cols-8">
         <Metric label="views" value={countEvents(events, 'view')} />
         <Metric label="clicks" value={countEvents(events, 'click')} />
         <Metric label="sends" value={countEvents(events, 'send')} />
         <Metric label="replies" value={countEvents(events, 'reply')} />
         <Metric label="subscribed" value={newsletterSubscriberCount(subscriptions)} />
         <Metric label="unsubscribed" value={newsletterUnsubscriberCount(subscriptions)} />
+        <Metric label="social posts" value={socialPostTargets.length} />
+        <Metric label="ad views" value={formatCompactNumber(adTotals.impressions)} />
       </div>
 
-      <Panel title="activity">
+      <Panel title="newsletter activity">
         <div className="max-h-[calc(100vh-340px)] overflow-auto">
           <table className="w-full min-w-[1040px] text-left font-mono text-xs">
             <thead className="sticky top-0 z-10 bg-pit text-[10px] uppercase tracking-label text-fg-4">
@@ -2947,12 +3940,30 @@ function EmptyState({ label }: { label: string }) {
 
 function sectionFromPath(pathname: string): MarketingSection | null {
   const part = pathname.split('/')[2]
+  if (part === 'content' || part === 'broadcasts' || part === 'ctas') return 'newsletters'
   return SECTIONS.some((entry) => entry.id === part) ? part as MarketingSection : null
+}
+
+function newsletterTabFromPath(pathname: string): NewsletterTab {
+  const parts = pathname.split('/')
+  const section = parts[2]
+  const tab = parts[3]
+  if (section === 'content') return 'content'
+  if (section === 'broadcasts') return 'broadcasts'
+  if (section === 'ctas') return 'ctas'
+  if (section !== 'newsletters') return 'content'
+  return NEWSLETTER_TABS.some((entry) => entry.id === tab) ? tab as NewsletterTab : 'content'
+}
+
+function marketingSectionPath(section: MarketingSection) {
+  return section === 'newsletters' ? '/marketing/newsletters/content' : `/marketing/${section}`
 }
 
 function broadcastRunIdFromPath(pathname: string) {
   const parts = pathname.split('/')
-  return parts[2] === 'broadcasts' && parts[3] ? decodeURIComponent(parts[3]) : ''
+  if (parts[2] === 'broadcasts' && parts[3]) return decodeURIComponent(parts[3])
+  if (parts[2] === 'newsletters' && parts[3] === 'broadcasts' && parts[4]) return decodeURIComponent(parts[4])
+  return ''
 }
 
 function blogOutputForContent(item: ContentItemRow, outputs: ContentOutputRow[]) {
@@ -2962,6 +3973,374 @@ function blogOutputForContent(item: ContentItemRow, outputs: ContentOutputRow[])
 function socialTargetsForContent(item: ContentItemRow, posts: SocialPostRow[], targets: SocialPostTargetRow[]) {
   const postIds = new Set(posts.filter((post) => post.contentItemId === item.id).map((post) => post.id))
   return targets.filter((target) => postIds.has(target.socialPostId))
+}
+
+function socialTargetSortTime(target: SocialPostTargetRow, post: SocialPostRow | null) {
+  return target.publishedAt ?? target.scheduledAt ?? target.updatedAt ?? post?.updatedAt ?? 0
+}
+
+function socialPostsForContent(item: ContentItemRow, posts: SocialPostRow[]) {
+  return posts.filter((post) => post.contentItemId === item.id)
+}
+
+function adPromotionsForContent(item: ContentItemRow, promotions: AdPromotionRow[]) {
+  return promotions.filter((promotion) => promotion.contentItemId === item.id)
+}
+
+function adMetricSnapshotsForPromotions(promotions: AdPromotionRow[], snapshots: AdMetricSnapshotRow[]) {
+  const promotionIds = new Set(promotions.map((promotion) => promotion.id))
+  return snapshots.filter((snapshot) => snapshot.promotionId && promotionIds.has(snapshot.promotionId))
+}
+
+function sumAdMetricSnapshots(snapshots: AdMetricSnapshotRow[]) {
+  return snapshots.reduce(
+    (totals, snapshot) => ({
+      impressions: totals.impressions + snapshot.impressions,
+      clicks: totals.clicks + snapshot.clicks,
+      spendMinor: totals.spendMinor + snapshot.spendMinor,
+      leads: totals.leads + snapshot.leads,
+      conversions: totals.conversions + snapshot.conversions,
+    }),
+    { impressions: 0, clicks: 0, spendMinor: 0, leads: 0, conversions: 0 },
+  )
+}
+
+function adPromotionHeadline(promotion: AdPromotionRow) {
+  const creative = readRecord(promotion.creative)
+  return typeof creative.headline === 'string' ? creative.headline : ''
+}
+
+function buildMarketingCalendarEvents({
+  contentItems,
+  runs,
+  socialChannels,
+  socialPosts,
+  socialPostTargets,
+  adPromotions,
+}: {
+  contentItems: ContentItemRow[]
+  runs: DistributionRunRow[]
+  socialChannels: SocialChannelRow[]
+  socialPosts: SocialPostRow[]
+  socialPostTargets: SocialPostTargetRow[]
+  adPromotions: AdPromotionRow[]
+}) {
+  const contentById = new Map(contentItems.map((entry) => [entry.id, entry]))
+  const socialPostById = new Map(socialPosts.map((entry) => [entry.id, entry]))
+  const socialChannelById = new Map(socialChannels.map((entry) => [entry.id, entry]))
+  const events: MarketingCalendarEvent[] = []
+
+  for (const run of runs) {
+    if (!run.scheduledAt) continue
+    const content = run.contentItemId ? contentById.get(run.contentItemId) : null
+    const type = marketingCalendarRunType(run.channel)
+    const destinationName = run.channel === 'newsletter' ? 'email broadcast' : run.channel
+    events.push({
+      id: `run-${run.id}`,
+      type,
+      title: run.name || content?.title || 'scheduled content',
+      startsAt: run.scheduledAt,
+      endsAt: run.scheduledAt + MARKETING_CALENDAR_EVENT_DURATION_MS,
+      status: run.status,
+      channelName: run.channel,
+      destinationKey: `run:${run.channel}`,
+      destinationName,
+      contentTitle: content?.title ?? '',
+      timezone: run.scheduledTimezone || DEFAULT_MARKETING_TIMEZONE,
+      href: run.channel === 'blog' && run.contentItemId
+        ? `/marketing/newsletters/content?content=${run.contentItemId}`
+        : `/marketing/newsletters/broadcasts/${run.id}`,
+      tone: marketingCalendarStatusTone(run.status),
+    })
+  }
+
+  for (const target of socialPostTargets) {
+    if (!target.scheduledAt) continue
+    const post = socialPostById.get(target.socialPostId)
+    const channel = socialChannelById.get(target.channelId)
+    const content = post?.contentItemId ? contentById.get(post.contentItemId) : null
+    events.push({
+      id: `social-${target.id}`,
+      type: 'social',
+      title: post?.title || post?.caption || 'social post',
+      startsAt: target.scheduledAt,
+      endsAt: target.scheduledAt + MARKETING_CALENDAR_EVENT_DURATION_MS,
+      status: target.status,
+      channelName: channel?.provider ?? 'social',
+      destinationKey: target.channelId,
+      destinationName: channel?.displayName ?? 'social destination',
+      contentTitle: content?.title ?? '',
+      timezone: target.scheduledTimezone || DEFAULT_MARKETING_TIMEZONE,
+      href: '/marketing/social',
+      tone: marketingCalendarStatusTone(target.status),
+    })
+  }
+
+  for (const promotion of adPromotions) {
+    if (!promotion.startsAt) continue
+    const content = contentById.get(promotion.contentItemId)
+    const startsAt = promotion.startsAt
+    const endsAt = promotion.endsAt && promotion.endsAt > startsAt
+      ? promotion.endsAt
+      : startsAt + MARKETING_CALENDAR_EVENT_DURATION_MS
+    events.push({
+      id: `ad-${promotion.id}`,
+      type: 'ad',
+      title: adPromotionHeadline(promotion) || content?.title || 'ad promotion',
+      startsAt,
+      endsAt,
+      status: promotion.status,
+      channelName: `${promotion.provider} ad`,
+      destinationKey: promotion.adAccountExternalId ? `ad:${promotion.provider}:${promotion.adAccountExternalId}` : `ad:${promotion.provider}:pending`,
+      destinationName: promotion.adAccountExternalId || 'ad account pending',
+      contentTitle: content?.title ?? '',
+      timezone: DEFAULT_MARKETING_TIMEZONE,
+      href: promotion.socialPostId ? '/marketing/social' : `/marketing/newsletters/content?content=${promotion.contentItemId}`,
+      tone: marketingCalendarStatusTone(promotion.status),
+    })
+  }
+
+  return events.sort((a, b) => a.startsAt - b.startsAt)
+}
+
+function buildMarketingCalendarFilterConfigs(events: MarketingCalendarEvent[]): FilterFieldConfig[] {
+  const eventTypes = uniqueMarketingCalendarOptions(events.map((event) => ({
+    value: event.type,
+    label: marketingCalendarEventTypeLabel(event.type),
+  })))
+  const channels = uniqueMarketingCalendarOptions(events.map((event) => ({
+    value: event.channelName,
+    label: event.channelName,
+  })))
+  const destinations = uniqueMarketingCalendarOptions(events.map((event) => ({
+    value: event.destinationKey,
+    label: event.destinationName,
+  })))
+  const statuses = new Set(events.map((event) => event.status))
+  const statusOptions = [
+    ...MARKETING_CALENDAR_STATUS_ORDER.filter((status) => statuses.has(status)),
+    ...[...statuses].filter((status) => !MARKETING_CALENDAR_STATUS_ORDER.includes(status)).sort(),
+  ]
+
+  return [
+    {
+      field: 'eventType',
+      label: 'type',
+      icon: CalendarDays,
+      options: eventTypes,
+      allowSelectAll: true,
+    },
+    {
+      field: 'channel',
+      label: 'channel',
+      icon: Newspaper,
+      options: channels,
+      allowSelectAll: true,
+    },
+    {
+      field: 'status',
+      label: 'status',
+      icon: Radio,
+      options: statusOptions.map((status) => ({ value: status, label: status })),
+      allowSelectAll: true,
+    },
+    {
+      field: 'destination',
+      label: 'destination',
+      icon: Building2,
+      options: destinations,
+      allowSelectAll: true,
+    },
+  ]
+}
+
+function uniqueMarketingCalendarOptions(options: Array<{ value: string; label: string }>) {
+  const seen = new Map<string, string>()
+  for (const option of options) {
+    if (!option.value || seen.has(option.value)) continue
+    seen.set(option.value, option.label)
+  }
+  return [...seen.entries()]
+    .map(([value, label]) => ({ value, label }))
+    .sort((a, b) => a.label.localeCompare(b.label))
+}
+
+function filterMarketingCalendarEvents(events: MarketingCalendarEvent[], activeFilters: ActiveFilters, searchQuery: string) {
+  const q = searchQuery.trim().toLowerCase()
+  return events.filter((event) => {
+    if (!matchesMarketingCalendarFilter(activeFilters.eventType, event.type)) return false
+    if (!matchesMarketingCalendarFilter(activeFilters.channel, event.channelName)) return false
+    if (!matchesMarketingCalendarFilter(activeFilters.status, event.status)) return false
+    if (!matchesMarketingCalendarFilter(activeFilters.destination, event.destinationKey)) return false
+    if (!q) return true
+
+    return [
+      event.title,
+      event.status,
+      event.type,
+      event.channelName,
+      event.destinationName,
+      event.contentTitle,
+      event.timezone,
+    ].join(' ').toLowerCase().includes(q)
+  })
+}
+
+function matchesMarketingCalendarFilter(values: string[] | undefined, value: string) {
+  return !values || values.length === 0 || values.includes(value)
+}
+
+function toMarketingFullCalendarEvent(event: MarketingCalendarEvent): EventInput {
+  return {
+    id: event.id,
+    title: event.title,
+    start: new Date(event.startsAt).toISOString(),
+    end: new Date(event.endsAt).toISOString(),
+    extendedProps: event,
+  }
+}
+
+function renderMarketingCalendarDayCellContent(arg: DayCellContentArg, onOpenDay: (date: Date) => void) {
+  if (arg.view.type !== 'dayGridMonth') return arg.dayNumberText
+
+  return (
+    <button
+      type="button"
+      className="pach-calendar-day-number"
+      data-calendar-date={formatMarketingCalendarDateParam(arg.date)}
+      onClick={(event) => {
+        event.preventDefault()
+        event.stopPropagation()
+        onOpenDay(arg.date)
+      }}
+    >
+      {arg.dayNumberText}
+    </button>
+  )
+}
+
+function renderMarketingCalendarEventContent(arg: EventContentArg) {
+  const event = arg.event.extendedProps as MarketingCalendarEvent
+  return (
+    <div className="pach-calendar-event">
+      <div className="pach-calendar-event__topline">
+        <span className="pach-calendar-event__time">{formatEventTime(event.startsAt)}</span>
+        <span className="pach-calendar-event__status">{event.status}</span>
+      </div>
+      <div className="pach-calendar-event__title">{event.title}</div>
+      <div className="pach-calendar-event__meta">{event.destinationName} · {timezoneLabel(event.timezone)}</div>
+    </div>
+  )
+}
+
+function handleMarketingCalendarEventMount(arg: EventMountArg) {
+  const event = arg.event.extendedProps as MarketingCalendarEvent
+  arg.el.title = [
+    event.title,
+    event.status,
+    formatScheduledDate(event.startsAt, event.timezone),
+    event.channelName,
+    event.destinationName,
+  ].filter(Boolean).join('\n')
+}
+
+function readStoredMarketingCalendarState(): StoredMarketingCalendarState {
+  const fallback: StoredMarketingCalendarState = {
+    view: 'timeGridWeek',
+    currentDate: null,
+    filters: { ...EMPTY_MARKETING_CALENDAR_FILTERS },
+    searchQuery: '',
+  }
+  if (typeof window === 'undefined') return fallback
+
+  try {
+    const raw = window.localStorage.getItem(MARKETING_CALENDAR_STATE_STORAGE_KEY)
+    if (!raw) return fallback
+    const parsed = JSON.parse(raw) as Partial<StoredMarketingCalendarState>
+    return {
+      view: readMarketingCalendarView(parsed.view) ?? fallback.view,
+      currentDate: readFiniteTimestamp(parsed.currentDate),
+      filters: normalizeStoredMarketingCalendarFilters(parsed.filters),
+      searchQuery: typeof parsed.searchQuery === 'string' ? parsed.searchQuery : '',
+    }
+  } catch {
+    return fallback
+  }
+}
+
+function writeStoredMarketingCalendarState(state: StoredMarketingCalendarState) {
+  if (typeof window === 'undefined') return
+  try {
+    window.localStorage.setItem(MARKETING_CALENDAR_STATE_STORAGE_KEY, JSON.stringify(state))
+  } catch {
+    // Storage can be unavailable in restricted contexts.
+  }
+}
+
+function readMarketingCalendarView(value: unknown): MarketingCalendarView | null {
+  return typeof value === 'string' && MARKETING_CALENDAR_VIEW_OPTIONS.some((option) => option.value === value)
+    ? value as MarketingCalendarView
+    : null
+}
+
+function readFiniteTimestamp(value: unknown) {
+  return typeof value === 'number' && Number.isFinite(value) ? value : null
+}
+
+function normalizeStoredMarketingCalendarFilters(value: unknown): ActiveFilters {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return { ...EMPTY_MARKETING_CALENDAR_FILTERS }
+  const raw = value as Record<string, unknown>
+  return {
+    eventType: readStringArray(raw.eventType),
+    channel: readStringArray(raw.channel),
+    status: readStringArray(raw.status),
+    destination: readStringArray(raw.destination),
+  }
+}
+
+function readStringArray(value: unknown) {
+  return Array.isArray(value)
+    ? value.filter((item): item is string => typeof item === 'string')
+    : []
+}
+
+function marketingCalendarRunType(channel: string) {
+  if (channel === 'newsletter') return 'newsletter'
+  if (channel === 'blog') return 'blog'
+  return 'distribution'
+}
+
+function marketingCalendarEventTypeLabel(type: string) {
+  if (type === 'ad') return 'ad promotion'
+  if (type === 'social') return 'social post'
+  return type
+}
+
+function marketingCalendarStatusTone(status: string): MarketingCalendarEventTone {
+  if (['active', 'completed', 'published', 'ready', 'sent'].includes(status)) return 'ok'
+  if (['draft', 'paused', 'publishing', 'scheduled', 'sending'].includes(status)) return 'warn'
+  if (['archived', 'blocked_waiting_for_output', 'canceled', 'failed'].includes(status)) return 'fail'
+  return 'info'
+}
+
+function marketingCalendarStatusTextClass(tone: MarketingCalendarEventTone) {
+  if (tone === 'ok') return 'text-ok'
+  if (tone === 'warn') return 'text-warn'
+  if (tone === 'fail') return 'text-fail'
+  if (tone === 'info') return 'text-info'
+  return 'text-fg-4'
+}
+
+function formatEventTime(value: number) {
+  return new Intl.DateTimeFormat(undefined, { hour: '2-digit', minute: '2-digit' }).format(new Date(value))
+}
+
+function formatMarketingCalendarDateParam(value: Date | number) {
+  const date = value instanceof Date ? value : new Date(value)
+  const year = date.getFullYear()
+  const month = String(date.getMonth() + 1).padStart(2, '0')
+  const day = String(date.getDate()).padStart(2, '0')
+  return `${year}-${month}-${day}`
 }
 
 function defaultLinkedInCaption(item: ContentItemRow) {
@@ -3178,6 +4557,18 @@ function formatScheduledDate(value: number | null | undefined, timezone: string 
     minute: '2-digit',
   }).format(new Date(value))
   return `${formatted} · ${timezoneLabel(resolvedTimezone)}`
+}
+
+function formatCompactNumber(value: number) {
+  return new Intl.NumberFormat(undefined, { notation: 'compact', maximumFractionDigits: 1 }).format(value)
+}
+
+function formatMoneyMinor(value: number, currencyCode: string) {
+  return new Intl.NumberFormat(undefined, {
+    style: 'currency',
+    currency: currencyCode || 'MXN',
+    maximumFractionDigits: 0,
+  }).format(value / 100)
 }
 
 function timezoneLabel(value: string | null | undefined) {
