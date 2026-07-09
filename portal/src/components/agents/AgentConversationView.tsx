@@ -142,14 +142,14 @@ export function AgentConversationView({
     <div className="flex-1 min-h-0 bg-pit/35">
       <div className="flex h-full min-h-0 flex-col">
         <div className="shrink-0 border-b border-edge/12 px-4 py-4 md:px-8">
-          <div className="mx-auto flex max-w-5xl flex-wrap items-center justify-between gap-3">
-            <div className="min-w-0">
+          <div className="mx-auto flex max-w-5xl flex-wrap items-start justify-between gap-3">
+            <div className="min-w-0 flex-1 basis-[28rem]">
               <div className="mb-1 flex items-center gap-2 font-mono text-[10px] uppercase tracking-label text-fg-4">
                 <MessageSquare className="h-3.5 w-3.5 text-accent" />
                 agent conversation
                 {run ? <span>· {run.status}</span> : null}
               </div>
-              <div className="truncate font-mono text-lg font-bold text-fg-1">
+              <div className="whitespace-normal break-words font-mono text-lg font-bold leading-snug text-fg-1">
                 {issue.identifier} {issue.title}
               </div>
             </div>
