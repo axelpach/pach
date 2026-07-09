@@ -89,7 +89,7 @@ export async function finalizeAgentRunPullRequest({
     { timeout: 180_000, maxBuffer: 2_000_000 },
   )
 
-  const existingPr = await fetchGithubPullRequestForBranch({
+  const existingPr = await fetchOpenGithubPullRequestForBranch({
     repoFullName: run.repoFullName,
     branchName: run.branchName,
     token: githubToken,
@@ -287,7 +287,7 @@ function buildFinalizeBranchCommand({
   ].join('\n')
 }
 
-async function fetchGithubPullRequestForBranch({
+async function fetchOpenGithubPullRequestForBranch({
   repoFullName,
   branchName,
   token,
@@ -298,7 +298,7 @@ async function fetchGithubPullRequestForBranch({
 }) {
   const { owner } = parseRepoFullName(repoFullName)
   const url = new URL(`https://api.github.com/repos/${repoFullName}/pulls`)
-  url.searchParams.set('state', 'all')
+  url.searchParams.set('state', 'open')
   url.searchParams.set('head', `${owner}:${branchName}`)
   url.searchParams.set('per_page', '1')
 
@@ -307,7 +307,7 @@ async function fetchGithubPullRequestForBranch({
   })
   if (!response.ok) {
     const body = await response.text()
-    throw new Error(`GitHub PR lookup failed: ${response.status} ${body.slice(0, 240)}`)
+    throw new Error(`GitHub open PR lookup failed: ${response.status} ${body.slice(0, 240)}`)
   }
 
   const prs = (await response.json()) as GithubPullRequestResponse[]
