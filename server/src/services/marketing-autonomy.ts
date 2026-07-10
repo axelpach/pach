@@ -38,6 +38,7 @@ export type MarketingAutonomySummary = {
   checked: number
   slotsCreated: number
   slotsLinked: number
+  blogRunsPaired: number
   ideaRunsQueued: number
   slotRunsQueued: number
   skipped: number
@@ -95,6 +96,7 @@ export async function runAutonomousPublicationChecks(params: { now?: Date; limit
     checked: 0,
     slotsCreated: 0,
     slotsLinked: 0,
+    blogRunsPaired: 0,
     ideaRunsQueued: 0,
     slotRunsQueued: 0,
     skipped: 0,
@@ -110,6 +112,7 @@ export async function runAutonomousPublicationChecks(params: { now?: Date; limit
       const result = await reconcilePublicationAutonomy(publication, cadence, now)
       summary.slotsCreated += result.slotsCreated
       summary.slotsLinked += result.slotsLinked
+      summary.blogRunsPaired += result.blogRunsPaired
       summary.ideaRunsQueued += result.ideaRunsQueued
       summary.slotRunsQueued += result.slotRunsQueued
       if (result.skipped) summary.skipped += 1
@@ -140,6 +143,7 @@ export async function reconcilePublicationAutonomy(publication: PublicationRow, 
   const result = {
     slotsCreated: 0,
     slotsLinked: 0,
+    blogRunsPaired: 0,
     ideaRunsQueued: 0,
     slotRunsQueued: 0,
     skipped: targets.length === 0,
@@ -233,6 +237,36 @@ export async function reconcilePublicationAutonomy(publication: PublicationRow, 
     }
   }
 
+  for (const run of existingRuns) {
+    if (run.status !== 'scheduled' || !run.scheduledAt || !run.contentItemId) continue
+    const slot = slotsByKey.get(slotKeyForScheduledAt(cadence, run.scheduledAt))
+    const paired = await ensureBlogRunForScheduledNewsletter({
+      publication,
+      newsletterRun: run,
+      slot,
+      now,
+      source: 'marketing_autonomy_reconcile',
+    })
+    if (!paired) continue
+    result.blogRunsPaired += 1
+    await recordPublicationActivity({
+      organizationId: publication.organizationId,
+      publication,
+      slot,
+      eventType: 'newsletter_blog_schedule_paired',
+      subjectType: 'marketing_broadcast',
+      subjectId: run.id,
+      subjectLabel: run.subject ?? run.name,
+      summary: `${paired.action === 'created' ? 'Scheduled' : 'Linked'} blog publication for newsletter "${run.subject ?? run.name}"`,
+      metadata: {
+        publicationId: publication.id,
+        newsletterDistributionRunId: run.id,
+        blogDistributionRunId: paired.run.id,
+        action: paired.action,
+      },
+    })
+  }
+
   const availableIdeas = await db
     .select()
     .from(mktEditorialIdeas)
@@ -271,6 +305,142 @@ export async function reconcilePublicationAutonomy(publication: PublicationRow, 
   }
 
   return result
+}
+
+async function ensureBlogRunForScheduledNewsletter({
+  publication,
+  newsletterRun,
+  slot,
+  now,
+  source,
+}: {
+  publication: PublicationRow
+  newsletterRun: DistributionRunRow
+  slot?: SlotRow
+  now: Date
+  source: string
+}): Promise<{ run: DistributionRunRow; action: 'created' | 'updated' | 'linked' } | null> {
+  if (newsletterRun.channel !== 'newsletter') return null
+  if (newsletterRun.status !== 'scheduled' || !newsletterRun.scheduledAt || !newsletterRun.contentItemId) return null
+
+  const db = getDb()
+  const [contentItem] = await db
+    .select()
+    .from(mktContentItems)
+    .where(and(
+      eq(mktContentItems.organizationId, newsletterRun.organizationId),
+      eq(mktContentItems.id, newsletterRun.contentItemId),
+    ))
+    .limit(1)
+  if (!contentItem) return null
+
+  const channels = ensureArticleChannels(contentItem.supportedChannels)
+  if (channels.length !== contentItem.supportedChannels.length) {
+    await db.update(mktContentItems).set({ supportedChannels: channels, updatedAt: now }).where(eq(mktContentItems.id, contentItem.id))
+  }
+
+  const linkedBlogDistributionRunId = readOptionalString(readRecord(slot?.metadata).blogDistributionRunId)
+  const existingBlogRuns = await db
+    .select()
+    .from(mktDistributionRuns)
+    .where(and(
+      eq(mktDistributionRuns.organizationId, newsletterRun.organizationId),
+      eq(mktDistributionRuns.contentItemId, contentItem.id),
+      eq(mktDistributionRuns.channel, 'blog'),
+      inArray(mktDistributionRuns.status, ['draft', 'scheduled', 'sending', 'published']),
+    ))
+  const reusableBlogRun = existingBlogRuns.find((run) => run.id === linkedBlogDistributionRunId)
+    ?? existingBlogRuns.find((run) => readOptionalString(readRecord(run.metadata).pairedNewsletterRunId) === newsletterRun.id)
+    ?? existingBlogRuns.find((run) => ['draft', 'scheduled'].includes(run.status))
+    ?? existingBlogRuns.find((run) => ['sending', 'published'].includes(run.status))
+  if (reusableBlogRun && isBlogRunAlreadyPaired({ publication, newsletterRun, blogRun: reusableBlogRun, slot })) {
+    return null
+  }
+  const blogRunMetadata = {
+    ...(reusableBlogRun ? readRecord(reusableBlogRun.metadata) : {}),
+    source: 'newsletter_schedule_pair',
+    pairedNewsletterRunId: newsletterRun.id,
+    publicationSlotId: slot?.id,
+    sourceDocumentId: contentItem.sourceDocumentId,
+    pairedBy: source,
+    pairedAt: now.toISOString(),
+  }
+
+  const blogRun = reusableBlogRun
+    ? ['sending', 'published'].includes(reusableBlogRun.status)
+      ? reusableBlogRun
+      : (await db.update(mktDistributionRuns).set({
+        publicationId: publication.id,
+        contentItemId: contentItem.id,
+        distributionType: 'publish',
+        name: newsletterRun.subject?.trim() || newsletterRun.name || contentItem.title,
+        status: 'scheduled',
+        scheduledAt: newsletterRun.scheduledAt,
+        scheduledTimezone: newsletterRun.scheduledTimezone,
+        recipientFilter: {},
+        error: null,
+        metadata: blogRunMetadata,
+        updatedAt: now,
+      }).where(eq(mktDistributionRuns.id, reusableBlogRun.id)).returning())[0]
+    : (await db.insert(mktDistributionRuns).values({
+      id: randomUUID(),
+      organizationId: newsletterRun.organizationId,
+      publicationId: publication.id,
+      contentItemId: contentItem.id,
+      channel: 'blog',
+      distributionType: 'publish',
+      name: newsletterRun.subject?.trim() || newsletterRun.name || contentItem.title,
+      status: 'scheduled',
+      scheduledAt: newsletterRun.scheduledAt,
+      scheduledTimezone: newsletterRun.scheduledTimezone,
+      recipientFilter: {},
+      metrics: {},
+      metadata: blogRunMetadata,
+      createdAt: now,
+      updatedAt: now,
+    }).returning())[0]
+  if (!blogRun) return null
+
+  if (slot && readOptionalString(readRecord(slot.metadata).blogDistributionRunId) !== blogRun.id) {
+    await db.update(mktPublicationSlots).set({
+      metadata: {
+        ...readRecord(slot.metadata),
+        blogDistributionRunId: blogRun.id,
+        blogDistributionRunPairedAt: now.toISOString(),
+      },
+      updatedAt: now,
+    }).where(eq(mktPublicationSlots.id, slot.id))
+  }
+
+  return {
+    run: blogRun,
+    action: reusableBlogRun
+      ? ['sending', 'published'].includes(reusableBlogRun.status) ? 'linked' : 'updated'
+      : 'created',
+  }
+}
+
+function isBlogRunAlreadyPaired({
+  publication,
+  newsletterRun,
+  blogRun,
+  slot,
+}: {
+  publication: PublicationRow
+  newsletterRun: DistributionRunRow
+  blogRun: DistributionRunRow
+  slot?: SlotRow
+}) {
+  const metadata = readRecord(blogRun.metadata)
+  const slotMetadata = readRecord(slot?.metadata)
+  const slotLinked = !slot || readOptionalString(slotMetadata.blogDistributionRunId) === blogRun.id
+  return blogRun.status === 'scheduled' &&
+    blogRun.publicationId === publication.id &&
+    blogRun.contentItemId === newsletterRun.contentItemId &&
+    readOptionalString(metadata.pairedNewsletterRunId) === newsletterRun.id &&
+    blogRun.scheduledAt?.getTime() === newsletterRun.scheduledAt?.getTime() &&
+    blogRun.scheduledTimezone === newsletterRun.scheduledTimezone &&
+    slotLinked
 }
 
 export async function createEditorialIdea(input: CreateEditorialIdeaInput) {
@@ -363,7 +533,7 @@ export async function fulfillPublicationSlot(input: FulfillPublicationSlotInput)
         status: 'ready',
         body: document.body,
         format: document.format,
-        supportedChannels: ensureNewsletterChannel(existingContent.supportedChannels),
+        supportedChannels: ensureArticleChannels(existingContent.supportedChannels),
         metadata: {
           ...readRecord(existingContent.metadata),
           sourceDocumentTitle: document.title,
@@ -413,7 +583,10 @@ export async function fulfillPublicationSlot(input: FulfillPublicationSlotInput)
     let distributionRun: typeof mktDistributionRuns.$inferSelect
     const subject = input.subject?.trim() || document.title
     const paragraphPreview = firstParagraph(document.body)
-    const preheader = input.preheader?.trim() || paragraphPreview?.slice(0, 180) || undefined
+    const inputPreheader = input.preheader?.trim()
+    const preheader = inputPreheader && !isSameMarketingText(inputPreheader, subject)
+      ? inputPreheader
+      : paragraphPreview?.slice(0, 180) || undefined
     const runMetadata = {
       ...(slot.distributionRunId ? {} : { createdBy: 'newsletter_slot_fulfill' }),
       publicationSlotId: slot.id,
@@ -463,6 +636,64 @@ export async function fulfillPublicationSlot(input: FulfillPublicationSlotInput)
       }).returning())[0]
     }
 
+    const linkedBlogDistributionRunId = readOptionalString(readRecord(slot.metadata).blogDistributionRunId)
+    const existingBlogRuns = await tx
+      .select()
+      .from(mktDistributionRuns)
+      .where(and(
+        eq(mktDistributionRuns.organizationId, slot.organizationId),
+        eq(mktDistributionRuns.contentItemId, contentItem.id),
+        eq(mktDistributionRuns.channel, 'blog'),
+        inArray(mktDistributionRuns.status, ['draft', 'scheduled', 'sending', 'published']),
+      ))
+    const reusableBlogRun = existingBlogRuns.find((run) => run.id === linkedBlogDistributionRunId)
+      ?? existingBlogRuns.find((run) => readOptionalString(readRecord(run.metadata).pairedNewsletterRunId) === distributionRun.id)
+      ?? existingBlogRuns.find((run) => ['draft', 'scheduled'].includes(run.status))
+      ?? existingBlogRuns.find((run) => ['sending', 'published'].includes(run.status))
+    const blogRunMetadata = {
+      ...(reusableBlogRun ? readRecord(reusableBlogRun.metadata) : {}),
+      source: 'newsletter_schedule_pair',
+      pairedNewsletterRunId: distributionRun.id,
+      publicationSlotId: slot.id,
+      editorialIdeaId: idea?.id,
+      sourceDocumentId: document.id,
+      fulfilledByRunId: input.runId,
+      pairedAt: now.toISOString(),
+    }
+    const blogDistributionRun = reusableBlogRun
+      ? ['sending', 'published'].includes(reusableBlogRun.status)
+        ? reusableBlogRun
+        : (await tx.update(mktDistributionRuns).set({
+          publicationId: slot.publicationId,
+          contentItemId: contentItem.id,
+          distributionType: 'publish',
+          name: subject,
+          status: 'scheduled',
+          scheduledAt: slot.scheduledAt,
+          scheduledTimezone: slot.scheduledTimezone,
+          recipientFilter: {},
+          error: null,
+          metadata: blogRunMetadata,
+          updatedAt: now,
+        }).where(eq(mktDistributionRuns.id, reusableBlogRun.id)).returning())[0]
+      : (await tx.insert(mktDistributionRuns).values({
+        id: randomUUID(),
+        organizationId: slot.organizationId,
+        publicationId: slot.publicationId,
+        contentItemId: contentItem.id,
+        channel: 'blog',
+        distributionType: 'publish',
+        name: subject,
+        status: 'scheduled',
+        scheduledAt: slot.scheduledAt,
+        scheduledTimezone: slot.scheduledTimezone,
+        recipientFilter: {},
+        metrics: {},
+        metadata: blogRunMetadata,
+        createdAt: now,
+        updatedAt: now,
+      }).returning())[0]
+
     const [updatedSlot] = await tx.update(mktPublicationSlots).set({
       ideaId: idea?.id ?? slot.ideaId,
       documentId: document.id,
@@ -475,6 +706,7 @@ export async function fulfillPublicationSlot(input: FulfillPublicationSlotInput)
         ...readRecord(slot.metadata),
         fulfilledAt: now.toISOString(),
         fulfilledByRunId: input.runId,
+        blogDistributionRunId: blogDistributionRun.id,
       },
       updatedAt: now,
     }).where(eq(mktPublicationSlots.id, slot.id)).returning()
@@ -491,12 +723,16 @@ export async function fulfillPublicationSlot(input: FulfillPublicationSlotInput)
           ...readRecord(idea.metadata),
           publicationSlotId: slot.id,
           distributionRunId: distributionRun.id,
+          blogDistributionRunId: blogDistributionRun.id,
           usedAt: now.toISOString(),
         },
         updatedAt: now,
       }).where(eq(mktEditorialIdeas.id, idea.id))
     }
 
+    const blogActivityLabel = blogDistributionRun.status === 'scheduled'
+      ? 'scheduled blog'
+      : `linked ${blogDistributionRun.status} blog`
     await tx.insert(activityEvents).values({
       id: randomUUID(),
       organizationId: slot.organizationId,
@@ -512,7 +748,7 @@ export async function fulfillPublicationSlot(input: FulfillPublicationSlotInput)
       actorName: 'editorial_agent',
       source: 'marketing_autonomy',
       severity: 'info',
-      summary: `Scheduled newsletter "${subject}" for ${slot.scheduledAt.toISOString()}`,
+      summary: `Scheduled newsletter and ${blogActivityLabel} "${subject}" for ${slot.scheduledAt.toISOString()}`,
       details: {
         publicationId: publication.id,
         publicationSlug: publication.slug,
@@ -520,16 +756,19 @@ export async function fulfillPublicationSlot(input: FulfillPublicationSlotInput)
         documentId: document.id,
         contentItemId: contentItem.id,
         distributionRunId: distributionRun.id,
+        blogDistributionRunId: blogDistributionRun.id,
+        blogDistributionRunStatus: blogDistributionRun.status,
       },
       metadata: {
         publicationId: publication.id,
         publicationSlug: publication.slug,
         publicationSlotId: slot.id,
+        blogDistributionRunId: blogDistributionRun.id,
         agentRunId: input.runId,
       },
     })
 
-    return { slot: updatedSlot, publication, document, idea, contentItem, distributionRun }
+    return { slot: updatedSlot, publication, document, idea, contentItem, distributionRun, blogDistributionRun }
   })
 }
 
@@ -921,17 +1160,50 @@ function slotStatusForDistributionRun(status: string) {
   return 'planned'
 }
 
-function ensureNewsletterChannel(channels: unknown) {
+function ensureArticleChannels(channels: unknown) {
   const values = Array.isArray(channels) ? channels.filter((entry): entry is string => typeof entry === 'string') : []
-  return values.includes('newsletter') ? values : [...values, 'newsletter']
+  const next = [...values]
+  for (const channel of ['blog', 'newsletter']) {
+    if (!next.includes(channel)) next.push(channel)
+  }
+  return next
 }
 
 function firstParagraph(markdown: string) {
-  return markdown
-    .split(/\n{2,}/)
-    .map((part) => part.replace(/^#+\s+/gm, '').trim())
-    .find((part) => part && !part.startsWith(':::') && !part.startsWith('!['))
-    ?.slice(0, 280)
+  for (const block of markdown.replace(/\r\n/g, '\n').split(/\n{2,}/)) {
+    const paragraph = block
+      .split('\n')
+      .map((line) => line.trim())
+      .filter((line) => line && !/^#{1,6}\s+/.test(line) && !line.startsWith(':::') && !line.startsWith('![') && !line.startsWith('```'))
+      .join(' ')
+      .trim()
+    if (paragraph) return stripInlineMarkdown(paragraph).slice(0, 280)
+  }
+  return undefined
+}
+
+function stripInlineMarkdown(value: string) {
+  return value
+    .replace(/\[([^\]]+)]\([^)]+\)/g, '$1')
+    .replace(/[*_`~]/g, '')
+}
+
+function isSameMarketingText(value: string | null | undefined, candidate: string | null | undefined) {
+  const left = marketingTextDedupeKey(value)
+  const right = marketingTextDedupeKey(candidate)
+  return Boolean(left && right && left === right)
+}
+
+function marketingTextDedupeKey(value: string | null | undefined) {
+  return (value ?? '')
+    .replace(/^#{1,6}\s+/, '')
+    .replace(/\[([^\]]+)]\([^)]+\)/g, '$1')
+    .replace(/[*_`~]/g, '')
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim()
 }
 
 function normalizeDedupeKey(value: string) {

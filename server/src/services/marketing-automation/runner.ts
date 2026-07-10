@@ -36,6 +36,7 @@ type MarketingAutomationSummary = {
     checked: number
     slotsCreated: number
     slotsLinked: number
+    blogRunsPaired: number
     ideaRunsQueued: number
     slotRunsQueued: number
     skipped: number

@@ -161,7 +161,7 @@ publicMarketingRouter.get('/organizations/:project/marketing/posts/:slug', async
     organization: publicOrganization(organization),
     post: {
       ...publicPostSummary(item, run, newsletterPublication),
-      body: item.body,
+      body: stripDuplicateLeadingHeading(item.body, [item.title]),
       format: item.format,
       tags: item.tags,
       metadata: item.metadata,
@@ -611,12 +611,15 @@ router.post('/content/:id/snapshot', asyncRoute(async (req, res) => {
     res.status(404).json({ error: 'Source document not found' })
     return
   }
+  const nextTitle = readOptionalString(req.body.title) ?? document.title
+  const explicitExcerpt = readOptionalString(req.body.excerpt)
+  const preservedExcerpt = visibleMarketingExcerpt(item.excerpt, [nextTitle])
 
   const [updated] = await getDb()
     .update(mktContentItems)
     .set({
-      title: readOptionalString(req.body.title) ?? document.title,
-      excerpt: readOptionalString(req.body.excerpt) ?? item.excerpt ?? firstParagraph(document.body),
+      title: nextTitle,
+      excerpt: explicitExcerpt ?? preservedExcerpt ?? firstParagraph(document.body),
       body: document.body,
       format: document.format,
       status: readOptionalString(req.body.status) ?? item.status,
@@ -750,7 +753,7 @@ export async function sendNewsletterRun(runId: string, testOnly: boolean) {
         to: recipient.email,
         subject: run.subject || item.title,
         html: renderNewsletterHtml({ item, run, publication, sender, designSystem, primaryCta, audienceMemberId: recipient.id, unsubscribeUrl }),
-        text: renderNewsletterText({ item, primaryCta, unsubscribeUrl }),
+        text: renderNewsletterText({ item, run, primaryCta, unsubscribeUrl }),
         tags: [
           { name: 'run_id', value: run.id },
           { name: 'content_id', value: item.id },
@@ -976,7 +979,7 @@ async function renderNewsletterRun(runId: string) {
 
   return {
     html: renderNewsletterHtml({ item, run, publication, sender, designSystem, primaryCta }),
-    text: renderNewsletterText({ item, primaryCta }),
+    text: renderNewsletterText({ item, run, primaryCta }),
     warnings: newsletterRenderWarnings(item.body),
     mode: emailThemeMode(run, publication, designSystem),
   }
@@ -1308,6 +1311,8 @@ function renderNewsletterHtml({
   const mode = emailThemeMode(run, publication, designSystem)
   const palette = newsletterEmailPalette(designSystem, mode)
   const preheader = run.preheader ? `<div style="display:none;max-height:0;overflow:hidden">${escapeHtml(run.preheader)}</div>` : ''
+  const visibleExcerpt = visibleMarketingExcerpt(item.excerpt, [item.title, run.subject])
+  const body = stripDuplicateLeadingHeading(item.body, [item.title, run.subject])
   const wrapper = publicationEmailWrapper(publication)
   const headerBlock = renderEmailBrandHeader({ wrapper, sender, designSystem, mode, palette })
   const beforeContentBlock = wrapper.beforeContent
@@ -1338,8 +1343,8 @@ function renderNewsletterHtml({
         ${headerBlock}
         ${beforeContentBlock}
         <h1 style="font-size:28px;line-height:1.2;font-weight:200;letter-spacing:-0.04em;margin:0 0 24px;color:${palette.text};">${escapeHtml(item.title)}</h1>
-        ${item.excerpt ? `<p style="font-size:15px;line-height:1.6;font-weight:300;color:${palette.textSoft};margin:0 0 14px;">${escapeHtml(item.excerpt)}</p>` : ''}
-        <div style="font-size:15px;line-height:1.6;font-weight:300;color:${palette.textSoft};">${markdownToEmailHtml(item.body, palette)}</div>
+        ${visibleExcerpt ? `<p style="font-size:15px;line-height:1.6;font-weight:300;color:${palette.textSoft};margin:0 0 14px;">${escapeHtml(visibleExcerpt)}</p>` : ''}
+        <div style="font-size:15px;line-height:1.6;font-weight:300;color:${palette.textSoft};">${markdownToEmailHtml(body, palette)}</div>
         ${ctaBlock}
         ${footerBlock}
       </main>
@@ -1382,10 +1387,12 @@ async function selectedNewsletterCta(
 
 function renderNewsletterText({
   item,
+  run,
   primaryCta,
   unsubscribeUrl,
 }: {
   item: typeof mktContentItems.$inferSelect
+  run?: typeof mktDistributionRuns.$inferSelect
   primaryCta?: SelectedEmailCta | null
   unsubscribeUrl?: string | null
 }) {
@@ -1394,8 +1401,8 @@ function renderNewsletterText({
     : null
   return [
     item.title,
-    item.excerpt,
-    markdownToText(item.body),
+    visibleMarketingExcerpt(item.excerpt, [item.title, run?.subject]),
+    markdownToText(stripDuplicateLeadingHeading(item.body, [item.title, run?.subject])),
     selectedCta ? `${selectedCta.label}: ${selectedCta.url}` : null,
     unsubscribeUrl ? `Cancelar suscripción: ${unsubscribeUrl}` : null,
   ].filter(Boolean).join('\n\n')
@@ -1716,6 +1723,38 @@ function newsletterEmailPalette(designSystem: typeof designSystems.$inferSelect 
     fontSerif: readOptionalString(typography.serif) ?? fallback.fontSerif,
     fontMono: readOptionalString(typography.mono) ?? fallback.fontMono,
   }
+}
+
+function visibleMarketingExcerpt(excerpt: string | null | undefined, titleCandidates: Array<string | null | undefined>) {
+  const value = excerpt?.trim()
+  if (!value) return undefined
+  return titleCandidates.some((candidate) => isSameMarketingText(value, candidate)) ? undefined : value
+}
+
+function stripDuplicateLeadingHeading(markdown: string, titleCandidates: Array<string | null | undefined>) {
+  const normalized = markdown.replace(/\r\n/g, '\n')
+  const match = normalized.match(/^(\s*)#{1,6}\s+(.+?)[ \t]*(?:\n+|$)/)
+  if (!match) return markdown
+  if (!titleCandidates.some((candidate) => isSameMarketingText(match[2], candidate))) return markdown
+  return normalized.slice(match[0].length).replace(/^\n+/, '')
+}
+
+function isSameMarketingText(value: string | null | undefined, candidate: string | null | undefined) {
+  const left = marketingTextDedupeKey(value)
+  const right = marketingTextDedupeKey(candidate)
+  return Boolean(left && right && left === right)
+}
+
+function marketingTextDedupeKey(value: string | null | undefined) {
+  return (value ?? '')
+    .replace(/^#{1,6}\s+/, '')
+    .replace(/\[([^\]]+)]\([^)]+\)/g, '$1')
+    .replace(/[*_`~]/g, '')
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim()
 }
 
 function markdownToEmailHtml(markdown: string, palette: EmailPalette = DEFAULT_EMAIL_PALETTE) {
@@ -2075,7 +2114,7 @@ function publicPostSummary(
     distributionRunId: run.id,
     title: item.title,
     slug: item.slug,
-    excerpt: item.excerpt,
+    excerpt: visibleMarketingExcerpt(item.excerpt, [item.title]) ?? null,
     contentKind: item.contentKind,
     supportedChannels: item.supportedChannels,
     publishedAt: run.completedAt?.toISOString() ?? run.updatedAt.toISOString(),

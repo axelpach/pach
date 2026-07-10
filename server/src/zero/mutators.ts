@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto'
 import type { ServerTransaction } from '@rocicorp/zero'
 import type { PostgresJsTransaction } from '@rocicorp/zero/pg'
 import type { Schema } from '../../schema.js'
@@ -128,6 +129,63 @@ export class AuthorizationError extends Error {
   }
 }
 
+type DistributionRunSnapshot = {
+  id: string
+  organizationId: string
+  publicationId?: string | null
+  contentItemId?: string | null
+  channel: string
+  distributionType: string
+  name: string
+  subject?: string | null
+  status: string
+  scheduledAt?: number | null
+  scheduledTimezone?: string | null
+  metadata: Record<string, unknown>
+}
+
+type ContentItemSnapshot = {
+  id: string
+  title: string
+  supportedChannels: string[]
+}
+
+function readRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {}
+}
+
+function readStringArray(value: unknown) {
+  return Array.isArray(value) ? value.filter((entry): entry is string => typeof entry === 'string') : []
+}
+
+function timestampMs(value: unknown): number | null {
+  if (value instanceof Date) return value.getTime()
+  if (typeof value === 'number' && Number.isFinite(value)) return value
+  if (typeof value === 'string') {
+    const parsed = Date.parse(value)
+    return Number.isNaN(parsed) ? null : parsed
+  }
+  return null
+}
+
+function distributionRunSnapshot(row: Record<string, unknown> | undefined): DistributionRunSnapshot | null {
+  if (!row?.id || !row.organization_id) return null
+  return {
+    id: String(row.id),
+    organizationId: String(row.organization_id),
+    publicationId: row.publication_id ? String(row.publication_id) : null,
+    contentItemId: row.content_item_id ? String(row.content_item_id) : null,
+    channel: String(row.channel ?? ''),
+    distributionType: String(row.distribution_type ?? ''),
+    name: String(row.name ?? ''),
+    subject: row.subject ? String(row.subject) : null,
+    status: String(row.status ?? ''),
+    scheduledAt: timestampMs(row.scheduled_at),
+    scheduledTimezone: row.scheduled_timezone ? String(row.scheduled_timezone) : null,
+    metadata: readRecord(row.metadata),
+  }
+}
+
 function issueActivityKind(type: string, metadata?: Record<string, unknown>) {
   if (type === 'completed') return 'progress'
   if (type === 'agent_run_failed' || metadata?.level === 'error') return 'incident'
@@ -164,6 +222,185 @@ export function createServerMutators(authData?: JWTPayload) {
 
   async function requireExistingOrganizationAccess(tx: Tx, tableName: ScopedTable, id: string) {
     requireOrganizationAccess(await readOrganizationId(tx, tableName, id))
+  }
+
+  async function readDistributionRun(tx: Tx, id: string): Promise<DistributionRunSnapshot | null> {
+    const rows = await tx.dbTransaction.query(
+      `select
+        "id",
+        "organization_id",
+        "publication_id",
+        "content_item_id",
+        "channel",
+        "distribution_type",
+        "name",
+        "subject",
+        "status",
+        "scheduled_at",
+        "scheduled_timezone",
+        "metadata"
+      from "mkt_distribution_runs"
+      where "id" = $1
+      limit 1`,
+      [id],
+    )
+    return distributionRunSnapshot(Array.from(rows)[0] as Record<string, unknown> | undefined)
+  }
+
+  async function readContentItem(tx: Tx, id: string): Promise<ContentItemSnapshot | null> {
+    const rows = await tx.dbTransaction.query(
+      'select "id", "title", "supported_channels" from "mkt_content_items" where "id" = $1 limit 1',
+      [id],
+    )
+    const row = Array.from(rows)[0] as Record<string, unknown> | undefined
+    if (!row?.id) return null
+    return {
+      id: String(row.id),
+      title: String(row.title ?? ''),
+      supportedChannels: readStringArray(row.supported_channels),
+    }
+  }
+
+  async function readPairedBlogRun(tx: Tx, newsletterRunId: string): Promise<DistributionRunSnapshot | null> {
+    const rows = await tx.dbTransaction.query(
+      `select
+        "id",
+        "organization_id",
+        "publication_id",
+        "content_item_id",
+        "channel",
+        "distribution_type",
+        "name",
+        "subject",
+        "status",
+        "scheduled_at",
+        "scheduled_timezone",
+        "metadata"
+      from "mkt_distribution_runs"
+      where "channel" = 'blog'
+        and "metadata"->>'pairedNewsletterRunId' = $1
+        and "status" in ('draft', 'scheduled', 'sending', 'published')
+      order by "updated_at" desc
+      limit 1`,
+      [newsletterRunId],
+    )
+    return distributionRunSnapshot(Array.from(rows)[0] as Record<string, unknown> | undefined)
+  }
+
+  async function readReusableBlogRun(tx: Tx, newsletterRun: DistributionRunSnapshot): Promise<DistributionRunSnapshot | null> {
+    if (!newsletterRun.contentItemId) return null
+    const rows = await tx.dbTransaction.query(
+      `select
+        "id",
+        "organization_id",
+        "publication_id",
+        "content_item_id",
+        "channel",
+        "distribution_type",
+        "name",
+        "subject",
+        "status",
+        "scheduled_at",
+        "scheduled_timezone",
+        "metadata"
+      from "mkt_distribution_runs"
+      where "organization_id" = $1
+        and "content_item_id" = $2
+        and "channel" = 'blog'
+        and "status" in ('draft', 'scheduled', 'sending', 'published')
+      order by
+        case
+          when "metadata"->>'pairedNewsletterRunId' = $3 then 0
+          when "status" in ('draft', 'scheduled') then 1
+          else 2
+        end,
+        "updated_at" desc
+      limit 1`,
+      [newsletterRun.organizationId, newsletterRun.contentItemId, newsletterRun.id],
+    )
+    return distributionRunSnapshot(Array.from(rows)[0] as Record<string, unknown> | undefined)
+  }
+
+  async function syncPairedBlogRunForNewsletterSchedule(tx: Tx, newsletterRunId: string, now: number) {
+    const newsletterRun = await readDistributionRun(tx, newsletterRunId)
+    if (!newsletterRun || newsletterRun.channel !== 'newsletter') return
+
+    if (newsletterRun.status !== 'scheduled' || !newsletterRun.scheduledAt || !newsletterRun.contentItemId) {
+      const pairedBlogRun = await readPairedBlogRun(tx, newsletterRunId)
+      if (pairedBlogRun?.status === 'scheduled') {
+        await tx.mutate.mkt_distribution_runs.update({
+          id: pairedBlogRun.id,
+          status: 'draft',
+          scheduledAt: null,
+          startedAt: null,
+          error: null,
+          metadata: {
+            ...pairedBlogRun.metadata,
+            unpairedAt: new Date(now).toISOString(),
+          },
+          updatedAt: now,
+        })
+      }
+      return
+    }
+
+    const contentItem = await readContentItem(tx, newsletterRun.contentItemId)
+    if (!contentItem) return
+    if (!contentItem.supportedChannels.includes('blog')) {
+      await tx.mutate.mkt_content_items.update({
+        id: contentItem.id,
+        supportedChannels: [...contentItem.supportedChannels, 'blog'],
+        updatedAt: now,
+      })
+    }
+
+    const blogRun = await readPairedBlogRun(tx, newsletterRun.id) ?? await readReusableBlogRun(tx, newsletterRun)
+    if (blogRun && ['sending', 'published'].includes(blogRun.status)) return
+
+    const metadata = {
+      ...(blogRun?.metadata ?? {}),
+      source: 'newsletter_schedule_pair',
+      pairedNewsletterRunId: newsletterRun.id,
+      pairedAt: new Date(now).toISOString(),
+    }
+    const scheduledTimezone = newsletterRun.scheduledTimezone ?? 'America/Mexico_City'
+    const name = newsletterRun.subject?.trim() || newsletterRun.name || contentItem.title
+
+    if (blogRun) {
+      await tx.mutate.mkt_distribution_runs.update({
+        id: blogRun.id,
+        publicationId: newsletterRun.publicationId ?? undefined,
+        contentItemId: newsletterRun.contentItemId,
+        distributionType: 'publish',
+        name,
+        status: 'scheduled',
+        scheduledAt: newsletterRun.scheduledAt,
+        scheduledTimezone,
+        recipientFilter: {},
+        error: null,
+        metadata,
+        updatedAt: now,
+      })
+      return
+    }
+
+    await tx.mutate.mkt_distribution_runs.insert({
+      id: randomUUID(),
+      organizationId: newsletterRun.organizationId,
+      publicationId: newsletterRun.publicationId ?? undefined,
+      contentItemId: newsletterRun.contentItemId,
+      channel: 'blog',
+      distributionType: 'publish',
+      name,
+      status: 'scheduled',
+      scheduledAt: newsletterRun.scheduledAt,
+      scheduledTimezone,
+      recipientFilter: {},
+      metrics: {},
+      metadata,
+      createdAt: now,
+      updatedAt: now,
+    })
   }
 
   async function readSavedViewAccess(tx: Tx, id: string): Promise<{ companyId: string | null | undefined; ownerId: string | null | undefined }> {
@@ -1026,12 +1263,15 @@ export function createServerMutators(authData?: JWTPayload) {
           createdAt: now,
           updatedAt: now,
         })
+        if (args.id) await syncPairedBlogRunForNewsletterSchedule(tx, args.id, now)
       },
       async update(tx: Tx, args: any) {
         await requireExistingOrganizationAccess(tx, 'mkt_distribution_runs', args.id)
         if ('organizationId' in args) requireOrganizationAccess(args.organizationId)
         const { id, ...updates } = args
-        await tx.mutate.mkt_distribution_runs.update({ id, ...updates, updatedAt: Date.now() })
+        const now = Date.now()
+        await tx.mutate.mkt_distribution_runs.update({ id, ...updates, updatedAt: now })
+        await syncPairedBlogRunForNewsletterSchedule(tx, id, now)
       },
       async delete(tx: Tx, args: { id: string }) {
         await requireExistingOrganizationAccess(tx, 'mkt_distribution_runs', args.id)
