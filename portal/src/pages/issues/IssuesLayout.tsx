@@ -1,7 +1,7 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState, type DragEvent } from 'react'
 import { Outlet, useLocation, useNavigate, useOutletContext } from 'react-router-dom'
 import { useQuery, useZero } from '@rocicorp/zero/react'
-import { ChevronDown, ChevronRight, Menu, Pencil, Plus, Trash2, X } from 'lucide-react'
+import { ChevronDown, ChevronRight, GripVertical, Menu, Pencil, Plus, Trash2, X } from 'lucide-react'
 import type { Schema } from '../../zero-schema'
 import type { Mutators } from '../../mutators'
 import { useAuth } from '../../lib/auth'
@@ -27,6 +27,13 @@ type TeamModalState =
   | { mode: 'create' }
   | { mode: 'edit'; teamId: string }
   | null
+
+type SavedViewRow = Schema['tables']['pm_saved_views']['row']
+type SavedViewDropPosition = 'before' | 'after'
+type SavedViewDropTarget = {
+  viewId: string
+  position: SavedViewDropPosition
+}
 
 export default function IssuesLayout() {
   const z = useZero<Schema, Mutators>()
@@ -74,6 +81,8 @@ export default function IssuesLayout() {
   const [replacementTeamId, setReplacementTeamId] = useState('')
   const [teamDeleteStep, setTeamDeleteStep] = useState(false)
   const [mobileTrackerOpen, setMobileTrackerOpen] = useState(false)
+  const [viewDragId, setViewDragId] = useState<string | null>(null)
+  const [viewDropTarget, setViewDropTarget] = useState<SavedViewDropTarget | null>(null)
   const suppressNextViewUrlSyncRef = useRef(false)
   const replacementTeams = useMemo(
     () => teamModal?.mode === 'edit' ? teams.filter((team) => team.id !== teamModal.teamId) : [],
@@ -131,6 +140,77 @@ export default function IssuesLayout() {
 
   function requestComposer() {
     requestGlobalIssueComposer()
+  }
+
+  async function reorderSavedView(
+    draggedViewId: string,
+    targetViewId: string,
+    position: SavedViewDropPosition,
+  ) {
+    if (draggedViewId === targetViewId) return
+
+    const dragged = personalSavedViews.find((view) => view.id === draggedViewId)
+    const target = personalSavedViews.find((view) => view.id === targetViewId)
+    if (!dragged || !target) return
+
+    const withoutDragged = personalSavedViews.filter((view) => view.id !== draggedViewId)
+    const targetIndex = withoutDragged.findIndex((view) => view.id === targetViewId)
+    if (targetIndex === -1) return
+
+    const nextIndex = position === 'before' ? targetIndex : targetIndex + 1
+    const reordered = [...withoutDragged]
+    reordered.splice(nextIndex, 0, dragged)
+
+    await Promise.all(
+      reordered.map((view, index) => {
+        if (view.position === index) return Promise.resolve()
+        return z.mutate.pm_saved_views.update({ id: view.id, position: index })
+      }),
+    )
+  }
+
+  function handleSavedViewDragStart(event: DragEvent, view: SavedViewRow) {
+    setViewDragId(view.id)
+    setViewDropTarget(null)
+    event.dataTransfer.effectAllowed = 'move'
+    event.dataTransfer.setData('text/plain', view.id)
+  }
+
+  function handleSavedViewDragOver(event: DragEvent, view: SavedViewRow) {
+    if (!viewDragId || viewDragId === view.id) return
+    event.preventDefault()
+    event.dataTransfer.dropEffect = 'move'
+
+    const rect = event.currentTarget.getBoundingClientRect()
+    const position: SavedViewDropPosition = event.clientY < rect.top + rect.height / 2 ? 'before' : 'after'
+    setViewDropTarget((current) => (
+      current?.viewId === view.id && current.position === position
+        ? current
+        : { viewId: view.id, position }
+    ))
+  }
+
+  function handleSavedViewDragLeave(event: DragEvent, view: SavedViewRow) {
+    const nextTarget = event.relatedTarget
+    if (nextTarget instanceof Node && event.currentTarget.contains(nextTarget)) return
+    setViewDropTarget((current) => current?.viewId === view.id ? null : current)
+  }
+
+  async function handleSavedViewDrop(event: DragEvent, view: SavedViewRow) {
+    event.preventDefault()
+    const draggedViewId = viewDragId ?? event.dataTransfer.getData('text/plain')
+    const target = viewDropTarget?.viewId === view.id
+      ? viewDropTarget
+      : { viewId: view.id, position: 'after' as SavedViewDropPosition }
+
+    setViewDragId(null)
+    setViewDropTarget(null)
+    await reorderSavedView(draggedViewId, target.viewId, target.position)
+  }
+
+  function handleSavedViewDragEnd() {
+    setViewDragId(null)
+    setViewDropTarget(null)
   }
 
   function toggleTeam(teamId: string) {
@@ -456,11 +536,18 @@ export default function IssuesLayout() {
               onClick={() => selectSection({ kind: 'all' })}
             />
             {personalSavedViews.map((view) => (
-              <TrackerNavButton
+              <SavedViewNavItem
                 key={view.id}
+                view={view}
                 active={location.pathname === '/issues' && section.kind === 'view' && section.viewId === view.id}
-                label={view.name.toLowerCase()}
+                dragging={viewDragId === view.id}
+                dropPosition={viewDropTarget?.viewId === view.id ? viewDropTarget.position : null}
                 onClick={() => selectSection({ kind: 'view', viewId: view.id })}
+                onDragStart={(event) => handleSavedViewDragStart(event, view)}
+                onDragOver={(event) => handleSavedViewDragOver(event, view)}
+                onDragLeave={(event) => handleSavedViewDragLeave(event, view)}
+                onDrop={(event) => void handleSavedViewDrop(event, view)}
+                onDragEnd={handleSavedViewDragEnd}
               />
             ))}
           </div>
@@ -647,6 +734,71 @@ function TrackerNavButton({
       <span className="truncate">{label}</span>
       {meta ? <span className="ml-3 text-[10px] text-fg-4">{meta}</span> : null}
     </button>
+  )
+}
+
+function SavedViewNavItem({
+  view,
+  active,
+  dragging,
+  dropPosition,
+  onClick,
+  onDragStart,
+  onDragOver,
+  onDragLeave,
+  onDrop,
+  onDragEnd,
+}: {
+  view: SavedViewRow
+  active: boolean
+  dragging: boolean
+  dropPosition: SavedViewDropPosition | null
+  onClick: () => void
+  onDragStart: (event: DragEvent) => void
+  onDragOver: (event: DragEvent) => void
+  onDragLeave: (event: DragEvent) => void
+  onDrop: (event: DragEvent) => void
+  onDragEnd: () => void
+}) {
+  return (
+    <div
+      onDragOver={onDragOver}
+      onDragLeave={onDragLeave}
+      onDrop={onDrop}
+      className={`group relative flex items-stretch transition ${dragging ? 'opacity-45' : ''}`}
+    >
+      {dropPosition ? (
+        <span
+          className={`pointer-events-none absolute left-1 right-1 z-10 h-px bg-accent shadow-glow-xs ${
+            dropPosition === 'before' ? 'top-0' : 'bottom-0'
+          }`}
+        />
+      ) : null}
+      <button
+        type="button"
+        draggable
+        onDragStart={onDragStart}
+        onDragEnd={onDragEnd}
+        className={`flex w-6 shrink-0 cursor-grab items-center justify-center text-fg-4 opacity-0 transition hover:text-accent active:cursor-grabbing group-hover:opacity-100 ${
+          dragging ? 'opacity-100 text-accent' : ''
+        }`}
+        title="drag to reorder"
+        aria-label={`drag ${view.name.toLowerCase()} view`}
+      >
+        <GripVertical className="h-3.5 w-3.5" />
+      </button>
+      <button
+        type="button"
+        onClick={onClick}
+        className={`flex min-w-0 flex-1 items-center justify-between px-2 py-2 text-left font-mono text-xs lowercase transition ${
+          active
+            ? 'bg-accent-fill/8 text-accent ring-1 ring-accent-fill/20'
+            : 'text-fg-2 hover:bg-accent-fill/4 hover:text-fg-1'
+        }`}
+      >
+        <span className="truncate">{view.name.toLowerCase()}</span>
+      </button>
+    </div>
   )
 }
 
