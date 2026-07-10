@@ -21,7 +21,7 @@ export default function Campaigns({ basePath = '/marketing/whatsapp/campaigns' }
   const [showNew, setShowNew] = useState(false)
 
   return (
-    <div className="flex-1 flex flex-col overflow-hidden">
+    <div className="flex flex-col">
       <div className="px-8 py-3 border-b border-edge/15 flex items-center justify-between">
         <p className="text-xs text-fg-3 uppercase tracking-label">
           › {campaigns.length} {campaigns.length === 1 ? 'campaña' : 'campañas'}
@@ -31,7 +31,7 @@ export default function Campaigns({ basePath = '/marketing/whatsapp/campaigns' }
         </Button>
       </div>
 
-      <div className="flex-1 overflow-auto">
+      <div>
         {campaigns.length === 0 ? (
           <div className="text-center text-fg-3 py-12 font-mono text-sm">
             <span className="text-fg-4">// </span>no hay campañas · crea una para empezar

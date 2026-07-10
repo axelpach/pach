@@ -14,7 +14,9 @@ export default function WhatsAppLayout({ basePath = '/marketing/whatsapp' }: { b
           <Tab to={`${basePath}/campaigns`}>campañas</Tab>
         </div>
       </div>
-      <Outlet />
+      <div className="min-h-0 flex-1 overflow-y-auto">
+        <Outlet />
+      </div>
     </div>
   )
 }

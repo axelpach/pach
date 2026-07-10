@@ -444,7 +444,7 @@ export default function Marketing({ canAccessWhatsApp = false }: { canAccessWhat
           </div>
         ) : null}
 
-        <div className={isMarketingDetail ? 'min-h-full' : isCalendarSection || isWhatsAppSection ? 'min-h-0 flex-1' : 'px-5 py-5 md:px-8'}>
+        <div className={isMarketingDetail ? 'min-h-full' : isCalendarSection || isWhatsAppSection ? 'flex min-h-0 flex-1 flex-col' : 'px-5 py-5 md:px-8'}>
           {section === 'newsletters' ? (
             <div className={isMarketingDetail ? 'min-h-full' : 'space-y-4'}>
               {isPublicationDetail ? (
