@@ -14,14 +14,14 @@ const STATUS_BADGES: Record<string, { icon: typeof FileText; label: string; kind
   failed: { icon: AlertCircle, label: 'falló', kind: 'fail' },
 }
 
-export default function Campaigns() {
+export default function Campaigns({ basePath = '/marketing/whatsapp/campaigns' }: { basePath?: string }) {
   const z = useZero<Schema, Mutators>()
   const [campaigns] = useQuery(z.query.whatsapp_campaigns.orderBy('createdAt', 'desc'))
   const [templates] = useQuery(z.query.whatsapp_templates)
   const [showNew, setShowNew] = useState(false)
 
   return (
-    <div className="flex-1 flex flex-col overflow-hidden">
+    <div className="flex flex-col">
       <div className="px-8 py-3 border-b border-edge/15 flex items-center justify-between">
         <p className="text-xs text-fg-3 uppercase tracking-label">
           › {campaigns.length} {campaigns.length === 1 ? 'campaña' : 'campañas'}
@@ -31,7 +31,7 @@ export default function Campaigns() {
         </Button>
       </div>
 
-      <div className="flex-1 overflow-auto">
+      <div>
         {campaigns.length === 0 ? (
           <div className="text-center text-fg-3 py-12 font-mono text-sm">
             <span className="text-fg-4">// </span>no hay campañas · crea una para empezar
@@ -45,7 +45,7 @@ export default function Campaigns() {
               return (
                 <Link
                   key={c.id}
-                  to={`/whatsapp/campaigns/${c.id}`}
+                  to={`${basePath}/${c.id}`}
                   className="block px-8 py-3.5 border-b border-edge/8 hover:bg-accent-fill/3 transition-colors"
                 >
                   <div className="flex items-center gap-4">
@@ -74,7 +74,7 @@ export default function Campaigns() {
         )}
       </div>
 
-      {showNew && <NewCampaignModal onClose={() => setShowNew(false)} />}
+      {showNew && <NewCampaignModal basePath={basePath} onClose={() => setShowNew(false)} />}
     </div>
   )
 }

@@ -316,8 +316,8 @@ export default function WhatsAppTemplates() {
   }, [availableProjects, projectByCompanyId, remoteTemplates])
 
   return (
-    <div className="flex-1 flex flex-col overflow-hidden">
-      <div className="px-8 py-3 border-b border-edge/15 flex items-center justify-between">
+    <div className="flex flex-col">
+      <div className="px-8 py-3 flex items-center justify-between">
         <p className="text-xs text-fg-3 uppercase tracking-label">
           › whatsapp templates · sync-only view · {remoteTemplates.length} remotas
         </p>
@@ -332,7 +332,7 @@ export default function WhatsAppTemplates() {
         </div>
       )}
 
-      <div className="flex-1 overflow-auto px-8 py-6 space-y-6">
+      <div className="px-8 py-6 space-y-6">
         <section className="grid grid-cols-1 xl:grid-cols-2 gap-4">
           {projectStats.map(stat => (
             <div key={stat.projectId} className="border border-edge/15 bg-bg-2 p-4 font-mono">

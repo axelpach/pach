@@ -1,6 +1,6 @@
 import { NavLink, Outlet } from 'react-router-dom'
 
-export default function WhatsAppLayout() {
+export default function WhatsAppLayout({ basePath = '/marketing/whatsapp' }: { basePath?: string }) {
   return (
     <div className="flex-1 flex flex-col overflow-hidden">
       <div className="px-8 pt-6 pb-0 border-b border-edge/15">
@@ -10,11 +10,13 @@ export default function WhatsAppLayout() {
           <span className="text-fg-4">›</span> plantillas · campañas · entregas
         </p>
         <div className="flex gap-0">
-          <Tab to="/whatsapp/templates">plantillas</Tab>
-          <Tab to="/whatsapp/campaigns">campañas</Tab>
+          <Tab to={`${basePath}/templates`}>plantillas</Tab>
+          <Tab to={`${basePath}/campaigns`}>campañas</Tab>
         </div>
       </div>
-      <Outlet />
+      <div className="min-h-0 flex-1 overflow-y-auto">
+        <Outlet />
+      </div>
     </div>
   )
 }

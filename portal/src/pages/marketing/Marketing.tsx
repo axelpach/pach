@@ -26,6 +26,7 @@ import {
   Linkedin,
   Mail,
   Megaphone,
+  MessageCircleMore,
   Newspaper,
   Plus,
   Radio,
@@ -39,7 +40,7 @@ import {
 } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
-import { useLocation, useNavigate } from 'react-router-dom'
+import { Navigate, Route, Routes, useLocation, useNavigate } from 'react-router-dom'
 import { Button, Metric, Panel, StatusPill, TermInput, TermTextarea } from '../../components/pach'
 import { PachSelect, type PachSelectOption } from '../../components/PachSelect'
 import { FilterButton, type ActiveFilters, type FilterFieldConfig } from '../issues/IssueFilters'
@@ -48,6 +49,10 @@ import { config } from '../../config'
 import type { Mutators } from '../../mutators'
 import type { Schema } from '../../zero-schema'
 import { RichEditor, type RichEditorHandle } from '../../components/rich-editor/RichEditor'
+import WhatsAppLayout from '../whatsapp/WhatsAppLayout'
+import WhatsAppTemplates from '../whatsapp/Templates'
+import Campaigns from '../whatsapp/Campaigns'
+import CampaignDetail from '../whatsapp/CampaignDetail'
 import '../calendar/Calendar.css'
 
 type OrganizationRow = Schema['tables']['organizations']['row']
@@ -107,7 +112,7 @@ type LinkedInAdPromotionDraftPayload = {
   ctaLabel: string
 }
 
-type MarketingSection = 'newsletters' | 'social' | 'calendar' | 'analytics'
+type MarketingSection = 'newsletters' | 'social' | 'whatsapp' | 'calendar' | 'analytics'
 type NewsletterTab = 'content' | 'publications' | 'subscribers' | 'broadcasts' | 'ctas'
 type MarketingCalendarView = 'dayGridMonth' | 'timeGridWeek' | 'timeGridDay' | 'listWeek'
 type MarketingCalendarEventTone = 'ok' | 'warn' | 'fail' | 'info' | 'idle'
@@ -136,6 +141,7 @@ type StoredMarketingCalendarState = {
 const SECTIONS: Array<{ id: MarketingSection; label: string }> = [
   { id: 'newsletters', label: 'newsletters' },
   { id: 'social', label: 'social' },
+  { id: 'whatsapp', label: 'whatsapp' },
   { id: 'calendar', label: 'calendar' },
   { id: 'analytics', label: 'analytics' },
 ]
@@ -207,7 +213,7 @@ const WEEKDAY_OPTIONS: PachSelectOption[] = [
   { value: '6', label: 'saturday' },
 ]
 
-export default function Marketing() {
+export default function Marketing({ canAccessWhatsApp = false }: { canAccessWhatsApp?: boolean }) {
   const z = useZero<Schema, Mutators>()
   const navigate = useNavigate()
   const location = useLocation()
@@ -263,6 +269,10 @@ export default function Marketing() {
   const isBroadcastDetail = section === 'newsletters' && newsletterTab === 'broadcasts' && Boolean(broadcastRunIdFromUrl)
   const isPublicationDetail = section === 'newsletters' && newsletterTab === 'publications' && Boolean(publicationIdFromUrl)
   const isMarketingDetail = isBroadcastDetail || isPublicationDetail
+  const visibleSections = useMemo(
+    () => SECTIONS.filter((entry) => entry.id !== 'whatsapp' || canAccessWhatsApp),
+    [canAccessWhatsApp],
+  )
 
   const organizationOptions = useMemo<PachSelectOption[]>(
     () => organizations.map((entry) => ({ value: entry.id, label: entry.name })),
@@ -344,17 +354,19 @@ export default function Marketing() {
   }
 
   if (!section) return null
+  if (section === 'whatsapp' && !canAccessWhatsApp) return <Navigate to="/marketing/newsletters/content" replace />
   const isCalendarSection = section === 'calendar'
+  const isWhatsAppSection = section === 'whatsapp'
 
   return (
     <div className="flex h-full min-h-0 bg-pit text-fg-1">
       <aside className="hidden shrink-0 flex-col border-r border-edge/12 bg-pit/60 px-2 py-4 backdrop-blur-sm md:flex md:w-[200px]">
         <div className="mb-2 px-4 pb-3">
           <div className="flex items-center gap-2 font-mono text-[10px] uppercase tracking-label text-fg-4">
-            <Megaphone className="h-3.5 w-3.5 text-accent" />
+            {isWhatsAppSection ? <MessageCircleMore className="h-3.5 w-3.5 text-accent" /> : <Megaphone className="h-3.5 w-3.5 text-accent" />}
             marketing
           </div>
-          <div className="mt-1 font-mono text-lg font-bold lowercase text-fg-1">inbound</div>
+          <div className="mt-1 font-mono text-lg font-bold lowercase text-fg-1">{isWhatsAppSection ? 'outbound' : 'inbound'}</div>
         </div>
 
         <div className="mb-4 px-2">
@@ -374,7 +386,7 @@ export default function Marketing() {
 
         <div className="mt-4 space-y-1">
           <div className="px-3 pb-1 font-mono text-[10px] uppercase tracking-label text-fg-4">sections</div>
-          {SECTIONS.map((entry) => (
+          {visibleSections.map((entry) => (
             <MarketingSidebarButton
               key={entry.id}
               active={section === entry.id}
@@ -385,8 +397,8 @@ export default function Marketing() {
         </div>
       </aside>
 
-      <main className={`min-w-0 flex-1 ${isCalendarSection ? 'flex min-h-0 flex-col overflow-hidden' : 'overflow-auto'}`}>
-        {!isMarketingDetail ? (
+      <main className={`min-w-0 flex-1 ${isCalendarSection || isWhatsAppSection ? 'flex min-h-0 flex-col overflow-hidden' : 'overflow-auto'}`}>
+        {!isMarketingDetail && !isWhatsAppSection ? (
           <div className="border-b border-edge/12 px-5 py-4 md:px-8">
             <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
               <div className="md:hidden">
@@ -404,6 +416,7 @@ export default function Marketing() {
                   </div>
                 </div>
                 <MarketingMobileSectionMenu
+                  sections={visibleSections}
                   section={section}
                   onSelect={(nextSection) => navigate(marketingSectionPath(nextSection))}
                 />
@@ -431,7 +444,7 @@ export default function Marketing() {
           </div>
         ) : null}
 
-        <div className={isMarketingDetail ? 'min-h-full' : isCalendarSection ? 'min-h-0 flex-1' : 'px-5 py-5 md:px-8'}>
+        <div className={isMarketingDetail ? 'min-h-full' : isCalendarSection || isWhatsAppSection ? 'flex min-h-0 flex-1 flex-col' : 'px-5 py-5 md:px-8'}>
           {section === 'newsletters' ? (
             <div className={isMarketingDetail ? 'min-h-full' : 'space-y-4'}>
               {isPublicationDetail ? (
@@ -530,6 +543,16 @@ export default function Marketing() {
               socialPostTargets={orgSocialPostTargets}
             />
           ) : null}
+          {section === 'whatsapp' ? (
+            <Routes>
+              <Route path="whatsapp" element={<WhatsAppLayout basePath="/marketing/whatsapp" />}>
+                <Route index element={<WhatsAppTemplates />} />
+                <Route path="templates" element={<WhatsAppTemplates />} />
+                <Route path="campaigns" element={<Campaigns basePath="/marketing/whatsapp/campaigns" />} />
+                <Route path="campaigns/:id" element={<CampaignDetail basePath="/marketing/whatsapp/campaigns" />} />
+              </Route>
+            </Routes>
+          ) : null}
           {section === 'calendar' ? (
             <MarketingCalendarSection
               contentItems={orgContentItems}
@@ -558,15 +581,17 @@ export default function Marketing() {
 }
 
 function MarketingMobileSectionMenu({
+  sections,
   section,
   onSelect,
 }: {
+  sections: Array<{ id: MarketingSection; label: string }>
   section: MarketingSection
   onSelect: (section: MarketingSection) => void
 }) {
   return (
-    <div className="mt-3 grid grid-cols-4 gap-1 font-mono text-[10px] uppercase tracking-label">
-      {SECTIONS.map((entry) => (
+    <div className="mt-3 grid grid-cols-2 gap-1 font-mono text-[10px] uppercase tracking-label min-[420px]:grid-cols-3">
+      {sections.map((entry) => (
         <button
           key={entry.id}
           type="button"

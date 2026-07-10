@@ -6,7 +6,7 @@ import type { Schema } from '../../zero-schema'
 import type { Mutators } from '../../mutators'
 import { Button } from '../../components/pach'
 
-export default function NewCampaignModal({ onClose }: { onClose: () => void }) {
+export default function NewCampaignModal({ basePath = '/marketing/whatsapp/campaigns', onClose }: { basePath?: string; onClose: () => void }) {
   const z = useZero<Schema, Mutators>()
   const navigate = useNavigate()
   const [templates] = useQuery(z.query.whatsapp_templates.where('status', 'APPROVED').orderBy('name', 'asc'))
@@ -29,7 +29,7 @@ export default function NewCampaignModal({ onClose }: { onClose: () => void }) {
       name: name.trim(),
     })
     onClose()
-    navigate(`/whatsapp/campaigns/${id}`)
+    navigate(`${basePath}/${id}`)
   }
 
   return (
