@@ -8,7 +8,7 @@ import { config } from '../../config'
 import { authFetch } from '../../lib/auth'
 import { Button } from '../../components/pach'
 
-export default function CampaignDetail() {
+export default function CampaignDetail({ basePath = '/marketing/whatsapp/campaigns' }: { basePath?: string }) {
   const { id } = useParams<{ id: string }>()
   const z = useZero<Schema, Mutators>()
   const navigate = useNavigate()
@@ -95,7 +95,7 @@ export default function CampaignDetail() {
   async function handleDelete() {
     if (!confirm('¿Eliminar esta campaña?')) return
     await z.mutate.whatsapp_campaigns.delete({ id: campaign!.id })
-    navigate('/whatsapp/campaigns')
+    navigate(basePath)
   }
 
   function renderBody(text: string | null | undefined) {
@@ -108,7 +108,7 @@ export default function CampaignDetail() {
       <div className="flex-1 flex flex-col overflow-hidden">
         <div className="px-8 py-3 border-b border-edge/15 flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <Link to="/whatsapp/campaigns" className="text-fg-3 hover:text-accent transition-colors">
+            <Link to={basePath} className="text-fg-3 hover:text-accent transition-colors">
               <ArrowLeft className="w-4 h-4" />
             </Link>
             <div>

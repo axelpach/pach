@@ -1,6 +1,6 @@
 import { Routes, Route, NavLink, Navigate, useLocation, useNavigate, useParams } from 'react-router-dom'
 import { useQuery, useZero, ZeroProvider } from '@rocicorp/zero/react'
-import { Activity as ActivityIcon, CalendarDays, CircleDollarSign, FileText, FolderKanban, LogOut, Megaphone, MessageCircleMore, Menu, Moon, Palette, Rows3, Settings2, Sun, X } from 'lucide-react'
+import { Activity as ActivityIcon, CalendarDays, CircleDollarSign, FileText, FolderKanban, LogOut, Megaphone, Menu, Moon, Palette, Rows3, Settings2, Sun, X } from 'lucide-react'
 import { createContext, useContext, useEffect, useMemo, useState, type ComponentType, type ReactNode } from 'react'
 import { schema, type Schema } from './zero-schema'
 import { mutators, type Mutators } from './mutators'
@@ -20,10 +20,6 @@ import IssuesLayout from './pages/issues/IssuesLayout'
 import Labels from './pages/issues/Labels'
 import TaskTriggers from './pages/issues/TaskTriggers'
 import Login from './pages/Login'
-import WhatsAppLayout from './pages/whatsapp/WhatsAppLayout'
-import WhatsAppTemplates from './pages/whatsapp/Templates'
-import Campaigns from './pages/whatsapp/Campaigns'
-import CampaignDetail from './pages/whatsapp/CampaignDetail'
 import { Scanlines, LiveClock } from './components/pach'
 import { SearchPalette } from './components/SearchPalette'
 import { GlobalIssueComposer, requestGlobalIssueComposer } from './pages/issues/IssueComposer'
@@ -43,9 +39,8 @@ const OUTER_NAV_ITEMS: readonly OuterNavItem[] = [
   { label: 'Calendar', path: '/calendar' },
   { label: 'Docs', path: '/docs' },
   { label: 'CRM', path: '/crm' },
-  { label: 'Marketing', path: '/marketing/content' },
+  { label: 'Marketing', path: '/marketing/newsletters/content' },
   { label: 'Finance', path: '/finance/dashboard' },
-  { label: 'WhatsApp', path: '/whatsapp/templates', requiresWhatsApp: true },
   { label: 'Design', path: '/design' },
   { label: 'Settings', path: '/settings/repositories' },
 ]
@@ -102,7 +97,6 @@ function useTheme() {
 function isNavPathActive(targetPath: string, pathname: string) {
   if (targetPath.startsWith('/finance')) return pathname.startsWith('/finance')
   if (targetPath.startsWith('/marketing')) return pathname.startsWith('/marketing')
-  if (targetPath.startsWith('/whatsapp')) return pathname.startsWith('/whatsapp')
   if (targetPath.startsWith('/settings')) return pathname.startsWith('/settings')
   return pathname === targetPath || pathname.startsWith(`${targetPath}/`)
 }
@@ -229,9 +223,8 @@ const MOBILE_NAV_ITEMS: Array<{
   { to: '/calendar', label: 'calendar', icon: CalendarDays },
   { to: '/docs', label: 'docs', icon: FileText },
   { to: '/crm', label: 'crm', icon: FolderKanban },
-  { to: '/marketing/content', label: 'marketing', icon: Megaphone },
+  { to: '/marketing/newsletters/content', label: 'marketing', icon: Megaphone },
   { to: '/finance/dashboard', label: 'finance', icon: CircleDollarSign },
-  { to: '/whatsapp/templates', label: 'whatsapp', icon: MessageCircleMore, requiresWhatsApp: true },
   { to: '/design', label: 'design', icon: Palette },
   { to: '/settings/repositories', label: 'settings', icon: Settings2 },
 ]
@@ -391,7 +384,6 @@ function AppShell() {
         if (item.path === '/issues') return location.pathname.startsWith('/issues')
         if (item.path === '/activity') return location.pathname.startsWith('/activity')
         if (item.path === '/calendar') return location.pathname.startsWith('/calendar')
-        if (item.path === '/whatsapp/templates') return location.pathname.startsWith('/whatsapp')
         if (item.path.startsWith('/settings')) return location.pathname.startsWith('/settings')
         return false
       })
@@ -408,7 +400,7 @@ function AppShell() {
     return () => window.removeEventListener('keydown', handleKeyDown)
   }, [location.pathname, navigate, visibleOuterNavItems])
 
-  if (!canAccessWhatsApp && location.pathname.startsWith('/whatsapp')) {
+  if (!canAccessWhatsApp && (location.pathname.startsWith('/whatsapp') || location.pathname.startsWith('/marketing/whatsapp'))) {
     return <Navigate to={HOME_PATH} replace />
   }
 
@@ -429,7 +421,7 @@ function AppShell() {
               <Route path="/activity" element={<Activity />} />
               <Route path="/activity/:activityEventId" element={<Activity />} />
               <Route path="/calendar" element={<CalendarPage />} />
-              <Route path="/marketing/*" element={<Marketing />} />
+              <Route path="/marketing/*" element={<Marketing canAccessWhatsApp={canAccessWhatsApp} />} />
               <Route path="/docs" element={<Docs />} />
               <Route path="/docs/:documentId" element={<Docs />} />
               <Route path="/finance/*" element={<Finance />} />
@@ -439,14 +431,10 @@ function AppShell() {
                 <Route path="triggers" element={<TaskTriggers />} />
                 <Route path=":issueId" element={<IssueDetail />} />
               </Route>
-              {canAccessWhatsApp && (
-                <Route path="/whatsapp" element={<WhatsAppLayout />}>
-                  <Route index element={<WhatsAppTemplates />} />
-                  <Route path="templates" element={<WhatsAppTemplates />} />
-                  <Route path="campaigns" element={<Campaigns />} />
-                  <Route path="campaigns/:id" element={<CampaignDetail />} />
-                </Route>
-              )}
+              <Route path="/whatsapp" element={<Navigate to="/marketing/whatsapp/templates" replace />} />
+              <Route path="/whatsapp/templates" element={<Navigate to="/marketing/whatsapp/templates" replace />} />
+              <Route path="/whatsapp/campaigns" element={<Navigate to="/marketing/whatsapp/campaigns" replace />} />
+              <Route path="/whatsapp/campaigns/:id" element={<LegacyWhatsAppCampaignRedirect />} />
               <Route path="/design" element={<Design />} />
               <Route path="/design/:templateSlug" element={<Design />} />
               <Route path="/settings/*" element={<SettingsPage />} />
@@ -489,7 +477,6 @@ function useVisibleOuterNavItems() {
             item.path === '/crm' ? FolderKanban :
             item.path.startsWith('/marketing') ? Megaphone :
             item.path.startsWith('/finance') ? CircleDollarSign :
-            item.path === '/whatsapp/templates' ? MessageCircleMore :
             item.path.startsWith('/settings') ? Settings2 :
             Palette,
         })),
@@ -500,6 +487,11 @@ function useVisibleOuterNavItems() {
 function LegacyDeckRedirect() {
   const { slug } = useParams<{ slug: string }>()
   return <Navigate to={slug ? `/design/${slug}` : '/design'} replace />
+}
+
+function LegacyWhatsAppCampaignRedirect() {
+  const { id } = useParams<{ id: string }>()
+  return <Navigate to={id ? `/marketing/whatsapp/campaigns/${id}` : '/marketing/whatsapp/campaigns'} replace />
 }
 
 function useVisibleMobileNavItems() {
