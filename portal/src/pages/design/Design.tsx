@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type CSSProperties, type DragEvent, type FormEvent, type KeyboardEvent } from 'react'
+import { useEffect, useMemo, useRef, useState, type DragEvent, type FormEvent, type KeyboardEvent } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { useQuery, useZero } from '@rocicorp/zero/react'
 import {
@@ -6,7 +6,6 @@ import {
   Bot,
   Braces,
   Check,
-  CheckCircle2,
   Download,
   ExternalLink,
   FileImage,
@@ -18,19 +17,15 @@ import {
   Search,
   Send,
   Sparkles,
-  Type,
   Trash2,
   UploadCloud,
   X,
 } from 'lucide-react'
-import { SlideRenderer } from '@decks/engine/SlideRenderer'
-import { getTheme } from '@decks/engine/themes'
 import { PachSelect, type PachSelectOption } from '../../components/PachSelect'
 import { config } from '../../config'
 import { authFetch } from '../../lib/auth'
 import type { Schema } from '../../zero-schema'
 import type { Mutators } from '../../mutators'
-import { legacyDesignTemplates, type LegacyDesignTemplate } from './legacyTemplates'
 
 type Organization = {
   id: string
@@ -44,9 +39,12 @@ type DesignSystemRow = {
   organizationId: string
   name: string
   slug: string
+  markdown: string
   tokens: Record<string, unknown>
   assets: Record<string, unknown>
   metadata: Record<string, unknown>
+  createdAt?: number
+  updatedAt?: number
 }
 
 type DesignTemplateRow = {
@@ -85,16 +83,22 @@ type DesignTemplateRunRow = {
   id: string
   organizationId: string
   templateId?: string | null
+  designSystemId?: string | null
   agentRunId?: string | null
   templateSlug?: string | null
   prompt: string
   status: string
   statusMessage?: string | null
+  sourceVersionId?: string | null
+  targetVersionId?: string | null
+  outputSpec?: Record<string, unknown>
+  metadata?: Record<string, unknown>
   createdAt: number
 }
 
 type AgentRunRow = {
   id: string
+  parentRunId?: string | null
   subjectType: string
   subjectId?: string | null
   workerId?: string | null
@@ -152,32 +156,7 @@ type TemplateListItem = {
   createdAt?: string
   currentVersionId?: string | null
   metadata?: Record<string, unknown>
-  legacy?: LegacyDesignTemplate
 }
-
-type DesignPalette = {
-  name: string
-  direction: string
-  accent: string
-  accentDeep: string
-  accentSoft: string
-  bg: string
-  ink: string
-  ink2: string
-  muted: string
-  muted2: string
-  surface: string
-  surface2: string
-  hairline: string
-  hairline2: string
-  colors: Array<{ label: string; value: string }>
-  typography: Array<{ label: string; value: string; sample: string; style: CSSProperties }>
-  metrics: Array<{ value: string; suffix?: string; label: string }>
-}
-
-const ARDIA_SANS = "'Inter Tight', ui-sans-serif, system-ui, sans-serif"
-const ARDIA_SERIF = "'Instrument Serif', 'Newsreader', Georgia, serif"
-const ARDIA_MONO = "'Geist Mono', ui-monospace, Menlo, monospace"
 
 const DESIGN_ASPECT_RATIOS = [
   { id: 'deck-landscape', label: 'deck landscape', width: 1920, height: 1080, ratio: '16:9' },
@@ -185,150 +164,8 @@ const DESIGN_ASPECT_RATIOS = [
   { id: 'mobile-story', label: 'mobile story', width: 1080, height: 1920, ratio: '9:16' },
   { id: 'square', label: 'square', width: 1080, height: 1080, ratio: '1:1' },
 ] as const
-
-const displayTextStyle: CSSProperties = {
-  fontFamily: ARDIA_SANS,
-  fontWeight: 200,
-  fontSize: 'clamp(56px, 7cqw, 96px)',
-  lineHeight: 0.95,
-  letterSpacing: 0,
-  overflowWrap: 'normal',
-  wordBreak: 'normal',
-}
-
-const h1TextStyle: CSSProperties = {
-  fontFamily: ARDIA_SANS,
-  fontWeight: 200,
-  fontSize: 'clamp(42px, 5.6cqw, 64px)',
-  lineHeight: 0.98,
-  letterSpacing: 0,
-}
-
-const h2TextStyle: CSSProperties = {
-  fontFamily: ARDIA_SANS,
-  fontWeight: 200,
-  fontSize: 'clamp(34px, 4.4cqw, 48px)',
-  lineHeight: 1.02,
-  letterSpacing: 0,
-}
-
-const serifDisplayStyle: CSSProperties = {
-  fontFamily: ARDIA_SERIF,
-  fontStyle: 'italic',
-  fontWeight: 400,
-  fontSize: 'clamp(40px, 5.6cqw, 64px)',
-  lineHeight: 1,
-  letterSpacing: 0,
-}
-
-const bodyTextStyle: CSSProperties = {
-  fontFamily: ARDIA_SANS,
-  fontWeight: 300,
-  fontSize: 16,
-  lineHeight: 1.65,
-  letterSpacing: 0,
-}
-
-const monoLabelStyle: CSSProperties = {
-  fontFamily: ARDIA_MONO,
-  fontWeight: 500,
-  fontSize: 10,
-  lineHeight: 1,
-  letterSpacing: '0.18em',
-  textTransform: 'uppercase',
-}
-
-const monoDataStyle: CSSProperties = {
-  fontFamily: ARDIA_MONO,
-  fontWeight: 400,
-  fontSize: 12,
-  lineHeight: 1.4,
-  letterSpacing: 0,
-}
-
-// Mirrors ../ardia/apps/buyers-ardia/DESIGN_SYSTEM.md and
-// ../ardia/packages/design-system/styles/tokens.css.
-const FALLBACK_DESIGN_SYSTEMS: Record<string, DesignPalette> = {
-  ardia: {
-    name: 'Ardia',
-    direction: 'Quiet Minimalist',
-    accent: '#E43F3F',
-    accentDeep: '#8B1E1E',
-    accentSoft: '#F2A09F',
-    bg: '#14110f',
-    ink: '#ede6db',
-    ink2: 'rgba(237, 230, 219, 0.78)',
-    muted: 'rgba(237, 230, 219, 0.42)',
-    muted2: 'rgba(237, 230, 219, 0.24)',
-    surface: '#1a1614',
-    surface2: '#1e1a17',
-    hairline: 'rgba(237, 230, 219, 0.10)',
-    hairline2: 'rgba(237, 230, 219, 0.06)',
-    colors: [
-      { label: '--accent', value: '#E43F3F' },
-      { label: '--accent-deep', value: '#8B1E1E' },
-      { label: '--accent-soft', value: '#F2A09F' },
-      { label: '--bg', value: '#14110f' },
-      { label: '--surface', value: '#1a1614' },
-      { label: '--surface-2', value: '#1e1a17' },
-      { label: '--fg', value: '#ede6db' },
-      { label: '--fg-2', value: 'rgba(237, 230, 219, 0.78)' },
-      { label: '--fg-dim', value: 'rgba(237, 230, 219, 0.42)' },
-      { label: '--hairline', value: 'rgba(237, 230, 219, 0.10)' },
-    ],
-    typography: [
-      { label: '--t-display / inter tight 200 / 96', value: 'Hero H1 only', sample: 'Cobra a tiempo.', style: displayTextStyle },
-      { label: '--t-h1 / inter tight 200 / 64', value: 'Page heroes', sample: 'Administracion exacta.', style: h1TextStyle },
-      { label: '--t-h2 / inter tight 200 / 48', value: 'Section titles', sample: 'Pagos, reportes, bancos.', style: h2TextStyle },
-      { label: '--t-serif-display / instrument serif italic / 64', value: 'Accent line under H1', sample: 'Concilia al instante.', style: serifDisplayStyle },
-      { label: '--t-body / inter tight 300 / 16', value: 'Paragraphs, max 58ch', sample: 'Administracion inmobiliaria, con menos friccion. Cobranza, conciliacion y reporting, en un mismo lugar.', style: bodyTextStyle },
-      { label: '--t-mono-label / geist mono 500 / 10', value: 'Eyebrows and system labels', sample: 'MODULO / HOY / 25 ABR 2026', style: monoLabelStyle },
-      { label: '--t-mono-data / geist mono 400 / 12', value: 'Numeric data in tables', sample: 'MXN 482,330.50 - 22.04.2026', style: monoDataStyle },
-    ],
-    metrics: [
-      { value: '94', suffix: '%', label: 'Pagos a tiempo' },
-      { value: '96', suffix: '%', label: 'Empates auto.' },
-      { value: '<30', suffix: 's', label: 'Por movimiento' },
-      { value: '4', label: 'Flujos' },
-    ],
-  },
-}
-
-const DEFAULT_DESIGN_SYSTEM: DesignPalette = {
-  name: 'Pach',
-  direction: 'Operational minimal',
-  accent: '#7dd3fc',
-  accentDeep: '#0f7490',
-  accentSoft: '#bae6fd',
-  bg: '#101112',
-  ink: '#f5f7f8',
-  ink2: '#c9d0d5',
-  muted: '#7b8188',
-  muted2: '#525861',
-  surface: '#181a1d',
-  surface2: '#202327',
-  hairline: 'rgba(245, 247, 248, 0.14)',
-  hairline2: 'rgba(245, 247, 248, 0.08)',
-  colors: [
-    { label: 'accent', value: '#7dd3fc' },
-    { label: 'ink', value: '#f5f7f8' },
-    { label: 'void', value: '#101112' },
-    { label: 'surface', value: '#181a1d' },
-    { label: 'muted', value: '#7b8188' },
-  ],
-  typography: [
-    { label: 'display', value: 'Display', sample: 'Build the system.', style: displayTextStyle },
-    { label: 'headline', value: 'Headline', sample: 'Work moves cleanly.', style: serifDisplayStyle },
-    { label: 'body', value: 'Body', sample: 'A precise operating surface for projects, agents, and decisions.', style: bodyTextStyle },
-    { label: 'mono', value: 'Mono', sample: 'RUN 028 - READY', style: monoLabelStyle },
-  ],
-  metrics: [
-    { value: '12', label: 'Systems' },
-    { value: '48', label: 'Runs' },
-    { value: '7', label: 'Templates' },
-    { value: '1', label: 'Operator' },
-  ],
-}
+const CUSTOM_ASPECT_RATIO_ID = 'custom'
+const NO_DESIGN_SYSTEM_ID = '__none__'
 
 function readString(value: unknown) {
   return typeof value === 'string' ? value : undefined
@@ -338,18 +175,14 @@ function readNumber(value: unknown) {
   return typeof value === 'number' && Number.isFinite(value) ? value : undefined
 }
 
+function readBoolean(value: unknown) {
+  return typeof value === 'boolean' ? value : undefined
+}
+
 function readRecord(value: unknown) {
   return value && typeof value === 'object' && !Array.isArray(value)
     ? (value as Record<string, unknown>)
     : undefined
-}
-
-function pickTokenColor(colors: Record<string, unknown> | undefined, keys: string[], fallback: string) {
-  for (const key of keys) {
-    const value = readString(colors?.[key])
-    if (value) return value
-  }
-  return fallback
 }
 
 function formatDate(value?: number | string) {
@@ -381,200 +214,45 @@ function slugifyTemplateName(value: string) {
     .replace(/^-+|-+$/g, '')
 }
 
-function buildDesignSystemRunMetadata(
-  organization: Organization,
-  system: DesignSystemRow | undefined,
-  palette: DesignPalette,
-) {
-  return {
-    required: true,
-    instruction: [
-      `Use ${organization.name}'s organization design system as a hard constraint for all deck edits.`,
-      'Do not introduce a competing visual direction unless the user explicitly asks to change the organization design system.',
-      'When changing layout, copy, colors, typography, components, or imagery, preserve the organization design system tokens and principles.',
-      `Use one of these predefined aspect ratios unless the user requests otherwise: ${DESIGN_ASPECT_RATIOS.map((ratio) => `${ratio.label} ${ratio.width}x${ratio.height}`).join(', ')}. Set manifest.dimensions or manifest.aspectRatioId so preview and export sizing stay predictable.`,
-      organization.project === 'ardia'
-        ? 'For Ardia, the Pach legacy ardia-one-pager is the default composition skeleton for every deck slide: top brand row, right metadata, dot/mono eyebrow, Inter Tight 200 title scale, one emotionally important inline Instrument Serif italic vermilion phrase, short body, hairline rows, transparent framed modules, footer hairline, and subtle off-canvas red radial glow. Use exact legacy proportions: on 1080x1528, side padding 64px, top brand row y=56px, hero y about 200px, title 64px/1.0 Inter Tight 200, body 19px/1.55 max 780px, hairline rows y about 575px, module y about 865px, footer pinned to bottom; scale proportionally for other aspect ratios. Buyer landing, data, chart, KPI, table, WhatsApp, and Universo aBanza modules are allowed, but they must inherit that one-pager skeleton rather than replacing the whole slide composition.'
-        : '',
-    ].join(' '),
-    system: system
-      ? {
-          id: system.id,
-          name: system.name,
-          slug: system.slug,
-          tokens: system.tokens,
-          assets: system.assets,
-          metadata: system.metadata,
-        }
-      : {
-          id: null,
-          name: palette.name,
-          slug: organization.project ?? 'organization-design-system',
-          tokens: {
-            direction: palette.direction,
-            colors: {
-              accent: palette.accent,
-              accentDeep: palette.accentDeep,
-              accentSoft: palette.accentSoft,
-              bg: palette.bg,
-              ink: palette.ink,
-              ink2: palette.ink2,
-              muted: palette.muted,
-              muted2: palette.muted2,
-              surface: palette.surface,
-              surface2: palette.surface2,
-              hairline: palette.hairline,
-              hairline2: palette.hairline2,
-            },
-            colorRamp: palette.colors,
-            typography: palette.typography.map((item) => ({
-              label: item.label,
-              value: item.value,
-              sample: item.sample,
-              style: item.style,
-            })),
-            metrics: palette.metrics,
-          },
-          assets: organization.project === 'ardia'
-            ? {
-                logo: {
-                  preferred: 'svg',
-                  usage: 'Use the Ardia building mark plus Instrument Serif italic wordmark. Do not draw a generic square logo.',
-                  publicCandidates: [
-                    { url: 'https://www.ardia.mx/ardia-iso-light.png', width: 190, height: 190, usage: 'light icon for dark backgrounds' },
-                    { url: 'https://www.ardia.mx/ardia-iso-dark.png', width: 162, height: 162, usage: 'dark icon for light backgrounds' },
-                  ],
-                },
-              }
-            : {},
-          metadata: {
-            fallbackSnapshot: true,
-            requiredDesignContract: organization.project === 'ardia'
-              ? {
-                  priority: 'hard_constraint',
-                  canonicalReferences: [
-                    'Ardia buyer landing',
-                    'Pach legacy ardia-one-pager deck',
-                    'Pach legacy Universo aBanza onboarding deck',
-                  ],
-                  nonNegotiables: [
-                    'Preserve the Ardia quiet-minimalist system unless the user explicitly asks to replace the organization design system.',
-                    'Use the legacy Ardia one-pager composition skeleton for the whole slide: top brand row, right metadata, dot/mono eyebrow, Inter Tight 200 title scale, inline red serif phrase, short body, hairline rows, transparent framed modules, footer hairline, and subtle off-canvas red glow.',
-                    'Use exact legacy one-pager proportions: on 1080x1528, side padding 64px, top brand row y=56px, hero y about 200px, title 64px/1.0 Inter Tight 200, body 19px/1.55 max 780px, hairline rows y about 575px, module y about 865px, footer pinned to bottom; scale proportionally for other aspect ratios. Do not invent larger title scales or wider margins.',
-                    'Charts, KPIs, tables, WhatsApp mocks, product surfaces, buyer-landing data panels, and Universo aBanza checklist modules are allowed, but they must be inserted into the one-pager skeleton and inherit its margins, type scale, hairline rhythm, transparent frames, and footer structure.',
-                    'Use Inter Tight 200 display titles, Geist Mono labels, and Instrument Serif italic vermilion as one emotionally important inline title phrase, accent word, or short accent line.',
-                    'Use real Ardia logo/assets; do not draw or invent a generic square logo.',
-                    'Use near-black backgrounds, whitespace, one-pixel hairlines, quiet data/product surfaces, and vermilion as a recurring low-area signal: dot, inline serif phrase, KPI unit, chart stroke/faint fill, CTA underline, status text.',
-                    'The legacy Ardia one-pager red atmosphere is allowed: one subtle off-canvas vermilion radial glow per slide, opacity 0.08-0.13, fading to transparent. Do not use neon, bokeh, blue/purple gradients, or opaque red panels.',
-                    'For decks, create fixed-size slide components and export a slides array so Pach renders separated slide frames.',
-                  ],
-                  forbiddenDrift: [
-                    'generic executive deck layouts',
-                    'generic dark SaaS cards',
-                    'blue or purple gradients',
-                    'neon glows, bokeh, glass panels, or glowing card stacks',
-                    'large serif primary titles',
-                    'all-italic headlines',
-                    'fake square logos',
-                    'opaque red panels or heavy red backgrounds',
-                    'one long scrolling document pretending to be slides',
-                  ],
-                }
-              : undefined,
-            agentInstruction: organization.project === 'ardia'
-              ? 'MANDATORY ARDIA DESIGN CONTRACT: use the Pach legacy ardia-one-pager as the composition skeleton for the whole slide. Treat metadata.requiredDesignContract as a QA checklist. Use exact legacy proportions: on 1080x1528, side padding 64px, top brand row y=56px, hero y about 200px, title 64px/1.0 Inter Tight 200, body 19px/1.55 max 780px, hairline rows y about 575px, module y about 865px, footer pinned to bottom; scale proportionally for other aspect ratios. Do not drift into generic executive decks, generic SaaS cards, blue/purple gradients, neon/glass/bokeh panels, large serif primary titles, all-italic headlines, fake square logos, opaque red panels, or one long scrolling document. Use Inter Tight 200 display titles, Geist Mono labels, one emotionally important inline Instrument Serif italic vermilion title phrase, hairlines, whitespace, recurring low-area vermilion signals, the allowed subtle off-canvas red radial glow, and the real Ardia logo asset or inline mark. Charts, KPIs, tables, WhatsApp mocks, and product/data surfaces are allowed, but they must inherit the one-pager margins, title scale, text hierarchy, hairline rhythm, transparent frames, footer, and subtle glow.'
-              : undefined,
-            avoid: organization.project === 'ardia'
-              ? [
-                  'large serif titles',
-                  'all-italic headlines',
-                  'fake square logos',
-                  'generic dark SaaS cards',
-                  'purple or blue gradients',
-                  'filled or opaque red blocks',
-                ]
-              : undefined,
-          },
-        },
-  }
-}
+function defaultDesignSystemMarkdown(organizationName: string) {
+  return `# ${organizationName} Design System
 
-function buildPalette(organization?: Organization, system?: DesignSystemRow): DesignPalette {
-  const base = FALLBACK_DESIGN_SYSTEMS[organization?.project ?? ''] ?? DEFAULT_DESIGN_SYSTEM
-  const tokens = system?.tokens ?? {}
-  const colors = readRecord(tokens.colors)
-  const typography = tokens.typography as Array<Record<string, unknown>> | undefined
-  const metrics = tokens.metrics as Array<Record<string, unknown>> | undefined
-  const accent = pickTokenColor(colors, ['accent', '--accent'], base.accent)
-  const accentDeep = pickTokenColor(colors, ['accentDeep', 'accent-deep', '--accent-deep'], base.accentDeep)
-  const accentSoft = pickTokenColor(colors, ['accentSoft', 'accent-soft', '--accent-soft'], base.accentSoft)
-  const bg = pickTokenColor(colors, ['bg', '--bg'], base.bg)
-  const ink = pickTokenColor(colors, ['ink', 'fg', '--fg'], base.ink)
-  const ink2 = pickTokenColor(colors, ['ink2', 'fg2', 'fg-2', '--fg-2'], base.ink2)
-  const muted = pickTokenColor(colors, ['muted', 'fgDim', 'fg-dim', '--fg-dim'], base.muted)
-  const muted2 = pickTokenColor(colors, ['muted2', 'fgDim2', 'fg-dim-2', '--fg-dim-2'], base.muted2)
-  const surface = pickTokenColor(colors, ['surface', '--surface'], base.surface)
-  const surface2 = pickTokenColor(colors, ['surface2', 'surface-2', '--surface-2'], base.surface2)
-  const hairline = pickTokenColor(colors, ['hairline', '--hairline'], base.hairline)
-  const hairline2 = pickTokenColor(colors, ['hairline2', 'hairline-2', '--hairline-2'], base.hairline2)
-  const normalizedColors = colors
-    ? [
-        { label: '--accent', value: accent },
-        { label: '--accent-deep', value: accentDeep },
-        { label: '--accent-soft', value: accentSoft },
-        { label: '--bg', value: bg },
-        { label: '--surface', value: surface },
-        { label: '--surface-2', value: surface2 },
-        { label: '--fg', value: ink },
-        { label: '--fg-2', value: ink2 },
-        { label: '--fg-dim', value: muted },
-        { label: '--hairline', value: hairline },
-      ]
-    : base.colors
+## Direction
 
-  return {
-    ...base,
-    name: system?.name ?? organization?.name ?? base.name,
-    direction: readString(tokens.direction) ?? base.direction,
-    accent,
-    accentDeep,
-    accentSoft,
-    bg,
-    ink,
-    ink2,
-    muted,
-    muted2,
-    surface,
-    surface2,
-    hairline,
-    hairline2,
-    colors: Array.isArray(tokens.colorRamp)
-      ? tokens.colorRamp
-          .map((item) => ({
-            label: readString((item as Record<string, unknown>).label) ?? 'color',
-            value: readString((item as Record<string, unknown>).value) ?? base.accent,
-          }))
-      : normalizedColors,
-    typography: Array.isArray(typography)
-      ? typography.map((item, index) => {
-          const fallbackStyle = base.typography[index]?.style ?? bodyTextStyle
-          const style = readRecord(item.style)
-          return {
-            label: readString(item.label) ?? 'type',
-            value: readString(item.value) ?? 'Type',
-            sample: readString(item.sample) ?? 'Sample text',
-            style: style ? ({ ...fallbackStyle, ...style } as CSSProperties) : fallbackStyle,
-          }
-        })
-      : base.typography,
-    metrics: Array.isArray(metrics)
-      ? metrics.map((item) => ({
-          value: String(readString(item.value) ?? readNumber(item.value) ?? '0'),
-          suffix: readString(item.suffix),
-          label: readString(item.label) ?? 'Metric',
-        }))
-      : base.metrics,
-  }
+Describe the visual direction, brand personality, and what the design should feel like.
+
+## Typography
+
+- Primary font:
+- Secondary/accent font:
+- Weights and hierarchy:
+
+## Color
+
+- Backgrounds:
+- Text:
+- Accent:
+- Avoid:
+
+## Layout
+
+- Composition:
+- Spacing:
+- Components:
+- Data/product surfaces:
+
+## Assets
+
+- Logos:
+- Imagery:
+- Product screenshots:
+
+## Deck Rules
+
+- Preferred slide structure:
+- Do:
+- Do not:
+`
 }
 
 function buildDbTemplateItems(rows: DesignTemplateRow[]): TemplateListItem[] {
@@ -599,6 +277,27 @@ function buildDbTemplateItems(rows: DesignTemplateRow[]): TemplateListItem[] {
       metadata,
     }
   })
+}
+
+function buildOutputSpec(aspectRatioId: string, customWidth: number, customHeight: number, slideCount: number) {
+  const preset = DESIGN_ASPECT_RATIOS.find((ratio) => ratio.id === aspectRatioId)
+  const width = preset?.width ?? clampDimension(customWidth, 320, 3840)
+  const height = preset?.height ?? clampDimension(customHeight, 320, 3840)
+  const safeSlideCount = Math.max(1, Math.min(30, Math.floor(slideCount || 1)))
+
+  return {
+    aspectRatioId: preset?.id ?? CUSTOM_ASPECT_RATIO_ID,
+    label: preset?.label ?? 'custom',
+    ratio: preset?.ratio ?? `${width}:${height}`,
+    width,
+    height,
+    slideCount: safeSlideCount,
+  }
+}
+
+function clampDimension(value: number, min: number, max: number) {
+  if (!Number.isFinite(value)) return min
+  return Math.max(min, Math.min(max, Math.round(value)))
 }
 
 function mergeRowsById<T extends { id: string }>(primary: T[], secondary: T[]) {
@@ -631,6 +330,11 @@ export default function Design() {
   const [pendingInputMedia, setPendingInputMedia] = useState<PendingAgentInputMedia[]>([])
   const [localCreatedTemplates, setLocalCreatedTemplates] = useState<DesignTemplateRow[]>([])
   const [localCreatedVersions, setLocalCreatedVersions] = useState<DesignTemplateVersionRow[]>([])
+  const [selectedDesignSystemId, setSelectedDesignSystemId] = useState<string>('')
+  const [selectedAspectRatioId, setSelectedAspectRatioId] = useState<string>('deck-landscape')
+  const [customWidth, setCustomWidth] = useState(1920)
+  const [customHeight, setCustomHeight] = useState(1080)
+  const [slideCount, setSlideCount] = useState(5)
 
   const typedOrganizations = organizations as Organization[]
   const typedSystems = designSystems as DesignSystemRow[]
@@ -650,24 +354,7 @@ export default function Design() {
   const typedProgressReports = agentRunProgressReports as AgentRunProgressReportRow[]
 
   const templates = useMemo(() => {
-    const dbItems = buildDbTemplateItems(typedDbTemplates)
-    return [
-      ...dbItems,
-      ...legacyDesignTemplates.map((template): TemplateListItem => ({
-        id: template.id,
-        slug: template.slug,
-        title: template.title,
-        project: template.project,
-        organizationProject: template.organizationProject,
-        type: template.type,
-        sourceKind: template.sourceKind,
-        description: template.description,
-        slideCount: template.slideCount,
-        dimensions: template.dimensions,
-        createdAt: template.createdAt,
-        legacy: template,
-      })),
-    ]
+    return buildDbTemplateItems(typedDbTemplates)
   }, [typedDbTemplates])
 
   const selectedTemplate = templates.find((template) => template.slug === templateSlug)
@@ -689,8 +376,29 @@ export default function Design() {
   }, [selectedOrganizationId, selectedTemplate, typedOrganizations])
 
   const selectedOrganization = typedOrganizations.find((organization) => organization.id === selectedOrganizationId)
-  const selectedSystem = typedSystems.find((system) => system.organizationId === selectedOrganizationId)
-  const palette = useMemo(() => buildPalette(selectedOrganization, selectedSystem), [selectedOrganization, selectedSystem])
+  const systemsForOrganization = useMemo(
+    () => typedSystems
+      .filter((system) => system.organizationId === selectedOrganizationId)
+      .sort((a, b) => {
+        const aDefault = readBoolean(a.metadata?.isDefault) ? 1 : 0
+        const bDefault = readBoolean(b.metadata?.isDefault) ? 1 : 0
+        if (aDefault !== bDefault) return bDefault - aDefault
+        return (b.updatedAt ?? 0) - (a.updatedAt ?? 0)
+      }),
+    [selectedOrganizationId, typedSystems],
+  )
+  const selectedSystem = systemsForOrganization.find((system) => system.id === selectedDesignSystemId)
+  const outputSpec = useMemo(
+    () => buildOutputSpec(selectedAspectRatioId, customWidth, customHeight, slideCount),
+    [selectedAspectRatioId, customWidth, customHeight, slideCount],
+  )
+
+  useEffect(() => {
+    if (!selectedOrganizationId) return
+    if (selectedDesignSystemId && systemsForOrganization.some((system) => system.id === selectedDesignSystemId)) return
+    const defaultSystem = systemsForOrganization.find((system) => readBoolean(system.metadata?.isDefault))
+    setSelectedDesignSystemId(defaultSystem?.id ?? '')
+  }, [selectedDesignSystemId, selectedOrganizationId, systemsForOrganization])
 
   const visibleTemplates = templates.filter((template) => {
     if (typeFilter !== 'all' && template.type !== typeFilter) return false
@@ -756,11 +464,60 @@ export default function Design() {
     setChatError(null)
     const mediaToUpload = pendingInputMedia
     try {
+      const latestDesignRun = [...runsForTemplate]
+        .reverse()
+        .find((run) => agentRunByDesignRunId.get(run.id) || run.agentRunId)
+      const latestAgentRun = latestDesignRun
+        ? agentRunByDesignRunId.get(latestDesignRun.id) ?? typedAgentRuns.find((run) => run.id === latestDesignRun.agentRunId)
+        : undefined
+      const hasPendingMedia = mediaToUpload.length > 0
+
+      if (latestAgentRun) {
+        const response = await authFetch(`${config.apiUrl}/design/runs/${encodeURIComponent(latestAgentRun.id)}/follow-up`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({
+            feedback: cleanPrompt,
+            pendingInputMediaCount: mediaToUpload.length,
+            designSystemId: selectedDesignSystemId || null,
+            outputSpec,
+          }),
+        })
+        const payload = await response.json().catch(() => ({})) as {
+          run?: { id?: string }
+          designRun?: { id?: string }
+          message?: string
+          error?: string
+        }
+        if (!response.ok) {
+          throw new Error(readString(payload.message) ?? readString(payload.error) ?? 'could not queue follow-up')
+        }
+
+        const agentRunId = readString(payload.run?.id)
+        const designRunId = readString(payload.designRun?.id)
+        if (hasPendingMedia && agentRunId) {
+          await uploadAgentInputMedia(agentRunId, mediaToUpload)
+          await z.mutate.agent_runs.update({
+            id: agentRunId,
+            status: 'queued',
+            statusMessage: latestAgentRun.workerId ? 'queued for same design agent worker' : 'queued for design agent worker',
+          })
+          if (designRunId) {
+            await z.mutate.design_template_runs.update({
+              id: designRunId,
+              status: 'queued',
+              statusMessage: 'queued for agent worker',
+            })
+          }
+        }
+        setPrompt('')
+        setPendingInputMedia([])
+        return
+      }
+
       const designRunId = crypto.randomUUID()
       const agentRunId = crypto.randomUUID()
       const branchName = `design/${selectedTemplate.slug}-${agentRunId.slice(0, 8)}`
-      const designSystemMetadata = buildDesignSystemRunMetadata(selectedOrganization, selectedSystem, palette)
-      const hasPendingMedia = mediaToUpload.length > 0
       await z.mutate.agent_runs.create({
         id: agentRunId,
         subjectType: 'design_template_run',
@@ -777,7 +534,7 @@ export default function Design() {
           requiredCapabilities: ['codex.local', 'pach-mcp'],
           queuedVia: 'design_template_chat',
           designTemplateRunId: designRunId,
-          designTemplateId: selectedTemplate.legacy ? undefined : selectedTemplate.id,
+          designTemplateId: selectedTemplate.id,
           designTemplateSlug: selectedTemplate.slug,
           designTemplateTitle: selectedTemplate.title,
           organizationId: selectedOrganization.id,
@@ -785,17 +542,16 @@ export default function Design() {
           organizationProject: selectedOrganization.project,
           sourceVersionId: selectedVersion?.id,
           prompt: cleanPrompt,
-          mustUseOrganizationDesignSystem: true,
+          designSystemId: selectedDesignSystemId || undefined,
+          outputSpec,
           pendingInputMediaCount: mediaToUpload.length,
-          designSystem: designSystemMetadata,
-          availableAspectRatios: DESIGN_ASPECT_RATIOS,
-          preferredAspectRatio: DESIGN_ASPECT_RATIOS[0],
         },
       })
       await z.mutate.design_template_runs.create({
         id: designRunId,
         organizationId: selectedOrganization.id,
-        templateId: selectedTemplate.legacy ? undefined : selectedTemplate.id,
+        templateId: selectedTemplate.id,
+        designSystemId: selectedDesignSystemId || undefined,
         agentRunId,
         templateSlug: selectedTemplate.slug,
         prompt: cleanPrompt,
@@ -805,12 +561,11 @@ export default function Design() {
         metadata: {
           templateTitle: selectedTemplate.title,
           sourceKind: selectedTemplate.sourceKind,
-          mustUseOrganizationDesignSystem: true,
-          designSystem: designSystemMetadata,
-          availableAspectRatios: DESIGN_ASPECT_RATIOS,
-          preferredAspectRatio: DESIGN_ASPECT_RATIOS[0],
+          designSystemId: selectedDesignSystemId || null,
+          outputSpec,
           agentRunId,
         },
+        outputSpec,
       })
       if (hasPendingMedia) {
         await uploadAgentInputMedia(agentRunId, mediaToUpload)
@@ -893,8 +648,8 @@ export default function Design() {
         styling: 'tailwind',
         googleFontsHref: 'https://fonts.googleapis.com/css2?family=Inter+Tight:wght@200;300;400;500&family=Instrument+Serif:ital@0;1&family=Geist+Mono:wght@400;500&display=swap',
         tailwindConfig: buildDefaultTailwindConfig(selectedOrganization),
-        aspectRatioId: 'deck-landscape',
-        dimensions: { width: 1920, height: 1080 },
+        aspectRatioId: outputSpec.aspectRatioId,
+        dimensions: { width: outputSpec.width, height: outputSpec.height },
       }
       const response = await authFetch(`${config.apiUrl}/design/templates`, {
         method: 'POST',
@@ -914,7 +669,8 @@ export default function Design() {
           metadata: {
             project: selectedOrganization.project,
             description: 'Draft deck template',
-            slideCount: 1,
+            slideCount: outputSpec.slideCount,
+            dimensions: `${outputSpec.width} x ${outputSpec.height}`,
           },
         }),
       })
@@ -935,7 +691,7 @@ export default function Design() {
 
   async function handleRenameTemplate(template: TemplateListItem, nextName: string) {
     const cleanName = nextName.trim()
-    if (!cleanName || template.legacy || cleanName === template.title) return
+    if (!cleanName || cleanName === template.title) return
 
     await z.mutate.design_templates.update({
       id: template.id,
@@ -954,8 +710,6 @@ export default function Design() {
   }
 
   async function handleDeleteTemplate(template: TemplateListItem) {
-    if (template.legacy) return
-
     const response = await authFetch(`${config.apiUrl}/design/templates/${encodeURIComponent(template.id)}`, {
       method: 'DELETE',
     })
@@ -967,6 +721,49 @@ export default function Design() {
     setLocalCreatedTemplates((current) => current.filter((row) => row.id !== template.id))
     setLocalCreatedVersions((current) => current.filter((row) => row.templateId !== template.id))
     navigate('/design')
+  }
+
+  async function handleCreateDesignSystem() {
+    if (!selectedOrganization) return
+    const id = crypto.randomUUID()
+    const name = systemsForOrganization.length ? 'New design system' : `${selectedOrganization.name} design system`
+    const slug = `${slugifyTemplateName(name)}-${Date.now().toString(36)}`
+    const isDefault = systemsForOrganization.length === 0
+    await z.mutate.design_systems.create({
+      id,
+      organizationId: selectedOrganization.id,
+      name,
+      slug,
+      markdown: defaultDesignSystemMarkdown(selectedOrganization.name),
+      metadata: { isDefault },
+    })
+    setSelectedDesignSystemId(id)
+  }
+
+  async function handleSaveDesignSystem(system: DesignSystemRow, updates: { name: string; slug: string; markdown: string; metadata: Record<string, unknown> }) {
+    await z.mutate.design_systems.update({
+      id: system.id,
+      name: updates.name,
+      slug: updates.slug,
+      markdown: updates.markdown,
+      metadata: updates.metadata,
+    })
+  }
+
+  async function handleDeleteDesignSystem(system: DesignSystemRow) {
+    await z.mutate.design_systems.delete({ id: system.id })
+    if (selectedDesignSystemId === system.id) setSelectedDesignSystemId('')
+  }
+
+  async function handleSetDefaultDesignSystem(system: DesignSystemRow | null) {
+    await Promise.all(systemsForOrganization.map((candidate) => z.mutate.design_systems.update({
+      id: candidate.id,
+      metadata: {
+        ...(candidate.metadata ?? {}),
+        isDefault: system ? candidate.id === system.id : false,
+      },
+    })))
+    setSelectedDesignSystemId(system?.id ?? '')
   }
 
   return (
@@ -1000,7 +797,18 @@ export default function Design() {
         chatError={chatError}
         onRenameTemplate={handleRenameTemplate}
         onDeleteTemplate={handleDeleteTemplate}
-        designSystemName={selectedSystem?.name ?? palette.name}
+        designSystems={systemsForOrganization}
+        selectedDesignSystemId={selectedDesignSystemId}
+        onDesignSystemChange={setSelectedDesignSystemId}
+        aspectRatioId={selectedAspectRatioId}
+        onAspectRatioChange={setSelectedAspectRatioId}
+        customWidth={customWidth}
+        onCustomWidthChange={setCustomWidth}
+        customHeight={customHeight}
+        onCustomHeightChange={setCustomHeight}
+        slideCount={slideCount}
+        onSlideCountChange={setSlideCount}
+        designSystemName={selectedSystem?.name ?? 'no design system'}
         onOpenAssets={() => setIsAssetsModalOpen(true)}
         onBack={() => navigate('/design')}
         onOpenTemplate={(slug) => navigate(`/design/${slug}`)}
@@ -1010,7 +818,16 @@ export default function Design() {
         {selectedTemplate ? (
           <TemplatePreview template={selectedTemplate} version={selectedVersion} />
         ) : (
-          <DesignSystemCanvas organization={selectedOrganization} palette={palette} />
+          <DesignSystemEditor
+            organization={selectedOrganization}
+            systems={systemsForOrganization}
+            selectedDesignSystemId={selectedDesignSystemId}
+            onSelectedDesignSystemChange={setSelectedDesignSystemId}
+            onCreateDesignSystem={handleCreateDesignSystem}
+            onSaveDesignSystem={handleSaveDesignSystem}
+            onDeleteDesignSystem={handleDeleteDesignSystem}
+            onSetDefaultDesignSystem={handleSetDefaultDesignSystem}
+          />
         )}
       </main>
 
@@ -1051,6 +868,17 @@ function DesignSidebar({
   chatError,
   onRenameTemplate,
   onDeleteTemplate,
+  designSystems,
+  selectedDesignSystemId,
+  onDesignSystemChange,
+  aspectRatioId,
+  onAspectRatioChange,
+  customWidth,
+  onCustomWidthChange,
+  customHeight,
+  onCustomHeightChange,
+  slideCount,
+  onSlideCountChange,
   designSystemName,
   onOpenAssets,
   onBack,
@@ -1080,6 +908,17 @@ function DesignSidebar({
   chatError: string | null
   onRenameTemplate: (template: TemplateListItem, nextName: string) => Promise<void>
   onDeleteTemplate: (template: TemplateListItem) => Promise<void>
+  designSystems: DesignSystemRow[]
+  selectedDesignSystemId: string
+  onDesignSystemChange: (id: string) => void
+  aspectRatioId: string
+  onAspectRatioChange: (id: string) => void
+  customWidth: number
+  onCustomWidthChange: (value: number) => void
+  customHeight: number
+  onCustomHeightChange: (value: number) => void
+  slideCount: number
+  onSlideCountChange: (value: number) => void
   designSystemName: string
   onOpenAssets: () => void
   onBack: () => void
@@ -1113,6 +952,17 @@ function DesignSidebar({
           chatError={chatError}
           onRenameTemplate={onRenameTemplate}
           onDeleteTemplate={onDeleteTemplate}
+          designSystems={designSystems}
+          selectedDesignSystemId={selectedDesignSystemId}
+          onDesignSystemChange={onDesignSystemChange}
+          aspectRatioId={aspectRatioId}
+          onAspectRatioChange={onAspectRatioChange}
+          customWidth={customWidth}
+          onCustomWidthChange={onCustomWidthChange}
+          customHeight={customHeight}
+          onCustomHeightChange={onCustomHeightChange}
+          slideCount={slideCount}
+          onSlideCountChange={onSlideCountChange}
           designSystemName={designSystemName}
           onOpenAssets={onOpenAssets}
           onBack={onBack}
@@ -1226,6 +1076,17 @@ function TemplateChatSidebar({
   chatError,
   onRenameTemplate,
   onDeleteTemplate,
+  designSystems,
+  selectedDesignSystemId,
+  onDesignSystemChange,
+  aspectRatioId,
+  onAspectRatioChange,
+  customWidth,
+  onCustomWidthChange,
+  customHeight,
+  onCustomHeightChange,
+  slideCount,
+  onSlideCountChange,
   designSystemName,
   onOpenAssets,
   onBack,
@@ -1243,6 +1104,17 @@ function TemplateChatSidebar({
   chatError: string | null
   onRenameTemplate: (template: TemplateListItem, nextName: string) => Promise<void>
   onDeleteTemplate: (template: TemplateListItem) => Promise<void>
+  designSystems: DesignSystemRow[]
+  selectedDesignSystemId: string
+  onDesignSystemChange: (id: string) => void
+  aspectRatioId: string
+  onAspectRatioChange: (id: string) => void
+  customWidth: number
+  onCustomWidthChange: (value: number) => void
+  customHeight: number
+  onCustomHeightChange: (value: number) => void
+  slideCount: number
+  onSlideCountChange: (value: number) => void
   designSystemName: string
   onOpenAssets: () => void
   onBack: () => void
@@ -1255,10 +1127,28 @@ function TemplateChatSidebar({
   const chatScrollRef = useRef<HTMLDivElement | null>(null)
   const chatBottomRef = useRef<HTMLDivElement | null>(null)
   const fileInputRef = useRef<HTMLInputElement | null>(null)
-  const canRename = !template.legacy
-  const canDelete = !template.legacy
+  const canRename = true
+  const canDelete = true
   const cleanTemplateName = templateName.trim()
   const hasNameChange = cleanTemplateName.length > 0 && cleanTemplateName !== template.title
+  const designSystemOptions: PachSelectOption[] = [
+    { value: NO_DESIGN_SYSTEM_ID, label: 'no design system' },
+    ...designSystems.map((system) => ({
+      value: system.id,
+      label: readBoolean(system.metadata?.isDefault) ? `${system.name} (default)` : system.name,
+    })),
+  ]
+  const selectedDesignSystemLabel = selectedDesignSystemId
+    ? designSystemOptions.find((option) => option.value === selectedDesignSystemId)?.label ?? 'design system'
+    : 'no design system'
+  const aspectRatioOptions: PachSelectOption[] = [
+    ...DESIGN_ASPECT_RATIOS.map((ratio) => ({
+      value: ratio.id,
+      label: `${ratio.ratio} / ${ratio.label}`,
+    })),
+    { value: CUSTOM_ASPECT_RATIO_ID, label: 'custom' },
+  ]
+  const selectedAspectRatioLabel = aspectRatioOptions.find((option) => option.value === aspectRatioId)?.label ?? 'custom'
   const chatScrollKey = runs.map((run) => {
     const agentRun = agentRunByDesignRunId.get(run.id)
     const latestProgress = agentRun ? progressReportsByRunId.get(agentRun.id)?.[0] : undefined
@@ -1425,7 +1315,9 @@ function TemplateChatSidebar({
               design agent
             </div>
             <p className="text-xs leading-5 text-fg-3">
-              Ready for edits. Prompts must preserve the {designSystemName} design system.
+              {designSystemName === 'no design system'
+                ? 'Ready for edits. No design-system context is selected.'
+                : `Ready for edits. Prompts will use ${designSystemName}.`}
             </p>
           </div>
           {runs.map((run) => (
@@ -1490,6 +1382,60 @@ function TemplateChatSidebar({
             ))}
           </div>
         ) : null}
+        <div className="mb-3 grid gap-2">
+          <PachSelect
+            value={selectedDesignSystemId || NO_DESIGN_SYSTEM_ID}
+            onChange={(value) => onDesignSystemChange(value === NO_DESIGN_SYSTEM_ID ? '' : value)}
+            options={designSystemOptions}
+            display={selectedDesignSystemLabel}
+            popupWidth="300"
+            triggerClassName="flex h-9 w-full items-center justify-between border border-edge/20 bg-pit-3 px-2.5 text-left font-mono text-[10px] uppercase tracking-label text-fg-2 outline-none transition hover:border-edge/32 hover:bg-accent-fill/4 focus-visible:border-accent focus-visible:shadow-glow-xs"
+          />
+          <div className="grid grid-cols-[minmax(0,1fr)_74px] gap-2">
+            <PachSelect
+              value={aspectRatioId}
+              onChange={onAspectRatioChange}
+              options={aspectRatioOptions}
+              display={selectedAspectRatioLabel}
+              popupWidth="260"
+              triggerClassName="flex h-9 min-w-0 items-center justify-between border border-edge/20 bg-pit-3 px-2.5 text-left font-mono text-[10px] uppercase tracking-label text-fg-2 outline-none transition hover:border-edge/32 hover:bg-accent-fill/4 focus-visible:border-accent focus-visible:shadow-glow-xs"
+            />
+            <input
+              value={slideCount}
+              onChange={(event) => onSlideCountChange(Math.max(1, Math.min(30, Number(event.target.value) || 1)))}
+              className="h-9 w-full border border-edge/20 bg-pit-3 px-2 text-center font-mono text-[10px] uppercase tracking-label text-fg-2 outline-none transition focus:border-accent/60"
+              type="number"
+              min={1}
+              max={30}
+              aria-label="slide count"
+              title="slide count"
+            />
+          </div>
+          {aspectRatioId === CUSTOM_ASPECT_RATIO_ID && (
+            <div className="grid grid-cols-2 gap-2">
+              <input
+                value={customWidth}
+                onChange={(event) => onCustomWidthChange(clampDimension(Number(event.target.value), 320, 3840))}
+                className="h-9 border border-edge/20 bg-pit-3 px-2 font-mono text-[10px] uppercase tracking-label text-fg-2 outline-none transition focus:border-accent/60"
+                type="number"
+                min={320}
+                max={3840}
+                aria-label="custom width"
+                title="custom width"
+              />
+              <input
+                value={customHeight}
+                onChange={(event) => onCustomHeightChange(clampDimension(Number(event.target.value), 320, 3840))}
+                className="h-9 border border-edge/20 bg-pit-3 px-2 font-mono text-[10px] uppercase tracking-label text-fg-2 outline-none transition focus:border-accent/60"
+                type="number"
+                min={320}
+                max={3840}
+                aria-label="custom height"
+                title="custom height"
+              />
+            </div>
+          )}
+        </div>
         <textarea
           value={prompt}
           onChange={(event) => onPromptChange(event.target.value)}
@@ -1606,6 +1552,235 @@ function formatRunPhase(phase: string) {
     .replace(/\b\w/g, (letter) => letter.toUpperCase())
 }
 
+function DesignSystemEditor({
+  organization,
+  systems,
+  selectedDesignSystemId,
+  onSelectedDesignSystemChange,
+  onCreateDesignSystem,
+  onSaveDesignSystem,
+  onDeleteDesignSystem,
+  onSetDefaultDesignSystem,
+}: {
+  organization?: Organization
+  systems: DesignSystemRow[]
+  selectedDesignSystemId: string
+  onSelectedDesignSystemChange: (id: string) => void
+  onCreateDesignSystem: () => Promise<void>
+  onSaveDesignSystem: (system: DesignSystemRow, updates: { name: string; slug: string; markdown: string; metadata: Record<string, unknown> }) => Promise<void>
+  onDeleteDesignSystem: (system: DesignSystemRow) => Promise<void>
+  onSetDefaultDesignSystem: (system: DesignSystemRow | null) => Promise<void>
+}) {
+  const selectedSystem = systems.find((system) => system.id === selectedDesignSystemId) ?? null
+  const [draftName, setDraftName] = useState(selectedSystem?.name ?? '')
+  const [draftSlug, setDraftSlug] = useState(selectedSystem?.slug ?? '')
+  const [draftMarkdown, setDraftMarkdown] = useState(selectedSystem?.markdown ?? '')
+  const [isSaving, setIsSaving] = useState(false)
+  const [saveError, setSaveError] = useState<string | null>(null)
+  const hasChanges = Boolean(selectedSystem && (
+    draftName !== selectedSystem.name ||
+    draftSlug !== selectedSystem.slug ||
+    draftMarkdown !== selectedSystem.markdown
+  ))
+
+  useEffect(() => {
+    setDraftName(selectedSystem?.name ?? '')
+    setDraftSlug(selectedSystem?.slug ?? '')
+    setDraftMarkdown(selectedSystem?.markdown ?? '')
+    setSaveError(null)
+    setIsSaving(false)
+  }, [selectedSystem?.id])
+
+  async function handleSave(event: FormEvent) {
+    event.preventDefault()
+    if (!selectedSystem || isSaving) return
+    const cleanName = draftName.trim()
+    const cleanSlug = slugifyTemplateName(draftSlug || cleanName)
+    if (!cleanName || !cleanSlug) {
+      setSaveError('name and slug are required')
+      return
+    }
+
+    setIsSaving(true)
+    setSaveError(null)
+    try {
+      await onSaveDesignSystem(selectedSystem, {
+        name: cleanName,
+        slug: cleanSlug,
+        markdown: draftMarkdown,
+        metadata: selectedSystem.metadata ?? {},
+      })
+    } catch (error) {
+      setSaveError(error instanceof Error ? error.message : 'could not save design system')
+    } finally {
+      setIsSaving(false)
+    }
+  }
+
+  async function handleDelete() {
+    if (!selectedSystem || isSaving) return
+    if (!window.confirm(`Delete "${selectedSystem.name}"? Design runs can still keep their saved run metadata, but this design system will no longer be selectable.`)) return
+    setIsSaving(true)
+    setSaveError(null)
+    try {
+      await onDeleteDesignSystem(selectedSystem)
+    } catch (error) {
+      setSaveError(error instanceof Error ? error.message : 'could not delete design system')
+      setIsSaving(false)
+    }
+  }
+
+  async function handleSetDefault() {
+    if (!selectedSystem || isSaving) return
+    setIsSaving(true)
+    setSaveError(null)
+    try {
+      await onSetDefaultDesignSystem(readBoolean(selectedSystem.metadata?.isDefault) ? null : selectedSystem)
+    } catch (error) {
+      setSaveError(error instanceof Error ? error.message : 'could not update default')
+    } finally {
+      setIsSaving(false)
+    }
+  }
+
+  if (!organization) {
+    return (
+      <div className="flex h-full items-center justify-center bg-pit px-6 text-center font-mono text-sm lowercase text-fg-4">
+        select an organization
+      </div>
+    )
+  }
+
+  return (
+    <div className="grid h-full min-h-0 bg-pit text-fg-1 lg:grid-cols-[320px_minmax(0,1fr)]">
+      <aside className="min-h-0 overflow-y-auto border-r border-edge/12 bg-void/40">
+        <div className="border-b border-edge/12 px-5 py-4">
+          <div className="mb-1 flex items-center gap-2 font-mono text-[10px] uppercase tracking-label text-accent">
+            <Palette className="h-3.5 w-3.5" />
+            design systems
+          </div>
+          <h1 className="font-mono text-lg font-semibold lowercase text-fg-1">{organization.name}</h1>
+          <button
+            type="button"
+            onClick={() => void onCreateDesignSystem()}
+            className="mt-4 inline-flex h-8 items-center gap-1.5 border border-accent-fill/25 bg-accent-fill/8 px-3 font-mono text-[10px] uppercase tracking-label text-accent transition hover:bg-accent-fill/14"
+          >
+            <Plus className="h-3.5 w-3.5" />
+            new system
+          </button>
+        </div>
+        <div>
+          {systems.map((system) => (
+            <button
+              key={system.id}
+              type="button"
+              onClick={() => onSelectedDesignSystemChange(system.id)}
+              className={`block w-full border-b border-edge/10 px-5 py-4 text-left transition ${system.id === selectedDesignSystemId ? 'bg-accent-fill/8' : 'hover:bg-accent-fill/4'}`}
+            >
+              <span className="block truncate font-mono text-sm font-semibold lowercase text-fg-1">{system.name}</span>
+              <span className="mt-2 flex flex-wrap items-center gap-2 font-mono text-[9px] uppercase tracking-label text-fg-4">
+                <span>{system.slug}</span>
+                {readBoolean(system.metadata?.isDefault) ? <span className="text-accent">default</span> : null}
+              </span>
+            </button>
+          ))}
+          {systems.length === 0 && (
+            <div className="px-5 py-12 text-center">
+              <Palette className="mx-auto mb-4 h-8 w-8 text-fg-4" />
+              <p className="font-mono text-sm lowercase text-fg-2">no design systems</p>
+              <p className="mt-2 text-xs leading-5 text-fg-4">
+                Create one to give design runs explicit brand context. Leaving this empty means runs get no design-system prompt.
+              </p>
+            </div>
+          )}
+        </div>
+      </aside>
+      <main className="min-h-0 overflow-y-auto px-5 py-5 md:px-8 md:py-7">
+        {selectedSystem ? (
+          <form onSubmit={handleSave} className="mx-auto flex min-h-full max-w-5xl flex-col">
+            <div className="mb-5 flex flex-wrap items-start justify-between gap-4">
+              <div>
+                <div className="mb-2 font-mono text-[10px] uppercase tracking-label text-fg-4">markdown source</div>
+                <h2 className="font-mono text-2xl font-semibold lowercase text-fg-1">{selectedSystem.name}</h2>
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => void handleSetDefault()}
+                  disabled={isSaving}
+                  className="inline-flex h-9 items-center border border-edge/20 bg-pit-3 px-3 font-mono text-[10px] uppercase tracking-label text-fg-3 transition hover:border-edge/40 hover:text-accent disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  {readBoolean(selectedSystem.metadata?.isDefault) ? 'unset default' : 'make default'}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void handleDelete()}
+                  disabled={isSaving}
+                  className="inline-flex h-9 w-9 items-center justify-center border border-edge/20 bg-pit-3 text-fg-3 transition hover:border-fail/40 hover:text-fail disabled:cursor-not-allowed disabled:opacity-50"
+                  title="delete design system"
+                  aria-label="delete design system"
+                >
+                  <Trash2 className="h-4 w-4" />
+                </button>
+                <button
+                  type="submit"
+                  disabled={!hasChanges || isSaving}
+                  className="inline-flex h-9 items-center gap-2 border border-accent-fill/30 bg-accent-fill/10 px-4 font-mono text-[10px] uppercase tracking-label text-accent transition hover:bg-accent-fill/16 disabled:cursor-not-allowed disabled:border-edge/12 disabled:bg-pit-3 disabled:text-fg-4"
+                >
+                  <Check className="h-3.5 w-3.5" />
+                  {isSaving ? 'saving' : 'save'}
+                </button>
+              </div>
+            </div>
+            <div className="mb-4 grid gap-3 md:grid-cols-[minmax(0,1fr)_260px]">
+              <label className="block">
+                <span className="mb-2 block font-mono text-[10px] uppercase tracking-label text-fg-4">name</span>
+                <input
+                  value={draftName}
+                  onChange={(event) => setDraftName(event.target.value)}
+                  className="h-10 w-full border border-edge/20 bg-pit-3 px-3 font-mono text-sm text-fg-1 outline-none transition focus:border-accent/60"
+                />
+              </label>
+              <label className="block">
+                <span className="mb-2 block font-mono text-[10px] uppercase tracking-label text-fg-4">slug</span>
+                <input
+                  value={draftSlug}
+                  onChange={(event) => setDraftSlug(event.target.value)}
+                  className="h-10 w-full border border-edge/20 bg-pit-3 px-3 font-mono text-sm text-fg-1 outline-none transition focus:border-accent/60"
+                />
+              </label>
+            </div>
+            <textarea
+              value={draftMarkdown}
+              onChange={(event) => setDraftMarkdown(event.target.value)}
+              className="min-h-[520px] flex-1 resize-none border border-edge/20 bg-void px-4 py-4 font-mono text-sm leading-6 text-fg-1 outline-none transition placeholder:text-fg-4 focus:border-accent/60"
+              spellCheck={false}
+              placeholder="# Design system"
+            />
+            {saveError ? <div className="mt-4 border border-fail/25 bg-fail/5 px-3 py-2 text-xs text-fail">{saveError}</div> : null}
+          </form>
+        ) : (
+          <div className="flex h-full min-h-[520px] flex-col items-center justify-center text-center">
+            <Palette className="mb-4 h-9 w-9 text-fg-4" />
+            <p className="font-mono text-sm lowercase text-fg-2">select or create a design system</p>
+            <p className="mt-2 max-w-sm text-xs leading-5 text-fg-4">
+              Design runs only receive design-system context when one is explicitly selected.
+            </p>
+            <button
+              type="button"
+              onClick={() => void onCreateDesignSystem()}
+              className="mt-5 inline-flex h-9 items-center gap-2 border border-accent-fill/25 bg-accent-fill/8 px-4 font-mono text-[10px] uppercase tracking-label text-accent transition hover:bg-accent-fill/14"
+            >
+              <Plus className="h-3.5 w-3.5" />
+              new system
+            </button>
+          </div>
+        )}
+      </main>
+    </div>
+  )
+}
+
 function DesignAssetsModal({
   organization,
   template,
@@ -1650,7 +1825,7 @@ function DesignAssetsModal({
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({
           organizationId: organization.id,
-          templateId: template?.legacy ? undefined : template?.id,
+          templateId: template?.id,
           name: assetName.trim() || selectedFile.name,
           fileName: selectedFile.name,
           mimeType: selectedFile.type || 'application/octet-stream',
@@ -1906,24 +2081,6 @@ function TemplatePreview({
   version?: DesignTemplateVersionRow
 }) {
   const iframeRef = useRef<HTMLIFrameElement | null>(null)
-
-  if (template.legacy) {
-    const theme = getTheme(template.legacy.config.theme)
-    return (
-      <div className="h-full min-h-0 overflow-hidden">
-        <SlideRenderer
-          slides={template.legacy.slides}
-          title={template.legacy.config.title}
-          description={`${template.legacy.slides.length} slides / ${template.legacy.config.dimensions.width} x ${template.legacy.config.dimensions.height}px`}
-          width={template.legacy.config.dimensions.width}
-          height={template.legacy.config.dimensions.height}
-          theme={theme}
-          filename={template.slug}
-          ctaLinks={template.legacy.config.ctaLinks}
-        />
-      </div>
-    )
-  }
 
   const previewUrl = getTemplatePreviewUrl(version)
 
@@ -2357,215 +2514,6 @@ function PreviewStat({ label, value }: { label: string; value: string }) {
     <div className="border border-edge/12 bg-pit-2 px-4 py-4">
       <div className="font-mono text-[9px] uppercase tracking-label text-fg-4">{label}</div>
       <div className="mt-2 font-mono text-sm text-fg-1">{value}</div>
-    </div>
-  )
-}
-
-function DesignSystemCanvas({
-  organization,
-  palette,
-}: {
-  organization?: Organization
-  palette: DesignPalette
-}) {
-  return (
-    <div
-      className="h-full w-full min-w-0 overflow-y-auto overflow-x-hidden bg-pit px-4 py-6 md:px-8 md:py-8"
-      style={{
-        color: palette.ink,
-        fontFamily: ARDIA_SANS,
-        containerType: 'inline-size',
-      }}
-    >
-      <div
-        className="mx-auto w-full max-w-[1360px] min-w-0 border px-5 py-10 md:px-8 md:py-12 lg:px-10"
-        style={{ background: palette.bg, borderColor: palette.hairline }}
-      >
-        <div className="mb-20 grid min-w-0 gap-10 md:grid-cols-[minmax(0,1.1fr)_minmax(220px,0.9fr)]">
-          <div className="min-w-0">
-            <div
-              className="mb-7 flex items-center gap-2"
-              style={{ ...monoLabelStyle, color: palette.accent }}
-            >
-              <span className="h-1 w-1 rounded-full" style={{ background: palette.accent }} />
-              direction d
-            </div>
-            <h1
-              className="min-w-0"
-              style={{
-                ...h1TextStyle,
-                color: palette.ink,
-                fontSize: 'clamp(48px, 6cqw, 72px)',
-              }}
-            >
-              Quiet{' '}
-              <span style={{ fontFamily: ARDIA_SERIF, fontStyle: 'italic', fontWeight: 400, color: palette.accent }}>
-                minimalist
-              </span>
-            </h1>
-            <p className="mt-6 max-w-[58ch]" style={{ ...bodyTextStyle, color: palette.muted }}>
-              Maximum restraint. Ultra-light weights, a single hairline rule, whitespace instead of containers.
-              A vermilion dot where other directions use a full color block. Reads as confident, almost
-              Scandinavian.
-            </p>
-          </div>
-          <div
-            className="self-end text-left md:text-right"
-            style={{ ...monoLabelStyle, color: palette.muted }}
-          >
-            <div>{organization?.project ?? 'organization'} / design surface</div>
-            <div style={{ color: palette.accent }}>one hairline / one dot</div>
-          </div>
-        </div>
-
-        <section className="mb-20 grid min-w-0 gap-8 md:grid-cols-[minmax(118px,14cqw)_minmax(0,1fr)]">
-          <SectionLabel icon={Type} label="type specimen" palette={palette} />
-          <div className="min-w-0">
-            {palette.typography.map((item) => (
-              <div
-                key={item.label}
-                className="grid min-w-0 gap-4 border-b py-7 first:pt-0 md:grid-cols-[minmax(130px,16cqw)_minmax(0,1fr)]"
-                style={{ borderColor: palette.hairline }}
-              >
-                <div style={{ ...monoLabelStyle, color: palette.muted }}>
-                  {item.label}
-                </div>
-                <div className="min-w-0">
-                  <div
-                    className="min-w-0"
-                    style={{ ...item.style, color: palette.ink }}
-                  >
-                    {item.sample}
-                  </div>
-                  <div className="mt-3" style={{ ...monoLabelStyle, color: palette.muted }}>
-                    {item.value}
-                  </div>
-                </div>
-              </div>
-            ))}
-          </div>
-        </section>
-
-        <section className="mb-20">
-          <SectionLabel icon={Palette} label="color system" palette={palette} />
-          <div className="mt-8 grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
-            {palette.colors.map((color) => (
-              <div
-                key={color.label}
-                className="min-w-0 border p-3"
-                style={{ borderColor: palette.hairline, background: palette.surface }}
-              >
-                <div className="mb-12 h-14 border" style={{ background: color.value, borderColor: palette.hairline2 }} />
-                <div style={{ ...monoLabelStyle, color: palette.muted }}>{color.label}</div>
-                <div className="mt-1 break-words" style={{ ...monoDataStyle, color: palette.ink }}>{color.value}</div>
-              </div>
-            ))}
-          </div>
-        </section>
-
-        <section className="mb-20">
-          <SectionLabel icon={CheckCircle2} label="numbers" palette={palette} />
-          <div className="mt-8 grid grid-cols-2 gap-8 md:grid-cols-4">
-            {palette.metrics.map((metric) => (
-              <div key={metric.label} className="min-w-0">
-                <div style={{ fontFamily: ARDIA_SANS, fontWeight: 200, lineHeight: 0.95, fontSize: 'clamp(48px, 6cqw, 72px)', color: palette.ink }}>
-                  {metric.value}
-                  {metric.suffix && (
-                    <span
-                      className="ml-1"
-                      style={{ fontFamily: ARDIA_SERIF, fontStyle: 'italic', fontSize: 22, color: palette.accent }}
-                    >
-                      {metric.suffix}
-                    </span>
-                  )}
-                </div>
-                <div className="mt-3" style={{ ...monoDataStyle, color: palette.muted }}>{metric.label}</div>
-              </div>
-            ))}
-          </div>
-        </section>
-
-        <section className="grid min-w-0 gap-10 lg:grid-cols-[minmax(280px,0.85fr)_minmax(0,1.15fr)]">
-          <div>
-            <SectionLabel icon={Sparkles} label="buttons and links" palette={palette} />
-            <div className="mt-8 flex flex-wrap items-center gap-6 text-sm">
-              <button
-                type="button"
-                className="border-b pb-1"
-                style={{ ...bodyTextStyle, borderColor: palette.accent, color: palette.ink }}
-              >
-                Solicitar demo <span style={{ color: palette.accent }}>-&gt;</span>
-              </button>
-              <button type="button" style={{ ...bodyTextStyle, color: palette.muted }}>Ver producto</button>
-              <button
-                type="button"
-                style={{ fontFamily: ARDIA_SERIF, fontStyle: 'italic', fontSize: 16, color: palette.muted }}
-              >
-                conversar
-              </button>
-            </div>
-            <blockquote
-              className="mt-10 max-w-[32rem]"
-              style={{ fontFamily: ARDIA_SERIF, fontStyle: 'italic', fontSize: 28, lineHeight: 1.22, color: palette.ink }}
-            >
-              "Conciliar 8 millones solia tomar tres dias. Ahora son <span style={{ color: palette.accent }}>treinta segundos</span>."
-            </blockquote>
-          </div>
-
-          <div className="min-w-0">
-            <SectionLabel icon={Layers3} label="product surface" palette={palette} />
-            <div className="mt-8 min-w-0 border px-5 py-5 md:px-6" style={{ borderColor: palette.hairline, background: palette.surface }}>
-              <div className="mb-6 flex flex-wrap items-center justify-between gap-3 border-b pb-4" style={{ borderColor: palette.hairline }}>
-                <div style={{ fontFamily: ARDIA_SERIF, fontStyle: 'italic', fontSize: 14, color: palette.ink }}>Conciliacion</div>
-                <div style={{ ...monoLabelStyle, color: palette.muted }}>22 abr / 14:08</div>
-              </div>
-              <div className="grid gap-8 md:grid-cols-2">
-                <div className="min-w-0">
-                  <div style={{ ...monoLabelStyle, color: palette.muted }}>Empates hoy</div>
-                  <div className="mt-3" style={{ fontFamily: ARDIA_SANS, fontWeight: 200, fontSize: 'clamp(42px, 5cqw, 54px)', lineHeight: 1, color: palette.ink }}>
-                    96.07<span className="ml-1" style={{ fontFamily: ARDIA_SERIF, fontStyle: 'italic', fontSize: 18, color: palette.accent }}>%</span>
-                  </div>
-                  <div className="mt-3" style={{ ...monoDataStyle, color: palette.muted }}>1,247 de 1,298 / 51 en revision</div>
-                </div>
-                <div className="min-w-0">
-                  <div style={{ ...monoLabelStyle, color: palette.muted }}>Saldo</div>
-                  <div className="mt-4" style={{ fontFamily: ARDIA_SANS, fontWeight: 200, fontSize: 34, lineHeight: 1, color: palette.ink }}>8.42M</div>
-                  <div className="mt-3" style={{ ...monoDataStyle, color: palette.muted }}>MXN / +142,300 vs. ayer</div>
-                </div>
-              </div>
-              <div className="mt-8 space-y-3">
-                {['BBVA 8042 - D. Ramirez - U304', 'Santander 1168 - M. Orozco - U211', 'Banorte 8913 - Casa Tlalpan SA'].map((row, index) => (
-                  <div
-                    key={row}
-                    className="grid min-w-0 grid-cols-[minmax(0,1fr)_auto] gap-4 border-t pt-3"
-                    style={{ ...monoDataStyle, borderColor: palette.hairline2, color: index === 2 ? palette.ink : palette.muted }}
-                  >
-                    <span className="min-w-0 truncate">{row}</span>
-                    <span style={{ color: index === 2 ? palette.accent : palette.muted }}>ok</span>
-                  </div>
-                ))}
-              </div>
-            </div>
-          </div>
-        </section>
-      </div>
-    </div>
-  )
-}
-
-function SectionLabel({
-  icon: Icon,
-  label,
-  palette,
-}: {
-  icon: typeof Type
-  label: string
-  palette: DesignPalette
-}) {
-  return (
-    <div className="flex items-center gap-2" style={{ ...monoLabelStyle, color: palette.muted }}>
-      <Icon className="h-3.5 w-3.5" />
-      {label}
     </div>
   )
 }

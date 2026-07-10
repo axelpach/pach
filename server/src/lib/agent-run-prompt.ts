@@ -82,6 +82,7 @@ export function buildGeneralMcpPrompt(run: AgentRunPromptRecord) {
   const feedback = readMetadataString(run.metadata, 'feedback')
   const codexSessionId = readMetadataString(run.metadata, 'codexSessionId')
   if (feedback && codexSessionId) {
+    if (run.subjectType === 'design_template_run') return buildDesignTemplateFollowUpPrompt(run)
     return buildFollowUpContinuationPrompt({
       feedback,
       metadata: run.metadata,
@@ -249,8 +250,10 @@ function buildDesignTemplateMcpPrompt(run: AgentRunPromptRecord) {
   const templateSlug = readMetadataString(run.metadata, 'designTemplateSlug')
   const templateId = readMetadataString(run.metadata, 'designTemplateId')
   const organizationProject = readMetadataString(run.metadata, 'organizationProject')
+  const designSystemId = readMetadataString(run.metadata, 'designSystemId')
   const designTemplateRunId = readMetadataString(run.metadata, 'designTemplateRunId') ?? run.subjectId ?? undefined
   const attachments = formatAgentInputMediaPrompt(run.metadata)
+  const outputSpec = formatOutputSpec(run.metadata)
   return [
     'You are Pach design template MCP worker.',
     '',
@@ -260,23 +263,72 @@ function buildDesignTemplateMcpPrompt(run: AgentRunPromptRecord) {
     designTemplateRunId ? `Design template run id: ${designTemplateRunId}` : null,
     templateId ? `Template id: ${templateId}` : null,
     templateSlug ? `Template slug: ${templateSlug}` : null,
+    designSystemId ? `Selected design system id: ${designSystemId}` : 'Selected design system id: none',
     organizationProject ? `Organization project: ${organizationProject}` : null,
-    organizationProject ? `If deeper source context is needed, read the related project repo at /home/pach/workspaces/repos/axelpach/${organizationProject} when that path exists.` : null,
     prompt ? `User prompt: ${prompt}` : null,
+    outputSpec,
     attachments,
     '',
     'Workflow:',
-    '1. Read the template with pach.design.template.get using the template id or slug above.',
-    '2. Follow agentInstructions.mustUseOrganizationDesignSystem from the template response as a hard constraint. Inspect organizationDesignSystem.tokens, organizationDesignSystem.assets, and organizationDesignSystem.metadata before designing.',
+    designSystemId
+      ? '1. Read the template with pach.design.template.get using the template id or slug above and pass the selected designSystemId. Use organizationDesignSystem.markdown as the selected design-system context.'
+      : '1. Read the template with pach.design.template.get using the template id or slug above. Do not pass a designSystemId and do not invent organization-specific design-system context.',
+    '2. Respect the selected output settings above, including dimensions/aspect ratio and requested slide count.',
     '3. Report progress with pach.progress.report and include the agent run id.',
     '4. Edit or create the template source files requested by the user. Prefer React source with manifest.entry set to src/Template.tsx. For deck templates, export one React component per slide and export const slides = [CoverSlide, ...] so Pach can preview them as separated, scaled slide frames.',
-    organizationProject === 'ardia' ? 'Ardia-specific hard contract: use the Pach legacy ardia-one-pager as the composition skeleton for the whole slide. Keep the one-pager margins, top brand row, right metadata, dot/mono eyebrow, Inter Tight 200 title scale, one inline Instrument Serif italic vermilion phrase, short body, hairline rows, transparent framed modules, footer hairline, and subtle off-canvas vermilion glow. Use exact legacy proportions: on 1080x1528, side padding 64px, top brand row y=56px, hero y about 200px, title 64px/1.0 Inter Tight 200, body 19px/1.55 max 780px, hairline rows y about 575px, module y about 865px, footer pinned to bottom; scale proportionally for other aspect ratios. Charts, KPIs, tables, WhatsApp mocks, product surfaces, buyer-landing data panels, and Universo aBanza checklist modules are allowed, but they must inherit that skeleton instead of replacing the slide composition. Use organizationDesignSystem.metadata.requiredDesignContract as a QA checklist before saving. Do not drift into generic executive decks, generic SaaS cards, blue/purple gradients, neon/glass/bokeh panels, large serif primary titles, fake square logos, opaque red panels, or one long scrolling document.' : null,
     'Styling rule: design templates render as standalone iframe documents, not inside the Pach portal. Tailwind classes are supported only when manifest.styling is "tailwind"; otherwise use inline React style objects or import a local CSS file from the template files. Do not rely on Pach CSS variables or app global CSS.',
     '5. Create a new template version with pach.design.template.version.create. Pass the full files object, manifest.entry, manifest.dimensions or manifest.aspectRatioId, dependencies for any third-party package imports, and the agent run id as runId.',
     '6. Put the final result in pach.progress.report with phase "final_result".',
     '',
     'Keep the final result concise and useful inside the Pach design chat.',
   ].filter((line): line is string => Boolean(line)).join('\n')
+}
+
+function buildDesignTemplateFollowUpPrompt(run: AgentRunPromptRecord) {
+  const feedback = readMetadataString(run.metadata, 'feedback')
+  const attachments = formatAgentInputMediaPrompt(run.metadata, { includeInstruction: false })
+  const outputSpec = formatOutputSpec(run.metadata)
+  const designSystemChanged = readMetadataBoolean(run.metadata, 'designSystemChanged')
+  const designSystemId = readMetadataString(run.metadata, 'designSystemId')
+  const designTemplateRunId = readMetadataString(run.metadata, 'designTemplateRunId') ?? run.subjectId ?? undefined
+
+  return [
+    [
+      `Agent run id for this follow-up: ${run.id}`,
+      designTemplateRunId ? `Design template run id for this follow-up: ${designTemplateRunId}` : null,
+    ].filter((line): line is string => Boolean(line)).join('\n'),
+    feedback?.trim(),
+    outputSpec,
+    designSystemChanged
+      ? designSystemId
+        ? `Selected design system changed for this turn: ${designSystemId}. Fetch it only if needed.`
+        : 'Selected design system changed for this turn: none. Continue without organization-specific design-system context.'
+      : null,
+    attachments,
+  ].filter((line): line is string => Boolean(line)).join('\n\n')
+}
+
+function formatOutputSpec(metadata: unknown) {
+  const outputSpec = readMetadataRecord(metadata, 'outputSpec')
+  if (!outputSpec) return null
+  const aspectRatioId = readRecordString(outputSpec, 'aspectRatioId')
+  const label = readRecordString(outputSpec, 'label')
+  const width = readRecordNumber(outputSpec, 'width')
+  const height = readRecordNumber(outputSpec, 'height')
+  const slideCount = readRecordNumber(outputSpec, 'slideCount')
+  const dimensions = width && height ? `${width}x${height}` : null
+  const details = [
+    aspectRatioId || label ? `- Aspect ratio: ${label ?? aspectRatioId}${aspectRatioId && label ? ` (${aspectRatioId})` : ''}` : null,
+    dimensions ? `- Dimensions: ${dimensions}` : null,
+    slideCount ? `- Slides: ${slideCount}` : null,
+  ].filter((line): line is string => Boolean(line))
+
+  if (details.length === 0) return null
+
+  return [
+    'Selected output settings:',
+    ...details,
+  ].join('\n')
 }
 
 function readMetadataString(metadata: unknown, key: string) {
@@ -288,5 +340,28 @@ function readMetadataString(metadata: unknown, key: string) {
 function readMetadataNumber(metadata: unknown, key: string) {
   if (!metadata || typeof metadata !== 'object') return null
   const value = (metadata as Record<string, unknown>)[key]
+  return typeof value === 'number' && Number.isFinite(value) ? value : null
+}
+
+function readMetadataBoolean(metadata: unknown, key: string) {
+  if (!metadata || typeof metadata !== 'object') return false
+  return (metadata as Record<string, unknown>)[key] === true
+}
+
+function readMetadataRecord(metadata: unknown, key: string) {
+  if (!metadata || typeof metadata !== 'object') return null
+  const value = (metadata as Record<string, unknown>)[key]
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : null
+}
+
+function readRecordString(record: Record<string, unknown>, key: string) {
+  const value = record[key]
+  return typeof value === 'string' && value.trim() ? value.trim() : null
+}
+
+function readRecordNumber(record: Record<string, unknown>, key: string) {
+  const value = record[key]
   return typeof value === 'number' && Number.isFinite(value) ? value : null
 }

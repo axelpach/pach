@@ -364,10 +364,11 @@ export function createServerMutators(authData?: JWTPayload) {
     },
 
     design_systems: {
-      async create(tx: Tx, args: { id: string; organizationId: string; name: string; slug: string; tokens?: Record<string, unknown>; assets?: Record<string, unknown>; metadata?: Record<string, unknown> }) {
+      async create(tx: Tx, args: { id: string; organizationId: string; name: string; slug: string; markdown?: string; tokens?: Record<string, unknown>; assets?: Record<string, unknown>; metadata?: Record<string, unknown> }) {
         requireOrganizationAccess(args.organizationId)
         const now = Date.now()
         await tx.mutate.design_systems.insert({
+          markdown: '',
           tokens: {},
           assets: {},
           metadata: {},
@@ -376,7 +377,7 @@ export function createServerMutators(authData?: JWTPayload) {
           updatedAt: now,
         } as any)
       },
-      async update(tx: Tx, args: { id: string; name?: string; slug?: string; tokens?: Record<string, unknown>; assets?: Record<string, unknown>; metadata?: Record<string, unknown> }) {
+      async update(tx: Tx, args: { id: string; name?: string; slug?: string; markdown?: string; tokens?: Record<string, unknown>; assets?: Record<string, unknown>; metadata?: Record<string, unknown> }) {
         await requireExistingOrganizationAccess(tx, 'design_systems', args.id)
         const { id, ...updates } = args
         await tx.mutate.design_systems.update({ id, ...updates, updatedAt: Date.now() } as any)
@@ -460,21 +461,24 @@ export function createServerMutators(authData?: JWTPayload) {
     },
 
     design_template_runs: {
-      async create(tx: Tx, args: { id: string; organizationId: string; templateId?: string; agentRunId?: string; templateSlug?: string; prompt: string; status?: string; statusMessage?: string; sourceVersionId?: string; targetVersionId?: string; metadata?: Record<string, unknown> }) {
+      async create(tx: Tx, args: { id: string; organizationId: string; templateId?: string; designSystemId?: string; agentRunId?: string; templateSlug?: string; prompt: string; status?: string; statusMessage?: string; sourceVersionId?: string; targetVersionId?: string; outputSpec?: Record<string, unknown>; metadata?: Record<string, unknown> }) {
         requireOrganizationAccess(args.organizationId)
         if (args.templateId) await requireExistingOrganizationAccess(tx, 'design_templates', args.templateId)
+        if (args.designSystemId) await requireExistingOrganizationAccess(tx, 'design_systems', args.designSystemId)
         const now = Date.now()
         await tx.mutate.design_template_runs.insert({
           status: 'queued',
+          outputSpec: {},
           metadata: {},
           ...args,
           createdAt: now,
           updatedAt: now,
         } as any)
       },
-      async update(tx: Tx, args: { id: string; templateId?: string | null; agentRunId?: string | null; templateSlug?: string | null; prompt?: string; status?: string; statusMessage?: string | null; sourceVersionId?: string | null; targetVersionId?: string | null; metadata?: Record<string, unknown> }) {
+      async update(tx: Tx, args: { id: string; templateId?: string | null; designSystemId?: string | null; agentRunId?: string | null; templateSlug?: string | null; prompt?: string; status?: string; statusMessage?: string | null; sourceVersionId?: string | null; targetVersionId?: string | null; outputSpec?: Record<string, unknown>; metadata?: Record<string, unknown> }) {
         await requireExistingOrganizationAccess(tx, 'design_template_runs', args.id)
         if (args.templateId) await requireExistingOrganizationAccess(tx, 'design_templates', args.templateId)
+        if (args.designSystemId) await requireExistingOrganizationAccess(tx, 'design_systems', args.designSystemId)
         const { id, ...updates } = args
         await tx.mutate.design_template_runs.update({ id, ...updates, updatedAt: Date.now() } as any)
       },

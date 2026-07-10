@@ -46,7 +46,6 @@ import {
   type McpAuthContext,
   type McpCapability,
 } from '../lib/mcp-token.js'
-import { getFallbackDesignSystemForOrganization, mergeDesignSystemWithFallback } from '../design-systems/fallback.js'
 import { finalizeAgentRunPullRequest } from '../lib/agent-pr-finalizer.js'
 import {
   SIGNED_READ_SECONDS as AGENT_INPUT_MEDIA_SIGNED_READ_SECONDS,
@@ -747,6 +746,7 @@ const tools: ToolDefinition[] = [
       properties: {
         templateId: { type: 'string' },
         slug: { type: 'string' },
+        designSystemId: { type: 'string', description: 'Optional selected design system. If omitted, no organization design system context is returned.' },
       },
     },
   },
@@ -2467,6 +2467,7 @@ async function getDesignTemplate(req: AuthenticatedRequest, args: unknown) {
   const body = ensureObject(args)
   const templateId = readOptionalString(body.templateId)
   const slug = readOptionalString(body.slug)
+  const selectedDesignSystemId = readOptionalString(body.designSystemId)
   if (!templateId && !slug) throw new Error('Provide templateId or slug')
 
   const db = getDb()
@@ -2479,7 +2480,7 @@ async function getDesignTemplate(req: AuthenticatedRequest, args: unknown) {
   if (!template) throw new Error('Design template not found')
 
   const [organization] = await db.select().from(organizations).where(eq(organizations.id, template.organizationId)).limit(1)
-  const [versions, runs, organizationDesignSystems, assets] = await Promise.all([
+  const [versions, runs, selectedDesignSystems, assets] = await Promise.all([
     db
       .select()
       .from(designTemplateVersions)
@@ -2495,7 +2496,7 @@ async function getDesignTemplate(req: AuthenticatedRequest, args: unknown) {
     db
       .select()
       .from(designSystems)
-      .where(eq(designSystems.organizationId, template.organizationId))
+      .where(selectedDesignSystemId ? eq(designSystems.id, selectedDesignSystemId) : eq(designSystems.id, '00000000-0000-0000-0000-000000000000'))
       .orderBy(desc(designSystems.updatedAt))
       .limit(1),
     db
@@ -2505,13 +2506,9 @@ async function getDesignTemplate(req: AuthenticatedRequest, args: unknown) {
       .orderBy(desc(designAssets.updatedAt))
       .limit(100),
   ])
-  const designSystem = organizationDesignSystems[0]
-  const fallbackDesignSystem = getFallbackDesignSystemForOrganization(organization)
-  const effectiveDesignSystem = mergeDesignSystemWithFallback(
-    designSystem ? serializeDesignSystem(designSystem) : null,
-    fallbackDesignSystem,
-  )
-  const designSystemAgentInstruction = readOptionalString(effectiveDesignSystem?.metadata?.agentInstruction)
+  const selectedDesignSystem = selectedDesignSystems.find((system) => system.organizationId === template.organizationId)
+  if (selectedDesignSystemId && !selectedDesignSystem) throw new Error('Selected design system not found for this template organization')
+  const effectiveDesignSystem = selectedDesignSystem ? serializeDesignSystem(selectedDesignSystem) : null
 
   return {
     ok: true,
@@ -2519,21 +2516,17 @@ async function getDesignTemplate(req: AuthenticatedRequest, args: unknown) {
     organizationDesignSystem: effectiveDesignSystem,
     assets: assets.map((asset) => serializeDesignAsset(asset, req)),
     agentInstructions: {
-      mustUseOrganizationDesignSystem: true,
+      mustUseOrganizationDesignSystem: Boolean(effectiveDesignSystem),
       designSystemId: effectiveDesignSystem?.id ?? null,
       instruction: [
-        `Use ${organization?.name ?? 'the organization'}'s design system as a hard constraint for all template edits.`,
-        'Do not introduce a competing visual direction unless the user explicitly asks to change the organization design system.',
-        'When changing layout, copy, colors, typography, components, or imagery, preserve the organization design system tokens and principles.',
+        effectiveDesignSystem
+          ? 'Use organizationDesignSystem.markdown as the selected design system for this run. Treat it as the canonical design-system source.'
+          : 'No design system was selected for this run. Do not invent hidden organization-specific design context.',
         'For deck templates, prefer one React component per slide and export const slides = [SlideOne, SlideTwo, ...]. Set manifest.dimensions or manifest.aspectRatioId so Pach can render separated, scaled slide frames.',
         'Templates render as standalone iframe documents outside the Pach app shell. Tailwind classes are supported only when manifest.styling is "tailwind"; otherwise use inline React style objects or import a local CSS file included in the template files. Do not rely on Pach CSS variables or app global CSS.',
-        organization?.project === 'ardia'
-          ? 'For Ardia, organizationDesignSystem.metadata.requiredDesignContract is mandatory. Use the Pach legacy ardia-one-pager as the composition skeleton for the whole slide: top brand row, right metadata, dot/mono eyebrow, Inter Tight 200 title scale, one inline Instrument Serif italic vermilion phrase, short body, hairline rows, transparent framed modules, footer hairline, and subtle off-canvas vermilion glow. Use exact legacy proportions: on 1080x1528, side padding 64px, top brand row y=56px, hero y about 200px, title 64px/1.0 Inter Tight 200, body 19px/1.55 max 780px, hairline rows y about 575px, module y about 865px, footer pinned to bottom; scale proportionally for other aspect ratios. Charts, KPIs, tables, WhatsApp mocks, product surfaces, buyer-landing data panels, and Universo aBanza checklist modules are allowed, but they must inherit that skeleton instead of replacing the whole composition. Do not drift into generic executive decks, generic SaaS cards, blue/purple gradients, neon/glass/bokeh panels, large serif primary titles, fake square logos, opaque red panels, or one long scrolling document.'
-          : '',
         assets.length > 0
           ? 'Use available assets from the assets array when a logo, product image, screenshot, or uploaded visual is needed. Persist the stable asset url/stableUrl in template code; do not save temporary signedUrl values in React source. Respect each asset URL, dimensions, and metadata.'
           : 'If an asset is needed but not available, report that in progress instead of inventing a fake logo or product image.',
-        designSystemAgentInstruction,
       ].join(' '),
       availableAspectRatios: [
         { id: 'deck-landscape', label: 'deck landscape', width: 1920, height: 1080, ratio: '16:9' },
@@ -3259,6 +3252,7 @@ function serializeDesignSystem(system: typeof designSystems.$inferSelect) {
     organizationId: system.organizationId,
     name: system.name,
     slug: system.slug,
+    markdown: system.markdown ?? '',
     tokens: system.tokens ?? {},
     assets: system.assets ?? {},
     metadata: system.metadata ?? {},
@@ -3292,6 +3286,7 @@ function serializeDesignTemplateRun(run: typeof designTemplateRuns.$inferSelect)
     id: run.id,
     organizationId: run.organizationId,
     templateId: run.templateId,
+    designSystemId: run.designSystemId,
     agentRunId: run.agentRunId,
     templateSlug: run.templateSlug,
     prompt: run.prompt,
@@ -3299,6 +3294,7 @@ function serializeDesignTemplateRun(run: typeof designTemplateRuns.$inferSelect)
     statusMessage: run.statusMessage,
     sourceVersionId: run.sourceVersionId,
     targetVersionId: run.targetVersionId,
+    outputSpec: run.outputSpec ?? {},
     metadata: run.metadata ?? {},
     createdAt: run.createdAt.toISOString(),
     updatedAt: run.updatedAt.toISOString(),
