@@ -35,7 +35,7 @@ type DocumentDragState = {
   documentId: string
   parentId: string | null
 }
-type DocumentDropPosition = 'before' | 'after'
+type DocumentDropPosition = 'before' | 'after' | 'inside'
 type DocumentDropTarget = {
   documentId: string
   parentId: string | null
@@ -363,6 +363,17 @@ export default function Docs() {
     const dragged = documentsInSelectedOrganization.find((entry) => entry.id === draggedDocumentId)
     const target = documentsInSelectedOrganization.find((entry) => entry.id === targetDocumentId)
     if (!dragged || !target) return
+    if (position === 'inside') {
+      if (targetParentId !== target.id) return
+      if (isDescendantDocument(target.id, dragged.id, documentsInSelectedOrganization)) return
+      if ((dragged.parentId ?? null) === target.id) return
+
+      const sortOrder = nextDocumentSortOrder(target.id, target.organizationId ?? null)
+      await z.mutate.documents.update({ id: dragged.id, parentId: target.id, sortOrder })
+      setExpandedDocumentIds((current) => new Set([...current, target.id]))
+      return
+    }
+
     if ((dragged.parentId ?? null) !== targetParentId || (target.parentId ?? null) !== targetParentId) return
 
     const siblings = documentsInSelectedOrganization
@@ -396,12 +407,24 @@ export default function Docs() {
   function handleDocumentDragOver(event: DragEvent, entry: DocumentRow) {
     if (!documentDrag) return
     const parentId = entry.parentId ?? null
-    if (documentDrag.documentId === entry.id || documentDrag.parentId !== parentId) return
+    const draggingSameParent = documentDrag.parentId === parentId
+    const canDropInside = documentsInSelectedOrganization.some((document) => document.parentId === entry.id) &&
+      !isDescendantDocument(entry.id, documentDrag.documentId, documentsInSelectedOrganization)
+    if (documentDrag.documentId === entry.id || (!draggingSameParent && !canDropInside)) return
+
     event.preventDefault()
     event.dataTransfer.dropEffect = 'move'
     const rect = event.currentTarget.getBoundingClientRect()
-    const position: DocumentDropPosition = event.clientY < rect.top + rect.height / 2 ? 'before' : 'after'
-    setDocumentDropTarget({ documentId: entry.id, parentId, position })
+    const y = event.clientY - rect.top
+    const insideBandStart = rect.height * 0.3
+    const insideBandEnd = rect.height * 0.7
+    const position: DocumentDropPosition = canDropInside && y >= insideBandStart && y <= insideBandEnd
+      ? 'inside'
+      : y < rect.height / 2
+        ? 'before'
+        : 'after'
+    if (position !== 'inside' && !draggingSameParent) return
+    setDocumentDropTarget({ documentId: entry.id, parentId: position === 'inside' ? entry.id : parentId, position })
   }
 
   function handleDocumentDragLeave(event: DragEvent, entry: DocumentRow) {
@@ -1257,10 +1280,11 @@ function DocumentTreeItem({
   const indent = Math.min(depth, 8) * 14
   const isDragging = dragState?.documentId === node.document.id
   const isDropTarget = dropTarget?.documentId === node.document.id
+  const isInsideDropTarget = isDropTarget && dropTarget.position === 'inside'
   const canDropHere = Boolean(
     dragState &&
     dragState.documentId !== node.document.id &&
-    dragState.parentId === (node.document.parentId ?? null),
+    (dragState.parentId === (node.document.parentId ?? null) || node.children.length > 0),
   )
 
   return (
@@ -1273,12 +1297,12 @@ function DocumentTreeItem({
           selected
             ? 'bg-accent-fill/8 text-accent ring-1 ring-inset ring-edge/20'
             : 'text-fg-2 hover:bg-accent-fill/4 hover:text-fg-1'
-        } ${isDragging ? 'opacity-45' : ''} ${
+        } ${isInsideDropTarget ? 'bg-accent-fill/12 ring-1 ring-inset ring-accent/40' : ''} ${isDragging ? 'opacity-45' : ''} ${
           canDropHere && !isDropTarget ? 'ring-1 ring-inset ring-edge/10' : ''
         }`}
         style={{ paddingLeft: 6 + indent }}
       >
-        {isDropTarget ? (
+        {isDropTarget && dropTarget.position !== 'inside' ? (
           <span
             className={`pointer-events-none absolute left-1 right-1 h-px bg-accent shadow-glow-xs ${
               dropTarget.position === 'before' ? 'top-0' : 'bottom-0'
@@ -1420,6 +1444,18 @@ function createsDocumentCycle(documentId: string, parentId: string, nodes: Map<s
     if (seen.has(currentId)) return true
     seen.add(currentId)
     currentId = nodes.get(currentId)?.document.parentId
+  }
+  return false
+}
+
+function isDescendantDocument(documentId: string, ancestorId: string, documents: DocumentRow[]) {
+  const byId = new Map(documents.map((document) => [document.id, document]))
+  const seen = new Set<string>()
+  let current = byId.get(documentId)
+  while (current?.parentId && !seen.has(current.parentId)) {
+    if (current.parentId === ancestorId) return true
+    seen.add(current.parentId)
+    current = byId.get(current.parentId)
   }
   return false
 }
