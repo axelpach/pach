@@ -2658,6 +2658,7 @@ async function reportProgress(req: AuthenticatedRequest, args: unknown) {
       metadata: {
         source: 'pach-mcp',
         ...metadata,
+        ...runTurnMetadata(run),
       },
       createdAt: now,
     })
@@ -2673,6 +2674,7 @@ async function reportProgress(req: AuthenticatedRequest, args: unknown) {
             message,
             percent,
             reportedAt: now.toISOString(),
+            ...runTurnMetadata(run),
           },
         },
         updatedAt: now,
@@ -3580,6 +3582,21 @@ function readMetadataString(metadata: unknown, key: string) {
   if (!metadata || typeof metadata !== 'object') return null
   const value = (metadata as Record<string, unknown>)[key]
   return typeof value === 'string' && value.trim() ? value.trim() : null
+}
+
+function readMetadataNumber(metadata: unknown, key: string) {
+  if (!metadata || typeof metadata !== 'object') return null
+  const value = (metadata as Record<string, unknown>)[key]
+  return typeof value === 'number' && Number.isFinite(value) ? value : null
+}
+
+function runTurnMetadata(run: typeof agentRuns.$inferSelect) {
+  const feedbackMessageId = readMetadataString(run.metadata, 'feedbackMessageId')
+  const followUpCount = readMetadataNumber(run.metadata, 'followUpCount')
+  return {
+    ...(feedbackMessageId ? { feedbackMessageId } : {}),
+    ...(followUpCount !== null ? { followUpCount } : {}),
+  }
 }
 
 function ensureObject(value: unknown): Record<string, unknown> {

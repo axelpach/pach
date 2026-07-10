@@ -260,6 +260,7 @@ async function executeGeneralMcpRun(worker: WorkerRecord, run: AgentRunRecord) {
       message: finalMessage,
       percent: 100,
       metadata: {
+        ...runTurnMetadata(run),
         durationMs,
         codexSessionId,
         stdout: truncateText(stdout, 20_000),
@@ -277,6 +278,7 @@ async function executeGeneralMcpRun(worker: WorkerRecord, run: AgentRunRecord) {
           status: 'completed',
           message: `PR creation failed: ${pullRequestError}`,
           metadata: {
+            ...runTurnMetadata(run),
             pullRequestError,
           },
         }).catch((progressError) => {
@@ -293,6 +295,7 @@ async function executeGeneralMcpRun(worker: WorkerRecord, run: AgentRunRecord) {
       status: 'completed',
       message: finalMessage,
       metadata: {
+        ...runTurnMetadata(run),
         handler: 'general-mcp',
         durationMs,
         codexSessionId,
@@ -1007,6 +1010,21 @@ function readMetadataString(metadata: unknown, key: string) {
   if (!metadata || typeof metadata !== 'object') return null
   const value = (metadata as Record<string, unknown>)[key]
   return typeof value === 'string' && value.trim() ? value.trim() : null
+}
+
+function readMetadataNumber(metadata: unknown, key: string) {
+  if (!metadata || typeof metadata !== 'object') return null
+  const value = (metadata as Record<string, unknown>)[key]
+  return typeof value === 'number' && Number.isFinite(value) ? value : null
+}
+
+function runTurnMetadata(run: AgentRunRecord) {
+  const feedbackMessageId = readMetadataString(run.metadata, 'feedbackMessageId')
+  const followUpCount = readMetadataNumber(run.metadata, 'followUpCount')
+  return {
+    ...(feedbackMessageId ? { feedbackMessageId } : {}),
+    ...(followUpCount !== null ? { followUpCount } : {}),
+  }
 }
 
 function readRunSpecString(runSpec: AgentRunSpec | null | undefined, key: 'codexSessionId') {

@@ -274,14 +274,16 @@ router.post('/issues/:issueId/runs/queue', async (req, res) => {
     const runId = randomUUID()
     const conversationId = randomUUID()
     const messageId = randomUUID()
-    const branchName = route.executionMode === 'code_worktree' && repository
-      ? normalizeBranchName(requestedBranchName ?? buildDefaultAgentBranchName(issue, repository))
+    const requestedOrDefaultBranchName = route.executionMode === 'code_worktree' && repository
+      ? requestedBranchName ?? buildDefaultAgentBranchName(issue, repository)
       : `mcp/${issue.identifier.toLowerCase()}-${runId.slice(0, 8)}`
+    const normalizedBranchName = normalizeBranchName(requestedOrDefaultBranchName)
 
-    if (route.executionMode === 'code_worktree' && !isValidBranchName(branchName)) {
+    if (route.executionMode === 'code_worktree' && !isValidBranchName(normalizedBranchName)) {
       res.status(400).json({ ok: false, error: 'Invalid branch name.', route })
       return
     }
+    const branchName = await uniqueAgentRunBranchName(normalizedBranchName)
 
     const now = new Date()
     await db.insert(agentConversations).values({
@@ -1488,6 +1490,23 @@ function repositoryRoleRank(role: string | null | undefined) {
 
 function buildDefaultAgentBranchName(issue: typeof pmIssues.$inferSelect, repository: typeof githubRepositories.$inferSelect) {
   return `agent/${repository.projectKey}-${issue.identifier.toLowerCase()}-${slugifyBranchPart(issue.title)}`
+}
+
+async function uniqueAgentRunBranchName(baseBranchName: string) {
+  const normalized = normalizeBranchName(baseBranchName)
+  if (!normalized) return normalized
+
+  for (let attempt = 0; attempt < 25; attempt += 1) {
+    const candidate = attempt === 0 ? normalized : `${normalized}-${attempt + 1}`
+    const [existing] = await getDb()
+      .select({ id: agentRuns.id })
+      .from(agentRuns)
+      .where(eq(agentRuns.branchName, candidate))
+      .limit(1)
+    if (!existing) return candidate
+  }
+
+  return `${normalized}-${randomUUID().slice(0, 8)}`
 }
 
 function normalizeBranchName(value: string) {

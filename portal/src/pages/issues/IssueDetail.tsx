@@ -478,7 +478,7 @@ export default function IssueDetail() {
     if (!issue) return
 
     const repo = selectDeveloperRepository()
-    const branchName = branchNameIsValid && branchNameDraft.trim()
+    const branchName = !activeRun && branchNameIsValid && branchNameDraft.trim()
       ? normalizeBranchName(branchNameDraft)
       : undefined
 

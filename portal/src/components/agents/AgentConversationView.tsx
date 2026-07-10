@@ -44,6 +44,7 @@ type AgentConversationViewProps = {
 type AgentConversationStreamItemModel = {
   id: string
   runId?: string
+  turnId?: string
   role: 'user' | 'agent'
   phase: string
   body: string
@@ -525,7 +526,7 @@ function buildAgentConversationStream({
   legacyProgressActivity: Schema['tables']['activity_events']['row'][]
   messages: Schema['tables']['agent_messages']['row'][]
 }): AgentConversationStreamItemModel[] {
-  const preferredFinalResultByRun = new Map<string, Schema['tables']['agent_run_progress_reports']['row']>()
+  const preferredFinalResultByTurn = new Map<string, Schema['tables']['agent_run_progress_reports']['row']>()
   const progressPhasesByRun = new Map<string, Set<string>>()
 
   for (const report of progressReports) {
@@ -534,14 +535,17 @@ function buildAgentConversationStream({
     progressPhasesByRun.set(report.runId, phases)
 
     if (report.phase !== 'final_result') continue
-    const current = preferredFinalResultByRun.get(report.runId)
-    if (!current || isBetterFinalResult(report, current)) preferredFinalResultByRun.set(report.runId, report)
+    const turnId = progressTurnId(report)
+    const current = preferredFinalResultByTurn.get(turnId)
+    if (!current || isBetterFinalResult(report, current)) preferredFinalResultByTurn.set(turnId, report)
   }
+  const finalResultRunIds = new Set(Array.from(preferredFinalResultByTurn.values()).map((report) => report.runId))
 
   const items = [
     ...messages.map((message): AgentConversationStreamItemModel => ({
       id: `message-${message.id}`,
       runId: message.runId,
+      turnId: `message-${message.id}`,
       role: message.role === 'user' ? 'user' : 'agent',
       phase: message.role,
       body: message.body,
@@ -549,10 +553,11 @@ function buildAgentConversationStream({
       createdAt: message.createdAt,
     })),
     ...progressReports
-      .filter((report) => shouldShowProgressReport(report, preferredFinalResultByRun))
+      .filter((report) => shouldShowProgressReport(report, preferredFinalResultByTurn))
       .map((report): AgentConversationStreamItemModel => ({
         id: `progress-${report.id}`,
         runId: report.runId,
+        turnId: progressTurnId(report),
         role: 'agent',
         phase: report.phase ?? report.level,
         body: report.message,
@@ -561,7 +566,7 @@ function buildAgentConversationStream({
         percent: report.percent,
       })),
     ...legacyProgressActivity
-      .filter((entry) => shouldShowLegacyProgress(entry, progressPhasesByRun, preferredFinalResultByRun))
+      .filter((entry) => shouldShowLegacyProgress(entry, progressPhasesByRun, finalResultRunIds))
       .map((entry): AgentConversationStreamItemModel => ({
         id: `legacy-${entry.id}`,
         runId: readMetadataString(entry.metadata, 'runId') ?? undefined,
@@ -588,13 +593,13 @@ function isBetterFinalResult(
 
 function shouldShowProgressReport(
   report: Schema['tables']['agent_run_progress_reports']['row'],
-  preferredFinalResultByRun: Map<string, Schema['tables']['agent_run_progress_reports']['row']>,
+  preferredFinalResultByTurn: Map<string, Schema['tables']['agent_run_progress_reports']['row']>,
 ) {
   if (report.phase === 'final_result') {
-    return preferredFinalResultByRun.get(report.runId)?.id === report.id
+    return preferredFinalResultByTurn.get(progressTurnId(report))?.id === report.id
   }
 
-  if (report.phase === 'completed' && preferredFinalResultByRun.has(report.runId)) {
+  if (report.phase === 'completed' && preferredFinalResultByTurn.has(progressTurnId(report))) {
     return false
   }
 
@@ -604,7 +609,14 @@ function shouldShowProgressReport(
 function dedupeConversationItems(items: AgentConversationStreamItemModel[]) {
   const seen = new Set<string>()
   return items.filter((item) => {
-    const key = [item.runId ?? 'no-run', item.role, item.phase, normalizeMessageForDedupe(item.body)].join('|')
+    if (item.id.startsWith('message-')) return true
+    const key = [
+      item.runId ?? 'no-run',
+      item.turnId ?? 'no-turn',
+      item.role,
+      item.phase,
+      normalizeMessageForDedupe(item.body),
+    ].join('|')
     if (seen.has(key)) return false
     seen.add(key)
     return true
@@ -618,7 +630,7 @@ function normalizeMessageForDedupe(value: string) {
 function shouldShowLegacyProgress(
   entry: Schema['tables']['activity_events']['row'],
   progressPhasesByRun: Map<string, Set<string>>,
-  preferredFinalResultByRun: Map<string, Schema['tables']['agent_run_progress_reports']['row']>,
+  finalResultRunIds: Set<string>,
 ) {
   const runId = readMetadataString(entry.metadata, 'runId')
   if (!runId) return true
@@ -626,7 +638,7 @@ function shouldShowLegacyProgress(
   const phase = readMetadataString(entry.metadata, 'phase') ?? legacyProgressPhase(entry.eventType)
   const progressPhases = progressPhasesByRun.get(runId)
   if (!progressPhases) return true
-  if (phase === 'completed' && preferredFinalResultByRun.has(runId)) return false
+  if (phase === 'completed' && finalResultRunIds.has(runId)) return false
   return !progressPhases.has(phase)
 }
 
@@ -700,6 +712,22 @@ function readMetadataString(metadata: unknown, key: string) {
   if (!metadata || typeof metadata !== 'object') return null
   const value = (metadata as Record<string, unknown>)[key]
   return typeof value === 'string' && value.trim() ? value : null
+}
+
+function readMetadataNumber(metadata: unknown, key: string) {
+  if (!metadata || typeof metadata !== 'object') return null
+  const value = (metadata as Record<string, unknown>)[key]
+  return typeof value === 'number' && Number.isFinite(value) ? value : null
+}
+
+function progressTurnId(report: Schema['tables']['agent_run_progress_reports']['row']) {
+  const feedbackMessageId = readMetadataString(report.metadata, 'feedbackMessageId')
+  if (feedbackMessageId) return `feedback:${feedbackMessageId}`
+
+  const followUpCount = readMetadataNumber(report.metadata, 'followUpCount')
+  if (followUpCount !== null) return `follow-up:${followUpCount}`
+
+  return `run:${report.runId}`
 }
 
 function readImageDimensions(file: File) {

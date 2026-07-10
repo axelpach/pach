@@ -189,6 +189,7 @@ router.post('/runs/claim', async (req: AgentWorkerRequest, res) => {
         metadata: {
           executionClass,
           requiredCapabilities,
+          ...runTurnMetadata(claimed),
         },
       })
 
@@ -245,6 +246,7 @@ router.post('/runs/:id/progress', async (req: AgentWorkerRequest, res) => {
         message,
         at: now.toISOString(),
         ...metadata,
+        ...runTurnMetadata(run),
       },
     }
 
@@ -535,6 +537,7 @@ async function appendRunActivity(
       source: 'agent-worker',
       runId: run.id,
       ...metadata,
+      ...runTurnMetadata(run),
     },
     occurredAt: now,
     createdAt: now,
@@ -566,7 +569,10 @@ async function appendRunProgressReport(
     level: report.level ?? 'info',
     message: report.message,
     percent: report.percent,
-    metadata: report.metadata ?? {},
+    metadata: {
+      ...(report.metadata ?? {}),
+      ...runTurnMetadata(run),
+    },
     createdAt: new Date(),
   })
 }
@@ -648,6 +654,16 @@ function readRequiredCapabilities(metadata: unknown) {
   return readStringArray(readObject(metadata).requiredCapabilities)
 }
 
+function runTurnMetadata(run: typeof agentRuns.$inferSelect) {
+  const metadata = readObject(run.metadata)
+  const feedbackMessageId = readOptionalString(metadata.feedbackMessageId)
+  const followUpCount = readOptionalNumber(metadata.followUpCount)
+  return {
+    ...(feedbackMessageId ? { feedbackMessageId } : {}),
+    ...(followUpCount !== undefined ? { followUpCount } : {}),
+  }
+}
+
 function readWorkerLimits(value: unknown) {
   const limits = readObject(value)
   return {
@@ -720,6 +736,10 @@ function readRouteParam(value: string | string[] | undefined, field: string) {
 
 function readOptionalString(value: unknown) {
   return typeof value === 'string' && value.trim() ? value.trim() : undefined
+}
+
+function readOptionalNumber(value: unknown) {
+  return typeof value === 'number' && Number.isFinite(value) ? value : undefined
 }
 
 function readOptionalBoolean(value: unknown, fallback?: boolean) {
