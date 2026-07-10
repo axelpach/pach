@@ -675,7 +675,8 @@ export const RichEditor = forwardRef<RichEditorHandle, RichEditorProps>(function
       return
     }
     if (!editor) return
-    if (!file.type.startsWith('image/')) {
+    const mimeType = imageMimeType(file)
+    if (!mimeType) {
       setMediaStatus('images only for v1')
       return
     }
@@ -693,7 +694,7 @@ export const RichEditor = forwardRef<RichEditorHandle, RichEditorProps>(function
           documentId: owner.type === 'document' ? owner.id : undefined,
           organizationId: organizationId ?? null,
           fileName: file.name,
-          mimeType: file.type || 'application/octet-stream',
+          mimeType,
           contentBase64,
         }),
       })
@@ -1403,7 +1404,54 @@ function handleCodeBlockTab(editor: TiptapEditor, shiftKey: boolean) {
 
 function imageFilesFromDataTransfer(dataTransfer: DataTransfer | null) {
   if (!dataTransfer) return []
-  return Array.from(dataTransfer.files).filter((file) => file.type.startsWith('image/'))
+
+  const filesFromItems = Array.from(dataTransfer.items ?? [])
+    .filter((item) => item.kind === 'file')
+    .map((item) => item.getAsFile())
+    .filter((file): file is File => Boolean(file))
+    .filter(isImageFile)
+
+  if (filesFromItems.length > 0) return dedupeFiles(filesFromItems)
+  return Array.from(dataTransfer.files).filter(isImageFile)
+}
+
+function dedupeFiles(files: File[]) {
+  const seen = new Set<string>()
+  return files.filter((file) => {
+    const key = `${file.name}:${file.size}:${file.lastModified}`
+    if (seen.has(key)) return false
+    seen.add(key)
+    return true
+  })
+}
+
+function isImageFile(file: File) {
+  return Boolean(imageMimeType(file))
+}
+
+function imageMimeType(file: File) {
+  if (file.type.startsWith('image/')) return file.type
+  return imageMimeTypeFromFileName(file.name)
+}
+
+function imageMimeTypeFromFileName(fileName: string) {
+  const extension = fileName.trim().toLowerCase().match(/\.([a-z0-9]+)$/)?.[1]
+  if (!extension) return ''
+  const mimeTypes: Record<string, string> = {
+    avif: 'image/avif',
+    bmp: 'image/bmp',
+    gif: 'image/gif',
+    heic: 'image/heic',
+    heif: 'image/heif',
+    jpeg: 'image/jpeg',
+    jpg: 'image/jpeg',
+    png: 'image/png',
+    svg: 'image/svg+xml',
+    tif: 'image/tiff',
+    tiff: 'image/tiff',
+    webp: 'image/webp',
+  }
+  return mimeTypes[extension] ?? ''
 }
 
 function mediaMarkdownToHtml(alt: string, src: string) {
