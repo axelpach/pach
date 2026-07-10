@@ -559,7 +559,7 @@ export default function IssuesLayout() {
           </div>
         </aside>
 
-        <main className="flex-1 min-w-0 flex flex-col">
+        <main className="flex-1 min-h-0 min-w-0 flex flex-col overflow-hidden">
           {/* mobile tracker toggle */}
           <div className="md:hidden flex items-center gap-2 border-b border-edge/12 bg-pit/60 backdrop-blur-sm px-3 py-2">
             <button
