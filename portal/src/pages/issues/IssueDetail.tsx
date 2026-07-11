@@ -788,10 +788,10 @@ export default function IssueDetail() {
             onClose={closeAgentFullView}
           />
         ) : (
-        <div className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden overscroll-contain pb-8 md:overflow-hidden md:pb-0 flex flex-col md:flex-row">
+        <div className="flex min-h-0 flex-1 flex-col overflow-y-auto overflow-x-hidden overscroll-contain pb-8 md:flex-row md:overflow-hidden md:pb-0">
           {/* main column */}
           <div
-            className="order-1 min-h-0 flex-1 min-w-0 px-4 py-5 md:order-none md:overflow-y-auto md:overflow-x-hidden md:px-10 md:py-8 [&::-webkit-scrollbar]:hidden"
+            className="order-1 flex-none min-w-0 px-4 py-5 md:order-none md:min-h-0 md:flex-1 md:overflow-y-auto md:overflow-x-hidden md:px-10 md:py-8 [&::-webkit-scrollbar]:hidden"
             style={{ scrollbarWidth: 'none' }}
           >
             <div className="mx-auto max-w-3xl">
