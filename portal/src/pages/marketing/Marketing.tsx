@@ -619,21 +619,32 @@ function MarketingSubtabMenu<T extends string>({
   onChange: (value: T) => void
 }) {
   return (
-    <div className="flex flex-wrap gap-1 border-b border-edge/12 font-mono text-[10px] uppercase tracking-label">
-      {tabs.map((tab) => (
-        <button
-          key={tab.id}
-          type="button"
-          onClick={() => onChange(tab.id)}
-          className={`-mb-px border-b-2 px-3 py-2 transition ${
-            value === tab.id
-              ? 'border-accent text-accent glow'
-              : 'border-transparent text-fg-4 hover:text-fg-1'
-          }`}
-        >
-          {tab.label}
-        </button>
-      ))}
+    <div className="-mx-5 overflow-x-auto border-b border-edge/12 px-5 md:mx-0 md:px-0">
+      <div className="flex min-w-max gap-1 font-mono text-[10px] uppercase tracking-label">
+        {tabs.map((tab) => (
+          <button
+            key={tab.id}
+            type="button"
+            onClick={() => onChange(tab.id)}
+            className={`-mb-px shrink-0 border-b-2 px-3 py-2 transition ${
+              value === tab.id
+                ? 'border-accent text-accent glow'
+                : 'border-transparent text-fg-4 hover:text-fg-1'
+            }`}
+          >
+            {tab.label}
+          </button>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+function RowMeta({ label, children, className = '' }: { label: string; children: ReactNode; className?: string }) {
+  return (
+    <div className={`min-w-0 ${className}`}>
+      <div className="font-mono text-[9px] uppercase tracking-label text-fg-4">{label}</div>
+      <div className="mt-1 min-w-0 font-mono text-xs text-fg-2">{children}</div>
     </div>
   )
 }
@@ -861,51 +872,43 @@ function ContentSection({
   return (
     <>
       <Panel title="content">
-        <div className="overflow-auto">
-          <table className="w-full min-w-[720px] text-left font-mono text-xs">
-            <thead className="text-[10px] uppercase tracking-label text-fg-4">
-              <tr className="border-b border-edge/12">
-                <th className="pb-2 pr-3 font-normal">title</th>
-                <th className="pb-2 pr-3 font-normal">channels</th>
-                <th className="pb-2 pr-3 font-normal">status</th>
-                <th className="pb-2 pr-3 font-normal">blog</th>
-                <th className="pb-2 font-normal">updated</th>
-              </tr>
-            </thead>
-            <tbody>
-              {contentItems.map((item) => {
-                const blogRun = runs.find((run) => run.contentItemId === item.id && run.channel === 'blog')
-                const blogPublished = blogRun?.status === 'published'
-                const blogScheduled = blogRun?.status === 'scheduled'
-                const blogVisible = blogPublished && isPublicBlogContentItem(item)
-                return (
-                  <tr
-                    key={item.id}
-                    onClick={() => onSelectContent(item.id)}
-                    className={`cursor-pointer border-b border-edge/8 transition hover:bg-accent-fill/4 ${
-                      selectedContent?.id === item.id ? 'bg-accent-fill/8 text-accent' : 'text-fg-2'
-                    }`}
-                  >
-                    <td className="max-w-[320px] truncate py-2.5 pr-3">{item.title}</td>
-                    <td className="py-2.5 pr-3">{item.supportedChannels.join(', ')}</td>
-                    <td className="py-2.5 pr-3"><StatusPill kind={statusKind(item.status)}>{item.status}</StatusPill></td>
-                    <td className="py-2.5 pr-3">
-                      {blogScheduled ? (
-                        <StatusPill kind="warn">{formatScheduledDate(blogRun?.scheduledAt, blogRun?.scheduledTimezone)}</StatusPill>
-                      ) : blogVisible ? (
-                        <StatusPill>published</StatusPill>
-                      ) : blogPublished ? (
-                        <StatusPill kind="warn">hidden</StatusPill>
-                      ) : (
-                        <span className="text-fg-4">-</span>
-                      )}
-                    </td>
-                    <td className="py-2.5 text-fg-4">{formatDate(item.updatedAt)}</td>
-                  </tr>
-                )
-              })}
-            </tbody>
-          </table>
+        <div className="divide-y divide-edge/8">
+          {contentItems.map((item) => {
+            const blogRun = runs.find((run) => run.contentItemId === item.id && run.channel === 'blog')
+            const blogPublished = blogRun?.status === 'published'
+            const blogScheduled = blogRun?.status === 'scheduled'
+            const blogVisible = blogPublished && isPublicBlogContentItem(item)
+            return (
+              <button
+                key={item.id}
+                type="button"
+                onClick={() => onSelectContent(item.id)}
+                className={`grid w-full grid-cols-1 gap-2 py-3 text-left transition hover:bg-accent-fill/4 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center ${
+                  selectedContent?.id === item.id ? 'bg-accent-fill/8 text-accent' : 'text-fg-2'
+                }`}
+              >
+                <div className="min-w-0 px-3">
+                  <div className="truncate text-sm text-fg-1">{item.title}</div>
+                  <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 font-mono text-[10px] uppercase tracking-label text-fg-4">
+                    <span>{item.supportedChannels.join(', ')}</span>
+                    <span>{formatDate(item.updatedAt)}</span>
+                  </div>
+                </div>
+                <div className="flex flex-wrap items-center gap-2 px-3 sm:justify-end">
+                  <StatusPill kind={statusKind(item.status)}>{item.status}</StatusPill>
+                  {blogScheduled ? (
+                    <StatusPill kind="warn">{formatScheduledDate(blogRun?.scheduledAt, blogRun?.scheduledTimezone)}</StatusPill>
+                  ) : blogVisible ? (
+                    <StatusPill>blog published</StatusPill>
+                  ) : blogPublished ? (
+                    <StatusPill kind="warn">blog hidden</StatusPill>
+                  ) : (
+                    <span className="font-mono text-xs text-fg-4">no blog run</span>
+                  )}
+                </div>
+              </button>
+            )
+          })}
         </div>
         {contentItems.length === 0 ? <EmptyState label="no content items" /> : null}
       </Panel>
@@ -1779,53 +1782,47 @@ function NewslettersSection({
 
       {tab === 'publications' ? (
         <Panel title={<InfoTitle label="publications" info="Newsletter publications. Click a row to open the publication detail page for cadence, guidelines, ideas, and slots." />}>
-          <div className="overflow-auto">
-            <table className="w-full min-w-[820px] text-left font-mono text-xs">
-              <thead className="text-[10px] uppercase tracking-label text-fg-4">
-                <tr className="border-b border-edge/12">
-                  <th className="pb-2 pr-3 font-normal">name</th>
-                  <th className="pb-2 pr-3 font-normal">slug</th>
-                  <th className="pb-2 pr-3 font-normal">sender</th>
-                  <th className="pb-2 pr-3 font-normal">subscribers</th>
-                  <th className="pb-2 pr-3 font-normal">status</th>
-                  <th className="pb-2 font-normal">action</th>
-                </tr>
-              </thead>
-              <tbody>
-                {publications.map((publication) => {
-                  const sender = senderProfiles.find((profile) => profile.id === publication.defaultSenderProfileId)
-                  return (
-                    <tr
-                      key={publication.id}
-                      className="cursor-pointer border-b border-edge/8 text-fg-2 transition hover:bg-accent-fill/4"
-                      onClick={() => openPublicationEditor(publication.id)}
+          <div className="divide-y divide-edge/8">
+            {publications.map((publication) => {
+              const sender = senderProfiles.find((profile) => profile.id === publication.defaultSenderProfileId)
+              return (
+                <div
+                  key={publication.id}
+                  role="button"
+                  tabIndex={0}
+                  className="grid cursor-pointer grid-cols-1 gap-3 px-3 py-3 transition hover:bg-accent-fill/4 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-center"
+                  onClick={() => openPublicationEditor(publication.id)}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter' || event.key === ' ') {
+                      event.preventDefault()
+                      openPublicationEditor(publication.id)
+                    }
+                  }}
+                >
+                  <div className="min-w-0">
+                    <div className="truncate text-sm text-fg-1">{publication.name}</div>
+                    <div className="mt-2 grid gap-2 sm:grid-cols-3">
+                      <RowMeta label="slug"><span className="truncate text-fg-4">{publication.slug}</span></RowMeta>
+                      <RowMeta label="sender"><span className="truncate">{sender?.fromEmail ?? '-'}</span></RowMeta>
+                      <RowMeta label="subscribers">{subscriberCounts.get(publication.id) ?? 0}</RowMeta>
+                    </div>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-2 lg:justify-end">
+                    <StatusPill kind={statusKind(publication.status)}>{publication.status}</StatusPill>
+                    <Button
+                      className="px-2 py-1 text-[10px]"
+                      icon={<Users className="h-3 w-3" />}
+                      onClick={(event) => {
+                        event.stopPropagation()
+                        showSubscribers(publication.id)
+                      }}
                     >
-                      <td className="max-w-[220px] py-2.5 pr-3">
-                        <div className="max-w-full truncate text-fg-1">{publication.name}</div>
-                      </td>
-                      <td className="py-2.5 pr-3 text-fg-4">{publication.slug}</td>
-                      <td className="max-w-[220px] truncate py-2.5 pr-3">{sender?.fromEmail ?? '-'}</td>
-                      <td className="py-2.5 pr-3">{subscriberCounts.get(publication.id) ?? 0}</td>
-                      <td className="py-2.5 pr-3"><StatusPill kind={statusKind(publication.status)}>{publication.status}</StatusPill></td>
-                      <td className="py-2.5">
-                        <div className="flex gap-2">
-                          <Button
-                            className="px-2 py-1 text-[10px]"
-                            icon={<Users className="h-3 w-3" />}
-                            onClick={(event) => {
-                              event.stopPropagation()
-                              showSubscribers(publication.id)
-                            }}
-                          >
-                            subscribers
-                          </Button>
-                        </div>
-                      </td>
-                    </tr>
-                  )
-                })}
-              </tbody>
-            </table>
+                      subscribers
+                    </Button>
+                  </div>
+                </div>
+              )
+            })}
           </div>
           {publications.length === 0 ? <EmptyState label="no publications" /> : null}
         </Panel>
@@ -1841,42 +1838,29 @@ function NewslettersSection({
             <div className="ml-auto font-mono text-xs uppercase tracking-label text-fg-3">{subscriberRows.length} visible</div>
           </div>
 
-          <div className="overflow-auto">
-            <table className="w-full min-w-[900px] text-left font-mono text-xs">
-              <thead className="text-[10px] uppercase tracking-label text-fg-4">
-                <tr className="border-b border-edge/12">
-                  <th className="pb-2 pr-3 font-normal">publication</th>
-                  <th className="pb-2 pr-3 font-normal">name</th>
-                  <th className="pb-2 pr-3 font-normal">email</th>
-                  <th className="pb-2 pr-3 font-normal">company</th>
-                  <th className="pb-2 pr-3 font-normal">role</th>
-                  <th className="pb-2 pr-3 font-normal">whatsapp</th>
-                  <th className="pb-2 pr-3 font-normal">status</th>
-                  <th className="pb-2 font-normal">action</th>
-                </tr>
-              </thead>
-              <tbody>
-                {subscriberRows.map(({ subscription, member, publication }) => (
-                  <tr key={subscription.id} className="border-b border-edge/8 text-fg-2">
-                    <td className="py-2.5 pr-3">{publication.name}</td>
-                    <td className="py-2.5 pr-3">{member.name || '-'}</td>
-                    <td className="py-2.5 pr-3">{member.email}</td>
-                    <td className="py-2.5 pr-3">{member.company || '-'}</td>
-                    <td className="py-2.5 pr-3">{member.role || '-'}</td>
-                    <td className="py-2.5 pr-3">{member.whatsappPhone || '-'}</td>
-                    <td className="py-2.5 pr-3"><StatusPill kind="ok">subscribed</StatusPill></td>
-                    <td className="py-2.5">
-                      <button
-                        className="text-fg-4 transition hover:text-amber"
-                        onClick={() => void z.mutate.mkt_audience_subscriptions.update({ id: subscription.id, status: 'unsubscribed', unsubscribedAt: Date.now() })}
-                      >
-                        unsubscribe
-                      </button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+          <div className="divide-y divide-edge/8">
+            {subscriberRows.map(({ subscription, member, publication }) => (
+              <div key={subscription.id} className="grid gap-3 px-3 py-3 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-center">
+                <div className="min-w-0">
+                  <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+                    <div className="min-w-0 truncate text-sm text-fg-1">{member.name || member.email}</div>
+                    <StatusPill kind="ok">subscribed</StatusPill>
+                  </div>
+                  <div className="mt-2 grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
+                    <RowMeta label="email"><span className="truncate">{member.email}</span></RowMeta>
+                    <RowMeta label="publication"><span className="truncate">{publication.name}</span></RowMeta>
+                    <RowMeta label="company"><span className="truncate">{member.company || '-'}</span></RowMeta>
+                    <RowMeta label="role"><span className="truncate">{member.role || member.whatsappPhone || '-'}</span></RowMeta>
+                  </div>
+                </div>
+                <button
+                  className="justify-self-start font-mono text-xs text-fg-4 transition hover:text-amber lg:justify-self-end"
+                  onClick={() => void z.mutate.mkt_audience_subscriptions.update({ id: subscription.id, status: 'unsubscribed', unsubscribedAt: Date.now() })}
+                >
+                  unsubscribe
+                </button>
+              </div>
+            ))}
           </div>
           {subscriberRows.length === 0 ? <EmptyState label="no subscribers" /> : null}
         </Panel>
@@ -2480,89 +2464,75 @@ function PublicationDetailPage({
         <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_360px]">
           <div className="space-y-4">
             <Panel title={<InfoTitle label="editorial ideas" info="Unused, reserved, and used topics the autonomous editor can draft from without repeating prior newsletter work." />}>
-              <div className="overflow-auto">
-                <table className="w-full min-w-[760px] text-left font-mono text-xs">
-                  <thead className="text-[10px] uppercase tracking-label text-fg-4">
-                    <tr className="border-b border-edge/12">
-                      <th className="pb-2 pr-3 font-normal">status</th>
-                      <th className="pb-2 pr-3 font-normal">title</th>
-                      <th className="pb-2 pr-3 font-normal">angle</th>
-                      <th className="pb-2 pr-3 font-normal">document</th>
-                      <th className="pb-2 font-normal">updated</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {ideas.slice(0, 80).map((idea) => {
-                      const document = idea.documentId ? documents.find((entry) => entry.id === idea.documentId) : null
-                      return (
-                        <tr key={idea.id} className="border-b border-edge/8 text-fg-2">
-                          <td className="py-2.5 pr-3"><StatusPill kind={statusKind(idea.status)}>{idea.status}</StatusPill></td>
-                          <td className="max-w-[260px] py-2.5 pr-3">
-                            <div className="truncate text-fg-1">{idea.title}</div>
-                            <div className="mt-1 truncate text-[10px] text-fg-4">{idea.dedupeKey}</div>
-                          </td>
-                          <td className="max-w-[280px] truncate py-2.5 pr-3 text-fg-3">{idea.angle || '-'}</td>
-                          <td className="py-2.5 pr-3">
-                            {document ? (
-                              <button
-                                type="button"
-                                className="inline-flex items-center gap-1 text-fg-3 transition hover:text-accent"
-                                onClick={() => navigate(`/docs/${document.id}`)}
-                              >
-                                <ExternalLink className="h-3 w-3" />
-                                {document.title}
-                              </button>
-                            ) : '-'}
-                          </td>
-                          <td className="py-2.5 text-fg-4">{formatDate(idea.updatedAt)}</td>
-                        </tr>
-                      )
-                    })}
-                  </tbody>
-                </table>
+              <div className="divide-y divide-edge/8">
+                {ideas.slice(0, 80).map((idea) => {
+                  const document = idea.documentId ? documents.find((entry) => entry.id === idea.documentId) : null
+                  return (
+                    <div key={idea.id} className="grid gap-3 px-3 py-3 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-center">
+                      <div className="min-w-0">
+                        <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+                          <div className="min-w-0 truncate text-sm text-fg-1">{idea.title}</div>
+                          <StatusPill kind={statusKind(idea.status)}>{idea.status}</StatusPill>
+                        </div>
+                        <div className="mt-2 grid gap-2 sm:grid-cols-3">
+                          <RowMeta label="angle"><span className="truncate">{idea.angle || '-'}</span></RowMeta>
+                          <RowMeta label="dedupe"><span className="truncate text-fg-4">{idea.dedupeKey}</span></RowMeta>
+                          <RowMeta label="updated">{formatDate(idea.updatedAt)}</RowMeta>
+                        </div>
+                      </div>
+                      <div className="lg:justify-self-end">
+                        {document ? (
+                          <button
+                            type="button"
+                            className="inline-flex max-w-full items-center gap-1 font-mono text-xs text-fg-3 transition hover:text-accent"
+                            onClick={() => navigate(`/docs/${document.id}`)}
+                          >
+                            <ExternalLink className="h-3 w-3 shrink-0" />
+                            <span className="truncate">{document.title}</span>
+                          </button>
+                        ) : (
+                          <span className="font-mono text-xs text-fg-4">no document</span>
+                        )}
+                      </div>
+                    </div>
+                  )
+                })}
               </div>
               {ideas.length === 0 ? <EmptyState label="no ideas yet" /> : null}
             </Panel>
 
             <Panel title={<InfoTitle label="publication slots" info="Upcoming cadence windows the automation keeps filled with a draft document, content snapshot, and scheduled newsletter run." />}>
-              <div className="overflow-auto">
-                <table className="w-full min-w-[760px] text-left font-mono text-xs">
-                  <thead className="text-[10px] uppercase tracking-label text-fg-4">
-                    <tr className="border-b border-edge/12">
-                      <th className="pb-2 pr-3 font-normal">time</th>
-                      <th className="pb-2 pr-3 font-normal">status</th>
-                      <th className="pb-2 pr-3 font-normal">idea</th>
-                      <th className="pb-2 pr-3 font-normal">content</th>
-                      <th className="pb-2 font-normal">run</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {upcomingSlots.map((slot) => {
-                      const idea = slot.ideaId ? ideas.find((entry) => entry.id === slot.ideaId) : null
-                      const contentItem = slot.contentItemId ? contentItems.find((entry) => entry.id === slot.contentItemId) : null
-                      const run = slot.distributionRunId ? runs.find((entry) => entry.id === slot.distributionRunId) : null
-                      return (
-                        <tr key={slot.id} className="border-b border-edge/8 text-fg-2">
-                          <td className="py-2.5 pr-3">{formatScheduledDate(slot.scheduledAt, slot.scheduledTimezone)}</td>
-                          <td className="py-2.5 pr-3"><StatusPill kind={statusKind(slot.status)}>{slot.status}</StatusPill></td>
-                          <td className="max-w-[260px] truncate py-2.5 pr-3">{idea?.title ?? '-'}</td>
-                          <td className="max-w-[220px] py-2.5 pr-3">
+              <div className="divide-y divide-edge/8">
+                {upcomingSlots.map((slot) => {
+                  const idea = slot.ideaId ? ideas.find((entry) => entry.id === slot.ideaId) : null
+                  const contentItem = slot.contentItemId ? contentItems.find((entry) => entry.id === slot.contentItemId) : null
+                  const run = slot.distributionRunId ? runs.find((entry) => entry.id === slot.distributionRunId) : null
+                  return (
+                    <div key={slot.id} className="grid gap-3 px-3 py-3 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-center">
+                      <div className="min-w-0">
+                        <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+                          <div className="font-mono text-xs text-fg-1">{formatScheduledDate(slot.scheduledAt, slot.scheduledTimezone)}</div>
+                          <StatusPill kind={statusKind(slot.status)}>{slot.status}</StatusPill>
+                        </div>
+                        <div className="mt-2 grid gap-2 sm:grid-cols-2">
+                          <RowMeta label="idea"><span className="truncate">{idea?.title ?? '-'}</span></RowMeta>
+                          <RowMeta label="content">
                             {contentItem ? (
                               <button
                                 type="button"
-                                className="truncate text-fg-3 transition hover:text-accent"
+                                className="inline-flex max-w-full text-fg-3 transition hover:text-accent"
                                 onClick={() => navigate(`/marketing/newsletters/content?content=${contentItem.id}`)}
                               >
-                                {contentItem.title}
+                                <span className="truncate">{contentItem.title}</span>
                               </button>
                             ) : '-'}
-                          </td>
-                          <td className="py-2.5 text-fg-4">{run ? run.status : '-'}</td>
-                        </tr>
-                      )
-                    })}
-                  </tbody>
-                </table>
+                          </RowMeta>
+                        </div>
+                      </div>
+                      <RowMeta label="run" className="lg:justify-self-end">{run ? run.status : '-'}</RowMeta>
+                    </div>
+                  )
+                })}
               </div>
               {slots.length === 0 ? <EmptyState label="no slots yet" /> : null}
             </Panel>
@@ -2961,42 +2931,34 @@ function BroadcastsSection({
         </Button>
       </div>
       <Panel title="broadcasts">
-        <div className="overflow-auto">
-          <table className="w-full min-w-[980px] text-left font-mono text-xs">
-            <thead className="text-[10px] uppercase tracking-label text-fg-4">
-              <tr className="border-b border-edge/12">
-                <th className="pb-2 pr-3 font-normal">name</th>
-                <th className="pb-2 pr-3 font-normal">content</th>
-                <th className="pb-2 pr-3 font-normal">publication</th>
-                <th className="pb-2 pr-3 font-normal">status</th>
-                <th className="pb-2 pr-3 font-normal">scheduled</th>
-                <th className="pb-2 pr-3 font-normal">metrics</th>
-                <th className="pb-2 font-normal">updated</th>
-              </tr>
-            </thead>
-            <tbody>
-              {newsletterRuns.map((run) => {
-                const item = contentItems.find((entry) => entry.id === run.contentItemId)
-                const publication = publications.find((entry) => entry.id === run.publicationId)
-                const metrics = run.metrics as Record<string, unknown>
-                return (
-                  <tr
-                    key={run.id}
-                    className="cursor-pointer border-b border-edge/8 text-fg-2 transition hover:bg-accent-fill/4 hover:text-fg-1"
-                    onClick={() => navigate(`${basePath}/${run.id}`)}
-                  >
-                    <td className="max-w-[260px] truncate py-2.5 pr-3">{run.name}</td>
-                    <td className="max-w-[260px] truncate py-2.5 pr-3">{item?.title ?? '-'}</td>
-                    <td className="py-2.5 pr-3">{publication?.name ?? '-'}</td>
-                    <td className="py-2.5 pr-3"><StatusPill kind={statusKind(run.status)}>{run.status}</StatusPill></td>
-                    <td className="py-2.5 pr-3 text-fg-4">{formatScheduledDate(run.scheduledAt, run.scheduledTimezone)}</td>
-                    <td className="py-2.5 pr-3 text-fg-4">sent {String(metrics.sent ?? 0)} · failed {String(metrics.failed ?? 0)}</td>
-                    <td className="py-2.5 text-fg-4">{formatDate(run.updatedAt)}</td>
-                  </tr>
-                )
-              })}
-            </tbody>
-          </table>
+        <div className="divide-y divide-edge/8">
+          {newsletterRuns.map((run) => {
+            const item = contentItems.find((entry) => entry.id === run.contentItemId)
+            const publication = publications.find((entry) => entry.id === run.publicationId)
+            const metrics = run.metrics as Record<string, unknown>
+            return (
+              <button
+                key={run.id}
+                type="button"
+                className="grid w-full grid-cols-1 gap-3 px-3 py-3 text-left text-fg-2 transition hover:bg-accent-fill/4 hover:text-fg-1 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-center"
+                onClick={() => navigate(`${basePath}/${run.id}`)}
+              >
+                <div className="min-w-0">
+                  <div className="truncate text-sm text-fg-1">{run.name}</div>
+                  <div className="mt-2 grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
+                    <RowMeta label="content"><span className="truncate">{item?.title ?? '-'}</span></RowMeta>
+                    <RowMeta label="publication"><span className="truncate">{publication?.name ?? '-'}</span></RowMeta>
+                    <RowMeta label="scheduled">{formatScheduledDate(run.scheduledAt, run.scheduledTimezone)}</RowMeta>
+                    <RowMeta label="updated">{formatDate(run.updatedAt)}</RowMeta>
+                  </div>
+                </div>
+                <div className="flex flex-wrap items-center gap-2 lg:justify-end">
+                  <StatusPill kind={statusKind(run.status)}>{run.status}</StatusPill>
+                  <span className="font-mono text-xs text-fg-4">sent {String(metrics.sent ?? 0)} · failed {String(metrics.failed ?? 0)}</span>
+                </div>
+              </button>
+            )
+          })}
         </div>
         {newsletterRuns.length === 0 ? <EmptyState label="no broadcasts" /> : null}
       </Panel>
@@ -4013,43 +3975,34 @@ function CtasSection({
         </Button>
       </div>
       <Panel title="ctas">
-        <div className="overflow-auto">
-          <table className="w-full min-w-[760px] text-left font-mono text-xs">
-            <thead className="text-[10px] uppercase tracking-label text-fg-4">
-              <tr className="border-b border-edge/12">
-                <th className="pb-2 pr-3 font-normal">label</th>
-                <th className="pb-2 pr-3 font-normal">key</th>
-                <th className="pb-2 pr-3 font-normal">destination</th>
-                <th className="pb-2 pr-3 font-normal">status</th>
-                <th className="pb-2 font-normal">action</th>
-              </tr>
-            </thead>
-            <tbody>
-              {ctas.map((cta) => (
-                <tr key={cta.id} className="border-b border-edge/8 text-fg-2">
-                  <td className="py-2.5 pr-3">{cta.label}</td>
-                  <td className="py-2.5 pr-3">{cta.key}</td>
-                  <td className="max-w-[360px] truncate py-2.5 pr-3">
-                    <a href={cta.url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-fg-2 transition hover:text-accent">
-                      {cta.url}
-                      <ExternalLink className="h-3 w-3" />
+        <div className="divide-y divide-edge/8">
+          {ctas.map((cta) => (
+            <div key={cta.id} className="grid gap-3 px-3 py-3 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-center">
+              <div className="min-w-0">
+                <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+                  <div className="min-w-0 truncate text-sm text-fg-1">{cta.label}</div>
+                  <StatusPill kind={statusKind(cta.status)}>{cta.status}</StatusPill>
+                </div>
+                <div className="mt-2 grid gap-2 sm:grid-cols-[minmax(120px,0.35fr)_minmax(0,1fr)]">
+                  <RowMeta label="key"><span className="truncate">{cta.key}</span></RowMeta>
+                  <RowMeta label="destination">
+                    <a href={cta.url} target="_blank" rel="noreferrer" className="inline-flex max-w-full items-center gap-1 text-fg-2 transition hover:text-accent">
+                      <span className="truncate">{cta.url}</span>
+                      <ExternalLink className="h-3 w-3 shrink-0" />
                     </a>
-                  </td>
-                  <td className="py-2.5 pr-3"><StatusPill kind={statusKind(cta.status)}>{cta.status}</StatusPill></td>
-                  <td className="py-2.5">
-                    <div className="flex gap-2">
-                      <Button className="px-2 py-1 text-[10px]" icon={<Edit3 className="h-3 w-3" />} onClick={() => setEditingCtaId(cta.id)}>
-                        edit
-                      </Button>
-                      <Button kind="danger" className="px-2 py-1 text-[10px]" icon={<Trash2 className="h-3 w-3" />} onClick={() => void z.mutate.mkt_ctas.delete({ id: cta.id })}>
-                        delete
-                      </Button>
-                    </div>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+                  </RowMeta>
+                </div>
+              </div>
+              <div className="flex flex-wrap gap-2 lg:justify-end">
+                <Button className="px-2 py-1 text-[10px]" icon={<Edit3 className="h-3 w-3" />} onClick={() => setEditingCtaId(cta.id)}>
+                  edit
+                </Button>
+                <Button kind="danger" className="px-2 py-1 text-[10px]" icon={<Trash2 className="h-3 w-3" />} onClick={() => void z.mutate.mkt_ctas.delete({ id: cta.id })}>
+                  delete
+                </Button>
+              </div>
+            </div>
+          ))}
         </div>
         {ctas.length === 0 ? <EmptyState label="no ctas" /> : null}
       </Panel>
