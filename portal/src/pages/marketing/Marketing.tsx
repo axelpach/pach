@@ -25,6 +25,7 @@ import {
   Link2,
   Linkedin,
   Mail,
+  Menu,
   Megaphone,
   MessageCircleMore,
   Newspaper,
@@ -244,6 +245,7 @@ export default function Marketing({ canAccessWhatsApp = false }: { canAccessWhat
   const [selectedContentId, setSelectedContentId] = useState('')
   const [selectedPublicationId, setSelectedPublicationId] = useState('')
   const [message, setMessage] = useState('')
+  const [mobileMarketingOpen, setMobileMarketingOpen] = useState(false)
 
   const organization = organizations.find((entry) => entry.id === organizationId) ?? null
   const orgContentItems = useMemo(() => byOrganization(contentItems, organizationId), [contentItems, organizationId])
@@ -360,67 +362,88 @@ export default function Marketing({ canAccessWhatsApp = false }: { canAccessWhat
 
   return (
     <div className="flex h-full min-h-0 bg-pit text-fg-1">
-      <aside className="hidden shrink-0 flex-col border-r border-edge/12 bg-pit/60 px-2 py-4 backdrop-blur-sm md:flex md:w-[200px]">
-        <div className="mb-2 px-4 pb-3">
-          <div className="flex items-center gap-2 font-mono text-[10px] uppercase tracking-label text-fg-4">
-            {isWhatsAppSection ? <MessageCircleMore className="h-3.5 w-3.5 text-accent" /> : <Megaphone className="h-3.5 w-3.5 text-accent" />}
-            marketing
-          </div>
-          <div className="mt-1 font-mono text-lg font-bold lowercase text-fg-1">{isWhatsAppSection ? 'outbound' : 'inbound'}</div>
-        </div>
+      <div className="relative flex h-full min-h-0 flex-1">
+        {mobileMarketingOpen ? (
+          <div
+            className="absolute inset-0 z-30 bg-overlay/70 backdrop-blur-sm md:hidden"
+            onClick={() => setMobileMarketingOpen(false)}
+          />
+        ) : null}
 
-        <div className="mb-4 px-2">
-          <div className="mb-2 font-mono text-[10px] uppercase tracking-label text-fg-4">organization</div>
-          <div className="relative">
-            <Building2 className="pointer-events-none absolute left-3 top-1/2 z-10 h-3.5 w-3.5 -translate-y-1/2 text-fg-4" />
-            <PachSelect
-              value={organizationId}
-              onChange={setOrganizationId}
-              options={organizationOptions}
-              display={organization?.name ?? 'organization'}
-              popupWidth="200"
-              triggerClassName="flex h-8 w-full items-center justify-between border border-edge/18 bg-rim pl-9 pr-2 text-left font-mono text-xs text-fg-1 outline-none transition hover:border-edge/32 hover:bg-accent-fill/4 focus-visible:border-accent focus-visible:shadow-glow-xs"
-            />
+        <aside
+          className={`${
+            mobileMarketingOpen
+              ? 'absolute inset-y-0 left-0 z-40 flex w-[82%] max-w-[300px]'
+              : 'hidden md:relative md:z-auto md:flex md:w-[200px]'
+          } shrink-0 flex-col border-r border-edge/12 bg-pit px-2 py-4 backdrop-blur-sm md:bg-pit/60`}
+        >
+          <div className="mb-2 flex items-start justify-between gap-2 px-4 pb-3">
+            <div className="min-w-0">
+              <div className="flex items-center gap-2 font-mono text-[10px] uppercase tracking-label text-fg-4">
+                {isWhatsAppSection ? <MessageCircleMore className="h-3.5 w-3.5 text-accent" /> : <Megaphone className="h-3.5 w-3.5 text-accent" />}
+                marketing
+              </div>
+              <div className="mt-1 font-mono text-lg font-bold lowercase text-fg-1">{isWhatsAppSection ? 'outbound' : 'inbound'}</div>
+            </div>
+            <button
+              type="button"
+              onClick={() => setMobileMarketingOpen(false)}
+              className="flex h-7 w-7 items-center justify-center text-fg-3 transition hover:text-accent md:hidden"
+              aria-label="close marketing menu"
+            >
+              <X className="h-4 w-4" />
+            </button>
           </div>
-        </div>
 
-        <div className="mt-4 space-y-1">
-          <div className="px-3 pb-1 font-mono text-[10px] uppercase tracking-label text-fg-4">sections</div>
-          {visibleSections.map((entry) => (
-            <MarketingSidebarButton
-              key={entry.id}
-              active={section === entry.id}
-              label={entry.label}
-              onClick={() => navigate(marketingSectionPath(entry.id))}
-            />
-          ))}
-        </div>
-      </aside>
+          <div className="mb-4 px-2">
+            <div className="mb-2 font-mono text-[10px] uppercase tracking-label text-fg-4">organization</div>
+            <div className="relative">
+              <Building2 className="pointer-events-none absolute left-3 top-1/2 z-10 h-3.5 w-3.5 -translate-y-1/2 text-fg-4" />
+              <PachSelect
+                value={organizationId}
+                onChange={setOrganizationId}
+                options={organizationOptions}
+                display={organization?.name ?? 'organization'}
+                popupWidth="200"
+                triggerClassName="flex h-8 w-full items-center justify-between border border-edge/18 bg-rim pl-9 pr-2 text-left font-mono text-xs text-fg-1 outline-none transition hover:border-edge/32 hover:bg-accent-fill/4 focus-visible:border-accent focus-visible:shadow-glow-xs"
+              />
+            </div>
+          </div>
+
+          <div className="mt-4 space-y-1">
+            <div className="px-3 pb-1 font-mono text-[10px] uppercase tracking-label text-fg-4">sections</div>
+            {visibleSections.map((entry) => (
+              <MarketingSidebarButton
+                key={entry.id}
+                active={section === entry.id}
+                label={entry.label}
+                onClick={() => {
+                  navigate(marketingSectionPath(entry.id))
+                  setMobileMarketingOpen(false)
+                }}
+              />
+            ))}
+          </div>
+        </aside>
 
       <main className={`min-w-0 flex-1 ${isCalendarSection || isWhatsAppSection ? 'flex min-h-0 flex-col overflow-hidden' : 'overflow-auto'}`}>
+        <div className="flex items-center gap-2 border-b border-edge/12 bg-pit/60 px-3 py-2 backdrop-blur-sm md:hidden">
+          <button
+            type="button"
+            onClick={() => setMobileMarketingOpen(true)}
+            className="flex h-8 w-8 items-center justify-center border border-edge/20 bg-pit-3 text-fg-2 transition hover:border-edge/40 hover:text-accent"
+            aria-label="open marketing menu"
+          >
+            <Menu className="h-4 w-4" />
+          </button>
+          <span className="min-w-0 truncate font-mono text-[10px] uppercase tracking-label text-fg-3">
+            ◊ marketing · {organization?.name?.toLowerCase() ?? 'organization'} · {section}
+          </span>
+        </div>
+
         {!isMarketingDetail && !isWhatsAppSection ? (
           <div className="border-b border-edge/12 px-5 py-4 md:px-8">
             <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
-              <div className="md:hidden">
-                <div className="font-mono text-[10px] uppercase tracking-label text-fg-4">organization</div>
-                <div className="mt-2 w-full max-w-[320px]">
-                  <div className="relative">
-                    <Building2 className="pointer-events-none absolute left-3 top-1/2 z-10 h-3.5 w-3.5 -translate-y-1/2 text-fg-4" />
-                    <PachSelect
-                      value={organizationId}
-                      onChange={setOrganizationId}
-                      options={organizationOptions}
-                      display={organization?.name ?? 'organization'}
-                      triggerClassName="flex h-9 w-full items-center justify-between border border-edge/18 bg-rim pl-9 pr-3 text-left font-mono text-xs text-fg-1 outline-none transition hover:border-edge/32 hover:bg-accent-fill/4"
-                    />
-                  </div>
-                </div>
-                <MarketingMobileSectionMenu
-                  sections={visibleSections}
-                  section={section}
-                  onSelect={(nextSection) => navigate(marketingSectionPath(nextSection))}
-                />
-              </div>
               {section !== 'analytics' ? (
                 <MarketingHeaderMetrics
                   section={section}
@@ -576,35 +599,7 @@ export default function Marketing({ canAccessWhatsApp = false }: { canAccessWhat
           ) : null}
         </div>
       </main>
-    </div>
-  )
-}
-
-function MarketingMobileSectionMenu({
-  sections,
-  section,
-  onSelect,
-}: {
-  sections: Array<{ id: MarketingSection; label: string }>
-  section: MarketingSection
-  onSelect: (section: MarketingSection) => void
-}) {
-  return (
-    <div className="mt-3 grid grid-cols-2 gap-1 font-mono text-[10px] uppercase tracking-label min-[420px]:grid-cols-3">
-      {sections.map((entry) => (
-        <button
-          key={entry.id}
-          type="button"
-          onClick={() => onSelect(entry.id)}
-          className={`min-w-0 border px-1.5 py-2 text-center transition ${
-            section === entry.id
-              ? 'border-edge/45 bg-accent-fill/8 text-accent'
-              : 'border-edge/12 text-fg-3 hover:border-edge/24 hover:text-fg-1'
-          }`}
-        >
-          <span className="block truncate">{entry.label}</span>
-        </button>
-      ))}
+      </div>
     </div>
   )
 }
