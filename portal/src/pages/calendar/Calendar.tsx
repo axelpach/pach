@@ -305,7 +305,7 @@ export default function CalendarPage() {
 
   return (
     <div className="flex h-full min-h-0 flex-col overflow-hidden bg-pit text-fg-1">
-      <header className="relative z-[120] shrink-0 border-b border-edge/12 bg-pit/80 px-4 py-3 backdrop-blur-sm md:px-6">
+      <header className="relative z-20 shrink-0 border-b border-edge/12 bg-pit/80 px-4 py-3 backdrop-blur-sm md:px-6">
         <div className="flex flex-col gap-3">
           <div className="flex flex-wrap items-center gap-3">
             <div className="min-w-0">
@@ -345,7 +345,7 @@ export default function CalendarPage() {
           </div>
 
           <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
-            <div className="relative z-[130] flex flex-wrap items-center gap-2">
+            <div className="relative z-30 flex flex-wrap items-center gap-2">
               <FilterButton
                 activeFilters={activeFilters}
                 filterConfigs={filterConfigs}
