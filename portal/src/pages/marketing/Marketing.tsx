@@ -452,27 +452,7 @@ export default function Marketing({ canAccessWhatsApp = false }: { canAccessWhat
           </span>
         </div>
 
-        {!isMarketingDetail && !isWhatsAppSection ? (
-          <div className="border-b border-edge/12 px-5 py-4 md:px-8">
-            <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
-              {section !== 'analytics' ? (
-                <MarketingHeaderMetrics
-                  section={section}
-                  contentItems={orgContentItems}
-                  subscriptions={orgSubscriptions}
-                  runs={orgRuns}
-                  events={orgEvents}
-                  socialChannels={orgSocialChannels}
-                  socialPostTargets={orgSocialPostTargets}
-                  adPromotions={orgAdPromotions}
-                />
-              ) : null}
-            </div>
-            {message ? (
-              <div className="mt-3 border border-ok/25 bg-ok/5 px-3 py-2 font-mono text-xs text-ok">{message}</div>
-            ) : null}
-          </div>
-        ) : message ? (
+        {message ? (
           <div className="pointer-events-none fixed right-5 top-16 z-50 border border-ok/25 bg-pit px-3 py-2 font-mono text-xs text-ok shadow-terminal-popover">
             {message}
           </div>
@@ -611,56 +591,6 @@ export default function Marketing({ canAccessWhatsApp = false }: { canAccessWhat
         </div>
       </main>
       </div>
-    </div>
-  )
-}
-
-function MarketingHeaderMetrics({
-  section,
-  contentItems,
-  subscriptions,
-  runs,
-  events,
-  socialChannels,
-  socialPostTargets,
-  adPromotions,
-}: {
-  section: MarketingSection
-  contentItems: ContentItemRow[]
-  subscriptions: AudienceSubscriptionRow[]
-  runs: DistributionRunRow[]
-  events: ContentEventRow[]
-  socialChannels: SocialChannelRow[]
-  socialPostTargets: SocialPostTargetRow[]
-  adPromotions: AdPromotionRow[]
-}) {
-  if (section === 'social') {
-    return (
-      <div className="grid grid-cols-2 gap-2 md:grid-cols-4 lg:min-w-[520px]">
-        <Metric label="posts" value={socialPostTargets.length} />
-        <Metric label="published" value={socialPostTargets.filter((target) => target.status === 'published').length} />
-        <Metric label="destinations" value={socialChannels.length} />
-        <Metric label="ad drafts" value={adPromotions.length} />
-      </div>
-    )
-  }
-  if (section === 'calendar') {
-    const scheduledRuns = runs.filter((run) => run.scheduledAt)
-    return (
-      <div className="grid grid-cols-2 gap-2 md:grid-cols-4 lg:min-w-[520px]">
-        <Metric label="scheduled" value={scheduledRuns.length + socialPostTargets.filter((target) => target.scheduledAt).length} />
-        <Metric label="blog" value={scheduledRuns.filter((run) => run.channel === 'blog').length} />
-        <Metric label="newsletter" value={scheduledRuns.filter((run) => run.channel === 'newsletter').length} />
-        <Metric label="social" value={socialPostTargets.filter((target) => target.scheduledAt).length} />
-      </div>
-    )
-  }
-  return (
-    <div className="grid grid-cols-2 gap-2 md:grid-cols-4 lg:min-w-[520px]">
-      <Metric label="content" value={contentItems.length} />
-      <Metric label="subscribers" value={newsletterSubscriberCount(subscriptions)} />
-      <Metric label="broadcasts" value={runs.filter((run) => run.channel === 'newsletter').length} />
-      <Metric label="conversations" value={countEvents(events, 'reply')} />
     </div>
   )
 }
