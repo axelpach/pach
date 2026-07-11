@@ -788,7 +788,7 @@ export default function IssueDetail() {
             onClose={closeAgentFullView}
           />
         ) : (
-        <div className="flex min-h-0 flex-1 flex-col overflow-y-auto overflow-x-hidden overscroll-contain pb-8 md:flex-row md:overflow-hidden md:pb-0">
+        <div className="flex min-h-0 flex-1 flex-col overflow-y-auto overflow-x-hidden overscroll-contain pb-[calc(6rem+env(safe-area-inset-bottom))] md:flex-row md:overflow-hidden md:pb-0">
           {/* main column */}
           <div
             className="order-1 flex-none min-w-0 px-4 py-5 md:order-none md:min-h-0 md:flex-1 md:overflow-y-auto md:overflow-x-hidden md:px-10 md:py-8 [&::-webkit-scrollbar]:hidden"
@@ -857,7 +857,7 @@ export default function IssueDetail() {
 
           {/* properties sidebar */}
           <aside className="order-2 flex w-full shrink-0 flex-col border-t border-edge/12 bg-pit/60 backdrop-blur-sm md:order-none md:min-h-0 md:w-[300px] md:border-l md:border-t-0 md:overflow-auto">
-            <div className="order-last md:order-none">
+            <div>
               <AgentSidebarCard
                 run={activeRun}
                 pullRequest={activePullRequest}
