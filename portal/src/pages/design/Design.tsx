@@ -17,6 +17,7 @@ import {
   Plus,
   Search,
   Send,
+  SlidersHorizontal,
   Sparkles,
   Trash2,
   UploadCloud,
@@ -337,6 +338,7 @@ export default function Design() {
   const [customHeight, setCustomHeight] = useState(1080)
   const [slideCount, setSlideCount] = useState(5)
   const [mobilePane, setMobilePane] = useState<'chat' | 'preview'>('preview')
+  const [mobileHomePane, setMobileHomePane] = useState<'templates' | 'systems'>('templates')
 
   const typedOrganizations = organizations as Organization[]
   const typedSystems = designSystems as DesignSystemRow[]
@@ -801,9 +803,36 @@ export default function Design() {
             preview
           </button>
         </div>
-      ) : null}
+      ) : (
+        <div className="grid shrink-0 grid-cols-2 border-b border-edge/12 bg-void/95 p-2 md:hidden">
+          <button
+            type="button"
+            onClick={() => setMobileHomePane('templates')}
+            className={`inline-flex h-9 items-center justify-center gap-2 border font-mono text-[10px] uppercase tracking-label transition ${
+              mobileHomePane === 'templates'
+                ? 'border-accent-fill/30 bg-accent-fill/10 text-accent'
+                : 'border-edge/14 bg-pit-3 text-fg-3 hover:border-edge/35 hover:text-fg-1'
+            }`}
+          >
+            <Layers3 className="h-3.5 w-3.5" />
+            templates
+          </button>
+          <button
+            type="button"
+            onClick={() => setMobileHomePane('systems')}
+            className={`inline-flex h-9 items-center justify-center gap-2 border font-mono text-[10px] uppercase tracking-label transition ${
+              mobileHomePane === 'systems'
+                ? 'border-accent-fill/30 bg-accent-fill/10 text-accent'
+                : 'border-edge/14 bg-pit-3 text-fg-3 hover:border-edge/35 hover:text-fg-1'
+            }`}
+          >
+            <Palette className="h-3.5 w-3.5" />
+            systems
+          </button>
+        </div>
+      )}
       <DesignSidebar
-        isHiddenOnMobile={Boolean(selectedTemplate && mobilePane === 'preview')}
+        isHiddenOnMobile={selectedTemplate ? mobilePane === 'preview' : mobileHomePane === 'systems'}
         organizations={typedOrganizations}
         selectedOrganizationId={selectedOrganizationId}
         onOrganizationChange={(id) => {
@@ -849,7 +878,7 @@ export default function Design() {
         onOpenTemplate={(slug) => navigate(`/design/${slug}`)}
       />
 
-      <main className={`${selectedTemplate && mobilePane === 'chat' ? 'hidden md:block' : 'block'} flex-1 min-w-0 min-h-0 overflow-hidden`}>
+      <main className={`${selectedTemplate ? (mobilePane === 'chat' ? 'hidden md:block' : 'block') : (mobileHomePane === 'templates' ? 'hidden md:block' : 'block')} flex-1 min-w-0 min-h-0 overflow-hidden`}>
         {selectedTemplate ? (
           <TemplatePreview template={selectedTemplate} version={selectedVersion} />
         ) : (
@@ -1161,6 +1190,7 @@ function TemplateChatSidebar({
   const [isRenaming, setIsRenaming] = useState(false)
   const [isDeleting, setIsDeleting] = useState(false)
   const [isInputMediaDragActive, setIsInputMediaDragActive] = useState(false)
+  const [isMobileSettingsOpen, setIsMobileSettingsOpen] = useState(false)
   const chatScrollRef = useRef<HTMLDivElement | null>(null)
   const chatBottomRef = useRef<HTMLDivElement | null>(null)
   const fileInputRef = useRef<HTMLInputElement | null>(null)
@@ -1419,7 +1449,82 @@ function TemplateChatSidebar({
             ))}
           </div>
         ) : null}
-        <div className="mb-3 grid gap-2">
+        <div className="mb-3 grid gap-2 md:hidden">
+          <button
+            type="button"
+            onClick={() => setIsMobileSettingsOpen((current) => !current)}
+            className="grid min-h-11 w-full grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-2 border border-edge/20 bg-pit-3 px-2.5 py-2 text-left transition hover:border-edge/35 hover:bg-accent-fill/4"
+            aria-expanded={isMobileSettingsOpen}
+          >
+            <SlidersHorizontal className="h-4 w-4 text-accent" />
+            <span className="min-w-0">
+              <span className="block font-mono text-[10px] uppercase tracking-label text-fg-2">generation settings</span>
+              <span className="mt-0.5 block truncate text-[11px] text-fg-4">
+                {selectedDesignSystemLabel} / {selectedAspectRatioLabel} / {slideCount} slides
+              </span>
+            </span>
+            <span className="font-mono text-[9px] uppercase tracking-label text-accent">
+              {isMobileSettingsOpen ? 'hide' : 'edit'}
+            </span>
+          </button>
+          {isMobileSettingsOpen && (
+            <div className="grid gap-2 border border-edge/12 bg-pit-2 p-2">
+              <PachSelect
+                value={selectedDesignSystemId || NO_DESIGN_SYSTEM_ID}
+                onChange={(value) => onDesignSystemChange(value === NO_DESIGN_SYSTEM_ID ? '' : value)}
+                options={designSystemOptions}
+                display={selectedDesignSystemLabel}
+                popupWidth="300"
+                triggerClassName="flex h-9 w-full items-center justify-between border border-edge/20 bg-pit-3 px-2.5 text-left font-mono text-[10px] uppercase tracking-label text-fg-2 outline-none transition hover:border-edge/32 hover:bg-accent-fill/4 focus-visible:border-accent focus-visible:shadow-glow-xs"
+              />
+              <div className="grid grid-cols-[minmax(0,1fr)_74px] gap-2">
+                <PachSelect
+                  value={aspectRatioId}
+                  onChange={onAspectRatioChange}
+                  options={aspectRatioOptions}
+                  display={selectedAspectRatioLabel}
+                  popupWidth="260"
+                  triggerClassName="flex h-9 min-w-0 items-center justify-between border border-edge/20 bg-pit-3 px-2.5 text-left font-mono text-[10px] uppercase tracking-label text-fg-2 outline-none transition hover:border-edge/32 hover:bg-accent-fill/4 focus-visible:border-accent focus-visible:shadow-glow-xs"
+                />
+                <input
+                  value={slideCount}
+                  onChange={(event) => onSlideCountChange(Math.max(1, Math.min(30, Number(event.target.value) || 1)))}
+                  className="h-9 w-full border border-edge/20 bg-pit-3 px-2 text-center font-mono text-[10px] uppercase tracking-label text-fg-2 outline-none transition focus:border-accent/60"
+                  type="number"
+                  min={1}
+                  max={30}
+                  aria-label="slide count"
+                  title="slide count"
+                />
+              </div>
+              {aspectRatioId === CUSTOM_ASPECT_RATIO_ID && (
+                <div className="grid grid-cols-2 gap-2">
+                  <input
+                    value={customWidth}
+                    onChange={(event) => onCustomWidthChange(clampDimension(Number(event.target.value), 320, 3840))}
+                    className="h-9 border border-edge/20 bg-pit-3 px-2 font-mono text-[10px] uppercase tracking-label text-fg-2 outline-none transition focus:border-accent/60"
+                    type="number"
+                    min={320}
+                    max={3840}
+                    aria-label="custom width"
+                    title="custom width"
+                  />
+                  <input
+                    value={customHeight}
+                    onChange={(event) => onCustomHeightChange(clampDimension(Number(event.target.value), 320, 3840))}
+                    className="h-9 border border-edge/20 bg-pit-3 px-2 font-mono text-[10px] uppercase tracking-label text-fg-2 outline-none transition focus:border-accent/60"
+                    type="number"
+                    min={320}
+                    max={3840}
+                    aria-label="custom height"
+                    title="custom height"
+                  />
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+        <div className="mb-3 hidden gap-2 md:grid">
           <PachSelect
             value={selectedDesignSystemId || NO_DESIGN_SYSTEM_ID}
             onChange={(value) => onDesignSystemChange(value === NO_DESIGN_SYSTEM_ID ? '' : value)}
