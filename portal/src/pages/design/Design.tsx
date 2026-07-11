@@ -11,6 +11,7 @@ import {
   FileImage,
   Image as ImageIcon,
   Layers3,
+  MessageSquare,
   Paperclip,
   Palette,
   Plus,
@@ -335,6 +336,7 @@ export default function Design() {
   const [customWidth, setCustomWidth] = useState(1920)
   const [customHeight, setCustomHeight] = useState(1080)
   const [slideCount, setSlideCount] = useState(5)
+  const [mobilePane, setMobilePane] = useState<'chat' | 'preview'>('preview')
 
   const typedOrganizations = organizations as Organization[]
   const typedSystems = designSystems as DesignSystemRow[]
@@ -358,6 +360,10 @@ export default function Design() {
   }, [typedDbTemplates])
 
   const selectedTemplate = templates.find((template) => template.slug === templateSlug)
+
+  useEffect(() => {
+    setMobilePane(templateSlug ? 'preview' : 'chat')
+  }, [templateSlug])
 
   useEffect(() => {
     if (!typedOrganizations.length) return
@@ -767,8 +773,37 @@ export default function Design() {
   }
 
   return (
-    <div className="flex flex-1 min-h-0 overflow-hidden bg-pit text-fg-1">
+    <div className="flex flex-1 min-h-0 flex-col overflow-hidden bg-pit text-fg-1 md:flex-row">
+      {selectedTemplate ? (
+        <div className="grid shrink-0 grid-cols-2 border-b border-edge/12 bg-void/95 p-2 md:hidden">
+          <button
+            type="button"
+            onClick={() => setMobilePane('chat')}
+            className={`inline-flex h-9 items-center justify-center gap-2 border font-mono text-[10px] uppercase tracking-label transition ${
+              mobilePane === 'chat'
+                ? 'border-accent-fill/30 bg-accent-fill/10 text-accent'
+                : 'border-edge/14 bg-pit-3 text-fg-3 hover:border-edge/35 hover:text-fg-1'
+            }`}
+          >
+            <MessageSquare className="h-3.5 w-3.5" />
+            chat
+          </button>
+          <button
+            type="button"
+            onClick={() => setMobilePane('preview')}
+            className={`inline-flex h-9 items-center justify-center gap-2 border font-mono text-[10px] uppercase tracking-label transition ${
+              mobilePane === 'preview'
+                ? 'border-accent-fill/30 bg-accent-fill/10 text-accent'
+                : 'border-edge/14 bg-pit-3 text-fg-3 hover:border-edge/35 hover:text-fg-1'
+            }`}
+          >
+            <Braces className="h-3.5 w-3.5" />
+            preview
+          </button>
+        </div>
+      ) : null}
       <DesignSidebar
+        isHiddenOnMobile={Boolean(selectedTemplate && mobilePane === 'preview')}
         organizations={typedOrganizations}
         selectedOrganizationId={selectedOrganizationId}
         onOrganizationChange={(id) => {
@@ -814,7 +849,7 @@ export default function Design() {
         onOpenTemplate={(slug) => navigate(`/design/${slug}`)}
       />
 
-      <main className="flex-1 min-w-0 min-h-0 overflow-hidden">
+      <main className={`${selectedTemplate && mobilePane === 'chat' ? 'hidden md:block' : 'block'} flex-1 min-w-0 min-h-0 overflow-hidden`}>
         {selectedTemplate ? (
           <TemplatePreview template={selectedTemplate} version={selectedVersion} />
         ) : (
@@ -844,6 +879,7 @@ export default function Design() {
 }
 
 function DesignSidebar({
+  isHiddenOnMobile,
   organizations,
   selectedOrganizationId,
   onOrganizationChange,
@@ -884,6 +920,7 @@ function DesignSidebar({
   onBack,
   onOpenTemplate,
 }: {
+  isHiddenOnMobile?: boolean
   organizations: Organization[]
   selectedOrganizationId: string
   onOrganizationChange: (id: string) => void
@@ -936,7 +973,7 @@ function DesignSidebar({
   const selectedTypeLabel = typeOptions.find((option) => option.value === typeFilter)?.label ?? 'all'
 
   return (
-    <aside className="flex w-[340px] shrink-0 flex-col border-r border-edge/12 bg-void/95 md:w-[372px]">
+    <aside className={`${isHiddenOnMobile ? 'hidden md:flex' : 'flex'} min-h-0 w-full flex-1 shrink-0 flex-col border-b border-edge/12 bg-void/95 md:w-[372px] md:flex-none md:border-b-0 md:border-r`}>
       {selectedTemplate ? (
         <TemplateChatSidebar
           template={selectedTemplate}
@@ -2098,8 +2135,8 @@ function TemplatePreview({
 
     return (
       <div className="h-full min-h-0 overflow-y-auto bg-pit text-fg-1">
-        <div className="sticky top-0 z-20 border-b border-edge/15 bg-pit/90 px-4 py-3 backdrop-blur-sm md:px-8 md:py-4">
-          <div className="mx-auto flex max-w-[1400px] flex-wrap items-center justify-between gap-3">
+        <div className="sticky top-0 z-20 border-b border-edge/15 bg-pit/90 px-3 py-3 backdrop-blur-sm md:px-8 md:py-4">
+          <div className="mx-auto flex max-w-[1400px] flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
             <div className="min-w-0">
               <div className="font-mono text-[10px] uppercase tracking-label text-fg-3">design preview</div>
               <h1 className="truncate font-mono text-base font-bold lowercase text-fg-1 md:text-lg">{template.title}</h1>
@@ -2107,11 +2144,11 @@ function TemplatePreview({
                 {previewDimensions.label} / {previewDimensions.width} x {previewDimensions.height}px
               </p>
             </div>
-            <div className="flex items-center gap-2">
+            <div className="grid grid-cols-3 gap-2 sm:flex sm:items-center">
               <button
                 type="button"
                 onClick={() => sendExportCommand('png')}
-                className="inline-flex h-8 items-center gap-1.5 border border-edge/20 bg-pit-3 px-3 font-mono text-[10px] uppercase tracking-label text-fg-2 transition hover:border-edge/35 hover:text-fg-1"
+                className="inline-flex h-8 min-w-0 items-center justify-center gap-1.5 border border-edge/20 bg-pit-3 px-2 font-mono text-[10px] uppercase tracking-label text-fg-2 transition hover:border-edge/35 hover:text-fg-1 sm:px-3"
                 title="export each slide as PNG"
               >
                 <FileImage className="h-3.5 w-3.5" />
@@ -2120,17 +2157,17 @@ function TemplatePreview({
               <button
                 type="button"
                 onClick={() => sendExportCommand('pdf')}
-                className="inline-flex h-8 items-center gap-1.5 border border-accent-fill/30 bg-accent-fill/8 px-3 font-mono text-[10px] uppercase tracking-label text-accent transition hover:bg-accent-fill/16"
+                className="inline-flex h-8 min-w-0 items-center justify-center gap-1.5 border border-accent-fill/30 bg-accent-fill/8 px-2 font-mono text-[10px] uppercase tracking-label text-accent transition hover:bg-accent-fill/16 sm:px-3"
                 title="download as PDF"
               >
                 <Download className="h-3.5 w-3.5" />
-                download pdf
+                <span className="hidden sm:inline">download </span>pdf
               </button>
               <a
                 href={previewUrl}
                 target="_blank"
                 rel="noreferrer"
-                className="inline-flex h-8 items-center gap-1.5 border border-edge/20 bg-pit-3 px-3 font-mono text-[10px] uppercase tracking-label text-fg-2 transition hover:border-edge/35 hover:text-fg-1"
+                className="inline-flex h-8 min-w-0 items-center justify-center gap-1.5 border border-edge/20 bg-pit-3 px-2 font-mono text-[10px] uppercase tracking-label text-fg-2 transition hover:border-edge/35 hover:text-fg-1 sm:px-3"
               >
                 <ExternalLink className="h-3.5 w-3.5" />
                 open
@@ -2144,7 +2181,7 @@ function TemplatePreview({
             title={template.title}
             src={previewUrl}
             sandbox="allow-scripts allow-downloads"
-            className="h-[calc(100vh-118px)] min-h-[560px] w-full border-0 bg-pit"
+            className="h-[calc(100dvh-188px)] min-h-[360px] w-full border-0 bg-pit md:h-[calc(100vh-118px)] md:min-h-[560px]"
           />
         </div>
       </div>
