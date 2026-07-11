@@ -92,7 +92,7 @@ export function Panel({
 }) {
   return (
     <div
-      className={`relative border border-edge/15 ${padded ? 'px-4 pt-3.5 pb-4' : ''} ${className || ''}`}
+      className={`relative min-w-0 max-w-full border border-edge/15 ${padded ? 'px-4 pt-3.5 pb-4' : ''} ${className || ''}`}
       style={{ background: 'rgb(var(--bg-1-rgb) / 0.6)', ...style }}
     >
       {title && <SectionHeader right={right}>◊ {title}</SectionHeader>}

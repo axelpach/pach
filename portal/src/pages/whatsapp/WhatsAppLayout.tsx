@@ -2,19 +2,19 @@ import { NavLink, Outlet } from 'react-router-dom'
 
 export default function WhatsAppLayout({ basePath = '/marketing/whatsapp' }: { basePath?: string }) {
   return (
-    <div className="flex-1 flex flex-col overflow-hidden">
-      <div className="px-8 pt-6 pb-0 border-b border-edge/15">
+    <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
+      <div className="border-b border-edge/15 px-5 pt-5 pb-0 md:px-8 md:pt-6">
         <div className="text-[10px] uppercase tracking-label text-fg-3 mb-1.5">◊ whatsapp · outbound</div>
         <h1 className="font-mono text-2xl font-bold text-fg-1 lowercase">whatsapp</h1>
         <p className="text-sm text-fg-3 mt-0.5 mb-4">
           <span className="text-fg-4">›</span> plantillas · campañas · entregas
         </p>
-        <div className="flex gap-0">
+        <div className="flex max-w-full gap-0 overflow-x-auto">
           <Tab to={`${basePath}/templates`}>plantillas</Tab>
           <Tab to={`${basePath}/campaigns`}>campañas</Tab>
         </div>
       </div>
-      <div className="min-h-0 flex-1 overflow-y-auto">
+      <div className="min-h-0 min-w-0 flex-1 overflow-y-auto">
         <Outlet />
       </div>
     </div>

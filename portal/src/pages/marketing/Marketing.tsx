@@ -379,8 +379,8 @@ export default function Marketing({ canAccessWhatsApp = false }: { canAccessWhat
   const isWhatsAppSection = section === 'whatsapp'
 
   return (
-    <div className="flex h-full min-h-0 bg-pit text-fg-1">
-      <div className="relative flex h-full min-h-0 flex-1">
+    <div className="flex h-full min-h-0 w-full min-w-0 bg-pit text-fg-1">
+      <div className="relative flex h-full min-h-0 w-full min-w-0 flex-1">
         <aside
           className={`${
             mobileMarketingOpen
@@ -437,7 +437,7 @@ export default function Marketing({ canAccessWhatsApp = false }: { canAccessWhat
           </div>
         </aside>
 
-      <main className={`min-w-0 flex-1 ${isCalendarSection || isWhatsAppSection ? 'flex min-h-0 flex-col overflow-hidden' : 'overflow-auto'}`}>
+      <main className={`w-full min-w-0 flex-1 ${isCalendarSection || isWhatsAppSection ? 'flex min-h-0 flex-col overflow-hidden' : 'overflow-auto'}`}>
         <div className="flex items-center gap-2 border-b border-edge/12 bg-pit/60 px-3 py-2 backdrop-blur-sm md:hidden">
           <button
             type="button"
@@ -458,9 +458,9 @@ export default function Marketing({ canAccessWhatsApp = false }: { canAccessWhat
           </div>
         ) : null}
 
-        <div className={isMarketingDetail ? 'min-h-full' : isCalendarSection || isWhatsAppSection ? 'flex min-h-0 flex-1 flex-col' : 'px-5 py-5 md:px-8'}>
+        <div className={isMarketingDetail ? 'min-h-full min-w-0' : isCalendarSection || isWhatsAppSection ? 'flex min-h-0 min-w-0 flex-1 flex-col' : 'min-w-0 px-5 py-5 md:px-8'}>
           {section === 'newsletters' ? (
-            <div className={isMarketingDetail ? 'min-h-full' : 'space-y-4'}>
+            <div className={isMarketingDetail ? 'min-h-full min-w-0' : 'min-w-0 space-y-4'}>
               {isPublicationDetail ? (
                 <PublicationDetailPage
                   z={z}
@@ -619,13 +619,13 @@ function MarketingSubtabMenu<T extends string>({
   onChange: (value: T) => void
 }) {
   return (
-    <div className="flex flex-wrap gap-1 border-b border-edge/12 font-mono text-[10px] uppercase tracking-label">
+    <div className="flex max-w-full gap-1 overflow-x-auto border-b border-edge/12 font-mono text-[10px] uppercase tracking-label md:flex-wrap">
       {tabs.map((tab) => (
         <button
           key={tab.id}
           type="button"
           onClick={() => onChange(tab.id)}
-          className={`-mb-px border-b-2 px-3 py-2 transition ${
+          className={`-mb-px shrink-0 border-b-2 px-3 py-2 transition ${
             value === tab.id
               ? 'border-accent text-accent glow'
               : 'border-transparent text-fg-4 hover:text-fg-1'
