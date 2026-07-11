@@ -95,6 +95,20 @@ export default function IssuesLayout() {
     setMobileTrackerOpen(false)
   }, [location.pathname])
 
+  useEffect(() => {
+    if (!mobileTrackerOpen) return
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === 'Escape') setMobileTrackerOpen(false)
+    }
+    const previousBodyOverflow = document.body.style.overflow
+    window.addEventListener('keydown', handleKeyDown)
+    document.body.style.overflow = 'hidden'
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown)
+      document.body.style.overflow = previousBodyOverflow
+    }
+  }, [mobileTrackerOpen])
+
   // setSection from any child navigates back to the list view when triggered from /issues/:id
   function setSection(next: TrackerSection) {
     suppressNextViewUrlSyncRef.current = next.kind !== 'view'
@@ -103,6 +117,16 @@ export default function IssuesLayout() {
     if (location.pathname !== '/issues' || location.search !== (next.kind === 'view' ? `?view=${next.viewId}` : '')) {
       navigate(target)
     }
+  }
+
+  function selectSection(next: TrackerSection) {
+    setSection(next)
+    setMobileTrackerOpen(false)
+  }
+
+  function navigateFromTracker(to: string) {
+    navigate(to)
+    setMobileTrackerOpen(false)
   }
 
   function requestComposer() {
@@ -384,19 +408,12 @@ export default function IssuesLayout() {
   return (
     <div className="flex-1 min-h-0 overflow-hidden text-fg-1">
       <div className="flex h-full min-h-0 relative">
-        {/* mobile drawer backdrop */}
-        {mobileTrackerOpen && (
-          <div
-            className="md:hidden absolute inset-0 z-30 bg-overlay/70 backdrop-blur-sm"
-            onClick={() => setMobileTrackerOpen(false)}
-          />
-        )}
         <aside
           className={`${
             mobileTrackerOpen
-              ? 'absolute inset-y-0 left-0 z-40 w-[80%] max-w-[280px] flex'
+              ? 'fixed inset-0 z-50 flex md:relative md:inset-auto md:z-auto md:w-[200px]'
               : 'hidden md:flex md:relative md:z-auto md:w-[200px]'
-          } shrink-0 border-r border-edge/12 bg-pit backdrop-blur-sm px-2 py-4 flex-col md:bg-pit/60`}
+          } shrink-0 overflow-y-auto border-r border-edge/12 bg-pit backdrop-blur-sm px-2 py-4 flex-col md:bg-pit/60`}
         >
           <div className="px-4 pb-3 mb-2 flex items-start justify-between gap-2">
             <div>
@@ -436,14 +453,14 @@ export default function IssuesLayout() {
               active={location.pathname === '/issues' && section.kind === 'all'}
               label="all issues"
               meta={`${scopedIssues.length}`}
-              onClick={() => setSection({ kind: 'all' })}
+              onClick={() => selectSection({ kind: 'all' })}
             />
             {personalSavedViews.map((view) => (
               <TrackerNavButton
                 key={view.id}
                 active={location.pathname === '/issues' && section.kind === 'view' && section.viewId === view.id}
                 label={view.name.toLowerCase()}
-                onClick={() => setSection({ kind: 'view', viewId: view.id })}
+                onClick={() => selectSection({ kind: 'view', viewId: view.id })}
               />
             ))}
           </div>
@@ -453,12 +470,12 @@ export default function IssuesLayout() {
             <TrackerNavButton
               active={location.pathname === '/issues/labels'}
               label="labels"
-              onClick={() => navigate('/issues/labels')}
+              onClick={() => navigateFromTracker('/issues/labels')}
             />
             <TrackerNavButton
               active={location.pathname === '/issues/triggers'}
               label="triggers"
-              onClick={() => navigate('/issues/triggers')}
+              onClick={() => navigateFromTracker('/issues/triggers')}
             />
           </div>
 
@@ -504,7 +521,7 @@ export default function IssuesLayout() {
                           : <ChevronRight className="h-3 w-3" />}
                       </button>
                       <button
-                        onClick={() => setSection({
+                        onClick={() => selectSection({
                           kind: 'team',
                           teamId: team.id,
                           tab: section.kind === 'team' && section.teamId === team.id ? section.tab : 'issues',
@@ -535,12 +552,12 @@ export default function IssuesLayout() {
                         <TrackerChildNavButton
                           active={isActive && section.tab === 'issues'}
                           label="issues"
-                          onClick={() => setSection({ kind: 'team', teamId: team.id, tab: 'issues' })}
+                          onClick={() => selectSection({ kind: 'team', teamId: team.id, tab: 'issues' })}
                         />
                         <TrackerChildNavButton
                           active={isActive && section.tab === 'projects'}
                           label="projects"
-                          onClick={() => setSection({ kind: 'team', teamId: team.id, tab: 'projects' })}
+                          onClick={() => selectSection({ kind: 'team', teamId: team.id, tab: 'projects' })}
                         />
                       </div>
                     ) : null}
