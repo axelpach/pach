@@ -779,7 +779,8 @@ function SavedViewNavItem({
         draggable
         onDragStart={onDragStart}
         onDragEnd={onDragEnd}
-        className={`flex w-6 shrink-0 cursor-grab items-center justify-center text-fg-4 opacity-0 transition hover:text-accent active:cursor-grabbing group-hover:opacity-100 ${
+        onClick={(event) => event.preventDefault()}
+        className={`flex w-6 shrink-0 cursor-grab touch-none items-center justify-center text-fg-4 opacity-100 transition hover:text-accent active:cursor-grabbing md:opacity-0 md:group-hover:opacity-100 ${
           dragging ? 'opacity-100 text-accent' : ''
         }`}
         title="drag to reorder"
@@ -790,7 +791,8 @@ function SavedViewNavItem({
       <button
         type="button"
         onClick={onClick}
-        className={`flex min-w-0 flex-1 items-center justify-between px-2 py-2 text-left font-mono text-xs lowercase transition ${
+        draggable={false}
+        className={`flex min-w-0 flex-1 touch-manipulation items-center justify-between px-2 py-2 text-left font-mono text-xs lowercase transition ${
           active
             ? 'bg-accent-fill/8 text-accent ring-1 ring-accent-fill/20'
             : 'text-fg-2 hover:bg-accent-fill/4 hover:text-fg-1'
