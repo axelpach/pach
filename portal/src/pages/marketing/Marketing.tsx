@@ -287,6 +287,24 @@ export default function Marketing({ canAccessWhatsApp = false }: { canAccessWhat
   }, [navigate, section])
 
   useEffect(() => {
+    setMobileMarketingOpen(false)
+  }, [location.pathname])
+
+  useEffect(() => {
+    if (!mobileMarketingOpen) return
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === 'Escape') setMobileMarketingOpen(false)
+    }
+    const previousBodyOverflow = document.body.style.overflow
+    window.addEventListener('keydown', handleKeyDown)
+    document.body.style.overflow = 'hidden'
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown)
+      document.body.style.overflow = previousBodyOverflow
+    }
+  }, [mobileMarketingOpen])
+
+  useEffect(() => {
     if (organizationId && organizations.some((entry) => entry.id === organizationId)) return
     const ardia = organizations.find((entry) => entry.project === 'ardia')
     setOrganizationId(ardia?.id ?? organizations[0]?.id ?? '')
@@ -363,19 +381,12 @@ export default function Marketing({ canAccessWhatsApp = false }: { canAccessWhat
   return (
     <div className="flex h-full min-h-0 bg-pit text-fg-1">
       <div className="relative flex h-full min-h-0 flex-1">
-        {mobileMarketingOpen ? (
-          <div
-            className="absolute inset-0 z-30 bg-overlay/70 backdrop-blur-sm md:hidden"
-            onClick={() => setMobileMarketingOpen(false)}
-          />
-        ) : null}
-
         <aside
           className={`${
             mobileMarketingOpen
-              ? 'absolute inset-y-0 left-0 z-40 flex w-[82%] max-w-[300px]'
+              ? 'fixed inset-0 z-50 flex md:relative md:inset-auto md:z-auto md:w-[200px]'
               : 'hidden md:relative md:z-auto md:flex md:w-[200px]'
-          } shrink-0 flex-col border-r border-edge/12 bg-pit px-2 py-4 backdrop-blur-sm md:bg-pit/60`}
+          } shrink-0 flex-col overflow-y-auto border-r border-edge/12 bg-pit px-2 py-4 backdrop-blur-sm md:bg-pit/60`}
         >
           <div className="mb-2 flex items-start justify-between gap-2 px-4 pb-3">
             <div className="min-w-0">
