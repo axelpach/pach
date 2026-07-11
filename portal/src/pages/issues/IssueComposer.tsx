@@ -556,16 +556,16 @@ function IssueComposerModal({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-start justify-center bg-overlay/70 px-4 pt-[10vh] backdrop-blur-sm"
+      className="fixed inset-0 z-50 flex items-stretch justify-center bg-overlay/70 backdrop-blur-sm md:items-start md:px-4 md:pt-[10vh]"
       onClick={onClose}
     >
       <div
-        className="max-h-[calc(100vh-5rem)] w-full max-w-2xl overflow-y-auto border border-edge/20 bg-pit-2 shadow-terminal-overlay"
+        className="flex h-[100dvh] w-full flex-col overflow-hidden bg-pit-2 shadow-terminal-overlay md:h-auto md:max-h-[calc(100vh-5rem)] md:max-w-2xl md:border md:border-edge/20"
         onClick={(event) => event.stopPropagation()}
         onKeyDown={handleKeyDown}
       >
-        <div className="flex items-center justify-between border-b border-edge/12 px-5 py-3">
-          <div className="flex items-center gap-2 font-mono text-xs">
+        <div className="flex shrink-0 items-center justify-between gap-3 border-b border-edge/12 px-4 py-3 md:px-5">
+          <div className="flex min-w-0 items-center gap-2 font-mono text-xs">
             <PachSelect
               variant="button"
               value={teamId}
@@ -581,168 +581,170 @@ function IssueComposerModal({
               popupWidth="200px"
             />
             <span className="text-fg-4">›</span>
-            <span className="text-fg-2 lowercase">new issue</span>
+            <span className="truncate text-fg-2 lowercase">new issue</span>
           </div>
           <button
             onClick={onClose}
-            className="font-mono text-xs uppercase tracking-label text-fg-4 transition hover:text-fg-1"
+            className="shrink-0 font-mono text-xs uppercase tracking-label text-fg-4 transition hover:text-fg-1"
             title="close"
           >
             [esc]
           </button>
         </div>
 
-        <div className="px-5 pt-4">
-          <input
-            autoFocus
-            value={title}
-            onChange={(event) => onTitleChange(event.target.value)}
-            placeholder="issue title"
-            className="w-full bg-transparent px-0 py-1 font-mono text-lg text-fg-1 outline-none placeholder:text-fg-4"
-          />
-          <RichEditor
-            key={issueId}
-            owner={{ type: 'issue', id: issueId }}
-            value={description}
-            documents={documents}
-            issues={issues}
-            organizationId={companyId || null}
-            onChange={onDescriptionChange}
-            onOpenDocument={onOpenDocument}
-            onOpenIssue={onOpenIssue}
-            placeholder="add description..."
-            className="min-h-[12rem] text-sm"
-            wrapperClassName="relative mt-2"
-          />
+        <div className="min-h-0 flex-1 overflow-y-auto">
+          <div className="px-4 pt-4 md:px-5">
+            <input
+              autoFocus
+              value={title}
+              onChange={(event) => onTitleChange(event.target.value)}
+              placeholder="issue title"
+              className="w-full bg-transparent px-0 py-1 font-mono text-lg text-fg-1 outline-none placeholder:text-fg-4"
+            />
+            <RichEditor
+              key={issueId}
+              owner={{ type: 'issue', id: issueId }}
+              value={description}
+              documents={documents}
+              issues={issues}
+              organizationId={companyId || null}
+              onChange={onDescriptionChange}
+              onOpenDocument={onOpenDocument}
+              onOpenIssue={onOpenIssue}
+              placeholder="add description..."
+              className="min-h-[12rem] text-sm"
+              wrapperClassName="relative mt-2"
+            />
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2 px-4 py-3 md:px-5">
+            <PachSelect
+              variant="button"
+              value={statusId}
+              onChange={onStatusChange}
+              options={statuses.map((status) => ({
+                value: status.id,
+                label: status.name.toLowerCase(),
+                icon: <StatusIcon statusType={status.type} />,
+              }))}
+              trigger={
+                <ComposerPill
+                  icon={<StatusIcon statusType={currentStatus?.type ?? 'backlog'} />}
+                  label={currentStatus?.name?.toLowerCase() ?? 'status'}
+                />
+              }
+              triggerTitle="status"
+              triggerClassName="transition"
+              popupWidth="200px"
+            />
+
+            <PachSelect
+              variant="button"
+              value={String(priority)}
+              onChange={(next) => onPriorityChange(Number(next))}
+              options={[1, 2, 3, 4, 0].map((nextPriority) => ({
+                value: String(nextPriority),
+                label: PRIORITY_META[nextPriority].label,
+                icon: <PriorityIcon priority={nextPriority} />,
+              }))}
+              trigger={
+                <ComposerPill
+                  icon={<PriorityIcon priority={priority} />}
+                  label={PRIORITY_META[priority]?.label ?? 'priority'}
+                />
+              }
+              triggerTitle="priority"
+              triggerClassName="transition"
+              popupWidth="180px"
+            />
+
+            <PachSelect
+              variant="button"
+              value={assigneeId}
+              onChange={onAssigneeChange}
+              options={users.map((entry) => ({ value: entry.id, label: (entry.name ?? entry.email).toLowerCase() }))}
+              trigger={
+                <ComposerPill
+                  icon={<span className="font-mono text-[10px] text-fg-3">@</span>}
+                  label={(currentAssignee?.name ?? currentAssignee?.email)?.toLowerCase() ?? 'assignee'}
+                />
+              }
+              triggerTitle="assignee"
+              triggerClassName="transition"
+              popupWidth="220px"
+            />
+
+            <PachSelect
+              variant="button"
+              value={projectId}
+              onChange={onProjectChange}
+              options={[
+                { value: '', label: 'no project' },
+                ...projects.map((project) => ({
+                  value: project.id,
+                  label: project.name.toLowerCase(),
+                  icon: <FolderKanban className="h-3 w-3" />,
+                })),
+              ]}
+              trigger={
+                <ComposerPill
+                  icon={<FolderKanban className="h-3 w-3" />}
+                  label={currentProject?.name?.toLowerCase() ?? 'project'}
+                />
+              }
+              triggerTitle="project"
+              triggerClassName="transition"
+              popupWidth="220px"
+            />
+
+            <PachSelect
+              variant="button"
+              value={String(estimate)}
+              onChange={(next) => onEstimateChange(Number(next))}
+              options={ESTIMATES.map((nextEstimate) => ({ value: String(nextEstimate), label: `${nextEstimate} pts` }))}
+              trigger={
+                <ComposerPill
+                  icon={<span className="font-mono text-[10px] text-fg-3">#</span>}
+                  label={`${estimate} pts`}
+                />
+              }
+              triggerTitle="estimate"
+              triggerClassName="transition"
+              popupWidth="160px"
+            />
+
+            <PachSelect
+              variant="button"
+              value={companyId}
+              onChange={onCompanyChange}
+              options={[
+                { value: '', label: 'no organization' },
+                ...companies.map((company) => ({ value: company.id, label: company.name })),
+              ]}
+              trigger={
+                <ComposerPill
+                  icon={<Building2 className="h-3 w-3" />}
+                  label={currentCompany?.name?.toLowerCase() ?? 'organization'}
+                />
+              }
+              triggerTitle="organization context"
+              triggerClassName="transition"
+              popupWidth="220px"
+            />
+          </div>
         </div>
 
-        <div className="flex flex-wrap items-center gap-2 px-5 py-3">
-          <PachSelect
-            variant="button"
-            value={statusId}
-            onChange={onStatusChange}
-            options={statuses.map((status) => ({
-              value: status.id,
-              label: status.name.toLowerCase(),
-              icon: <StatusIcon statusType={status.type} />,
-            }))}
-            trigger={
-              <ComposerPill
-                icon={<StatusIcon statusType={currentStatus?.type ?? 'backlog'} />}
-                label={currentStatus?.name?.toLowerCase() ?? 'status'}
-              />
-            }
-            triggerTitle="status"
-            triggerClassName="transition"
-            popupWidth="200px"
-          />
-
-          <PachSelect
-            variant="button"
-            value={String(priority)}
-            onChange={(next) => onPriorityChange(Number(next))}
-            options={[1, 2, 3, 4, 0].map((nextPriority) => ({
-              value: String(nextPriority),
-              label: PRIORITY_META[nextPriority].label,
-              icon: <PriorityIcon priority={nextPriority} />,
-            }))}
-            trigger={
-              <ComposerPill
-                icon={<PriorityIcon priority={priority} />}
-                label={PRIORITY_META[priority]?.label ?? 'priority'}
-              />
-            }
-            triggerTitle="priority"
-            triggerClassName="transition"
-            popupWidth="180px"
-          />
-
-          <PachSelect
-            variant="button"
-            value={assigneeId}
-            onChange={onAssigneeChange}
-            options={users.map((entry) => ({ value: entry.id, label: (entry.name ?? entry.email).toLowerCase() }))}
-            trigger={
-              <ComposerPill
-                icon={<span className="font-mono text-[10px] text-fg-3">@</span>}
-                label={(currentAssignee?.name ?? currentAssignee?.email)?.toLowerCase() ?? 'assignee'}
-              />
-            }
-            triggerTitle="assignee"
-            triggerClassName="transition"
-            popupWidth="220px"
-          />
-
-          <PachSelect
-            variant="button"
-            value={projectId}
-            onChange={onProjectChange}
-            options={[
-              { value: '', label: 'no project' },
-              ...projects.map((project) => ({
-                value: project.id,
-                label: project.name.toLowerCase(),
-                icon: <FolderKanban className="h-3 w-3" />,
-              })),
-            ]}
-            trigger={
-              <ComposerPill
-                icon={<FolderKanban className="h-3 w-3" />}
-                label={currentProject?.name?.toLowerCase() ?? 'project'}
-              />
-            }
-            triggerTitle="project"
-            triggerClassName="transition"
-            popupWidth="220px"
-          />
-
-          <PachSelect
-            variant="button"
-            value={String(estimate)}
-            onChange={(next) => onEstimateChange(Number(next))}
-            options={ESTIMATES.map((nextEstimate) => ({ value: String(nextEstimate), label: `${nextEstimate} pts` }))}
-            trigger={
-              <ComposerPill
-                icon={<span className="font-mono text-[10px] text-fg-3">#</span>}
-                label={`${estimate} pts`}
-              />
-            }
-            triggerTitle="estimate"
-            triggerClassName="transition"
-            popupWidth="160px"
-          />
-
-          <PachSelect
-            variant="button"
-            value={companyId}
-            onChange={onCompanyChange}
-            options={[
-              { value: '', label: 'no organization' },
-              ...companies.map((company) => ({ value: company.id, label: company.name })),
-            ]}
-            trigger={
-              <ComposerPill
-                icon={<Building2 className="h-3 w-3" />}
-                label={currentCompany?.name?.toLowerCase() ?? 'organization'}
-              />
-            }
-            triggerTitle="organization context"
-            triggerClassName="transition"
-            popupWidth="220px"
-          />
-        </div>
-
-        <div className="flex items-center justify-between border-t border-edge/12 px-5 py-3">
+        <div className="flex shrink-0 flex-col gap-3 border-t border-edge/12 px-4 py-3 md:flex-row md:items-center md:justify-between md:px-5">
           <button
             onClick={onClose}
-            className="px-2 py-1.5 font-mono text-xs uppercase tracking-label text-fg-3 transition hover:text-fg-1"
+            className="hidden px-2 py-1.5 font-mono text-xs uppercase tracking-label text-fg-3 transition hover:text-fg-1 md:inline-flex"
           >
             [cancel]
           </button>
-          <div className="flex items-center gap-4">
-            <div className="flex items-center gap-3">
+          <div className="flex flex-col gap-3 md:flex-row md:items-center md:gap-4">
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
               {agentRunMessage ? (
-                <span className="max-w-[220px] truncate font-mono text-[10px] uppercase tracking-label text-fg-3">
+                <span className="w-full truncate font-mono text-[10px] uppercase tracking-label text-fg-3 md:w-auto md:max-w-[220px]">
                   {agentRunMessage}
                 </span>
               ) : null}
@@ -771,7 +773,7 @@ function IssueComposerModal({
             <button
               onClick={onCreate}
               disabled={!title.trim() || (organizationRequired && !companyId) || creating}
-              className="inline-flex items-center gap-2 border border-edge/30 bg-accent-fill/8 px-3 py-1.5 font-mono text-xs uppercase tracking-label text-accent transition hover:bg-accent-fill/16 hover:shadow-glow-xs disabled:opacity-40 disabled:hover:bg-accent-fill/8 disabled:hover:shadow-none"
+              className="inline-flex w-full items-center justify-center gap-2 border border-edge/30 bg-accent-fill/8 px-3 py-2 font-mono text-xs uppercase tracking-label text-accent transition hover:bg-accent-fill/16 hover:shadow-glow-xs disabled:opacity-40 disabled:hover:bg-accent-fill/8 disabled:hover:shadow-none md:w-auto md:py-1.5"
             >
               <Plus className="h-3.5 w-3.5" />
               {creating ? (doTask ? 'creating + starting...' : 'creating...') : 'create issue'}
