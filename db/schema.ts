@@ -422,6 +422,128 @@ export const crmBoardColumns = pgTable('crm_board_columns', {
   color: text('color'),
 })
 
+/* ───────────────────────── SCHEDULING ───────────────────────── */
+
+export const calCalendarConnections = pgTable('cal_calendar_connections', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  organizationId: uuid('organization_id').notNull().references(() => organizations.id),
+  userId: uuid('user_id').notNull().references(() => users.id),
+  /** google | manual */
+  provider: text('provider').notNull().default('manual'),
+  accountEmail: text('account_email'),
+  status: text('status').notNull().default('active'),
+  accessTokenRef: text('access_token_ref'),
+  refreshTokenRef: text('refresh_token_ref'),
+  scopes: jsonb('scopes').$type<string[]>().notNull().default([]),
+  metadata: jsonb('metadata').$type<Record<string, unknown>>().notNull().default({}),
+  lastSyncedAt: timestamp('last_synced_at', { withTimezone: true }),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+}, (table) => ({
+  organizationIdIdx: index('cal_calendar_connections_organization_idx').on(table.organizationId),
+  userProviderIdx: index('cal_calendar_connections_user_provider_idx').on(table.userId, table.provider),
+}))
+
+export const calExternalCalendars = pgTable('cal_external_calendars', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  organizationId: uuid('organization_id').notNull().references(() => organizations.id),
+  connectionId: uuid('connection_id').notNull().references(() => calCalendarConnections.id),
+  providerCalendarId: text('provider_calendar_id').notNull(),
+  name: text('name').notNull(),
+  timezone: text('timezone'),
+  primary: boolean('primary').notNull().default(false),
+  includeForAvailability: boolean('include_for_availability').notNull().default(true),
+  metadata: jsonb('metadata').$type<Record<string, unknown>>().notNull().default({}),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+}, (table) => ({
+  organizationIdIdx: index('cal_external_calendars_organization_idx').on(table.organizationId),
+  connectionCalendarIdx: uniqueIndex('cal_external_calendars_connection_calendar_idx').on(table.connectionId, table.providerCalendarId),
+}))
+
+export const calEventTypes = pgTable('cal_event_types', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  organizationId: uuid('organization_id').notNull().references(() => organizations.id),
+  ownerUserId: uuid('owner_user_id').notNull().references(() => users.id),
+  title: text('title').notNull(),
+  slug: text('slug').notNull(),
+  description: text('description'),
+  durationMinutes: integer('duration_minutes').notNull().default(30),
+  timezone: text('timezone').notNull().default('UTC'),
+  locationMode: text('location_mode').notNull().default('video'),
+  locationDetails: text('location_details'),
+  meetingProvider: text('meeting_provider').notNull().default('manual'),
+  bufferBeforeMinutes: integer('buffer_before_minutes').notNull().default(0),
+  bufferAfterMinutes: integer('buffer_after_minutes').notNull().default(0),
+  minimumNoticeMinutes: integer('minimum_notice_minutes').notNull().default(120),
+  bookingWindowDays: integer('booking_window_days').notNull().default(30),
+  status: text('status').notNull().default('active'),
+  metadata: jsonb('metadata').$type<Record<string, unknown>>().notNull().default({}),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+}, (table) => ({
+  organizationIdIdx: index('cal_event_types_organization_idx').on(table.organizationId),
+  ownerUserIdIdx: index('cal_event_types_owner_user_idx').on(table.ownerUserId),
+  slugIdx: uniqueIndex('cal_event_types_slug_idx').on(table.slug),
+}))
+
+export const calAvailabilityRules = pgTable('cal_availability_rules', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  organizationId: uuid('organization_id').notNull().references(() => organizations.id),
+  eventTypeId: uuid('event_type_id').notNull().references(() => calEventTypes.id),
+  /** 0 = Sunday, 6 = Saturday. */
+  weekday: integer('weekday').notNull(),
+  startMinute: integer('start_minute').notNull(),
+  endMinute: integer('end_minute').notNull(),
+  timezone: text('timezone').notNull().default('UTC'),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+}, (table) => ({
+  organizationIdIdx: index('cal_availability_rules_organization_idx').on(table.organizationId),
+  eventTypeIdx: index('cal_availability_rules_event_type_idx').on(table.eventTypeId),
+}))
+
+export const calAvailabilityOverrides = pgTable('cal_availability_overrides', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  organizationId: uuid('organization_id').notNull().references(() => organizations.id),
+  eventTypeId: uuid('event_type_id').notNull().references(() => calEventTypes.id),
+  date: date('date').notNull(),
+  startMinute: integer('start_minute'),
+  endMinute: integer('end_minute'),
+  isAvailable: boolean('is_available').notNull().default(false),
+  reason: text('reason'),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+}, (table) => ({
+  organizationIdIdx: index('cal_availability_overrides_organization_idx').on(table.organizationId),
+  eventTypeDateIdx: index('cal_availability_overrides_event_type_date_idx').on(table.eventTypeId, table.date),
+}))
+
+export const calBookings = pgTable('cal_bookings', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  organizationId: uuid('organization_id').notNull().references(() => organizations.id),
+  eventTypeId: uuid('event_type_id').notNull().references(() => calEventTypes.id),
+  hostUserId: uuid('host_user_id').notNull().references(() => users.id),
+  guestName: text('guest_name').notNull(),
+  guestEmail: text('guest_email').notNull(),
+  guestNotes: text('guest_notes'),
+  startAt: timestamp('start_at', { withTimezone: true }).notNull(),
+  endAt: timestamp('end_at', { withTimezone: true }).notNull(),
+  status: text('status').notNull().default('confirmed'),
+  meetingUrl: text('meeting_url'),
+  providerEventId: text('provider_event_id'),
+  cancelToken: text('cancel_token').notNull(),
+  metadata: jsonb('metadata').$type<Record<string, unknown>>().notNull().default({}),
+  canceledAt: timestamp('canceled_at', { withTimezone: true }),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+}, (table) => ({
+  organizationIdIdx: index('cal_bookings_organization_idx').on(table.organizationId),
+  eventTypeStartIdx: index('cal_bookings_event_type_start_idx').on(table.eventTypeId, table.startAt),
+  hostStartIdx: index('cal_bookings_host_start_idx').on(table.hostUserId, table.startAt),
+  cancelTokenIdx: uniqueIndex('cal_bookings_cancel_token_idx').on(table.cancelToken),
+}))
+
 /* ─────────────────────────── FINANCE ─────────────────────────── */
 
 export const finAccounts = pgTable('fin_accounts', {

@@ -22,6 +22,12 @@ type ScopedTable =
   | 'crm_notes'
   | 'crm_boards'
   | 'crm_board_columns'
+  | 'cal_calendar_connections'
+  | 'cal_external_calendars'
+  | 'cal_event_types'
+  | 'cal_availability_rules'
+  | 'cal_availability_overrides'
+  | 'cal_bookings'
   | 'fin_accounts'
   | 'fin_categories'
   | 'fin_imports'
@@ -82,6 +88,12 @@ const ORG_COLUMN_BY_TABLE: Record<ScopedTable, string> = {
   crm_notes: 'organization_id',
   crm_boards: 'organization_id',
   crm_board_columns: 'organization_id',
+  cal_calendar_connections: 'organization_id',
+  cal_external_calendars: 'organization_id',
+  cal_event_types: 'organization_id',
+  cal_availability_rules: 'organization_id',
+  cal_availability_overrides: 'organization_id',
+  cal_bookings: 'organization_id',
   fin_accounts: 'organization_id',
   fin_categories: 'organization_id',
   fin_imports: 'organization_id',
@@ -841,6 +853,146 @@ export function createServerMutators(authData?: JWTPayload) {
       async delete(tx: Tx, args: { id: string }) {
         await requireExistingOrganizationAccess(tx, 'crm_board_columns', args.id)
         await tx.mutate.crm_board_columns.delete({ id: args.id })
+      },
+    },
+
+    cal_calendar_connections: {
+      async create(tx: Tx, args: { id: string; organizationId: string; userId?: string; provider?: string; accountEmail?: string; status?: string; scopes?: string[]; metadata?: Record<string, unknown> }) {
+        requireOrganizationAccess(args.organizationId)
+        const now = Date.now()
+        await tx.mutate.cal_calendar_connections.insert({
+          userId: args.userId ?? authData?.sub ?? '',
+          provider: 'manual',
+          status: 'active',
+          scopes: [],
+          metadata: {},
+          ...args,
+          createdAt: now,
+          updatedAt: now,
+        } as any)
+      },
+      async update(tx: Tx, args: { id: string; accountEmail?: string | null; status?: string; scopes?: string[]; metadata?: Record<string, unknown>; lastSyncedAt?: number | null }) {
+        await requireExistingOrganizationAccess(tx, 'cal_calendar_connections', args.id)
+        const { id, ...updates } = args
+        await tx.mutate.cal_calendar_connections.update({ id, ...updates, updatedAt: Date.now() } as any)
+      },
+      async delete(tx: Tx, args: { id: string }) {
+        await requireExistingOrganizationAccess(tx, 'cal_calendar_connections', args.id)
+        await tx.mutate.cal_calendar_connections.delete({ id: args.id })
+      },
+    },
+
+    cal_external_calendars: {
+      async create(tx: Tx, args: { id: string; organizationId?: string; connectionId: string; providerCalendarId: string; name: string; timezone?: string; primary?: boolean; includeForAvailability?: boolean; metadata?: Record<string, unknown> }) {
+        const organizationId = args.organizationId ?? await readOrganizationId(tx, 'cal_calendar_connections', args.connectionId)
+        requireOrganizationAccess(organizationId)
+        const now = Date.now()
+        await tx.mutate.cal_external_calendars.insert({
+          primary: false,
+          includeForAvailability: true,
+          metadata: {},
+          ...args,
+          organizationId,
+          createdAt: now,
+          updatedAt: now,
+        } as any)
+      },
+      async update(tx: Tx, args: { id: string; name?: string; timezone?: string | null; primary?: boolean; includeForAvailability?: boolean; metadata?: Record<string, unknown> }) {
+        await requireExistingOrganizationAccess(tx, 'cal_external_calendars', args.id)
+        const { id, ...updates } = args
+        await tx.mutate.cal_external_calendars.update({ id, ...updates, updatedAt: Date.now() } as any)
+      },
+      async delete(tx: Tx, args: { id: string }) {
+        await requireExistingOrganizationAccess(tx, 'cal_external_calendars', args.id)
+        await tx.mutate.cal_external_calendars.delete({ id: args.id })
+      },
+    },
+
+    cal_event_types: {
+      async create(tx: Tx, args: { id: string; organizationId: string; ownerUserId?: string; title: string; slug: string; description?: string; durationMinutes?: number; timezone?: string; locationMode?: string; locationDetails?: string; meetingProvider?: string; bufferBeforeMinutes?: number; bufferAfterMinutes?: number; minimumNoticeMinutes?: number; bookingWindowDays?: number; status?: string; metadata?: Record<string, unknown> }) {
+        requireOrganizationAccess(args.organizationId)
+        const now = Date.now()
+        await tx.mutate.cal_event_types.insert({
+          ownerUserId: args.ownerUserId ?? authData?.sub ?? '',
+          durationMinutes: 30,
+          timezone: 'UTC',
+          locationMode: 'video',
+          meetingProvider: 'manual',
+          bufferBeforeMinutes: 0,
+          bufferAfterMinutes: 0,
+          minimumNoticeMinutes: 120,
+          bookingWindowDays: 30,
+          status: 'active',
+          metadata: {},
+          ...args,
+          createdAt: now,
+          updatedAt: now,
+        } as any)
+      },
+      async update(tx: Tx, args: { id: string; title?: string; slug?: string; description?: string | null; durationMinutes?: number; timezone?: string; locationMode?: string; locationDetails?: string | null; meetingProvider?: string; bufferBeforeMinutes?: number; bufferAfterMinutes?: number; minimumNoticeMinutes?: number; bookingWindowDays?: number; status?: string; metadata?: Record<string, unknown> }) {
+        await requireExistingOrganizationAccess(tx, 'cal_event_types', args.id)
+        const { id, ...updates } = args
+        await tx.mutate.cal_event_types.update({ id, ...updates, updatedAt: Date.now() } as any)
+      },
+      async delete(tx: Tx, args: { id: string }) {
+        await requireExistingOrganizationAccess(tx, 'cal_event_types', args.id)
+        await tx.mutate.cal_event_types.delete({ id: args.id })
+      },
+    },
+
+    cal_availability_rules: {
+      async create(tx: Tx, args: { id: string; organizationId?: string; eventTypeId: string; weekday: number; startMinute: number; endMinute: number; timezone?: string }) {
+        const organizationId = args.organizationId ?? await readOrganizationId(tx, 'cal_event_types', args.eventTypeId)
+        requireOrganizationAccess(organizationId)
+        const now = Date.now()
+        await tx.mutate.cal_availability_rules.insert({
+          timezone: 'UTC',
+          ...args,
+          organizationId,
+          createdAt: now,
+          updatedAt: now,
+        } as any)
+      },
+      async update(tx: Tx, args: { id: string; weekday?: number; startMinute?: number; endMinute?: number; timezone?: string }) {
+        await requireExistingOrganizationAccess(tx, 'cal_availability_rules', args.id)
+        const { id, ...updates } = args
+        await tx.mutate.cal_availability_rules.update({ id, ...updates, updatedAt: Date.now() } as any)
+      },
+      async delete(tx: Tx, args: { id: string }) {
+        await requireExistingOrganizationAccess(tx, 'cal_availability_rules', args.id)
+        await tx.mutate.cal_availability_rules.delete({ id: args.id })
+      },
+    },
+
+    cal_availability_overrides: {
+      async create(tx: Tx, args: { id: string; organizationId?: string; eventTypeId: string; date: string; startMinute?: number; endMinute?: number; isAvailable?: boolean; reason?: string }) {
+        const organizationId = args.organizationId ?? await readOrganizationId(tx, 'cal_event_types', args.eventTypeId)
+        requireOrganizationAccess(organizationId)
+        const now = Date.now()
+        await tx.mutate.cal_availability_overrides.insert({
+          isAvailable: false,
+          ...args,
+          organizationId,
+          createdAt: now,
+          updatedAt: now,
+        } as any)
+      },
+      async update(tx: Tx, args: { id: string; date?: string; startMinute?: number | null; endMinute?: number | null; isAvailable?: boolean; reason?: string | null }) {
+        await requireExistingOrganizationAccess(tx, 'cal_availability_overrides', args.id)
+        const { id, ...updates } = args
+        await tx.mutate.cal_availability_overrides.update({ id, ...updates, updatedAt: Date.now() } as any)
+      },
+      async delete(tx: Tx, args: { id: string }) {
+        await requireExistingOrganizationAccess(tx, 'cal_availability_overrides', args.id)
+        await tx.mutate.cal_availability_overrides.delete({ id: args.id })
+      },
+    },
+
+    cal_bookings: {
+      async update(tx: Tx, args: { id: string; status?: string; meetingUrl?: string | null; providerEventId?: string | null; canceledAt?: number | null; metadata?: Record<string, unknown> }) {
+        await requireExistingOrganizationAccess(tx, 'cal_bookings', args.id)
+        const { id, ...updates } = args
+        await tx.mutate.cal_bookings.update({ id, ...updates, updatedAt: Date.now() } as any)
       },
     },
 

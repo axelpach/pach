@@ -22,6 +22,7 @@ import githubRoute from './routes/github.js'
 import githubWebhookRoute from './routes/github-webhooks.js'
 import socialRoute, { publicSocialRouter } from './routes/social.js'
 import googleRoute, { publicGoogleRouter } from './routes/google.js'
+import schedulingRoute, { publicSchedulingRouter } from './routes/scheduling.js'
 import { requireAuth, requireUnscopedAccess } from './middleware/auth.js'
 import { startAutomationRunners } from './services/automation-runners.js'
 import { ZERO_SCHEMA_VERSION } from './release.js'
@@ -45,6 +46,7 @@ app.get('/meta/release', (_req, res) => {
 
 app.use('/auth', authRoute)
 app.use('/whatsapp', publicWhatsAppRouter)
+app.use('/scheduling/public', publicSchedulingRouter)
 app.use('/inbound', inboundRoute)
 app.use('/public', publicMarketingRouter)
 app.use('/activity', activityRoute)
@@ -67,6 +69,7 @@ app.use('/social', publicSocialRouter)
 app.use('/social', requireAuth, socialRoute)
 app.use('/media', publicMediaRouter)
 app.use('/media', requireAuth, mediaRoute)
+app.use('/scheduling', requireAuth, schedulingRoute)
 
 app.use((err: unknown, _req: express.Request, res: express.Response, next: express.NextFunction) => {
   if (isPayloadTooLargeError(err)) {

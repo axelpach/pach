@@ -428,6 +428,13 @@
       "when": 1784476800000,
       "tag": "0060_google_ads_publishing",
       "breakpoints": true
+    },
+    {
+      "idx": 61,
+      "version": "7",
+      "when": 1784563200000,
+      "tag": "0061_calendar_scheduling",
+      "breakpoints": true
     }
   ]
 }
