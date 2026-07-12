@@ -99,6 +99,7 @@ export function SearchPalette({ tabs }: { tabs: PaletteTab[] }) {
 
   const results = useMemo<PaletteResult[]>(() => {
     const q = query.trim().toLowerCase()
+    const hasQuery = q.length > 0
     const matches = (value: string | null | undefined) => !q || (value ?? '').toLowerCase().includes(q)
     const canAccessOrganization = (organizationId: string | null | undefined) =>
       organizationId ? (user?.organizationIds ?? []).includes(organizationId) : user?.canAccessUnscoped ?? false
@@ -113,7 +114,7 @@ export function SearchPalette({ tabs }: { tabs: PaletteTab[] }) {
         return b.updatedAt - a.updatedAt
       })
       .map((document) => ({ kind: 'document' as const, id: `document:${document.id}`, document }))
-    const tabResults = flattenTabResults(tabs, matches)
+    const tabResults = flattenTabResults(tabs, matches, hasQuery)
     const viewResults = personalSavedViews
       .filter((view) => matches(view.name) || matches(view.slug))
       .map((view) => ({ kind: 'view' as const, id: `view:${view.id}`, view }))
@@ -293,14 +294,17 @@ export function SearchPalette({ tabs }: { tabs: PaletteTab[] }) {
 function flattenTabResults(
   tabs: PaletteTab[],
   matches: (value: string | null | undefined) => boolean,
+  hasQuery: boolean,
   depth = 0,
   includeAll = false,
 ): Extract<PaletteResult, { kind: 'tab' }>[] {
   const results: Extract<PaletteResult, { kind: 'tab' }>[] = []
 
   for (const tab of tabs) {
+    if (!hasQuery && depth > 0) continue
+
     const tabMatches = matches(tab.label) || matches(tab.path)
-    const childResults = flattenTabResults(tab.children ?? [], matches, depth + 1, includeAll || tabMatches)
+    const childResults = flattenTabResults(tab.children ?? [], matches, hasQuery, depth + 1, includeAll || tabMatches)
 
     if (includeAll || tabMatches || childResults.length > 0) {
       results.push({

@@ -56,7 +56,17 @@ const OUTER_NAV_ITEMS: readonly OuterNavItem[] = [
       { label: 'Analytics', path: '/marketing/analytics' },
     ],
   },
-  { label: 'Finance', path: '/finance/dashboard' },
+  {
+    label: 'Finance',
+    path: '/finance/dashboard',
+    children: [
+      { label: 'Dashboard', path: '/finance/dashboard' },
+      { label: 'Movements', path: '/finance/movements' },
+      { label: 'Accounts', path: '/finance/accounts' },
+      { label: 'Categories', path: '/finance/categories' },
+      { label: 'Forecasts', path: '/finance/forecasts' },
+    ],
+  },
   { label: 'Design', path: '/design' },
   { label: 'Settings', path: '/settings/repositories' },
 ]
