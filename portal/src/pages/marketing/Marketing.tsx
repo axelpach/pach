@@ -35,6 +35,7 @@ import {
   Search,
   Rss,
   Send,
+  Sparkles,
   Trash2,
   Users,
   X,
@@ -71,6 +72,7 @@ type CtaRow = Schema['tables']['mkt_ctas']['row']
 type ContentEventRow = Schema['tables']['mkt_content_events']['row']
 type ContentOutputRow = Schema['tables']['mkt_content_outputs']['row']
 type PromotablePageRecord = Schema['tables']['mkt_promotable_pages']['row']
+type KeywordIdeaRow = Schema['tables']['mkt_keyword_ideas']['row']
 type AdPromotionRow = Schema['tables']['mkt_ad_promotions']['row']
 type AdMetricSnapshotRow = Schema['tables']['mkt_ad_metric_snapshots']['row']
 
@@ -288,6 +290,7 @@ export default function Marketing({ canAccessWhatsApp = false }: { canAccessWhat
   const [publicationSlots] = useQuery(z.query.mkt_publication_slots.orderBy('scheduledAt', 'asc'))
   const [contentOutputs] = useQuery(z.query.mkt_content_outputs.orderBy('updatedAt', 'desc'))
   const [promotablePageRecords] = useQuery(z.query.mkt_promotable_pages.orderBy('updatedAt', 'desc'))
+  const [keywordIdeas] = useQuery(z.query.mkt_keyword_ideas.orderBy('updatedAt', 'desc'))
   const [ctas] = useQuery(z.query.mkt_ctas.orderBy('updatedAt', 'desc'))
   const [events] = useQuery(z.query.mkt_content_events.orderBy('createdAt', 'desc'))
   const [documents] = useQuery(z.query.documents.orderBy('updatedAt', 'desc'))
@@ -319,6 +322,7 @@ export default function Marketing({ canAccessWhatsApp = false }: { canAccessWhat
   const orgRuns = useMemo(() => byOrganization(distributionRuns, organizationId), [distributionRuns, organizationId])
   const orgContentOutputs = useMemo(() => byOrganization(contentOutputs, organizationId), [contentOutputs, organizationId])
   const orgPromotablePageRecords = useMemo(() => byOrganization(promotablePageRecords, organizationId), [organizationId, promotablePageRecords])
+  const orgKeywordIdeas = useMemo(() => byOrganization(keywordIdeas, organizationId), [keywordIdeas, organizationId])
   const orgCtas = useMemo(() => byOrganization(ctas, organizationId), [ctas, organizationId])
   const orgEvents = useMemo(() => byOrganization(events, organizationId), [events, organizationId])
   const orgSocialChannels = useMemo(() => byOrganization(socialChannels, organizationId), [organizationId, socialChannels])
@@ -632,6 +636,7 @@ export default function Marketing({ canAccessWhatsApp = false }: { canAccessWhat
               contentItems={orgContentItems}
               contentOutputs={orgContentOutputs}
               promotablePageRecords={orgPromotablePageRecords}
+              keywordIdeas={orgKeywordIdeas}
               adPromotions={orgAdPromotions}
               adMetricSnapshots={orgAdMetricSnapshots}
               searchConsoleMetrics={orgSearchConsoleMetrics}
@@ -1564,6 +1569,7 @@ type PromotablePageRow = {
   output: ContentOutputRow | null
   title: string
   url: string
+  keywordIdeas: KeywordIdeaRow[]
   searchMetrics: SearchConsoleMetricSnapshotRow[]
   searchTotals: { clicks: number; impressions: number }
   topQuery: string
@@ -1592,6 +1598,7 @@ function PromotionsSection({
   contentItems,
   contentOutputs,
   promotablePageRecords,
+  keywordIdeas,
   adPromotions,
   adMetricSnapshots,
   searchConsoleMetrics,
@@ -1602,6 +1609,7 @@ function PromotionsSection({
   contentItems: ContentItemRow[]
   contentOutputs: ContentOutputRow[]
   promotablePageRecords: PromotablePageRecord[]
+  keywordIdeas: KeywordIdeaRow[]
   adPromotions: AdPromotionRow[]
   adMetricSnapshots: AdMetricSnapshotRow[]
   searchConsoleMetrics: SearchConsoleMetricSnapshotRow[]
@@ -1611,9 +1619,11 @@ function PromotionsSection({
   const [promoteTarget, setPromoteTarget] = useState<{ page: PromotablePageRow; promotion: AdPromotionRow | null } | null>(null)
   const [pageEditor, setPageEditor] = useState<{ page: PromotablePageRecord | null } | null>(null)
   const [sitemapImporterOpen, setSitemapImporterOpen] = useState(false)
+  const [selectedPageIds, setSelectedPageIds] = useState<string[]>([])
+  const [keywordRunStatus, setKeywordRunStatus] = useState<'idle' | 'loading' | 'success'>('idle')
   const pages = useMemo(
-    () => promotablePages(promotablePageRecords, contentItems, contentOutputs, adPromotions, adMetricSnapshots, searchConsoleMetrics),
-    [adMetricSnapshots, adPromotions, contentItems, contentOutputs, promotablePageRecords, searchConsoleMetrics],
+    () => promotablePages(promotablePageRecords, contentItems, contentOutputs, keywordIdeas, adPromotions, adMetricSnapshots, searchConsoleMetrics),
+    [adMetricSnapshots, adPromotions, contentItems, contentOutputs, keywordIdeas, promotablePageRecords, searchConsoleMetrics],
   )
   const googlePromotions = useMemo(() => adPromotions.filter((promotion) => promotion.provider === 'google'), [adPromotions])
   const googleMetrics = useMemo(() => adMetricSnapshotsForPromotions(googlePromotions, adMetricSnapshots), [adMetricSnapshots, googlePromotions])
@@ -1622,6 +1632,12 @@ function PromotionsSection({
   const activePromotions = googlePromotions.filter((promotion) => ['active', 'scheduled', 'paused'].includes(promotion.status))
   const unpromotedOpportunityPages = pages.filter((page) => !page.googlePromotion && page.searchTotals.impressions > 0)
   const incompleteDrafts = draftPromotions.filter((promotion) => !promotion.budgetMinor || !promotion.adAccountExternalId)
+  const selectedPages = pages.filter((page) => selectedPageIds.includes(page.page.id))
+  const allPagesSelected = pages.length > 0 && selectedPageIds.length === pages.length
+
+  useEffect(() => {
+    setSelectedPageIds((ids) => ids.filter((id) => pages.some((page) => page.page.id === id)))
+  }, [pages])
 
   async function saveGoogleDraft(page: PromotablePageRow, promotion: AdPromotionRow | null, payload: GoogleSearchPromotionDraftPayload) {
     const values = {
@@ -1690,6 +1706,26 @@ function PromotionsSection({
     setPageEditor(null)
   }
 
+  async function queueKeywordGeneration(targetPages: PromotablePageRow[]) {
+    if (targetPages.length === 0 || keywordRunStatus === 'loading') return
+    setKeywordRunStatus('loading')
+    try {
+      const response = await authFetch(`${config.apiUrl}/marketing/promotions/keyword-runs`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ organizationId, pageIds: targetPages.map((page) => page.page.id) }),
+      })
+      const json = await readJson(response) as { queuedPages?: number }
+      setKeywordRunStatus('success')
+      setSelectedPageIds([])
+      onFlash(`keyword run queued · ${json.queuedPages ?? targetPages.length} page${targetPages.length === 1 ? '' : 's'}`)
+      window.setTimeout(() => setKeywordRunStatus('idle'), 1800)
+    } catch (err) {
+      setKeywordRunStatus('idle')
+      onFlash(err instanceof Error ? err.message : 'could not queue keyword run')
+    }
+  }
+
   return (
     <div className="space-y-4">
       <div className="grid gap-2 md:grid-cols-3 xl:grid-cols-6">
@@ -1717,6 +1753,19 @@ function PromotionsSection({
           <div className="flex flex-wrap items-center gap-2 pb-2">
             {tab === 'pages' ? (
               <>
+                <Button
+                  icon={<Sparkles className="h-3.5 w-3.5" />}
+                  onClick={() => void queueKeywordGeneration(selectedPages)}
+                  disabled={selectedPages.length === 0 || keywordRunStatus === 'loading'}
+                >
+                  {keywordRunStatus === 'loading'
+                    ? 'queuing'
+                    : keywordRunStatus === 'success'
+                      ? 'queued'
+                      : selectedPages.length
+                        ? `get keywords · ${selectedPages.length}`
+                        : 'get keywords'}
+                </Button>
                 <Button icon={<Rss className="h-3.5 w-3.5" />} onClick={() => setSitemapImporterOpen(true)}>
                   import sitemap
                 </Button>
@@ -1733,6 +1782,14 @@ function PromotionsSection({
           {tab === 'pages' ? (
             <PromotablePagesTable
               pages={pages}
+              selectedPageIds={selectedPageIds}
+              allPagesSelected={allPagesSelected}
+              keywordRunStatus={keywordRunStatus}
+              onToggleAll={() => setSelectedPageIds(allPagesSelected ? [] : pages.map((page) => page.page.id))}
+              onTogglePage={(pageId) => setSelectedPageIds((ids) => (
+                ids.includes(pageId) ? ids.filter((id) => id !== pageId) : [...ids, pageId]
+              ))}
+              onGenerateKeywords={(page) => void queueKeywordGeneration([page])}
               onEdit={(page) => setPageEditor({ page: page.page })}
               onPromote={(page) => setPromoteTarget({ page, promotion: page.googlePromotion })}
             />
@@ -1787,71 +1844,118 @@ function PromotionsSection({
 
 function PromotablePagesTable({
   pages,
+  selectedPageIds,
+  allPagesSelected,
+  keywordRunStatus,
+  onToggleAll,
+  onTogglePage,
+  onGenerateKeywords,
   onEdit,
   onPromote,
 }: {
   pages: PromotablePageRow[]
+  selectedPageIds: string[]
+  allPagesSelected: boolean
+  keywordRunStatus: 'idle' | 'loading' | 'success'
+  onToggleAll: () => void
+  onTogglePage: (pageId: string) => void
+  onGenerateKeywords: (page: PromotablePageRow) => void
   onEdit: (page: PromotablePageRow) => void
   onPromote: (page: PromotablePageRow) => void
 }) {
   if (pages.length === 0) return <EmptyState label="no published pages" />
   return (
     <div className="overflow-auto border border-edge/12">
-      <table className="w-full min-w-[980px] text-left font-mono text-xs">
+      <table className="w-full min-w-[1120px] text-left font-mono text-xs">
         <thead className="bg-rim text-[10px] uppercase tracking-label text-fg-4">
           <tr className="border-b border-edge/12">
+            <th className="w-10 px-3 py-2 font-normal">
+              <input
+                type="checkbox"
+                className="h-3 w-3 accent-accent"
+                checked={allPagesSelected}
+                onChange={onToggleAll}
+                aria-label="select all pages"
+              />
+            </th>
             <th className="px-3 py-2 font-normal">page</th>
             <th className="px-3 py-2 text-right font-normal">organic</th>
+            <th className="px-3 py-2 font-normal">keywords</th>
             <th className="px-3 py-2 text-right font-normal">paid</th>
             <th className="px-3 py-2 font-normal">status</th>
             <th className="px-3 py-2 text-right font-normal">action</th>
           </tr>
         </thead>
         <tbody>
-          {pages.map((page) => (
-            <tr key={page.page.id} className="border-b border-edge/8 text-fg-2 last:border-b-0">
-              <td className="max-w-[360px] px-3 py-3">
-                <div className="truncate text-fg-1">{page.title}</div>
-                <div className="mt-1 flex min-w-0 items-center gap-2 text-[11px] text-fg-4">
-                  <span className="truncate">{page.url}</span>
-                  <a href={page.url} target="_blank" rel="noreferrer" className="shrink-0 text-fg-4 transition hover:text-accent">
-                    <ExternalLink className="h-3 w-3" />
-                  </a>
-                </div>
-              </td>
-              <td className="px-3 py-3 text-right">
-                <div className="text-fg-1">{formatCompactNumber(page.searchTotals.clicks)} clicks</div>
-                <div className="mt-1 text-[11px] text-fg-4">{formatCompactNumber(page.searchTotals.impressions)} impressions</div>
-                {page.topQuery ? <div className="mt-1 text-[11px] text-accent">{page.topQuery}</div> : null}
-              </td>
-              <td className="px-3 py-3 text-right">
-                <div className="text-fg-1">{page.promotions.length ? `${page.promotions.length} draft${page.promotions.length === 1 ? '' : 's'}` : 'not promoted'}</div>
-                <div className="mt-1 text-[11px] text-fg-4">{formatMoneyMinor(page.paidTotals.spendMinor, 'MXN')} spend</div>
-              </td>
-              <td className="px-3 py-3">
-                <StatusPill kind={page.googlePromotion ? statusKind(page.googlePromotion.status) : 'idle'}>
-                  {page.googlePromotion?.status ?? page.page.status}
-                </StatusPill>
-              </td>
-              <td className="px-3 py-3 text-right">
-                <div className="flex justify-end gap-2">
-                  <Button
-                    icon={<Edit3 className="h-3.5 w-3.5" />}
-                    onClick={() => onEdit(page)}
-                  >
-                    edit
-                  </Button>
-                <Button
-                  kind={page.googlePromotion ? 'default' : 'primary'}
-                  icon={page.googlePromotion ? <Edit3 className="h-3.5 w-3.5" /> : <Search className="h-3.5 w-3.5" />}
-                  onClick={() => onPromote(page)}
-                >
-                  {page.googlePromotion ? 'edit draft' : 'promote'}
-                </Button>
-                </div>
-              </td>
-            </tr>
-          ))}
+          {pages.map((page) => {
+            const positiveKeywords = usableKeywordIdeas(page).length
+            const negativeKeywords = page.keywordIdeas.filter((idea) => idea.negative && idea.status !== 'rejected').length
+            const selected = selectedPageIds.includes(page.page.id)
+            return (
+              <tr key={page.page.id} className="border-b border-edge/8 text-fg-2 last:border-b-0">
+                <td className="px-3 py-3 align-top">
+                  <input
+                    type="checkbox"
+                    className="h-3 w-3 accent-accent"
+                    checked={selected}
+                    onChange={() => onTogglePage(page.page.id)}
+                    aria-label={`select ${page.title}`}
+                  />
+                </td>
+                <td className="max-w-[360px] px-3 py-3">
+                  <div className="truncate text-fg-1">{page.title}</div>
+                  <div className="mt-1 flex min-w-0 items-center gap-2 text-[11px] text-fg-4">
+                    <span className="truncate">{page.url}</span>
+                    <a href={page.url} target="_blank" rel="noreferrer" className="shrink-0 text-fg-4 transition hover:text-accent">
+                      <ExternalLink className="h-3 w-3" />
+                    </a>
+                  </div>
+                </td>
+                <td className="px-3 py-3 text-right">
+                  <div className="text-fg-1">{formatCompactNumber(page.searchTotals.clicks)} clicks</div>
+                  <div className="mt-1 text-[11px] text-fg-4">{formatCompactNumber(page.searchTotals.impressions)} impressions</div>
+                  {page.topQuery ? <div className="mt-1 text-[11px] text-accent">{page.topQuery}</div> : null}
+                </td>
+                <td className="px-3 py-3">
+                  <div className="text-fg-1">{positiveKeywords ? `${positiveKeywords} ideas` : 'not generated'}</div>
+                  <div className="mt-1 text-[11px] text-fg-4">{negativeKeywords ? `${negativeKeywords} negative` : keywordStatusLabel(page.page)}</div>
+                </td>
+                <td className="px-3 py-3 text-right">
+                  <div className="text-fg-1">{page.promotions.length ? `${page.promotions.length} draft${page.promotions.length === 1 ? '' : 's'}` : 'not promoted'}</div>
+                  <div className="mt-1 text-[11px] text-fg-4">{formatMoneyMinor(page.paidTotals.spendMinor, 'MXN')} spend</div>
+                </td>
+                <td className="px-3 py-3">
+                  <StatusPill kind={page.googlePromotion ? statusKind(page.googlePromotion.status) : 'idle'}>
+                    {page.googlePromotion?.status ?? page.page.status}
+                  </StatusPill>
+                </td>
+                <td className="px-3 py-3 text-right">
+                  <div className="flex justify-end gap-2">
+                    <Button
+                      icon={<Edit3 className="h-3.5 w-3.5" />}
+                      onClick={() => onEdit(page)}
+                    >
+                      edit
+                    </Button>
+                    <Button
+                      icon={<Sparkles className="h-3.5 w-3.5" />}
+                      onClick={() => onGenerateKeywords(page)}
+                      disabled={keywordRunStatus === 'loading'}
+                    >
+                      keywords
+                    </Button>
+                    <Button
+                      kind={page.googlePromotion ? 'default' : 'primary'}
+                      icon={page.googlePromotion ? <Edit3 className="h-3.5 w-3.5" /> : <Search className="h-3.5 w-3.5" />}
+                      onClick={() => onPromote(page)}
+                    >
+                      {page.googlePromotion ? 'edit draft' : 'promote'}
+                    </Button>
+                  </div>
+                </td>
+              </tr>
+            )
+          })}
         </tbody>
       </table>
     </div>
@@ -2019,6 +2123,7 @@ function GoogleSearchPromotionDrawer({
   const targeting = readRecord(promotion?.targeting)
   const startDate = promotion?.startsAt ? new Date(promotion.startsAt) : defaultSocialScheduleDate(page.output)
   const endDate = promotion?.endsAt ? new Date(promotion.endsAt) : new Date(startDate.getTime() + 7 * 24 * 60 * 60 * 1000)
+  const generatedKeywords = usableKeywordIdeas(page).map((idea) => idea.keyword)
   const [adAccountExternalId, setAdAccountExternalId] = useState(promotion?.adAccountExternalId ?? '')
   const [objective, setObjective] = useState(promotion?.objective ?? 'website_visits')
   const [geo, setGeo] = useState(readString(targeting.geo) || 'MX')
@@ -2136,10 +2241,19 @@ function GoogleSearchPromotionDrawer({
             </label>
           </div>
 
-          <label className="block">
-            <FieldLabel>keywords</FieldLabel>
+          <div className="block">
+            <div className="mb-1 flex items-center justify-between gap-2">
+              <FieldLabel>keywords</FieldLabel>
+              <Button
+                icon={<Sparkles className="h-3.5 w-3.5" />}
+                onClick={() => setKeywordText(generatedKeywords.join('\n'))}
+                disabled={generatedKeywords.length === 0}
+              >
+                use ideas
+              </Button>
+            </div>
             <TermTextarea rows={7} value={keywordText} onChange={(event) => setKeywordText(event.target.value)} />
-          </label>
+          </div>
 
           <label className="block">
             <FieldLabel>headlines</FieldLabel>
@@ -6135,12 +6249,19 @@ function promotablePages(
   pageRecords: PromotablePageRecord[],
   contentItems: ContentItemRow[],
   contentOutputs: ContentOutputRow[],
+  keywordIdeas: KeywordIdeaRow[],
   adPromotions: AdPromotionRow[],
   adMetricSnapshots: AdMetricSnapshotRow[],
   searchConsoleMetrics: SearchConsoleMetricSnapshotRow[],
 ): PromotablePageRow[] {
   const contentById = new Map(contentItems.map((item) => [item.id, item]))
   const outputById = new Map(contentOutputs.map((output) => [output.id, output]))
+  const keywordsByPageId = new Map<string, KeywordIdeaRow[]>()
+  for (const idea of keywordIdeas) {
+    const list = keywordsByPageId.get(idea.promotablePageId) ?? []
+    list.push(idea)
+    keywordsByPageId.set(idea.promotablePageId, list)
+  }
   return pageRecords
     .filter((page) => page.url && page.status !== 'archived')
     .map((page) => {
@@ -6161,6 +6282,7 @@ function promotablePages(
         output,
         title: page.title || item?.title || pageTitleFromUrl(page.url),
         url: page.url,
+        keywordIdeas: (keywordsByPageId.get(page.id) ?? []).sort((a, b) => b.priority - a.priority || a.keyword.localeCompare(b.keyword)),
         searchMetrics,
         searchTotals: sumSearchConsoleMetrics(searchMetrics),
         topQuery: topSearchQuery(searchMetrics),
@@ -6407,6 +6529,9 @@ function promotionDateRange(promotion: AdPromotionRow) {
 }
 
 function defaultGoogleKeywords(page: PromotablePageRow) {
+  const generatedKeywords = usableKeywordIdeas(page)
+    .map((idea) => idea.keyword)
+    .slice(0, 16)
   const queryKeywords = aggregateSearchConsoleMetrics(page.searchMetrics, 'query')
     .map((row) => row.query)
     .filter((query): query is string => Boolean(query))
@@ -6419,7 +6544,33 @@ function defaultGoogleKeywords(page: PromotablePageRow) {
   ]
     .flatMap((value) => keywordCandidates(value))
     .slice(0, 8)
-  return uniqueStrings([...queryKeywords, ...titleKeywords]).slice(0, 12)
+  return uniqueStrings([...generatedKeywords, ...queryKeywords, ...titleKeywords]).slice(0, 16)
+}
+
+function usableKeywordIdeas(page: PromotablePageRow) {
+  return page.keywordIdeas
+    .filter((idea) => !idea.negative)
+    .filter((idea) => ['approved', 'suggested', 'used'].includes(idea.status))
+    .sort((a, b) => {
+      const statusRank = keywordStatusRank(b.status) - keywordStatusRank(a.status)
+      return statusRank || b.priority - a.priority || a.keyword.localeCompare(b.keyword)
+    })
+}
+
+function keywordStatusRank(status: string) {
+  if (status === 'approved') return 3
+  if (status === 'used') return 2
+  if (status === 'suggested') return 1
+  return 0
+}
+
+function keywordStatusLabel(page: PromotablePageRecord) {
+  const metadata = readRecord(page.metadata)
+  const status = readString(metadata.keywordGenerationStatus)
+  if (status === 'queued') return 'queued'
+  if (status === 'running') return 'running'
+  if (status === 'done') return 'generated'
+  return 'no run'
 }
 
 function defaultGoogleHeadlines(page: PromotablePageRow) {

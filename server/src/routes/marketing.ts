@@ -1,10 +1,13 @@
-import { createHmac, timingSafeEqual } from 'node:crypto'
+import { createHmac, randomUUID, timingSafeEqual } from 'node:crypto'
 import { gunzipSync } from 'node:zlib'
 import { Router, type NextFunction, type Request, type Response } from 'express'
 import { and, desc, eq, inArray, isNull, sql } from 'drizzle-orm'
 import { getDb } from '../db.js'
 import {
   activityEvents,
+  agentConversations,
+  agentMessages,
+  agentRuns,
   designSystems,
   documents,
   mktAudienceMembers,
@@ -548,6 +551,115 @@ router.post('/promotions/import-sitemap', asyncRoute(async (req, res) => {
     skipped: result.skipped,
     pages: serializeDates(result.created),
   })
+}))
+
+router.post('/promotions/keyword-runs', asyncRoute(async (req, res) => {
+  const organizationId = readRequiredString(req.body.organizationId)
+  const pageIds = unique(readStringArray(req.body.pageIds, [])).slice(0, 26)
+  requireOrganizationAccess(req, organizationId)
+  if (pageIds.length === 0) throw new MarketingInputError('Select at least one page', 400)
+  if (pageIds.length > 25) throw new MarketingInputError('Keyword generation is limited to 25 pages per run', 400)
+
+  const db = getDb()
+  const [organization] = await db.select().from(organizations).where(eq(organizations.id, organizationId)).limit(1)
+  if (!organization) throw new MarketingInputError('Organization not found', 404)
+
+  const pages = await db
+    .select()
+    .from(mktPromotablePages)
+    .where(and(eq(mktPromotablePages.organizationId, organizationId), inArray(mktPromotablePages.id, pageIds)))
+    .orderBy(desc(mktPromotablePages.updatedAt))
+  const runnablePages = pages.filter((page) => page.status !== 'archived')
+  if (runnablePages.length !== pageIds.length) {
+    throw new MarketingInputError('One or more selected pages were not found', 404)
+  }
+
+  const now = new Date()
+  const conversationId = randomUUID()
+  const runId = randomUUID()
+  const messageId = randomUUID()
+  const branchBase = organization.project || organization.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'org'
+  const branchName = `mcp/keywords-${branchBase.slice(0, 24)}-${runId.slice(0, 8)}`
+  const pageContext = runnablePages.map((page) => ({
+    id: page.id,
+    title: page.title,
+    url: page.url,
+    canonicalUrl: page.canonicalUrl,
+    status: page.status,
+  }))
+  const metadata = {
+    executionClass: 'general',
+    handler: 'keyword-generation-mcp',
+    intent: 'marketing_keyword_generation',
+    executionMode: 'mcp',
+    agentProfile: 'general',
+    requiredCapabilities: ['codex.local', 'pach-mcp'],
+    queuedVia: 'promotions',
+    workflow: 'google_search_keyword_generation',
+    organizationId,
+    organizationName: organization.name,
+    organizationProject: organization.project,
+    pageIds: runnablePages.map((page) => page.id),
+    pages: pageContext,
+  }
+
+  await db.insert(agentConversations).values({
+    id: conversationId,
+    title: `Generate search keywords for ${organization.name}`,
+    status: 'open',
+    metadata: { source: 'promotions', workflow: 'google_search_keyword_generation', organizationId },
+    createdAt: now,
+    updatedAt: now,
+  })
+
+  const [run] = await db.insert(agentRuns).values({
+    id: runId,
+    conversationId,
+    projectKey: organization.project ?? 'pach',
+    repoFullName: 'pach/mcp',
+    baseBranch: 'main',
+    branchName,
+    agentKind: 'codex',
+    status: 'queued',
+    statusMessage: 'queued keyword generation worker',
+    subjectType: 'mkt_keyword_generation',
+    subjectId: organizationId,
+    metadata,
+    createdAt: now,
+    updatedAt: now,
+  }).returning()
+
+  await db.insert(agentMessages).values({
+    id: messageId,
+    conversationId,
+    runId: run.id,
+    role: 'user',
+    body: [
+      `Generate Google Search keyword ideas for ${organization.name}.`,
+      '',
+      'Selected promotable pages:',
+      ...runnablePages.map((page) => `- ${page.id} | ${page.title || page.url} | ${page.url}`),
+    ].join('\n'),
+    metadata: { source: 'promotions', workflow: 'google_search_keyword_generation', organizationId, pageIds },
+    createdAt: now,
+  })
+
+  for (const page of runnablePages) {
+    await db
+      .update(mktPromotablePages)
+      .set({
+        metadata: {
+          ...(page.metadata ?? {}),
+          keywordGenerationStatus: 'queued',
+          lastKeywordRunId: run.id,
+          keywordGenerationQueuedAt: now.toISOString(),
+        },
+        updatedAt: now,
+      })
+      .where(eq(mktPromotablePages.id, page.id))
+  }
+
+  res.json({ ok: true, run: serializeDates(run), queuedPages: runnablePages.length })
 }))
 
 router.post('/content/from-document', asyncRoute(async (req, res) => {

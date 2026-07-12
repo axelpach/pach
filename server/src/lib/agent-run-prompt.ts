@@ -90,6 +90,9 @@ export function buildGeneralMcpPrompt(run: AgentRunPromptRecord) {
   }
 
   if (run.subjectType === 'design_template_run') return buildDesignTemplateMcpPrompt(run)
+  if (run.subjectType === 'mkt_keyword_generation' || readMetadataString(run.metadata, 'handler') === 'keyword-generation-mcp') {
+    return buildKeywordGenerationMcpPrompt(run)
+  }
   if (readMetadataString(run.metadata, 'handler') === 'editorial-mcp') return buildEditorialMcpPrompt(run)
 
   const runSpec = buildAgentRunSpec(run)
@@ -181,6 +184,36 @@ function buildEditorialMcpPrompt(run: AgentRunPromptRecord) {
     '',
     'Keep the final result concise and useful inside the Pach run progress stream.',
     `Run spec profile: ${runSpec.agentProfile}`,
+  ].filter((line): line is string => Boolean(line)).join('\n')
+}
+
+function buildKeywordGenerationMcpPrompt(run: AgentRunPromptRecord) {
+  const organizationId = readMetadataString(run.metadata, 'organizationId')
+  const organizationName = readMetadataString(run.metadata, 'organizationName')
+  const organizationProject = readMetadataString(run.metadata, 'organizationProject')
+  const pageIds = readMetadataStringArray(run.metadata, 'pageIds')
+  const pageLines = formatMetadataPages(run.metadata)
+
+  return [
+    'You are Pach paid search keyword MCP worker.',
+    '',
+    'Use Pach MCP tools for Pach state. This is a safe planning run: do not create ad campaigns, publish content, send messages, or spend money.',
+    `Agent run id: ${run.id}`,
+    organizationId ? `Organization id: ${organizationId}` : null,
+    organizationName ? `Organization: ${organizationName}` : null,
+    organizationProject ? `Organization project: ${organizationProject}` : null,
+    pageIds.length ? `Selected page ids: ${pageIds.join(', ')}` : null,
+    pageLines,
+    '',
+    'Workflow:',
+    '1. Report progress with pach.progress.report using this agent run id.',
+    '2. Call pach.marketing.promotable_pages.list with the organization selector and selected pageIds. Use the returned page ids, URLs, content previews, and existing keyword ideas as the source of truth.',
+    '3. Inspect each public URL when available. Use Spanish keyword language when the page or organization is Spanish-language. Prefer commercial intent and specific pain/problem/use-case phrases over generic single words.',
+    '4. For each page, call pach.marketing.keyword_ideas.upsert with promotablePageId, runId, replaceSuggested true, and a concise batch of ideas. Aim for 8-15 positive keywords and 2-6 useful negative keywords per page unless the page is too small. Include matchType, intent, priority, negative, and a short rationale.',
+    '5. Avoid duplicates, irrelevant broad terms, competitor names unless clearly justified, and pure branded-only keywords unless the page is a homepage/brand landing page.',
+    '6. Report phase "final_result" with the pages processed, keyword counts, and any pages you could not inspect.',
+    '',
+    'Keep the final result concise and useful inside the Pach run progress stream.',
   ].filter((line): line is string => Boolean(line)).join('\n')
 }
 
@@ -341,6 +374,28 @@ function readMetadataNumber(metadata: unknown, key: string) {
   if (!metadata || typeof metadata !== 'object') return null
   const value = (metadata as Record<string, unknown>)[key]
   return typeof value === 'number' && Number.isFinite(value) ? value : null
+}
+
+function readMetadataStringArray(metadata: unknown, key: string) {
+  if (!metadata || typeof metadata !== 'object') return []
+  const value = (metadata as Record<string, unknown>)[key]
+  if (!Array.isArray(value)) return []
+  return value.filter((entry): entry is string => typeof entry === 'string' && entry.trim().length > 0).map((entry) => entry.trim())
+}
+
+function formatMetadataPages(metadata: unknown) {
+  if (!metadata || typeof metadata !== 'object') return null
+  const value = (metadata as Record<string, unknown>).pages
+  if (!Array.isArray(value) || value.length === 0) return null
+  const lines = value.flatMap((entry) => {
+    if (!entry || typeof entry !== 'object') return []
+    const record = entry as Record<string, unknown>
+    const id = readRecordString(record, 'id')
+    const title = readRecordString(record, 'title')
+    const url = readRecordString(record, 'url')
+    return id && url ? [`- ${id} | ${title ?? url} | ${url}`] : []
+  })
+  return lines.length ? ['Selected pages:', ...lines].join('\n') : null
 }
 
 function readMetadataBoolean(metadata: unknown, key: string) {

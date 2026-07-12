@@ -36,6 +36,7 @@ export default {
     mkt_publication_consumers: { row: { select: ['true'], insert: ['true'], update: ['true'], delete: ['true'] } },
     mkt_content_outputs: { row: { select: ['true'], insert: ['true'], update: ['true'], delete: ['true'] } },
     mkt_promotable_pages: { row: { select: ['true'], insert: ['true'], update: ['true'], delete: ['true'] } },
+    mkt_keyword_ideas: { row: { select: ['true'], insert: ['true'], update: ['true'], delete: ['true'] } },
     social_connections: { row: { select: ['true'], insert: ['true'], update: ['true'], delete: ['true'] } },
     social_channels: { row: { select: ['true'], insert: ['true'], update: ['true'], delete: ['true'] } },
     social_channel_connections: { row: { select: ['true'], insert: ['true'], update: ['true'], delete: ['true'] } },

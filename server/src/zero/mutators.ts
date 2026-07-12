@@ -47,6 +47,7 @@ type ScopedTable =
   | 'mkt_publication_consumers'
   | 'mkt_content_outputs'
   | 'mkt_promotable_pages'
+  | 'mkt_keyword_ideas'
   | 'social_provider_apps'
   | 'social_connections'
   | 'social_channels'
@@ -106,6 +107,7 @@ const ORG_COLUMN_BY_TABLE: Record<ScopedTable, string> = {
   mkt_publication_consumers: 'organization_id',
   mkt_content_outputs: 'organization_id',
   mkt_promotable_pages: 'organization_id',
+  mkt_keyword_ideas: 'organization_id',
   social_provider_apps: 'organization_id',
   social_connections: 'organization_id',
   social_channels: 'organization_id',
@@ -1412,6 +1414,36 @@ export function createServerMutators(authData?: JWTPayload) {
       async delete(tx: Tx, args: { id: string }) {
         await requireExistingOrganizationAccess(tx, 'mkt_promotable_pages', args.id)
         await tx.mutate.mkt_promotable_pages.delete({ id: args.id })
+      },
+    },
+
+    mkt_keyword_ideas: {
+      async create(tx: Tx, args: any) {
+        requireOrganizationAccess(args.organizationId)
+        await requireExistingOrganizationAccess(tx, 'mkt_promotable_pages', args.promotablePageId)
+        const now = Date.now()
+        await tx.mutate.mkt_keyword_ideas.insert({
+          matchType: 'phrase',
+          priority: 0,
+          negative: false,
+          status: 'suggested',
+          source: 'manual',
+          metadata: {},
+          ...args,
+          createdAt: now,
+          updatedAt: now,
+        })
+      },
+      async update(tx: Tx, args: any) {
+        await requireExistingOrganizationAccess(tx, 'mkt_keyword_ideas', args.id)
+        if ('organizationId' in args) requireOrganizationAccess(args.organizationId)
+        if (args.promotablePageId) await requireExistingOrganizationAccess(tx, 'mkt_promotable_pages', args.promotablePageId)
+        const { id, ...updates } = args
+        await tx.mutate.mkt_keyword_ideas.update({ id, ...updates, updatedAt: Date.now() })
+      },
+      async delete(tx: Tx, args: { id: string }) {
+        await requireExistingOrganizationAccess(tx, 'mkt_keyword_ideas', args.id)
+        await tx.mutate.mkt_keyword_ideas.delete({ id: args.id })
       },
     },
 

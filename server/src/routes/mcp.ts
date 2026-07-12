@@ -22,8 +22,11 @@ import {
   finMovements,
   mcpTokens,
   mktContentItems,
+  mktContentOutputs,
   mktDistributionRuns,
   mktEditorialIdeas,
+  mktKeywordIdeas,
+  mktPromotablePages,
   mktPublicationSlots,
   mktPublications,
   organizations,
@@ -676,6 +679,58 @@ const tools: ToolDefinition[] = [
     },
   },
   {
+    name: 'pach.marketing.promotable_pages.list',
+    description: 'List accessible promotable pages for paid search planning, with page ids, URLs, source metadata, linked content context, and existing keyword ideas.',
+    inputSchema: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        organizationId: { type: 'string' },
+        organizationName: { type: 'string' },
+        organizationProject: { type: 'string' },
+        pageId: { type: 'string' },
+        pageIds: { type: 'array', items: { type: 'string' } },
+        statuses: { type: 'array', items: { type: 'string' }, description: 'Defaults to non-archived pages.' },
+        includeKeywordIdeas: { type: 'boolean', description: 'Defaults to true.' },
+        limit: { type: 'number', description: 'Defaults to 50, maximum 200.' },
+      },
+    },
+  },
+  {
+    name: 'pach.marketing.keyword_ideas.upsert',
+    description: 'Create or update keyword ideas for one promotable page. Use this after inspecting the page URL/content. Repeated calls are idempotent by page, keyword, and negative flag.',
+    inputSchema: {
+      type: 'object',
+      additionalProperties: false,
+      required: ['promotablePageId', 'ideas'],
+      properties: {
+        organizationId: { type: 'string' },
+        promotablePageId: { type: 'string' },
+        runId: { type: 'string', description: 'Agent run id producing the ideas.' },
+        replaceSuggested: { type: 'boolean', description: 'When true, removes prior suggested agent ideas for this page before inserting the new batch.' },
+        ideas: {
+          type: 'array',
+          maxItems: 50,
+          items: {
+            type: 'object',
+            additionalProperties: false,
+            required: ['keyword'],
+            properties: {
+              keyword: { type: 'string' },
+              matchType: { type: 'string', description: 'exact, phrase, or broad. Defaults to phrase.' },
+              intent: { type: 'string' },
+              priority: { type: 'number', description: 'Higher numbers sort first.' },
+              negative: { type: 'boolean' },
+              rationale: { type: 'string' },
+              status: { type: 'string', description: 'Defaults to suggested.' },
+              metadata: { type: 'object', additionalProperties: true },
+            },
+          },
+        },
+      },
+    },
+  },
+  {
     name: 'pach.marketing.slot.get',
     description: 'Read one autonomous newsletter publication slot with publication, idea, document, content item, distribution run, and available ideas.',
     inputSchema: {
@@ -1085,6 +1140,12 @@ async function callTool(req: AuthenticatedRequest, params: unknown) {
       case 'pach.marketing.idea.create':
         requireMcpCapability(req, 'pach.marketing.write')
         return toolResult(await createMarketingIdea(req, args))
+      case 'pach.marketing.promotable_pages.list':
+        requireMcpCapability(req, 'pach.marketing.read')
+        return toolResult(await listPromotablePages(req, args))
+      case 'pach.marketing.keyword_ideas.upsert':
+        requireMcpCapability(req, 'pach.marketing.write')
+        return toolResult(await upsertKeywordIdeas(req, args))
       case 'pach.marketing.slot.get':
         requireMcpCapability(req, 'pach.marketing.read')
         return toolResult(await getMarketingSlot(req, args))
@@ -2146,6 +2207,202 @@ async function createMarketingIdea(req: AuthenticatedRequest, args: unknown) {
   }
 }
 
+async function listPromotablePages(req: AuthenticatedRequest, args: unknown) {
+  const body = ensureObject(args)
+  const pageIds = readStringFilters(body.pageId, body.pageIds)
+  const statuses = readStringFilters(body.status, body.statuses)
+  const includeKeywordIdeas = body.includeKeywordIdeas !== false
+  const limit = readPositiveInteger(body.limit, 50, 1, 200)
+  const db = getDb()
+
+  const pages = pageIds.length > 0
+    ? await db
+      .select()
+      .from(mktPromotablePages)
+      .where(inArray(mktPromotablePages.id, pageIds.slice(0, 200)))
+      .limit(200)
+    : await (async () => {
+      const organization = await resolveOrganizationForDocumentCreate(req, body)
+      if (!organization) throw new Error('Provide organizationId, organizationName, or organizationProject')
+      return db
+        .select()
+        .from(mktPromotablePages)
+        .where(eq(mktPromotablePages.organizationId, organization.id))
+        .orderBy(desc(mktPromotablePages.updatedAt))
+        .limit(Math.max(limit, 200))
+    })()
+
+  const accessiblePages = pages
+    .filter((page) => canAccessOrganization(req, page.organizationId))
+    .filter((page) => statuses.length > 0 ? statuses.includes(page.status) : page.status !== 'archived')
+    .slice(0, limit)
+
+  const organizationIds = uniqueStrings(accessiblePages.map((page) => page.organizationId))
+  const [organization] = organizationIds.length === 1
+    ? await db.select().from(organizations).where(eq(organizations.id, organizationIds[0])).limit(1)
+    : []
+  const contentItemIds = uniqueStrings(accessiblePages.map((page) => page.contentItemId))
+  const contentOutputIds = uniqueStrings(accessiblePages.map((page) => page.contentOutputId))
+  const contentItems = contentItemIds.length
+    ? await db.select().from(mktContentItems).where(inArray(mktContentItems.id, contentItemIds))
+    : []
+  const contentOutputs = contentOutputIds.length
+    ? await db.select().from(mktContentOutputs).where(inArray(mktContentOutputs.id, contentOutputIds))
+    : []
+  const itemById = new Map(contentItems.map((item) => [item.id, item]))
+  const outputById = new Map(contentOutputs.map((output) => [output.id, output]))
+  const keywordRows = includeKeywordIdeas && accessiblePages.length
+    ? await db
+      .select()
+      .from(mktKeywordIdeas)
+      .where(inArray(mktKeywordIdeas.promotablePageId, accessiblePages.map((page) => page.id)))
+      .orderBy(desc(mktKeywordIdeas.priority), asc(mktKeywordIdeas.keyword))
+      .limit(1000)
+    : []
+  const keywordsByPageId = new Map<string, Array<typeof mktKeywordIdeas.$inferSelect>>()
+  for (const keyword of keywordRows) {
+    if (!canAccessOrganization(req, keyword.organizationId)) continue
+    const list = keywordsByPageId.get(keyword.promotablePageId) ?? []
+    list.push(keyword)
+    keywordsByPageId.set(keyword.promotablePageId, list)
+  }
+
+  return {
+    ok: true,
+    organization: organization ? serializeMarketingOrganization(organization) : null,
+    pages: accessiblePages.map((page) => serializePromotablePageForMcp({
+      page,
+      contentItem: page.contentItemId ? itemById.get(page.contentItemId) ?? null : null,
+      contentOutput: page.contentOutputId ? outputById.get(page.contentOutputId) ?? null : null,
+      keywordIdeas: keywordsByPageId.get(page.id) ?? [],
+    })),
+  }
+}
+
+async function upsertKeywordIdeas(req: AuthenticatedRequest, args: unknown) {
+  const body = ensureObject(args)
+  const promotablePageId = readRequiredString(body, 'promotablePageId')
+  const ideasInput = Array.isArray(body.ideas) ? body.ideas : []
+  if (ideasInput.length === 0) throw new Error('Provide at least one keyword idea')
+  if (ideasInput.length > 50) throw new Error('Keyword idea batch is limited to 50 ideas')
+
+  const db = getDb()
+  const [page] = await db.select().from(mktPromotablePages).where(eq(mktPromotablePages.id, promotablePageId)).limit(1)
+  if (!page || !canAccessOrganization(req, page.organizationId) || page.status === 'archived') {
+    throw new Error('Promotable page not found')
+  }
+  const requestedOrganizationId = readOptionalString(body.organizationId)
+  if (requestedOrganizationId && requestedOrganizationId !== page.organizationId) {
+    throw new Error('Promotable page does not belong to the requested organization')
+  }
+
+  const runId = readOptionalString(body.runId)
+  const now = new Date()
+  const normalizedIdeas = dedupeKeywordIdeas(ideasInput.map((item, index) => readKeywordIdeaInput(item, index)))
+  if (normalizedIdeas.length === 0) throw new Error('No valid keyword ideas found')
+
+  if (body.replaceSuggested === true) {
+    await db
+      .delete(mktKeywordIdeas)
+      .where(and(
+        eq(mktKeywordIdeas.promotablePageId, page.id),
+        eq(mktKeywordIdeas.status, 'suggested'),
+        eq(mktKeywordIdeas.source, 'agent'),
+      ))
+  }
+
+  const existing = await db
+    .select()
+    .from(mktKeywordIdeas)
+    .where(eq(mktKeywordIdeas.promotablePageId, page.id))
+    .limit(500)
+  const existingByKey = new Map(existing.map((keyword) => [keywordIdeaKey(keyword.keyword, keyword.negative), keyword]))
+  const inserted: Array<typeof mktKeywordIdeas.$inferSelect> = []
+  const updated: Array<typeof mktKeywordIdeas.$inferSelect> = []
+
+  for (const idea of normalizedIdeas) {
+    const key = keywordIdeaKey(idea.keyword, idea.negative)
+    const current = existingByKey.get(key)
+    const metadata = {
+      ...(current?.metadata && isObject(current.metadata) ? current.metadata : {}),
+      ...idea.metadata,
+      lastGeneratedAt: now.toISOString(),
+    }
+
+    if (current) {
+      const [row] = await db
+        .update(mktKeywordIdeas)
+        .set({
+          agentRunId: runId ?? current.agentRunId,
+          matchType: idea.matchType,
+          intent: idea.intent ?? current.intent,
+          priority: idea.priority,
+          negative: idea.negative,
+          rationale: idea.rationale ?? current.rationale,
+          status: idea.statusWasExplicit ? idea.status : current.status,
+          source: 'agent',
+          metadata,
+          updatedAt: now,
+        })
+        .where(eq(mktKeywordIdeas.id, current.id))
+        .returning()
+      updated.push(row)
+      existingByKey.set(key, row)
+      continue
+    }
+
+    const [row] = await db
+      .insert(mktKeywordIdeas)
+      .values({
+        id: randomUUID(),
+        organizationId: page.organizationId,
+        promotablePageId: page.id,
+        agentRunId: runId ?? null,
+        keyword: idea.keyword,
+        matchType: idea.matchType,
+        intent: idea.intent ?? null,
+        priority: idea.priority,
+        negative: idea.negative,
+        rationale: idea.rationale ?? null,
+        status: idea.status,
+        source: 'agent',
+        metadata,
+        createdAt: now,
+        updatedAt: now,
+      })
+      .returning()
+    inserted.push(row)
+    existingByKey.set(key, row)
+  }
+
+  await db
+    .update(mktPromotablePages)
+    .set({
+      metadata: {
+        ...(page.metadata ?? {}),
+        keywordGenerationStatus: 'done',
+        lastKeywordRunId: runId ?? (page.metadata && isObject(page.metadata) ? readOptionalString(page.metadata.lastKeywordRunId) : null),
+        lastKeywordGeneratedAt: now.toISOString(),
+        keywordIdeaCount: existingByKey.size,
+      },
+      updatedAt: now,
+    })
+    .where(eq(mktPromotablePages.id, page.id))
+
+  return {
+    ok: true,
+    page: {
+      id: page.id,
+      title: page.title,
+      url: page.url,
+      status: page.status,
+    },
+    inserted: inserted.map(serializeKeywordIdea),
+    updated: updated.map(serializeKeywordIdea),
+    totalProcessed: inserted.length + updated.length,
+  }
+}
+
 async function getMarketingSlot(req: AuthenticatedRequest, args: unknown) {
   const body = ensureObject(args)
   const slotId = readRequiredString(body, 'slotId')
@@ -2337,6 +2594,134 @@ function serializeMarketingIdea(idea: typeof mktEditorialIdeas.$inferSelect) {
     createdAt: idea.createdAt.getTime(),
     updatedAt: idea.updatedAt.getTime(),
   }
+}
+
+function serializePromotablePageForMcp({
+  page,
+  contentItem,
+  contentOutput,
+  keywordIdeas,
+}: {
+  page: typeof mktPromotablePages.$inferSelect
+  contentItem: typeof mktContentItems.$inferSelect | null
+  contentOutput: typeof mktContentOutputs.$inferSelect | null
+  keywordIdeas: Array<typeof mktKeywordIdeas.$inferSelect>
+}) {
+  return {
+    id: page.id,
+    organizationId: page.organizationId,
+    contentItemId: page.contentItemId,
+    contentOutputId: page.contentOutputId,
+    source: page.source,
+    title: page.title,
+    url: page.url,
+    canonicalUrl: page.canonicalUrl,
+    sourceUrl: page.sourceUrl,
+    status: page.status,
+    sitemapUrl: page.sitemapUrl,
+    sitemapLastmod: page.sitemapLastmod?.getTime() ?? null,
+    lastSeenAt: page.lastSeenAt?.getTime() ?? null,
+    metadata: page.metadata ?? {},
+    contentItem: contentItem
+      ? {
+          id: contentItem.id,
+          title: contentItem.title,
+          slug: contentItem.slug,
+          excerpt: contentItem.excerpt,
+          contentKind: contentItem.contentKind,
+          status: contentItem.status,
+          tags: contentItem.tags ?? [],
+          bodyPreview: textPreview(contentItem.body, 1200),
+        }
+      : null,
+    contentOutput: contentOutput
+      ? {
+          id: contentOutput.id,
+          channel: contentOutput.channel,
+          publicUrl: contentOutput.publicUrl,
+          canonicalUrl: contentOutput.canonicalUrl,
+          status: contentOutput.status,
+          publishedAt: contentOutput.publishedAt?.getTime() ?? null,
+        }
+      : null,
+    keywordIdeas: keywordIdeas.map(serializeKeywordIdea),
+    createdAt: page.createdAt.getTime(),
+    updatedAt: page.updatedAt.getTime(),
+  }
+}
+
+function serializeKeywordIdea(idea: typeof mktKeywordIdeas.$inferSelect) {
+  return {
+    id: idea.id,
+    organizationId: idea.organizationId,
+    promotablePageId: idea.promotablePageId,
+    agentRunId: idea.agentRunId,
+    keyword: idea.keyword,
+    matchType: idea.matchType,
+    intent: idea.intent,
+    priority: idea.priority,
+    negative: idea.negative,
+    rationale: idea.rationale,
+    status: idea.status,
+    source: idea.source,
+    metadata: idea.metadata ?? {},
+    createdAt: idea.createdAt.getTime(),
+    updatedAt: idea.updatedAt.getTime(),
+  }
+}
+
+function readKeywordIdeaInput(value: unknown, index: number) {
+  const body = ensureObject(value)
+  const keyword = normalizeKeyword(readRequiredString(body, 'keyword'))
+  if (keyword.length < 2) throw new Error(`Keyword idea ${index + 1} is too short`)
+
+  const matchType = readOptionalString(body.matchType) ?? 'phrase'
+  if (!['exact', 'phrase', 'broad'].includes(matchType)) {
+    throw new Error(`Keyword idea ${index + 1} has invalid matchType`)
+  }
+
+  const statusWasExplicit = typeof body.status === 'string' && body.status.trim().length > 0
+  const status = readOptionalString(body.status) ?? 'suggested'
+  if (!['suggested', 'approved', 'rejected', 'used'].includes(status)) {
+    throw new Error(`Keyword idea ${index + 1} has invalid status`)
+  }
+
+  const priority = typeof body.priority === 'number' && Number.isFinite(body.priority)
+    ? Math.trunc(body.priority)
+    : 50 - index
+
+  return {
+    keyword,
+    matchType,
+    intent: readOptionalString(body.intent),
+    priority,
+    negative: body.negative === true,
+    rationale: readOptionalString(body.rationale),
+    status,
+    statusWasExplicit,
+    metadata: isObject(body.metadata) ? body.metadata : {},
+  }
+}
+
+function dedupeKeywordIdeas(ideas: ReturnType<typeof readKeywordIdeaInput>[]) {
+  const byKey = new Map<string, ReturnType<typeof readKeywordIdeaInput>>()
+  for (const idea of ideas) {
+    byKey.set(keywordIdeaKey(idea.keyword, idea.negative), idea)
+  }
+  return Array.from(byKey.values())
+}
+
+function keywordIdeaKey(keyword: string, negative: boolean) {
+  return `${normalizeKeyword(keyword)}:${negative ? 'negative' : 'positive'}`
+}
+
+function normalizeKeyword(value: string) {
+  return value.trim().replace(/\s+/g, ' ').toLowerCase()
+}
+
+function textPreview(value: string | null | undefined, maxLength: number) {
+  const text = (value ?? '').replace(/\s+/g, ' ').trim()
+  return text.length > maxLength ? `${text.slice(0, maxLength).trim()}...` : text
 }
 
 function serializeMarketingSlot(slot: typeof mktPublicationSlots.$inferSelect) {

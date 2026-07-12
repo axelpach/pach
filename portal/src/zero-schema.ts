@@ -770,6 +770,26 @@ const mktPromotablePages = table('mkt_promotable_pages')
   })
   .primaryKey('id')
 
+const mktKeywordIdeas = table('mkt_keyword_ideas')
+  .columns({
+    id: string(),
+    organizationId: string().from('organization_id'),
+    promotablePageId: string().from('promotable_page_id'),
+    agentRunId: string().optional().from('agent_run_id'),
+    keyword: string(),
+    matchType: string().from('match_type'),
+    intent: string().optional(),
+    priority: number(),
+    negative: boolean(),
+    rationale: string().optional(),
+    status: string(),
+    source: string(),
+    metadata: json(),
+    createdAt: number().from('created_at'),
+    updatedAt: number().from('updated_at'),
+  })
+  .primaryKey('id')
+
 const socialConnections = table('social_connections')
   .columns({
     id: string(),
@@ -1561,6 +1581,7 @@ export const schema = createSchema({
     mktPublicationConsumers,
     mktContentOutputs,
     mktPromotablePages,
+    mktKeywordIdeas,
     socialConnections,
     socialChannels,
     socialChannelConnections,

@@ -706,6 +706,45 @@ const mktContentOutputs = table('mkt_content_outputs')
     updatedAt: number().from('updated_at'),
 })
     .primaryKey('id');
+const mktPromotablePages = table('mkt_promotable_pages')
+    .columns({
+    id: string(),
+    organizationId: string().from('organization_id'),
+    contentItemId: string().optional().from('content_item_id'),
+    contentOutputId: string().optional().from('content_output_id'),
+    source: string(),
+    title: string(),
+    url: string(),
+    canonicalUrl: string().optional().from('canonical_url'),
+    sourceUrl: string().optional().from('source_url'),
+    status: string(),
+    sitemapUrl: string().optional().from('sitemap_url'),
+    sitemapLastmod: number().optional().from('sitemap_lastmod'),
+    lastSeenAt: number().optional().from('last_seen_at'),
+    metadata: json(),
+    createdAt: number().from('created_at'),
+    updatedAt: number().from('updated_at'),
+})
+    .primaryKey('id');
+const mktKeywordIdeas = table('mkt_keyword_ideas')
+    .columns({
+    id: string(),
+    organizationId: string().from('organization_id'),
+    promotablePageId: string().from('promotable_page_id'),
+    agentRunId: string().optional().from('agent_run_id'),
+    keyword: string(),
+    matchType: string().from('match_type'),
+    intent: string().optional(),
+    priority: number(),
+    negative: boolean(),
+    rationale: string().optional(),
+    status: string(),
+    source: string(),
+    metadata: json(),
+    createdAt: number().from('created_at'),
+    updatedAt: number().from('updated_at'),
+})
+    .primaryKey('id');
 const socialConnections = table('social_connections')
     .columns({
     id: string(),
@@ -801,7 +840,8 @@ const mktAdPromotions = table('mkt_ad_promotions')
     .columns({
     id: string(),
     organizationId: string().from('organization_id'),
-    contentItemId: string().from('content_item_id'),
+    promotablePageId: string().optional().from('promotable_page_id'),
+    contentItemId: string().optional().from('content_item_id'),
     contentOutputId: string().optional().from('content_output_id'),
     socialPostId: string().optional().from('social_post_id'),
     socialPostTargetId: string().optional().from('social_post_target_id'),
@@ -852,6 +892,117 @@ const mktAdMetricSnapshots = table('mkt_ad_metric_snapshots')
     rawMetrics: json().from('raw_metrics'),
     fetchedAt: number().from('fetched_at'),
     createdAt: number().from('created_at'),
+})
+    .primaryKey('id');
+const googleConnections = table('google_connections')
+    .columns({
+    id: string(),
+    organizationId: string().from('organization_id'),
+    connectedByUserId: string().optional().from('connected_by_user_id'),
+    providerAccountId: string().optional().from('provider_account_id'),
+    providerAccountEmail: string().optional().from('provider_account_email'),
+    providerAccountName: string().optional().from('provider_account_name'),
+    scopes: json(),
+    credentialKind: string().from('credential_kind'),
+    tokenExpiresAt: number().optional().from('token_expires_at'),
+    status: string(),
+    statusMessage: string().optional().from('status_message'),
+    lastUsedAt: number().optional().from('last_used_at'),
+    lastRefreshedAt: number().optional().from('last_refreshed_at'),
+    metadata: json(),
+    createdAt: number().from('created_at'),
+    updatedAt: number().from('updated_at'),
+})
+    .primaryKey('id');
+const searchConsoleProperties = table('search_console_properties')
+    .columns({
+    id: string(),
+    organizationId: string().from('organization_id'),
+    connectionId: string().optional().from('connection_id'),
+    siteUrl: string().from('site_url'),
+    displayName: string().from('display_name'),
+    permissionLevel: string().optional().from('permission_level'),
+    selected: boolean(),
+    status: string(),
+    lastSyncedAt: number().optional().from('last_synced_at'),
+    metadata: json(),
+    createdAt: number().from('created_at'),
+    updatedAt: number().from('updated_at'),
+})
+    .primaryKey('id');
+const searchConsoleSitemaps = table('search_console_sitemaps')
+    .columns({
+    id: string(),
+    organizationId: string().from('organization_id'),
+    propertyId: string().from('property_id'),
+    siteUrl: string().from('site_url'),
+    sitemapUrl: string().from('sitemap_url'),
+    status: string(),
+    lastSubmittedAt: number().optional().from('last_submitted_at'),
+    lastSyncedAt: number().optional().from('last_synced_at'),
+    error: string().optional(),
+    metadata: json(),
+    createdAt: number().from('created_at'),
+    updatedAt: number().from('updated_at'),
+})
+    .primaryKey('id');
+const searchConsoleMetricSnapshots = table('search_console_metric_snapshots')
+    .columns({
+    id: string(),
+    organizationId: string().from('organization_id'),
+    propertyId: string().from('property_id'),
+    contentItemId: string().optional().from('content_item_id'),
+    contentOutputId: string().optional().from('content_output_id'),
+    dataDate: number().from('data_date'),
+    searchType: string().from('search_type'),
+    page: string().optional(),
+    query: string().optional(),
+    country: string().optional(),
+    device: string().optional(),
+    clicks: number(),
+    impressions: number(),
+    ctr: string().optional(),
+    position: string().optional(),
+    metadata: json(),
+    fetchedAt: number().from('fetched_at'),
+    createdAt: number().from('created_at'),
+    updatedAt: number().from('updated_at'),
+})
+    .primaryKey('id');
+const searchConsoleDailySnapshots = table('search_console_daily_snapshots')
+    .columns({
+    id: string(),
+    organizationId: string().from('organization_id'),
+    propertyId: string().from('property_id'),
+    dataDate: number().from('data_date'),
+    searchType: string().from('search_type'),
+    clicks: number(),
+    impressions: number(),
+    ctr: string().optional(),
+    position: string().optional(),
+    metadata: json(),
+    fetchedAt: number().from('fetched_at'),
+    createdAt: number().from('created_at'),
+    updatedAt: number().from('updated_at'),
+})
+    .primaryKey('id');
+const searchConsoleUrlInspections = table('search_console_url_inspections')
+    .columns({
+    id: string(),
+    organizationId: string().from('organization_id'),
+    propertyId: string().from('property_id'),
+    contentItemId: string().optional().from('content_item_id'),
+    contentOutputId: string().optional().from('content_output_id'),
+    inspectionUrl: string().from('inspection_url'),
+    verdict: string().optional(),
+    coverageState: string().optional().from('coverage_state'),
+    indexingState: string().optional().from('indexing_state'),
+    robotsTxtState: string().optional().from('robots_txt_state'),
+    lastCrawlTime: number().optional().from('last_crawl_time'),
+    inspectedAt: number().from('inspected_at'),
+    rawResult: json().from('raw_result'),
+    createdAt: number().from('created_at'),
+    updatedAt: number().from('updated_at'),
 })
     .primaryKey('id');
 const pmTeams = table('pm_teams')
@@ -1344,6 +1495,8 @@ export const schema = createSchema({
         mktContentEvents,
         mktPublicationConsumers,
         mktContentOutputs,
+        mktPromotablePages,
+        mktKeywordIdeas,
         socialConnections,
         socialChannels,
         socialChannelConnections,
@@ -1351,6 +1504,12 @@ export const schema = createSchema({
         socialPostTargets,
         mktAdPromotions,
         mktAdMetricSnapshots,
+        googleConnections,
+        searchConsoleProperties,
+        searchConsoleSitemaps,
+        searchConsoleMetricSnapshots,
+        searchConsoleDailySnapshots,
+        searchConsoleUrlInspections,
         pmTeams,
         pmProjects,
         pmStatuses,
@@ -1446,6 +1605,8 @@ export const permissions = definePermissions(schema, () => {
         mkt_content_events: organizationScoped(),
         mkt_publication_consumers: organizationScoped(),
         mkt_content_outputs: organizationScoped(),
+        mkt_promotable_pages: organizationScoped(),
+        mkt_keyword_ideas: organizationScoped(),
         social_connections: organizationScoped(),
         social_channels: organizationScoped(),
         social_channel_connections: organizationScoped(),
@@ -1453,6 +1614,12 @@ export const permissions = definePermissions(schema, () => {
         social_post_targets: organizationScoped(),
         mkt_ad_promotions: organizationScoped(),
         mkt_ad_metric_snapshots: organizationScoped(),
+        google_connections: organizationScoped(),
+        search_console_properties: organizationScoped(),
+        search_console_sitemaps: organizationScoped(),
+        search_console_metric_snapshots: organizationScoped(),
+        search_console_daily_snapshots: organizationScoped(),
+        search_console_url_inspections: organizationScoped(),
         pm_teams: authenticatedReadOnly,
         pm_projects: organizationScoped('companyId'),
         pm_statuses: authenticatedReadOnly,

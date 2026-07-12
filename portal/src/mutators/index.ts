@@ -692,6 +692,30 @@ export const mutators = {
     },
   },
 
+  mkt_keyword_ideas: {
+    async create(tx: Tx, args: any) {
+      const now = Date.now()
+      await tx.mutate.mkt_keyword_ideas.insert({
+        matchType: 'phrase',
+        priority: 0,
+        negative: false,
+        status: 'suggested',
+        source: 'manual',
+        metadata: {},
+        ...args,
+        createdAt: now,
+        updatedAt: now,
+      })
+    },
+    async update(tx: Tx, args: any) {
+      const { id, ...updates } = args
+      await tx.mutate.mkt_keyword_ideas.update({ id, ...updates, updatedAt: Date.now() })
+    },
+    async delete(tx: Tx, args: { id: string }) {
+      await tx.mutate.mkt_keyword_ideas.delete({ id: args.id })
+    },
+  },
+
   social_connections: {
     async update(tx: Tx, args: any) {
       const { id, ...updates } = args

@@ -967,6 +967,33 @@ export const mktPromotablePages = pgTable('mkt_promotable_pages', {
   organizationUrlIdx: uniqueIndex('mkt_promotable_pages_organization_url_idx').on(table.organizationId, table.url),
 }))
 
+export const mktKeywordIdeas = pgTable('mkt_keyword_ideas', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  organizationId: uuid('organization_id').notNull().references(() => organizations.id),
+  promotablePageId: uuid('promotable_page_id').notNull().references(() => mktPromotablePages.id),
+  agentRunId: uuid('agent_run_id'),
+  keyword: text('keyword').notNull(),
+  /** exact | phrase | broad */
+  matchType: text('match_type').notNull().default('phrase'),
+  /** commercial | informational | navigational | branded | competitor | local */
+  intent: text('intent'),
+  priority: integer('priority').notNull().default(0),
+  negative: boolean('negative').notNull().default(false),
+  rationale: text('rationale'),
+  /** suggested | approved | rejected | used */
+  status: text('status').notNull().default('suggested'),
+  source: text('source').notNull().default('agent'),
+  metadata: jsonb('metadata').$type<Record<string, unknown>>().notNull().default({}),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+}, (table) => ({
+  organizationIdx: index('mkt_keyword_ideas_organization_idx').on(table.organizationId),
+  pageStatusIdx: index('mkt_keyword_ideas_page_status_idx').on(table.promotablePageId, table.status),
+  agentRunIdx: index('mkt_keyword_ideas_agent_run_idx').on(table.agentRunId),
+  organizationKeywordIdx: index('mkt_keyword_ideas_organization_keyword_idx').on(table.organizationId, table.keyword),
+  pageKeywordUniqueIdx: uniqueIndex('mkt_keyword_ideas_page_keyword_unique_idx').on(table.promotablePageId, table.keyword, table.negative),
+}))
+
 /* ─────────────────────── SOCIAL PUBLISHING ─────────────────────── */
 
 export const socialProviderApps = pgTable('social_provider_apps', {
