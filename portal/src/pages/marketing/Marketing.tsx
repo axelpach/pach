@@ -85,6 +85,7 @@ type SearchConsoleMetricSnapshotRow = {
   propertyId: string
   dataDate: number | string
   contentItemId?: string | null
+  contentOutputId?: string | null
   page?: string | null
   query?: string | null
   clicks: number
@@ -154,7 +155,21 @@ type LinkedInAdPromotionDraftPayload = {
   ctaLabel: string
 }
 
-type MarketingSection = 'newsletters' | 'social' | 'whatsapp' | 'calendar' | 'analytics'
+type GoogleSearchPromotionDraftPayload = {
+  adAccountExternalId: string
+  objective: string
+  geo: string
+  language: string
+  budgetMinor?: number
+  currencyCode: string
+  startsAt?: number
+  endsAt?: number
+  keywords: string[]
+  headlines: string[]
+  descriptions: string[]
+}
+
+type MarketingSection = 'newsletters' | 'social' | 'whatsapp' | 'promotions' | 'calendar' | 'analytics'
 type NewsletterTab = 'content' | 'publications' | 'subscribers' | 'broadcasts' | 'ctas'
 type MarketingCalendarView = 'dayGridMonth' | 'timeGridWeek' | 'timeGridDay' | 'listWeek'
 type MarketingCalendarEventTone = 'ok' | 'warn' | 'fail' | 'info' | 'idle'
@@ -184,6 +199,7 @@ const SECTIONS: Array<{ id: MarketingSection; label: string }> = [
   { id: 'newsletters', label: 'newsletters' },
   { id: 'social', label: 'social' },
   { id: 'whatsapp', label: 'whatsapp' },
+  { id: 'promotions', label: 'promotions' },
   { id: 'calendar', label: 'calendar' },
   { id: 'analytics', label: 'analytics' },
 ]
@@ -604,6 +620,17 @@ export default function Marketing({ canAccessWhatsApp = false }: { canAccessWhat
               socialChannels={orgSocialChannels}
               socialPosts={orgSocialPosts}
               socialPostTargets={orgSocialPostTargets}
+            />
+          ) : null}
+          {section === 'promotions' ? (
+            <PromotionsSection
+              z={z}
+              contentItems={orgContentItems}
+              contentOutputs={orgContentOutputs}
+              adPromotions={orgAdPromotions}
+              adMetricSnapshots={orgAdMetricSnapshots}
+              searchConsoleMetrics={orgSearchConsoleMetrics}
+              onFlash={flash}
             />
           ) : null}
           {section === 'whatsapp' ? (
@@ -1516,6 +1543,554 @@ function LinkedInAdPromotionModal({
             disabled={!canSubmit}
           >
             create draft
+          </Button>
+        </div>
+      </div>
+    </div>,
+    document.body,
+  )
+}
+
+type PromotionWorkspaceTab = 'pages' | 'drafts' | 'learning'
+
+type PromotablePageRow = {
+  item: ContentItemRow
+  output: ContentOutputRow
+  url: string
+  searchMetrics: SearchConsoleMetricSnapshotRow[]
+  searchTotals: { clicks: number; impressions: number }
+  topQuery: string
+  promotions: AdPromotionRow[]
+  googlePromotion: AdPromotionRow | null
+  paidTotals: ReturnType<typeof sumAdMetricSnapshots>
+}
+
+function PromotionsSection({
+  z,
+  contentItems,
+  contentOutputs,
+  adPromotions,
+  adMetricSnapshots,
+  searchConsoleMetrics,
+  onFlash,
+}: {
+  z: ReturnType<typeof useZero<Schema, Mutators>>
+  contentItems: ContentItemRow[]
+  contentOutputs: ContentOutputRow[]
+  adPromotions: AdPromotionRow[]
+  adMetricSnapshots: AdMetricSnapshotRow[]
+  searchConsoleMetrics: SearchConsoleMetricSnapshotRow[]
+  onFlash: (message: string) => void
+}) {
+  const [tab, setTab] = useState<PromotionWorkspaceTab>('pages')
+  const [promoteTarget, setPromoteTarget] = useState<{ page: PromotablePageRow; promotion: AdPromotionRow | null } | null>(null)
+  const pages = useMemo(
+    () => promotablePages(contentItems, contentOutputs, adPromotions, adMetricSnapshots, searchConsoleMetrics),
+    [adMetricSnapshots, adPromotions, contentItems, contentOutputs, searchConsoleMetrics],
+  )
+  const googlePromotions = useMemo(() => adPromotions.filter((promotion) => promotion.provider === 'google'), [adPromotions])
+  const googleMetrics = useMemo(() => adMetricSnapshotsForPromotions(googlePromotions, adMetricSnapshots), [adMetricSnapshots, googlePromotions])
+  const googleTotals = sumAdMetricSnapshots(googleMetrics)
+  const draftPromotions = googlePromotions.filter((promotion) => promotion.status === 'draft' || promotion.status === 'ready')
+  const activePromotions = googlePromotions.filter((promotion) => ['active', 'scheduled', 'paused'].includes(promotion.status))
+  const unpromotedOpportunityPages = pages.filter((page) => !page.googlePromotion && page.searchTotals.impressions > 0)
+  const incompleteDrafts = draftPromotions.filter((promotion) => !promotion.budgetMinor || !promotion.adAccountExternalId)
+
+  async function saveGoogleDraft(page: PromotablePageRow, promotion: AdPromotionRow | null, payload: GoogleSearchPromotionDraftPayload) {
+    const values = {
+      organizationId: page.item.organizationId,
+      contentItemId: page.item.id,
+      contentOutputId: page.output.id,
+      provider: 'google',
+      adAccountExternalId: payload.adAccountExternalId || undefined,
+      landingUrl: page.url,
+      objective: payload.objective,
+      status: 'draft',
+      budgetMinor: payload.budgetMinor,
+      currencyCode: payload.currencyCode,
+      startsAt: payload.startsAt,
+      endsAt: payload.endsAt,
+      targeting: {
+        campaignType: 'search',
+        keywords: payload.keywords,
+        matchType: 'phrase',
+        geo: payload.geo,
+        language: payload.language,
+      },
+      creative: {
+        finalUrl: page.url,
+        headlines: payload.headlines,
+        descriptions: payload.descriptions,
+      },
+      metadata: {
+        source: 'promotions',
+        publishMode: 'draft_only',
+        providerAction: 'google_search_campaign_draft',
+        budgetCadence: 'daily',
+      },
+    }
+
+    if (promotion) {
+      await z.mutate.mkt_ad_promotions.update({ id: promotion.id, ...values })
+      onFlash('google draft updated')
+    } else {
+      await z.mutate.mkt_ad_promotions.create({ id: crypto.randomUUID(), ...values })
+      onFlash('google draft created')
+    }
+    setPromoteTarget(null)
+    setTab('drafts')
+  }
+
+  return (
+    <div className="space-y-4">
+      <div className="grid gap-2 md:grid-cols-3 xl:grid-cols-6">
+        <Metric label="pages" value={pages.length} />
+        <Metric label="google drafts" value={draftPromotions.length} />
+        <Metric label="active" value={activePromotions.length} />
+        <Metric label="spend" value={formatMoneyMinor(googleTotals.spendMinor, googleMetrics[0]?.currencyCode ?? 'MXN')} />
+        <Metric label="clicks" value={formatCompactNumber(googleTotals.clicks)} />
+        <Metric label="leads" value={formatCompactNumber(googleTotals.leads)} />
+      </div>
+
+      <Panel>
+        <div className="flex flex-wrap items-end justify-between gap-3 border-b border-edge/12">
+          <div className="flex flex-wrap">
+            <MarketingTabButton active={tab === 'pages'} onClick={() => setTab('pages')}>
+              pages · {pages.length}
+            </MarketingTabButton>
+            <MarketingTabButton active={tab === 'drafts'} onClick={() => setTab('drafts')}>
+              drafts · {draftPromotions.length}
+            </MarketingTabButton>
+            <MarketingTabButton active={tab === 'learning'} onClick={() => setTab('learning')}>
+              learning · {unpromotedOpportunityPages.length + incompleteDrafts.length}
+            </MarketingTabButton>
+          </div>
+          <div className="pb-2 font-mono text-[10px] uppercase tracking-label text-fg-4">paid distribution</div>
+        </div>
+
+        <div className="pt-4">
+          {tab === 'pages' ? (
+            <PromotablePagesTable
+              pages={pages}
+              onPromote={(page) => setPromoteTarget({ page, promotion: page.googlePromotion })}
+            />
+          ) : null}
+          {tab === 'drafts' ? (
+            <GoogleDraftsTable
+              promotions={draftPromotions}
+              pages={pages}
+              metrics={adMetricSnapshots}
+              onEdit={(page, promotion) => setPromoteTarget({ page, promotion })}
+            />
+          ) : null}
+          {tab === 'learning' ? (
+            <PromotionsLearningPanel
+              unpromotedPages={unpromotedOpportunityPages}
+              incompleteDrafts={incompleteDrafts}
+              pages={pages}
+              onPromote={(page) => setPromoteTarget({ page, promotion: page.googlePromotion })}
+            />
+          ) : null}
+        </div>
+      </Panel>
+
+      {promoteTarget ? (
+        <GoogleSearchPromotionDrawer
+          page={promoteTarget.page}
+          promotion={promoteTarget.promotion}
+          onClose={() => setPromoteTarget(null)}
+          onSubmit={(payload) => void saveGoogleDraft(promoteTarget.page, promoteTarget.promotion, payload)}
+        />
+      ) : null}
+    </div>
+  )
+}
+
+function PromotablePagesTable({ pages, onPromote }: { pages: PromotablePageRow[]; onPromote: (page: PromotablePageRow) => void }) {
+  if (pages.length === 0) return <EmptyState label="no published pages" />
+  return (
+    <div className="overflow-auto border border-edge/12">
+      <table className="w-full min-w-[980px] text-left font-mono text-xs">
+        <thead className="bg-rim text-[10px] uppercase tracking-label text-fg-4">
+          <tr className="border-b border-edge/12">
+            <th className="px-3 py-2 font-normal">page</th>
+            <th className="px-3 py-2 text-right font-normal">organic</th>
+            <th className="px-3 py-2 text-right font-normal">paid</th>
+            <th className="px-3 py-2 font-normal">status</th>
+            <th className="px-3 py-2 text-right font-normal">action</th>
+          </tr>
+        </thead>
+        <tbody>
+          {pages.map((page) => (
+            <tr key={page.output.id} className="border-b border-edge/8 text-fg-2 last:border-b-0">
+              <td className="max-w-[360px] px-3 py-3">
+                <div className="truncate text-fg-1">{page.item.title}</div>
+                <div className="mt-1 flex min-w-0 items-center gap-2 text-[11px] text-fg-4">
+                  <span className="truncate">{page.url}</span>
+                  <a href={page.url} target="_blank" rel="noreferrer" className="shrink-0 text-fg-4 transition hover:text-accent">
+                    <ExternalLink className="h-3 w-3" />
+                  </a>
+                </div>
+              </td>
+              <td className="px-3 py-3 text-right">
+                <div className="text-fg-1">{formatCompactNumber(page.searchTotals.clicks)} clicks</div>
+                <div className="mt-1 text-[11px] text-fg-4">{formatCompactNumber(page.searchTotals.impressions)} impressions</div>
+                {page.topQuery ? <div className="mt-1 text-[11px] text-accent">{page.topQuery}</div> : null}
+              </td>
+              <td className="px-3 py-3 text-right">
+                <div className="text-fg-1">{page.promotions.length ? `${page.promotions.length} draft${page.promotions.length === 1 ? '' : 's'}` : 'not promoted'}</div>
+                <div className="mt-1 text-[11px] text-fg-4">{formatMoneyMinor(page.paidTotals.spendMinor, 'MXN')} spend</div>
+              </td>
+              <td className="px-3 py-3">
+                <StatusPill kind={page.googlePromotion ? statusKind(page.googlePromotion.status) : 'idle'}>
+                  {page.googlePromotion?.status ?? page.output.status}
+                </StatusPill>
+              </td>
+              <td className="px-3 py-3 text-right">
+                <Button
+                  kind={page.googlePromotion ? 'default' : 'primary'}
+                  icon={page.googlePromotion ? <Edit3 className="h-3.5 w-3.5" /> : <Search className="h-3.5 w-3.5" />}
+                  onClick={() => onPromote(page)}
+                >
+                  {page.googlePromotion ? 'edit draft' : 'promote'}
+                </Button>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  )
+}
+
+function GoogleDraftsTable({
+  promotions,
+  pages,
+  metrics,
+  onEdit,
+}: {
+  promotions: AdPromotionRow[]
+  pages: PromotablePageRow[]
+  metrics: AdMetricSnapshotRow[]
+  onEdit: (page: PromotablePageRow, promotion: AdPromotionRow) => void
+}) {
+  if (promotions.length === 0) return <EmptyState label="no google drafts" />
+  return (
+    <div className="overflow-auto border border-edge/12">
+      <table className="w-full min-w-[980px] text-left font-mono text-xs">
+        <thead className="bg-rim text-[10px] uppercase tracking-label text-fg-4">
+          <tr className="border-b border-edge/12">
+            <th className="px-3 py-2 font-normal">draft</th>
+            <th className="px-3 py-2 font-normal">keywords</th>
+            <th className="px-3 py-2 text-right font-normal">budget</th>
+            <th className="px-3 py-2 text-right font-normal">metrics</th>
+            <th className="px-3 py-2 text-right font-normal">action</th>
+          </tr>
+        </thead>
+        <tbody>
+          {promotions.map((promotion) => {
+            const page = pages.find((entry) => entry.output.id === promotion.contentOutputId || entry.item.id === promotion.contentItemId) ?? null
+            const totals = sumAdMetricSnapshots(adMetricSnapshotsForPromotions([promotion], metrics))
+            const keywords = promotionKeywords(promotion).slice(0, 4)
+            return (
+              <tr key={promotion.id} className="border-b border-edge/8 text-fg-2 last:border-b-0">
+                <td className="max-w-[320px] px-3 py-3">
+                  <div className="truncate text-fg-1">{adPromotionHeadline(promotion) || page?.item.title || 'google search draft'}</div>
+                  <div className="mt-1 truncate text-[11px] text-fg-4">{promotion.landingUrl ?? page?.url ?? '-'}</div>
+                  <div className="mt-2">
+                    <StatusPill kind={statusKind(promotion.status)}>{promotion.status}</StatusPill>
+                  </div>
+                </td>
+                <td className="max-w-[260px] px-3 py-3">
+                  <div className="truncate text-fg-1">{keywords.join(', ') || '-'}</div>
+                  <div className="mt-1 text-[11px] text-fg-4">{promotionDateRange(promotion)}</div>
+                </td>
+                <td className="px-3 py-3 text-right">
+                  <div className="text-fg-1">{promotion.budgetMinor ? formatMoneyMinor(promotion.budgetMinor, promotion.currencyCode) : '-'}</div>
+                  <div className="mt-1 text-[11px] text-fg-4">daily</div>
+                </td>
+                <td className="px-3 py-3 text-right">
+                  <div className="text-fg-1">{formatCompactNumber(totals.clicks)} clicks</div>
+                  <div className="mt-1 text-[11px] text-fg-4">{formatMoneyMinor(totals.spendMinor, promotion.currencyCode)} spend</div>
+                </td>
+                <td className="px-3 py-3 text-right">
+                  <Button
+                    icon={<Edit3 className="h-3.5 w-3.5" />}
+                    onClick={() => {
+                      if (page) onEdit(page, promotion)
+                    }}
+                    disabled={!page}
+                  >
+                    edit
+                  </Button>
+                </td>
+              </tr>
+            )
+          })}
+        </tbody>
+      </table>
+    </div>
+  )
+}
+
+function PromotionsLearningPanel({
+  unpromotedPages,
+  incompleteDrafts,
+  pages,
+  onPromote,
+}: {
+  unpromotedPages: PromotablePageRow[]
+  incompleteDrafts: AdPromotionRow[]
+  pages: PromotablePageRow[]
+  onPromote: (page: PromotablePageRow) => void
+}) {
+  const rows = [
+    ...unpromotedPages.slice(0, 6).map((page) => ({
+      id: `page-${page.output.id}`,
+      signal: 'organic opportunity',
+      title: page.item.title,
+      detail: `${formatCompactNumber(page.searchTotals.impressions)} impressions · ${page.topQuery || 'search demand'}`,
+      page,
+      promotion: null as AdPromotionRow | null,
+    })),
+    ...incompleteDrafts.slice(0, 6).map((promotion) => {
+      const page = pages.find((entry) => entry.output.id === promotion.contentOutputId || entry.item.id === promotion.contentItemId) ?? null
+      return {
+        id: `draft-${promotion.id}`,
+        signal: 'draft incomplete',
+        title: adPromotionHeadline(promotion) || page?.item.title || 'google search draft',
+        detail: !promotion.budgetMinor ? 'budget missing' : 'account id missing',
+        page,
+        promotion,
+      }
+    }),
+  ]
+
+  if (rows.length === 0) return <EmptyState label="no learning signals" />
+  return (
+    <div className="overflow-auto border border-edge/12">
+      <table className="w-full min-w-[820px] text-left font-mono text-xs">
+        <thead className="bg-rim text-[10px] uppercase tracking-label text-fg-4">
+          <tr className="border-b border-edge/12">
+            <th className="px-3 py-2 font-normal">signal</th>
+            <th className="px-3 py-2 font-normal">page</th>
+            <th className="px-3 py-2 font-normal">detail</th>
+            <th className="px-3 py-2 text-right font-normal">action</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((row) => (
+            <tr key={row.id} className="border-b border-edge/8 text-fg-2 last:border-b-0">
+              <td className="px-3 py-3"><StatusPill kind={row.signal === 'organic opportunity' ? 'info' : 'warn'}>{row.signal}</StatusPill></td>
+              <td className="max-w-[320px] px-3 py-3">
+                <div className="truncate text-fg-1">{row.title}</div>
+              </td>
+              <td className="px-3 py-3 text-fg-3">{row.detail}</td>
+              <td className="px-3 py-3 text-right">
+                {row.page ? (
+                  <Button icon={<Search className="h-3.5 w-3.5" />} onClick={() => onPromote(row.page)}>
+                    promote
+                  </Button>
+                ) : null}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  )
+}
+
+function GoogleSearchPromotionDrawer({
+  page,
+  promotion,
+  onClose,
+  onSubmit,
+}: {
+  page: PromotablePageRow
+  promotion: AdPromotionRow | null
+  onClose: () => void
+  onSubmit: (payload: GoogleSearchPromotionDraftPayload) => void
+}) {
+  const creative = readRecord(promotion?.creative)
+  const targeting = readRecord(promotion?.targeting)
+  const startDate = promotion?.startsAt ? new Date(promotion.startsAt) : defaultSocialScheduleDate(page.output)
+  const endDate = promotion?.endsAt ? new Date(promotion.endsAt) : new Date(startDate.getTime() + 7 * 24 * 60 * 60 * 1000)
+  const [adAccountExternalId, setAdAccountExternalId] = useState(promotion?.adAccountExternalId ?? '')
+  const [objective, setObjective] = useState(promotion?.objective ?? 'website_visits')
+  const [geo, setGeo] = useState(readString(targeting.geo) || 'MX')
+  const [language, setLanguage] = useState(readString(targeting.language) || 'es')
+  const [budgetMajor, setBudgetMajor] = useState(promotion?.budgetMinor ? String(Math.round(promotion.budgetMinor / 100)) : '150')
+  const [currencyCode, setCurrencyCode] = useState(promotion?.currencyCode ?? 'MXN')
+  const [startsAt, setStartsAt] = useState(() => toDatetimeLocalValue(startDate))
+  const [endsAt, setEndsAt] = useState(() => toDatetimeLocalValue(endDate))
+  const [keywordText, setKeywordText] = useState(() => {
+    const existing = readStringList(targeting.keywords)
+    return (existing.length ? existing : defaultGoogleKeywords(page)).join('\n')
+  })
+  const [headlineText, setHeadlineText] = useState(() => {
+    const existing = readStringList(creative.headlines)
+    return (existing.length ? existing : defaultGoogleHeadlines(page)).join('\n')
+  })
+  const [descriptionText, setDescriptionText] = useState(() => {
+    const existing = readStringList(creative.descriptions)
+    return (existing.length ? existing : defaultGoogleDescriptions(page)).join('\n')
+  })
+
+  const startsAtMs = startsAt ? Date.parse(startsAt) : undefined
+  const endsAtMs = endsAt ? Date.parse(endsAt) : undefined
+  const budgetNumber = budgetMajor.trim() ? Number(budgetMajor) : undefined
+  const budgetMinor = typeof budgetNumber === 'number' && Number.isFinite(budgetNumber) && budgetNumber > 0
+    ? Math.round(budgetNumber * 100)
+    : undefined
+  const keywords = lineList(keywordText).slice(0, 25)
+  const headlines = lineList(headlineText).slice(0, 15)
+  const descriptions = lineList(descriptionText).slice(0, 4)
+  const invalidBudget = Boolean(budgetMajor.trim()) && !budgetMinor
+  const invalidDates = (startsAt && (!startsAtMs || Number.isNaN(startsAtMs)))
+    || (endsAt && (!endsAtMs || Number.isNaN(endsAtMs)))
+    || (startsAtMs && endsAtMs ? endsAtMs <= startsAtMs : false)
+  const canSubmit = Boolean(page.url && keywords.length && headlines.length && descriptions.length && !invalidBudget && !invalidDates)
+  const objectiveOptions: PachSelectOption[] = [
+    { value: 'website_visits', label: 'website visits' },
+    { value: 'lead_generation', label: 'lead generation' },
+    { value: 'newsletter_signup', label: 'newsletter signup' },
+  ]
+  const currencyOptions: PachSelectOption[] = [
+    { value: 'MXN', label: 'MXN' },
+    { value: 'USD', label: 'USD' },
+  ]
+
+  return createPortal(
+    <div className="fixed inset-0 z-50 flex justify-end bg-overlay/70 backdrop-blur-sm" onClick={onClose}>
+      <div
+        className="h-screen min-h-screen w-[720px] max-w-full overflow-y-auto border-l border-edge/25 bg-pit-2 shadow-terminal-overlay"
+        onClick={(event) => event.stopPropagation()}
+      >
+        <div className="sticky top-0 z-10 flex items-center justify-between gap-3 border-b border-edge/12 bg-pit-2 px-5 py-3">
+          <div className="min-w-0">
+            <div className="font-mono text-[10px] uppercase tracking-label text-fg-4">promotions · google search</div>
+            <h2 className="mt-1 truncate font-mono text-lg font-bold lowercase text-fg-1">{promotion ? 'edit draft' : 'create draft'}</h2>
+          </div>
+          <button onClick={onClose} className="font-mono text-xs uppercase tracking-label text-fg-4 transition hover:text-fg-1">
+            [esc]
+          </button>
+        </div>
+
+        <div className="space-y-4 px-5 py-5">
+          <div className="border border-edge/12 bg-rim px-3 py-3">
+            <div className="truncate font-mono text-sm text-fg-1">{page.item.title}</div>
+            <div className="mt-1 truncate font-mono text-[11px] text-fg-4">{page.url}</div>
+          </div>
+
+          <div className="grid gap-3 md:grid-cols-2">
+            <label className="block">
+              <FieldLabel>google ads customer id</FieldLabel>
+              <TermInput
+                value={adAccountExternalId}
+                onChange={(event) => setAdAccountExternalId(event.target.value)}
+                placeholder="optional until account sync exists"
+              />
+            </label>
+            <div>
+              <FieldLabel>goal</FieldLabel>
+              <PachSelect
+                value={objective}
+                onChange={setObjective}
+                options={objectiveOptions}
+                display={objectiveOptions.find((entry) => entry.value === objective)?.label ?? 'goal'}
+              />
+            </div>
+          </div>
+
+          <div className="grid gap-3 md:grid-cols-4">
+            <label className="block">
+              <FieldLabel>daily budget</FieldLabel>
+              <TermInput type="number" min="0" step="50" value={budgetMajor} onChange={(event) => setBudgetMajor(event.target.value)} />
+            </label>
+            <div>
+              <FieldLabel>currency</FieldLabel>
+              <PachSelect value={currencyCode} onChange={setCurrencyCode} options={currencyOptions} display={currencyCode} />
+            </div>
+            <label className="block">
+              <FieldLabel>geo</FieldLabel>
+              <TermInput value={geo} onChange={(event) => setGeo(event.target.value.toUpperCase())} />
+            </label>
+            <label className="block">
+              <FieldLabel>language</FieldLabel>
+              <TermInput value={language} onChange={(event) => setLanguage(event.target.value.toLowerCase())} />
+            </label>
+          </div>
+
+          <div className="grid gap-3 md:grid-cols-2">
+            <label className="block">
+              <FieldLabel>starts</FieldLabel>
+              <TermInput type="datetime-local" value={startsAt} onChange={(event) => setStartsAt(event.target.value)} />
+            </label>
+            <label className="block">
+              <FieldLabel>ends</FieldLabel>
+              <TermInput type="datetime-local" value={endsAt} onChange={(event) => setEndsAt(event.target.value)} />
+            </label>
+          </div>
+
+          <label className="block">
+            <FieldLabel>keywords</FieldLabel>
+            <TermTextarea rows={7} value={keywordText} onChange={(event) => setKeywordText(event.target.value)} />
+          </label>
+
+          <label className="block">
+            <FieldLabel>headlines</FieldLabel>
+            <TermTextarea rows={6} value={headlineText} onChange={(event) => setHeadlineText(event.target.value)} />
+          </label>
+
+          <label className="block">
+            <FieldLabel>descriptions</FieldLabel>
+            <TermTextarea rows={5} value={descriptionText} onChange={(event) => setDescriptionText(event.target.value)} />
+          </label>
+
+          <div className="grid gap-3 md:grid-cols-3">
+            <div className="border border-edge/12 bg-rim px-3 py-2 font-mono text-xs text-fg-2">
+              <div className="text-[10px] uppercase tracking-label text-fg-4">keywords</div>
+              <div className="mt-1 text-fg-1">{keywords.length}</div>
+            </div>
+            <div className="border border-edge/12 bg-rim px-3 py-2 font-mono text-xs text-fg-2">
+              <div className="text-[10px] uppercase tracking-label text-fg-4">headlines</div>
+              <div className="mt-1 text-fg-1">{headlines.length}</div>
+            </div>
+            <div className="border border-edge/12 bg-rim px-3 py-2 font-mono text-xs text-fg-2">
+              <div className="text-[10px] uppercase tracking-label text-fg-4">descriptions</div>
+              <div className="mt-1 text-fg-1">{descriptions.length}</div>
+            </div>
+          </div>
+
+          {invalidBudget || invalidDates || !keywords.length || !headlines.length || !descriptions.length ? (
+            <div className="border border-fail/25 bg-fail/5 px-3 py-2 font-mono text-xs text-fail">
+              {invalidBudget ? 'budget must be a positive amount' : invalidDates ? 'end date must be after start date' : 'keywords, headlines, and descriptions are required'}
+            </div>
+          ) : null}
+        </div>
+
+        <div className="sticky bottom-0 flex items-center justify-end gap-2 border-t border-edge/12 bg-pit-2 px-5 py-3">
+          <Button onClick={onClose}>cancel</Button>
+          <Button
+            kind="primary"
+            icon={<Check className="h-3.5 w-3.5" />}
+            onClick={() => onSubmit({
+              adAccountExternalId: adAccountExternalId.trim(),
+              objective,
+              geo: geo.trim() || 'MX',
+              language: language.trim() || 'es',
+              budgetMinor,
+              currencyCode,
+              startsAt: startsAtMs,
+              endsAt: endsAtMs,
+              keywords,
+              headlines,
+              descriptions,
+            })}
+            disabled={!canSubmit}
+          >
+            save draft
           </Button>
         </div>
       </div>
@@ -5241,6 +5816,56 @@ function adMetricSnapshotsForPromotions(promotions: AdPromotionRow[], snapshots:
   return snapshots.filter((snapshot) => snapshot.promotionId && promotionIds.has(snapshot.promotionId))
 }
 
+function promotablePages(
+  contentItems: ContentItemRow[],
+  contentOutputs: ContentOutputRow[],
+  adPromotions: AdPromotionRow[],
+  adMetricSnapshots: AdMetricSnapshotRow[],
+  searchConsoleMetrics: SearchConsoleMetricSnapshotRow[],
+): PromotablePageRow[] {
+  const contentById = new Map(contentItems.map((item) => [item.id, item]))
+  return contentOutputs
+    .filter((output) => output.publicUrl && ['published', 'scheduled'].includes(output.status))
+    .map((output) => {
+      const item = contentById.get(output.contentItemId)
+      if (!item || !output.publicUrl) return null
+      const promotions = adPromotions.filter((promotion) => (
+        promotion.contentOutputId === output.id ||
+        promotion.contentItemId === item.id ||
+        normalizeUrl(promotion.landingUrl) === normalizeUrl(output.publicUrl)
+      ))
+      const googlePromotion = promotions.find((promotion) => promotion.provider === 'google') ?? null
+      const searchMetrics = searchConsoleMetricsForOutput(output, item, searchConsoleMetrics)
+      const paidMetrics = adMetricSnapshotsForPromotions(promotions, adMetricSnapshots)
+      return {
+        item,
+        output,
+        url: output.publicUrl,
+        searchMetrics,
+        searchTotals: sumSearchConsoleMetrics(searchMetrics),
+        topQuery: topSearchQuery(searchMetrics),
+        promotions,
+        googlePromotion,
+        paidTotals: sumAdMetricSnapshots(paidMetrics),
+      }
+    })
+    .filter((page): page is PromotablePageRow => Boolean(page))
+    .sort((a, b) => (b.output.publishedAt ?? b.output.updatedAt ?? 0) - (a.output.publishedAt ?? a.output.updatedAt ?? 0))
+}
+
+function searchConsoleMetricsForOutput(output: ContentOutputRow, item: ContentItemRow, metrics: SearchConsoleMetricSnapshotRow[]) {
+  const outputUrls = new Set([output.publicUrl, output.canonicalUrl].filter(Boolean).map((url) => normalizeUrl(url)))
+  return metrics.filter((metric) => (
+    metric.contentOutputId === output.id ||
+    metric.contentItemId === item.id ||
+    (metric.page ? outputUrls.has(normalizeUrl(metric.page)) : false)
+  ))
+}
+
+function topSearchQuery(metrics: SearchConsoleMetricSnapshotRow[]) {
+  return aggregateSearchConsoleMetrics(metrics, 'query')[0]?.query ?? ''
+}
+
 function sumAdMetricSnapshots(snapshots: AdMetricSnapshotRow[]) {
   return snapshots.reduce(
     (totals, snapshot) => ({
@@ -5435,7 +6060,100 @@ function readNumericText(value: string | null | undefined) {
 
 function adPromotionHeadline(promotion: AdPromotionRow) {
   const creative = readRecord(promotion.creative)
-  return typeof creative.headline === 'string' ? creative.headline : ''
+  if (typeof creative.headline === 'string') return creative.headline
+  return readStringList(creative.headlines)[0] ?? ''
+}
+
+function promotionKeywords(promotion: AdPromotionRow) {
+  return readStringList(readRecord(promotion.targeting).keywords)
+}
+
+function promotionDateRange(promotion: AdPromotionRow) {
+  if (!promotion.startsAt && !promotion.endsAt) return 'no dates'
+  if (!promotion.endsAt) return `from ${formatDate(promotion.startsAt)}`
+  if (!promotion.startsAt) return `until ${formatDate(promotion.endsAt)}`
+  return `${formatDate(promotion.startsAt)} - ${formatDate(promotion.endsAt)}`
+}
+
+function defaultGoogleKeywords(page: PromotablePageRow) {
+  const queryKeywords = aggregateSearchConsoleMetrics(page.searchMetrics, 'query')
+    .map((row) => row.query)
+    .filter((query): query is string => Boolean(query))
+    .slice(0, 8)
+  const titleKeywords = [
+    page.item.title,
+    page.item.excerpt,
+    firstParagraphText(page.item.body),
+  ]
+    .flatMap((value) => keywordCandidates(value))
+    .slice(0, 8)
+  return uniqueStrings([...queryKeywords, ...titleKeywords]).slice(0, 12)
+}
+
+function defaultGoogleHeadlines(page: PromotablePageRow) {
+  const title = page.item.title.trim()
+  const path = urlPathLabel(page.url)
+  return uniqueStrings([
+    title,
+    title.length > 26 ? title.slice(0, 27).trim() : `${title} en Pach`,
+    page.topQuery ? `Mejora ${page.topQuery}` : '',
+    path && path !== '-' ? path.replace(/[-/]/g, ' ').trim() : '',
+  ].filter(Boolean)).slice(0, 6)
+}
+
+function defaultGoogleDescriptions(page: PromotablePageRow) {
+  const excerpt = page.item.excerpt || firstParagraphText(page.item.body)
+  return uniqueStrings([
+    excerpt,
+    page.topQuery ? `Contenido para entender ${page.topQuery} y decidir el siguiente paso.` : '',
+    `Conoce ${page.item.title} y encuentra el recurso correcto para avanzar.`,
+  ].filter(Boolean)).slice(0, 4)
+}
+
+function keywordCandidates(value: string | null | undefined) {
+  if (!value) return []
+  return value
+    .split(/[.,:;|/()\[\]\n]+/g)
+    .map((entry) => entry.trim().toLowerCase())
+    .filter((entry) => entry.length >= 4 && entry.length <= 60)
+}
+
+function lineList(value: string) {
+  return uniqueStrings(value.split('\n').map((entry) => entry.trim()).filter(Boolean))
+}
+
+function uniqueStrings(values: string[]) {
+  const seen = new Set<string>()
+  const output: string[] = []
+  for (const value of values) {
+    const normalized = value.trim()
+    const key = normalized.toLowerCase()
+    if (!normalized || seen.has(key)) continue
+    seen.add(key)
+    output.push(normalized)
+  }
+  return output
+}
+
+function readString(value: unknown) {
+  return typeof value === 'string' ? value : ''
+}
+
+function readStringList(value: unknown) {
+  if (Array.isArray(value)) return value.filter((entry): entry is string => typeof entry === 'string' && Boolean(entry.trim()))
+  if (typeof value === 'string' && value.trim()) return [value.trim()]
+  return []
+}
+
+function normalizeUrl(value: string | null | undefined) {
+  if (!value) return ''
+  try {
+    const url = new URL(value)
+    url.hash = ''
+    return url.toString().replace(/\/+$/, '').toLowerCase()
+  } catch {
+    return value.trim().replace(/\/+$/, '').toLowerCase()
+  }
 }
 
 function buildMarketingCalendarEvents({
