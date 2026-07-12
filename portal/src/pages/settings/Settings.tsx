@@ -151,6 +151,11 @@ type GoogleSearchSettingsDefaults = {
   scopes: string[]
 }
 
+type SearchActionState = {
+  key: string
+  phase: 'loading' | 'success'
+} | null
+
 type ProviderAppFormPayload = {
   name: string
   purpose: string
@@ -231,6 +236,7 @@ export default function SettingsPage() {
   const [loadingGithub, setLoadingGithub] = useState(false)
   const [loadingSocial, setLoadingSocial] = useState(false)
   const [loadingGoogleSearch, setLoadingGoogleSearch] = useState(false)
+  const [searchAction, setSearchAction] = useState<SearchActionState>(null)
   const [createModalOpen, setCreateModalOpen] = useState(false)
   const [connectGithubOpen, setConnectGithubOpen] = useState(false)
   const [createLinkedInChannelOpen, setCreateLinkedInChannelOpen] = useState(false)
@@ -575,6 +581,7 @@ export default function SettingsPage() {
     }
 
     try {
+      setSearchAction({ key: 'connect', phase: 'loading' })
       const returnTo = `${window.location.origin}/settings/search`
       const response = await authFetch(
         `${config.apiUrl}/google/search-console/oauth/start?organizationId=${encodeURIComponent(organizationId)}&returnTo=${encodeURIComponent(returnTo)}`,
@@ -586,48 +593,57 @@ export default function SettingsPage() {
       window.location.assign(payload.authorizationUrl)
     } catch (error) {
       console.error('Google Search connect failed', error)
+      setSearchAction(null)
       flash(error instanceof Error ? error.message : 'google search connection failed')
     }
   }
 
   async function syncSearchConsoleProperties() {
     if (!organizationId) return
-    const response = await authFetch(`${config.apiUrl}/google/search-console/properties/sync`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ organizationId }),
+    await runSearchAction('sync-properties', async () => {
+      const response = await authFetch(`${config.apiUrl}/google/search-console/properties/sync`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ organizationId }),
+      })
+      const payload = await readJson(response)
+      const count = Array.isArray(payload.properties) ? payload.properties.length : 0
+      return `search properties synced · ${count}`
     })
-    const payload = await readJson(response)
-    const count = Array.isArray(payload.properties) ? payload.properties.length : 0
-    flash(`search properties synced · ${count}`)
   }
 
   async function selectSearchConsoleProperty(property: SearchConsolePropertyRow) {
-    const response = await authFetch(`${config.apiUrl}/google/search-console/properties/${property.id}/select`, {
-      method: 'POST',
+    await runSearchAction(`select:${property.id}`, async () => {
+      const response = await authFetch(`${config.apiUrl}/google/search-console/properties/${property.id}/select`, {
+        method: 'POST',
+      })
+      await readJson(response)
+      return 'search property selected'
     })
-    await readJson(response)
-    flash('search property selected')
   }
 
   async function submitSearchConsoleSitemap(property: SearchConsolePropertyRow) {
-    const response = await authFetch(`${config.apiUrl}/google/search-console/sitemaps/submit`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ propertyId: property.id }),
+    await runSearchAction(`sitemap:${property.id}`, async () => {
+      const response = await authFetch(`${config.apiUrl}/google/search-console/sitemaps/submit`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ propertyId: property.id }),
+      })
+      await readJson(response)
+      return 'sitemap submitted'
     })
-    await readJson(response)
-    flash('sitemap submitted')
   }
 
   async function syncSearchConsoleAnalytics(property: SearchConsolePropertyRow) {
-    const response = await authFetch(`${config.apiUrl}/google/search-console/search-analytics/sync`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ propertyId: property.id }),
+    await runSearchAction(`analytics:${property.id}`, async () => {
+      const response = await authFetch(`${config.apiUrl}/google/search-console/search-analytics/sync`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ propertyId: property.id }),
+      })
+      const payload = await readJson(response)
+      return `search analytics synced · ${payload.rows ?? 0}`
     })
-    const payload = await readJson(response)
-    flash(`search analytics synced · ${payload.rows ?? 0}`)
   }
 
   async function copySecret(secret: string) {
@@ -638,6 +654,25 @@ export default function SettingsPage() {
   function flash(next: string) {
     setMessage(next)
     window.setTimeout(() => setMessage(''), 2800)
+  }
+
+  async function runSearchAction(key: string, action: () => Promise<string>) {
+    if (searchAction?.phase === 'loading') return
+    setSearchAction({ key, phase: 'loading' })
+    try {
+      const nextMessage = await action()
+      setSearchAction({ key, phase: 'success' })
+      flash(nextMessage)
+      window.setTimeout(() => {
+        setSearchAction((current) => (
+          current?.key === key && current.phase === 'success' ? null : current
+        ))
+      }, 1600)
+    } catch (error) {
+      console.error(`Google Search action failed: ${key}`, error)
+      setSearchAction(null)
+      flash(error instanceof Error ? error.message : 'google search action failed')
+    }
   }
 
   if (!section) return null
@@ -757,6 +792,7 @@ export default function SettingsPage() {
             sitemaps={organizationSearchConsoleSitemaps}
             metrics={organizationSearchConsoleMetrics}
             inspections={organizationSearchConsoleInspections}
+            actionState={searchAction}
             onConnect={() => void connectGoogleSearch()}
             onSyncProperties={() => void syncSearchConsoleProperties()}
             onSelectProperty={(property) => void selectSearchConsoleProperty(property)}
@@ -1407,6 +1443,7 @@ function SearchSection({
   sitemaps,
   metrics,
   inspections,
+  actionState,
   onConnect,
   onSyncProperties,
   onSelectProperty,
@@ -1421,6 +1458,7 @@ function SearchSection({
   sitemaps: SearchConsoleSitemapRow[]
   metrics: SearchConsoleMetricSnapshotRow[]
   inspections: SearchConsoleUrlInspectionRow[]
+  actionState: SearchActionState
   onConnect: () => void
   onSyncProperties: () => void
   onSelectProperty: (property: SearchConsolePropertyRow) => void
@@ -1435,6 +1473,7 @@ function SearchSection({
   const totalImpressions = selectedMetrics.reduce((sum, metric) => sum + metric.impressions, 0)
   const syncedDates = new Set(selectedMetrics.map((metric) => metric.dataDate)).size
   const setup = googleSearchSetupState({ defaults, activeConnections, properties })
+  const actionLoading = actionState?.phase === 'loading'
 
   return (
     <div className="space-y-4">
@@ -1484,11 +1523,20 @@ function SearchSection({
           </div>
 
           <div className="flex shrink-0 flex-wrap gap-2 lg:justify-end">
-            <Button kind="primary" icon={<Search className="h-3.5 w-3.5" />} onClick={onConnect} disabled={!organization || Boolean(defaults && !defaults.configured)}>
-              connect google
+            <Button
+              kind="primary"
+              icon={searchActionIcon(actionState, 'connect', <Search className="h-3.5 w-3.5" />)}
+              onClick={onConnect}
+              disabled={actionLoading || !organization || Boolean(defaults && !defaults.configured)}
+            >
+              {searchActionLabel(actionState, 'connect', 'connect google', 'connecting', 'connected')}
             </Button>
-            <Button icon={<RefreshCw className="h-3.5 w-3.5" />} onClick={onSyncProperties} disabled={!organization || activeConnections.length === 0}>
-              sync properties
+            <Button
+              icon={searchActionIcon(actionState, 'sync-properties', <RefreshCw className="h-3.5 w-3.5" />)}
+              onClick={onSyncProperties}
+              disabled={actionLoading || !organization || activeConnections.length === 0}
+            >
+              {searchActionLabel(actionState, 'sync-properties', 'sync properties', 'syncing', 'synced')}
             </Button>
           </div>
         </div>
@@ -1542,11 +1590,21 @@ function SearchSection({
         right={
           selectedProperty ? (
             <div className="flex flex-wrap gap-2">
-              <Button className="px-2 py-1 text-[10px]" icon={<Link2 className="h-3 w-3" />} onClick={() => onSubmitSitemap(selectedProperty)}>
-                submit sitemap
+              <Button
+                className="px-2 py-1 text-[10px]"
+                icon={searchActionIcon(actionState, `sitemap:${selectedProperty.id}`, <Link2 className="h-3 w-3" />)}
+                onClick={() => onSubmitSitemap(selectedProperty)}
+                disabled={actionLoading}
+              >
+                {searchActionLabel(actionState, `sitemap:${selectedProperty.id}`, 'submit sitemap', 'submitting', 'submitted')}
               </Button>
-              <Button className="px-2 py-1 text-[10px]" icon={<RefreshCw className="h-3 w-3" />} onClick={() => onSyncAnalytics(selectedProperty)}>
-                sync analytics
+              <Button
+                className="px-2 py-1 text-[10px]"
+                icon={searchActionIcon(actionState, `analytics:${selectedProperty.id}`, <RefreshCw className="h-3 w-3" />)}
+                onClick={() => onSyncAnalytics(selectedProperty)}
+                disabled={actionLoading}
+              >
+                {searchActionLabel(actionState, `analytics:${selectedProperty.id}`, 'sync analytics', 'syncing', 'synced')}
               </Button>
             </div>
           ) : null
@@ -1583,14 +1641,29 @@ function SearchSection({
                     </td>
                     <td className="py-2.5">
                       <div className="flex flex-wrap gap-2">
-                        <Button className="px-2 py-1 text-[10px]" icon={<Check className="h-3 w-3" />} onClick={() => onSelectProperty(property)} disabled={property.selected}>
-                          select
+                        <Button
+                          className="px-2 py-1 text-[10px]"
+                          icon={searchActionIcon(actionState, `select:${property.id}`, <Check className="h-3 w-3" />)}
+                          onClick={() => onSelectProperty(property)}
+                          disabled={actionLoading || property.selected}
+                        >
+                          {searchActionLabel(actionState, `select:${property.id}`, 'select', 'selecting', 'selected')}
                         </Button>
-                        <Button className="px-2 py-1 text-[10px]" icon={<Link2 className="h-3 w-3" />} onClick={() => onSubmitSitemap(property)}>
-                          sitemap
+                        <Button
+                          className="px-2 py-1 text-[10px]"
+                          icon={searchActionIcon(actionState, `sitemap:${property.id}`, <Link2 className="h-3 w-3" />)}
+                          onClick={() => onSubmitSitemap(property)}
+                          disabled={actionLoading}
+                        >
+                          {searchActionLabel(actionState, `sitemap:${property.id}`, 'sitemap', 'submitting', 'submitted')}
                         </Button>
-                        <Button className="px-2 py-1 text-[10px]" icon={<RefreshCw className="h-3 w-3" />} onClick={() => onSyncAnalytics(property)}>
-                          analytics
+                        <Button
+                          className="px-2 py-1 text-[10px]"
+                          icon={searchActionIcon(actionState, `analytics:${property.id}`, <RefreshCw className="h-3 w-3" />)}
+                          onClick={() => onSyncAnalytics(property)}
+                          disabled={actionLoading}
+                        >
+                          {searchActionLabel(actionState, `analytics:${property.id}`, 'analytics', 'syncing', 'synced')}
                         </Button>
                       </div>
                     </td>
@@ -1640,6 +1713,23 @@ function SearchSection({
       ) : null}
     </div>
   )
+}
+
+function searchActionLabel(
+  state: SearchActionState,
+  key: string,
+  idle: string,
+  loading: string,
+  success: string,
+) {
+  if (state?.key !== key) return idle
+  return state.phase === 'loading' ? loading : success
+}
+
+function searchActionIcon(state: SearchActionState, key: string, idleIcon: ReactNode) {
+  if (state?.key !== key) return idleIcon
+  if (state.phase === 'loading') return <RefreshCw className="h-3.5 w-3.5 animate-spin" />
+  return <Check className="h-3.5 w-3.5" />
 }
 
 function SearchSetupStep({

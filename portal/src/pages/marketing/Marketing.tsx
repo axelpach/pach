@@ -82,6 +82,7 @@ type SearchConsolePropertyRow = {
 
 type SearchConsoleMetricSnapshotRow = {
   organizationId: string
+  propertyId: string
   contentItemId?: string | null
   page?: string | null
   query?: string | null
@@ -93,9 +94,12 @@ type SearchConsoleMetricSnapshotRow = {
 type SearchConsoleUrlInspectionRow = {
   id: string
   organizationId: string
+  propertyId: string
   inspectionUrl: string
   verdict?: string | null
 }
+
+type AnalyticsDetailTab = 'search' | 'newsletter' | 'social' | 'ads'
 
 type SocialChannelRow = Schema['tables']['social_channels']['row']
 type SocialPostRow = Schema['tables']['social_posts']['row']
@@ -615,6 +619,7 @@ export default function Marketing({ canAccessWhatsApp = false }: { canAccessWhat
               events={orgEvents}
               subscriptions={orgSubscriptions}
               ctas={orgCtas}
+              socialChannels={orgSocialChannels}
               socialPostTargets={orgSocialPostTargets}
               adMetricSnapshots={orgAdMetricSnapshots}
               searchConsoleProperties={orgSearchConsoleProperties}
@@ -4098,6 +4103,7 @@ function AnalyticsSection({
   events,
   subscriptions,
   ctas,
+  socialChannels,
   socialPostTargets,
   adMetricSnapshots,
   searchConsoleProperties,
@@ -4109,128 +4115,84 @@ function AnalyticsSection({
   events: ContentEventRow[]
   subscriptions: AudienceSubscriptionRow[]
   ctas: CtaRow[]
+  socialChannels: SocialChannelRow[]
   socialPostTargets: SocialPostTargetRow[]
   adMetricSnapshots: AdMetricSnapshotRow[]
   searchConsoleProperties: SearchConsolePropertyRow[]
   searchConsoleMetrics: SearchConsoleMetricSnapshotRow[]
   searchConsoleInspections: SearchConsoleUrlInspectionRow[]
 }) {
+  const [activeTab, setActiveTab] = useState<AnalyticsDetailTab>('search')
   const adTotals = sumAdMetricSnapshots(adMetricSnapshots)
-  const searchTotals = sumSearchConsoleMetrics(searchConsoleMetrics)
-  const topPages = aggregateSearchConsoleMetrics(searchConsoleMetrics, 'page').slice(0, 8)
-  const topQueries = aggregateSearchConsoleMetrics(searchConsoleMetrics, 'query').slice(0, 8)
-  const opportunities = searchConsoleOpportunities(searchConsoleMetrics).slice(0, 8)
   const contentById = new Map(contentItems.map((item) => [item.id, item]))
   const selectedProperty = searchConsoleProperties.find((property) => property.selected) ?? searchConsoleProperties[0] ?? null
+  const selectedSearchMetrics = selectedProperty
+    ? searchConsoleMetrics.filter((metric) => metric.propertyId === selectedProperty.id)
+    : searchConsoleMetrics
+  const selectedSearchInspections = selectedProperty
+    ? searchConsoleInspections.filter((inspection) => inspection.propertyId === selectedProperty.id)
+    : searchConsoleInspections
+  const searchTotals = sumSearchConsoleMetrics(selectedSearchMetrics)
+  const topPages = aggregateSearchConsoleMetrics(selectedSearchMetrics, 'page').slice(0, 8)
+  const topQueries = aggregateSearchConsoleMetrics(selectedSearchMetrics, 'query').slice(0, 8)
+  const opportunities = searchConsoleOpportunities(selectedSearchMetrics).slice(0, 8)
   return (
     <div className="space-y-4">
-      <div className="grid gap-2 md:grid-cols-4 xl:grid-cols-10">
+      <div className="grid gap-2 md:grid-cols-3 xl:grid-cols-6">
         <Metric label="views" value={countEvents(events, 'view')} />
         <Metric label="clicks" value={countEvents(events, 'click')} />
         <Metric label="sends" value={countEvents(events, 'send')} />
-        <Metric label="replies" value={countEvents(events, 'reply')} />
         <Metric label="subscribed" value={newsletterSubscriberCount(subscriptions)} />
-        <Metric label="unsubscribed" value={newsletterUnsubscriberCount(subscriptions)} />
-        <Metric label="social posts" value={socialPostTargets.length} />
-        <Metric label="ad views" value={formatCompactNumber(adTotals.impressions)} />
-        <Metric label="search clicks" value={formatCompactNumber(searchTotals.clicks)} />
         <Metric label="search views" value={formatCompactNumber(searchTotals.impressions)} />
+        <Metric label="search clicks" value={formatCompactNumber(searchTotals.clicks)} />
       </div>
 
-      <Panel
-        title="organic search"
-        right={selectedProperty ? (
-          <div className="font-mono text-[10px] uppercase tracking-label text-fg-4">
-            {selectedProperty.displayName} · {searchConsoleMetrics.length} rows
+      <Panel>
+        <div className="flex flex-wrap items-end justify-between gap-3 border-b border-edge/12">
+          <div className="flex flex-wrap">
+            <MarketingTabButton active={activeTab === 'search'} onClick={() => setActiveTab('search')}>
+              search · {formatCompactNumber(searchTotals.impressions)}
+            </MarketingTabButton>
+            <MarketingTabButton active={activeTab === 'newsletter'} onClick={() => setActiveTab('newsletter')}>
+              newsletter · {events.length}
+            </MarketingTabButton>
+            <MarketingTabButton active={activeTab === 'social'} onClick={() => setActiveTab('social')}>
+              social · {socialPostTargets.length}
+            </MarketingTabButton>
+            <MarketingTabButton active={activeTab === 'ads'} onClick={() => setActiveTab('ads')}>
+              ads · {formatCompactNumber(adTotals.impressions)}
+            </MarketingTabButton>
           </div>
-        ) : null}
-      >
-        {searchConsoleProperties.length === 0 ? (
-          <EmptyState label="connect google search console in settings" />
-        ) : searchConsoleMetrics.length === 0 ? (
-          <EmptyState label="sync search analytics in settings" />
-        ) : (
-          <div className="grid gap-4 xl:grid-cols-3">
-            <SearchAnalyticsTable
-              title="top pages"
-              rows={topPages}
-              primaryLabel="page"
-              renderPrimary={(row) => (
-                <div className="min-w-0">
-                  <div className="truncate text-fg-1">{contentById.get(row.contentItemId ?? '')?.title ?? urlPathLabel(row.key)}</div>
-                  <div className="mt-1 truncate text-[11px] text-fg-4">{row.key}</div>
-                </div>
-              )}
-            />
-            <SearchAnalyticsTable
-              title="top queries"
-              rows={topQueries}
-              primaryLabel="query"
-              renderPrimary={(row) => <span className="truncate text-fg-1">{row.key || '-'}</span>}
-            />
-            <SearchAnalyticsTable
-              title="improve next"
-              rows={opportunities}
-              primaryLabel="candidate"
-              renderPrimary={(row) => (
-                <div className="min-w-0">
-                  <div className="truncate text-fg-1">{row.query || row.key || '-'}</div>
-                  <div className="mt-1 truncate text-[11px] text-fg-4">{contentById.get(row.contentItemId ?? '')?.title ?? urlPathLabel(row.page ?? '')}</div>
-                </div>
-              )}
-            />
+          <div className="pb-2 font-mono text-[10px] uppercase tracking-label text-fg-4">
+            {analyticsTabLabel(activeTab)}
           </div>
-        )}
-        {searchConsoleInspections.length > 0 ? (
-          <div className="mt-4 border-t border-edge/12 pt-3">
-            <div className="mb-2 font-mono text-[10px] uppercase tracking-label text-fg-4">latest URL inspections</div>
-            <div className="grid gap-2 md:grid-cols-2">
-              {searchConsoleInspections.slice(0, 4).map((inspection) => (
-                <div key={inspection.id} className="flex items-center justify-between gap-3 border border-edge/12 bg-rim px-3 py-2 font-mono text-xs">
-                  <span className="min-w-0 truncate text-fg-2">{inspection.inspectionUrl}</span>
-                  <StatusPill kind={inspection.verdict === 'PASS' ? 'ok' : inspection.verdict ? 'warn' : 'idle'}>{inspection.verdict ?? 'unknown'}</StatusPill>
-                </div>
-              ))}
-            </div>
-          </div>
-        ) : null}
-      </Panel>
-
-      <Panel title="newsletter activity">
-        <div className="max-h-[calc(100vh-340px)] overflow-auto">
-          <table className="w-full min-w-[1040px] text-left font-mono text-xs">
-            <thead className="sticky top-0 z-10 bg-pit text-[10px] uppercase tracking-label text-fg-4">
-              <tr className="border-b border-edge/12">
-                <th className="pb-2 pr-3 font-normal">event</th>
-                <th className="pb-2 pr-3 font-normal">channel</th>
-                <th className="pb-2 pr-3 font-normal">content</th>
-                <th className="pb-2 pr-3 font-normal">cta</th>
-                <th className="pb-2 pr-3 font-normal">subscriber</th>
-                <th className="pb-2 pr-3 font-normal">source</th>
-                <th className="pb-2 font-normal">time</th>
-              </tr>
-            </thead>
-            <tbody>
-              {events.slice(0, 120).map((event) => {
-                const item = contentItems.find((entry) => entry.id === event.contentItemId)
-                const cta = ctas.find((entry) => entry.id === event.ctaId)
-                const audienceMember = audienceMembers.find((entry) => entry.id === event.audienceMemberId)
-                return (
-                  <tr key={event.id} className="border-b border-edge/8 text-fg-2">
-                    <td className="py-2.5 pr-3"><StatusPill kind={eventKind(event.eventType)}>{event.eventType}</StatusPill></td>
-                    <td className="py-2.5 pr-3">{event.channel ?? '-'}</td>
-                    <td className="max-w-[280px] truncate py-2.5 pr-3">{item?.title ?? '-'}</td>
-                    <td className="py-2.5 pr-3">{cta?.label ?? '-'}</td>
-                    <td className="max-w-[220px] truncate py-2.5 pr-3">{audienceMember?.email ?? audienceMember?.name ?? '-'}</td>
-                    <td className="py-2.5 pr-3">{event.source ?? '-'}</td>
-                    <td className="py-2.5 text-fg-4">{formatDate(event.createdAt)}</td>
-                  </tr>
-                )
-              })}
-            </tbody>
-          </table>
         </div>
-        {events.length === 0 ? <EmptyState label="no events" /> : null}
+
+        <div className="pt-4">
+          {activeTab === 'search' ? (
+            <OrganicSearchAnalyticsPanel
+              contentById={contentById}
+              selectedProperty={selectedProperty}
+              properties={searchConsoleProperties}
+              metrics={selectedSearchMetrics}
+              inspections={selectedSearchInspections}
+              topPages={topPages}
+              topQueries={topQueries}
+              opportunities={opportunities}
+            />
+          ) : null}
+          {activeTab === 'newsletter' ? (
+            <NewsletterAnalyticsPanel
+              contentItems={contentItems}
+              audienceMembers={audienceMembers}
+              events={events}
+              subscriptions={subscriptions}
+              ctas={ctas}
+            />
+          ) : null}
+          {activeTab === 'social' ? <SocialAnalyticsPanel channels={socialChannels} targets={socialPostTargets} /> : null}
+          {activeTab === 'ads' ? <AdAnalyticsPanel snapshots={adMetricSnapshots} totals={adTotals} /> : null}
+        </div>
       </Panel>
     </div>
   )
@@ -4288,6 +4250,315 @@ function SearchAnalyticsTable({
       </div>
     </div>
   )
+}
+
+function OrganicSearchAnalyticsPanel({
+  contentById,
+  selectedProperty,
+  properties,
+  metrics,
+  inspections,
+  topPages,
+  topQueries,
+  opportunities,
+}: {
+  contentById: Map<string, ContentItemRow>
+  selectedProperty: SearchConsolePropertyRow | null
+  properties: SearchConsolePropertyRow[]
+  metrics: SearchConsoleMetricSnapshotRow[]
+  inspections: SearchConsoleUrlInspectionRow[]
+  topPages: SearchAggregateRow[]
+  topQueries: SearchAggregateRow[]
+  opportunities: SearchAggregateRow[]
+}) {
+  const totals = sumSearchConsoleMetrics(metrics)
+  const passCount = inspections.filter((inspection) => inspection.verdict === 'PASS').length
+
+  return (
+    <div className="space-y-4">
+      <div className="grid gap-2 md:grid-cols-4">
+        <Metric label="properties" value={properties.length} />
+        <Metric label="rows" value={formatCompactNumber(metrics.length)} />
+        <Metric label="inspections" value={inspections.length} />
+        <Metric label="indexed" value={passCount} />
+      </div>
+
+      <div className="border border-edge/12 bg-rim px-3 py-2 font-mono text-xs text-fg-3">
+        <span className="text-fg-4">active property</span>
+        <span className="ml-2 text-fg-1">{selectedProperty?.displayName ?? 'none selected'}</span>
+        <span className="mx-2 text-fg-4">/</span>
+        <span>{formatCompactNumber(totals.clicks)} clicks</span>
+        <span className="mx-2 text-fg-4">/</span>
+        <span>{formatCompactNumber(totals.impressions)} views</span>
+      </div>
+
+      {properties.length === 0 ? (
+        <EmptyState label="connect google search console in settings" />
+      ) : metrics.length === 0 ? (
+        <EmptyState label="sync search analytics in settings" />
+      ) : (
+        <div className="grid gap-4 xl:grid-cols-3">
+          <SearchAnalyticsTable
+            title="top pages"
+            rows={topPages}
+            primaryLabel="page"
+            renderPrimary={(row) => (
+              <div className="min-w-0">
+                <div className="truncate text-fg-1">
+                  {row.contentItemId ? contentById.get(row.contentItemId)?.title ?? urlPathLabel(row.page ?? '') : urlPathLabel(row.page ?? '')}
+                </div>
+                <div className="mt-1 truncate text-[11px] text-fg-4">{row.page}</div>
+              </div>
+            )}
+          />
+          <SearchAnalyticsTable
+            title="top queries"
+            rows={topQueries}
+            primaryLabel="query"
+            renderPrimary={(row) => (
+              <div className="truncate text-fg-1">{row.query ?? '-'}</div>
+            )}
+          />
+          <SearchAnalyticsTable
+            title="improve next"
+            rows={opportunities}
+            primaryLabel="candidate"
+            renderPrimary={(row) => (
+              <div className="min-w-0">
+                <div className="truncate text-fg-1">{row.query ?? '-'}</div>
+                <div className="mt-1 truncate text-[11px] text-fg-4">{urlPathLabel(row.page ?? '')}</div>
+              </div>
+            )}
+          />
+        </div>
+      )}
+    </div>
+  )
+}
+
+function NewsletterAnalyticsPanel({
+  contentItems,
+  audienceMembers,
+  events,
+  subscriptions,
+  ctas,
+}: {
+  contentItems: ContentItemRow[]
+  audienceMembers: AudienceMemberRow[]
+  events: ContentEventRow[]
+  subscriptions: AudienceSubscriptionRow[]
+  ctas: CtaRow[]
+}) {
+  const contentById = new Map(contentItems.map((item) => [item.id, item]))
+  const audienceById = new Map(audienceMembers.map((member) => [member.id, member]))
+  const ctaById = new Map(ctas.map((cta) => [cta.id, cta]))
+  const recentEvents = [...events].sort((a, b) => b.createdAt - a.createdAt).slice(0, 80)
+
+  return (
+    <div className="space-y-4">
+      <div className="grid gap-2 md:grid-cols-4">
+        <Metric label="replies" value={countEvents(events, 'reply')} />
+        <Metric label="unsubscribed" value={newsletterUnsubscriberCount(subscriptions)} />
+        <Metric label="members" value={audienceMembers.length} />
+        <Metric label="ctas" value={ctas.filter((cta) => cta.status === 'active').length} />
+      </div>
+
+      <div className="overflow-auto border border-edge/12">
+        <table className="w-full min-w-[980px] text-left font-mono text-xs">
+          <thead className="bg-rim text-[10px] uppercase tracking-label text-fg-4">
+            <tr className="border-b border-edge/12">
+              <th className="px-3 py-2 font-normal">event</th>
+              <th className="px-3 py-2 font-normal">channel</th>
+              <th className="px-3 py-2 font-normal">content</th>
+              <th className="px-3 py-2 font-normal">cta</th>
+              <th className="px-3 py-2 font-normal">subscriber</th>
+              <th className="px-3 py-2 font-normal">source</th>
+              <th className="px-3 py-2 text-right font-normal">time</th>
+            </tr>
+          </thead>
+          <tbody>
+            {recentEvents.map((event) => {
+              const content = event.contentItemId ? contentById.get(event.contentItemId) : null
+              const subscriber = event.audienceMemberId ? audienceById.get(event.audienceMemberId) : null
+              const cta = event.ctaId ? ctaById.get(event.ctaId) : null
+              return (
+                <tr key={event.id} className="border-b border-edge/8 text-fg-2 last:border-b-0">
+                  <td className="px-3 py-2.5"><StatusPill kind={eventKind(event.eventType)}>{event.eventType}</StatusPill></td>
+                  <td className="px-3 py-2.5">{event.channel ?? '-'}</td>
+                  <td className="max-w-[260px] px-3 py-2.5">
+                    <div className="truncate text-fg-1">{content?.title ?? '-'}</div>
+                  </td>
+                  <td className="max-w-[180px] px-3 py-2.5">
+                    <div className="truncate">{cta?.label ?? '-'}</div>
+                  </td>
+                  <td className="max-w-[220px] px-3 py-2.5">
+                    <div className="truncate">{subscriber?.email ?? subscriber?.name ?? '-'}</div>
+                  </td>
+                  <td className="px-3 py-2.5">{event.source ?? '-'}</td>
+                  <td className="px-3 py-2.5 text-right text-fg-4">{formatDate(event.createdAt)}</td>
+                </tr>
+              )
+            })}
+          </tbody>
+        </table>
+        {recentEvents.length === 0 ? <EmptyState label="no newsletter events yet" /> : null}
+      </div>
+    </div>
+  )
+}
+
+function SocialAnalyticsPanel({
+  channels,
+  targets,
+}: {
+  channels: SocialChannelRow[]
+  targets: SocialPostTargetRow[]
+}) {
+  const channelById = new Map(channels.map((channel) => [channel.id, channel]))
+  const recentTargets = [...targets]
+    .sort((a, b) => socialTargetAnalyticsTime(b) - socialTargetAnalyticsTime(a))
+    .slice(0, 60)
+  const statusRows = statusCountRows(targets)
+
+  return (
+    <div className="space-y-4">
+      <div className="grid gap-2 md:grid-cols-4">
+        <Metric label="targets" value={targets.length} />
+        <Metric label="scheduled" value={targets.filter((target) => target.status === 'scheduled').length} />
+        <Metric label="published" value={targets.filter((target) => target.status === 'published').length} />
+        <Metric label="failed" value={targets.filter((target) => target.status === 'failed').length} />
+      </div>
+
+      <div className="grid gap-4 xl:grid-cols-[320px_minmax(0,1fr)]">
+        <div className="border border-edge/12">
+          <div className="border-b border-edge/12 bg-rim px-3 py-2 font-mono text-[10px] uppercase tracking-label text-fg-4">status mix</div>
+          <div className="divide-y divide-edge/8">
+            {statusRows.map((row) => (
+              <div key={row.status} className="flex items-center justify-between gap-3 px-3 py-2.5 font-mono text-xs">
+                <StatusPill kind={statusKind(row.status)}>{row.status}</StatusPill>
+                <span className="text-fg-1">{row.count}</span>
+              </div>
+            ))}
+          </div>
+          {statusRows.length === 0 ? <EmptyState label="no social targets yet" /> : null}
+        </div>
+
+        <div className="overflow-auto border border-edge/12">
+          <table className="w-full min-w-[720px] text-left font-mono text-xs">
+            <thead className="bg-rim text-[10px] uppercase tracking-label text-fg-4">
+              <tr className="border-b border-edge/12">
+                <th className="px-3 py-2 font-normal">status</th>
+                <th className="px-3 py-2 font-normal">channel</th>
+                <th className="px-3 py-2 font-normal">scheduled</th>
+                <th className="px-3 py-2 font-normal">published</th>
+                <th className="px-3 py-2 text-right font-normal">attempts</th>
+              </tr>
+            </thead>
+            <tbody>
+              {recentTargets.map((target) => {
+                const channel = channelById.get(target.channelId)
+                return (
+                  <tr key={target.id} className="border-b border-edge/8 text-fg-2 last:border-b-0">
+                    <td className="px-3 py-2.5"><StatusPill kind={statusKind(target.status)}>{target.status}</StatusPill></td>
+                    <td className="max-w-[220px] px-3 py-2.5">
+                      <div className="truncate text-fg-1">{channel?.displayName ?? target.channelId}</div>
+                      <div className="mt-1 truncate text-[11px] text-fg-4">{channel?.provider ?? channel?.kind ?? '-'}</div>
+                    </td>
+                    <td className="px-3 py-2.5">{formatDate(target.scheduledAt)}</td>
+                    <td className="px-3 py-2.5">{formatDate(target.publishedAt)}</td>
+                    <td className="px-3 py-2.5 text-right">{target.attemptCount}</td>
+                  </tr>
+                )
+              })}
+            </tbody>
+          </table>
+          {recentTargets.length === 0 ? <EmptyState label="no social activity yet" /> : null}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function AdAnalyticsPanel({
+  snapshots,
+  totals,
+}: {
+  snapshots: AdMetricSnapshotRow[]
+  totals: ReturnType<typeof sumAdMetricSnapshots>
+}) {
+  const recentSnapshots = [...snapshots].sort((a, b) => b.periodEnd - a.periodEnd).slice(0, 60)
+  const currencyCode = snapshots[0]?.currencyCode ?? 'MXN'
+  const ctr = totals.impressions ? totals.clicks / totals.impressions : 0
+
+  return (
+    <div className="space-y-4">
+      <div className="grid gap-2 md:grid-cols-5">
+        <Metric label="views" value={formatCompactNumber(totals.impressions)} />
+        <Metric label="clicks" value={formatCompactNumber(totals.clicks)} />
+        <Metric label="ctr" value={formatPercent(ctr)} />
+        <Metric label="leads" value={formatCompactNumber(totals.leads)} />
+        <Metric label="spend" value={formatMoneyMinor(totals.spendMinor, currencyCode)} />
+      </div>
+
+      <div className="overflow-auto border border-edge/12">
+        <table className="w-full min-w-[860px] text-left font-mono text-xs">
+          <thead className="bg-rim text-[10px] uppercase tracking-label text-fg-4">
+            <tr className="border-b border-edge/12">
+              <th className="px-3 py-2 font-normal">provider</th>
+              <th className="px-3 py-2 font-normal">entity</th>
+              <th className="px-3 py-2 font-normal">period</th>
+              <th className="px-3 py-2 text-right font-normal">views</th>
+              <th className="px-3 py-2 text-right font-normal">clicks</th>
+              <th className="px-3 py-2 text-right font-normal">leads</th>
+              <th className="px-3 py-2 text-right font-normal">spend</th>
+            </tr>
+          </thead>
+          <tbody>
+            {recentSnapshots.map((snapshot) => (
+              <tr key={snapshot.id} className="border-b border-edge/8 text-fg-2 last:border-b-0">
+                <td className="px-3 py-2.5">{snapshot.provider}</td>
+                <td className="max-w-[220px] px-3 py-2.5">
+                  <div className="truncate text-fg-1">{snapshot.entityKind}</div>
+                  <div className="mt-1 truncate text-[11px] text-fg-4">{snapshot.entityExternalId ?? snapshot.promotionId ?? '-'}</div>
+                </td>
+                <td className="px-3 py-2.5">{formatMetricPeriod(snapshot.periodStart, snapshot.periodEnd)}</td>
+                <td className="px-3 py-2.5 text-right">{formatCompactNumber(snapshot.impressions)}</td>
+                <td className="px-3 py-2.5 text-right text-fg-1">{formatCompactNumber(snapshot.clicks)}</td>
+                <td className="px-3 py-2.5 text-right">{formatCompactNumber(snapshot.leads)}</td>
+                <td className="px-3 py-2.5 text-right">{formatMoneyMinor(snapshot.spendMinor, snapshot.currencyCode)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        {recentSnapshots.length === 0 ? <EmptyState label="no ad analytics yet" /> : null}
+      </div>
+    </div>
+  )
+}
+
+function analyticsTabLabel(tab: AnalyticsDetailTab) {
+  if (tab === 'search') return 'organic discovery'
+  if (tab === 'newsletter') return 'newsletter activity'
+  if (tab === 'social') return 'social publishing'
+  return 'paid distribution'
+}
+
+function statusCountRows(rows: Array<{ status: string }>) {
+  const counts = new Map<string, number>()
+  for (const row of rows) counts.set(row.status, (counts.get(row.status) ?? 0) + 1)
+  return Array.from(counts.entries())
+    .map(([status, count]) => ({ status, count }))
+    .sort((a, b) => b.count - a.count || a.status.localeCompare(b.status))
+}
+
+function socialTargetAnalyticsTime(target: SocialPostTargetRow) {
+  return target.publishedAt ?? target.scheduledAt ?? target.updatedAt ?? target.createdAt
+}
+
+function formatMetricPeriod(start: number, end: number) {
+  if (!start && !end) return '-'
+  if (!end || start === end) return formatDate(start)
+  return `${formatDate(start)} - ${formatDate(end)}`
 }
 
 function MarketingTabButton({

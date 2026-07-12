@@ -124,7 +124,7 @@ export function Button({
   return (
     <button
       {...rest}
-      className={`inline-flex items-center gap-2 px-3.5 py-2 font-mono text-xs font-medium uppercase tracking-[0.12em] whitespace-nowrap select-none transition-colors duration-100 active:scale-[0.98] ${palette[kind]} ${className || ''}`}
+      className={`inline-flex items-center gap-2 px-3.5 py-2 font-mono text-xs font-medium uppercase tracking-[0.12em] whitespace-nowrap select-none transition-colors duration-100 active:scale-[0.98] disabled:pointer-events-none disabled:opacity-50 disabled:active:scale-100 ${palette[kind]} ${className || ''}`}
     >
       {icon && <span className={kind === 'primary' ? 'text-accent' : 'text-fg-3'}>{icon}</span>}
       <span>{children}</span>
