@@ -4181,7 +4181,7 @@ function AnalyticsSection({
         <Metric label="clicks" value={countEvents(events, 'click')} />
         <Metric label="sends" value={countEvents(events, 'send')} />
         <Metric label="subscribed" value={newsletterSubscriberCount(subscriptions)} />
-        <Metric label="search views" value={formatCompactNumber(searchTotals.impressions)} />
+        <Metric label="search impressions" value={formatCompactNumber(searchTotals.impressions)} />
         <Metric label="search clicks" value={formatCompactNumber(searchTotals.clicks)} />
       </div>
 
@@ -4279,7 +4279,7 @@ function SearchAnalyticsTable({
             <tr className="border-b border-edge/12">
               <th className="px-3 py-2 font-normal">{primaryLabel}</th>
               <th className="px-3 py-2 text-right font-normal">clicks</th>
-              <th className="px-3 py-2 text-right font-normal">views</th>
+              <th className="px-3 py-2 text-right font-normal">impressions</th>
               <th className="px-3 py-2 text-right font-normal">ctr</th>
               <th className="px-3 py-2 text-right font-normal">pos</th>
             </tr>
@@ -4342,7 +4342,7 @@ function OrganicSearchAnalyticsPanel({
         <span className="mx-2 text-fg-4">/</span>
         <span>{formatCompactNumber(totals.clicks)} clicks</span>
         <span className="mx-2 text-fg-4">/</span>
-        <span>{formatCompactNumber(totals.impressions)} views</span>
+        <span>{formatCompactNumber(totals.impressions)} impressions</span>
       </div>
 
       {trendPoints.length > 0 ? (
@@ -4462,7 +4462,7 @@ function SearchConsoleTrendChart({ points }: { points: SearchTrendPoint[] }) {
           clicks {formatCompactNumber(maxClicks)}
         </div>
         <div className="absolute right-3 top-3 font-mono text-[10px] uppercase tracking-label text-accent">
-          views {formatCompactNumber(maxImpressions)}
+          impressions {formatCompactNumber(maxImpressions)}
         </div>
         <svg viewBox={`0 0 ${width} ${height}`} preserveAspectRatio="none" className="block h-full w-full">
           <defs>
@@ -4520,7 +4520,7 @@ function SearchConsoleTrendChart({ points }: { points: SearchTrendPoint[] }) {
               <span className="text-fg-1 tabular-nums">{formatCompactNumber(hoveredPoint.clicks)}</span>
             </div>
             <div className="mt-1 flex items-center justify-between gap-4 text-accent">
-              <span>views</span>
+              <span>impressions</span>
               <span className="text-fg-1 tabular-nums">{formatCompactNumber(hoveredPoint.impressions)}</span>
             </div>
             <div className="mt-1 flex items-center justify-between gap-4 text-fg-3">
