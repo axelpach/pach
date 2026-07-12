@@ -493,7 +493,7 @@ export default function IssuesLayout() {
             mobileTrackerOpen
               ? 'fixed inset-0 z-50 flex md:relative md:inset-auto md:z-auto md:w-[200px]'
               : 'hidden md:flex md:relative md:z-auto md:w-[200px]'
-          } shrink-0 overflow-y-auto border-r border-edge/12 bg-pit backdrop-blur-sm px-2 py-4 flex-col md:bg-pit/60`}
+          } scrollbar-hidden-desktop shrink-0 overflow-y-auto border-r border-edge/12 bg-pit backdrop-blur-sm px-2 py-4 flex-col md:bg-pit/60`}
         >
           <div className="px-4 pb-3 mb-2 flex items-start justify-between gap-2">
             <div>
