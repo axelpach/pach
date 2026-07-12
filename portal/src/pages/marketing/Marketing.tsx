@@ -4173,6 +4173,8 @@ function AnalyticsSection({
     : buildSearchTrendPoints(visibleSearchMetrics)
   const topPages = aggregateSearchConsoleMetrics(visibleSearchMetrics, 'page').slice(0, 8)
   const topQueries = aggregateSearchConsoleMetrics(visibleSearchMetrics, 'query').slice(0, 8)
+  const topRemotePage = topPages[0] ?? null
+  const topRemoteQuery = topQueries[0] ?? null
   const opportunities = searchConsoleOpportunities(visibleSearchMetrics).slice(0, 8)
   return (
     <div className="space-y-4">
@@ -4183,6 +4185,25 @@ function AnalyticsSection({
         <Metric label="subscribed" value={newsletterSubscriberCount(subscriptions)} />
         <Metric label="search impressions" value={formatCompactNumber(searchTotals.impressions)} />
         <Metric label="search clicks" value={formatCompactNumber(searchTotals.clicks)} />
+      </div>
+
+      <div className="grid gap-2 lg:grid-cols-2">
+        <RemoteSearchKpiCard
+          label="top remote page"
+          row={topRemotePage}
+          primary={topRemotePage
+            ? topRemotePage.contentItemId
+              ? contentById.get(topRemotePage.contentItemId)?.title ?? urlPathLabel(topRemotePage.page ?? '')
+              : urlPathLabel(topRemotePage.page ?? '')
+            : null}
+          secondary={topRemotePage?.page ?? null}
+        />
+        <RemoteSearchKpiCard
+          label="top remote query"
+          row={topRemoteQuery}
+          primary={topRemoteQuery?.query ?? null}
+          secondary={topRemoteQuery?.page ? urlPathLabel(topRemoteQuery.page) : null}
+        />
       </div>
 
       <Panel>
@@ -4234,6 +4255,50 @@ function AnalyticsSection({
           {activeTab === 'ads' ? <AdAnalyticsPanel snapshots={adMetricSnapshots} totals={adTotals} /> : null}
         </div>
       </Panel>
+    </div>
+  )
+}
+
+function RemoteSearchKpiCard({
+  label,
+  row,
+  primary,
+  secondary,
+}: {
+  label: string
+  row: SearchAggregateRow | null
+  primary: string | null
+  secondary: string | null
+}) {
+  return (
+    <div className="min-w-0 border border-edge/12 bg-pit-2 px-3 py-3">
+      <div className="font-mono text-[10px] uppercase tracking-label text-fg-4">{label}</div>
+      {row ? (
+        <>
+          <div className="mt-2 truncate font-mono text-sm font-semibold text-fg-1">{primary || '-'}</div>
+          {secondary ? <div className="mt-1 truncate font-mono text-[11px] text-fg-4">{secondary}</div> : null}
+          <div className="mt-3 grid grid-cols-4 gap-2 font-mono text-[10px] uppercase tracking-label text-fg-4">
+            <div>
+              <div className="text-xs normal-case tracking-normal text-fg-1">{formatCompactNumber(row.clicks)}</div>
+              <div>clicks</div>
+            </div>
+            <div>
+              <div className="text-xs normal-case tracking-normal text-fg-1">{formatCompactNumber(row.impressions)}</div>
+              <div>impr.</div>
+            </div>
+            <div>
+              <div className="text-xs normal-case tracking-normal text-fg-1">{formatPercent(row.ctr)}</div>
+              <div>ctr</div>
+            </div>
+            <div>
+              <div className="text-xs normal-case tracking-normal text-fg-1">{row.position ? row.position.toFixed(1) : '-'}</div>
+              <div>pos</div>
+            </div>
+          </div>
+        </>
+      ) : (
+        <div className="mt-2 font-mono text-xs text-fg-4">sync search analytics in settings</div>
+      )}
     </div>
   )
 }
