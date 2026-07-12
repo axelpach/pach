@@ -19,6 +19,7 @@ import {
   Check,
   ChevronLeft,
   ChevronRight,
+  CircleDollarSign,
   Edit3,
   ExternalLink,
   Info,
@@ -1717,9 +1718,11 @@ function PromotionsSection({
       })
       const json = await readJson(response) as { queuedPages?: number }
       setKeywordRunStatus('success')
-      setSelectedPageIds([])
       onFlash(`keyword run queued · ${json.queuedPages ?? targetPages.length} page${targetPages.length === 1 ? '' : 's'}`)
-      window.setTimeout(() => setKeywordRunStatus('idle'), 1800)
+      window.setTimeout(() => {
+        setSelectedPageIds([])
+        setKeywordRunStatus('idle')
+      }, 1400)
     } catch (err) {
       setKeywordRunStatus('idle')
       onFlash(err instanceof Error ? err.message : 'could not queue keyword run')
@@ -1753,19 +1756,6 @@ function PromotionsSection({
           <div className="flex flex-wrap items-center gap-2 pb-2">
             {tab === 'pages' ? (
               <>
-                <Button
-                  icon={<Sparkles className="h-3.5 w-3.5" />}
-                  onClick={() => void queueKeywordGeneration(selectedPages)}
-                  disabled={selectedPages.length === 0 || keywordRunStatus === 'loading'}
-                >
-                  {keywordRunStatus === 'loading'
-                    ? 'queuing'
-                    : keywordRunStatus === 'success'
-                      ? 'queued'
-                      : selectedPages.length
-                        ? `get keywords · ${selectedPages.length}`
-                        : 'get keywords'}
-                </Button>
                 <Button icon={<Rss className="h-3.5 w-3.5" />} onClick={() => setSitemapImporterOpen(true)}>
                   import sitemap
                 </Button>
@@ -1784,12 +1774,10 @@ function PromotionsSection({
               pages={pages}
               selectedPageIds={selectedPageIds}
               allPagesSelected={allPagesSelected}
-              keywordRunStatus={keywordRunStatus}
               onToggleAll={() => setSelectedPageIds(allPagesSelected ? [] : pages.map((page) => page.page.id))}
               onTogglePage={(pageId) => setSelectedPageIds((ids) => (
                 ids.includes(pageId) ? ids.filter((id) => id !== pageId) : [...ids, pageId]
               ))}
-              onGenerateKeywords={(page) => void queueKeywordGeneration([page])}
               onEdit={(page) => setPageEditor({ page: page.page })}
               onPromote={(page) => setPromoteTarget({ page, promotion: page.googlePromotion })}
             />
@@ -1818,6 +1806,8 @@ function PromotionsSection({
           page={promoteTarget.page}
           promotion={promoteTarget.promotion}
           onClose={() => setPromoteTarget(null)}
+          keywordRunStatus={keywordRunStatus}
+          onGenerateKeywords={() => void queueKeywordGeneration([promoteTarget.page])}
           onSubmit={(payload) => void saveGoogleDraft(promoteTarget.page, promoteTarget.promotion, payload)}
         />
       ) : null}
@@ -1838,6 +1828,14 @@ function PromotionsSection({
           }}
         />
       ) : null}
+      {tab === 'pages' && selectedPages.length > 0 ? (
+        <SelectionActionTray
+          count={selectedPages.length}
+          status={keywordRunStatus}
+          onClear={() => setSelectedPageIds([])}
+          onGenerate={() => void queueKeywordGeneration(selectedPages)}
+        />
+      ) : null}
     </div>
   )
 }
@@ -1846,20 +1844,16 @@ function PromotablePagesTable({
   pages,
   selectedPageIds,
   allPagesSelected,
-  keywordRunStatus,
   onToggleAll,
   onTogglePage,
-  onGenerateKeywords,
   onEdit,
   onPromote,
 }: {
   pages: PromotablePageRow[]
   selectedPageIds: string[]
   allPagesSelected: boolean
-  keywordRunStatus: 'idle' | 'loading' | 'success'
   onToggleAll: () => void
   onTogglePage: (pageId: string) => void
-  onGenerateKeywords: (page: PromotablePageRow) => void
   onEdit: (page: PromotablePageRow) => void
   onPromote: (page: PromotablePageRow) => void
 }) {
@@ -1870,17 +1864,15 @@ function PromotablePagesTable({
         <thead className="bg-rim text-[10px] uppercase tracking-label text-fg-4">
           <tr className="border-b border-edge/12">
             <th className="w-10 px-3 py-2 font-normal">
-              <input
-                type="checkbox"
-                className="h-3 w-3 accent-accent"
-                checked={allPagesSelected}
-                onChange={onToggleAll}
-                aria-label="select all pages"
+              <SelectionMark
+                selected={allPagesSelected}
+                label="select all pages"
+                onClick={onToggleAll}
               />
             </th>
             <th className="px-3 py-2 font-normal">page</th>
             <th className="px-3 py-2 text-right font-normal">organic</th>
-            <th className="px-3 py-2 font-normal">keywords</th>
+            <th className="px-3 py-2 font-normal">ideas</th>
             <th className="px-3 py-2 text-right font-normal">paid</th>
             <th className="px-3 py-2 font-normal">status</th>
             <th className="px-3 py-2 text-right font-normal">action</th>
@@ -1892,21 +1884,29 @@ function PromotablePagesTable({
             const negativeKeywords = page.keywordIdeas.filter((idea) => idea.negative && idea.status !== 'rejected').length
             const selected = selectedPageIds.includes(page.page.id)
             return (
-              <tr key={page.page.id} className="border-b border-edge/8 text-fg-2 last:border-b-0">
+              <tr
+                key={page.page.id}
+                onClick={() => onTogglePage(page.page.id)}
+                className={`cursor-pointer border-b border-edge/8 text-fg-2 transition-colors last:border-b-0 ${selected ? 'bg-accent-fill/10 text-fg-1 shadow-[inset_3px_0_0_rgb(var(--accent-rgb)/0.55)]' : 'hover:bg-rim/35'}`}
+              >
                 <td className="px-3 py-3 align-top">
-                  <input
-                    type="checkbox"
-                    className="h-3 w-3 accent-accent"
-                    checked={selected}
-                    onChange={() => onTogglePage(page.page.id)}
-                    aria-label={`select ${page.title}`}
+                  <SelectionMark
+                    selected={selected}
+                    label={`select ${page.title}`}
+                    onClick={() => onTogglePage(page.page.id)}
                   />
                 </td>
                 <td className="max-w-[360px] px-3 py-3">
                   <div className="truncate text-fg-1">{page.title}</div>
                   <div className="mt-1 flex min-w-0 items-center gap-2 text-[11px] text-fg-4">
                     <span className="truncate">{page.url}</span>
-                    <a href={page.url} target="_blank" rel="noreferrer" className="shrink-0 text-fg-4 transition hover:text-accent">
+                    <a
+                      href={page.url}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="shrink-0 text-fg-4 transition hover:text-accent"
+                      onClick={(event) => event.stopPropagation()}
+                    >
                       <ExternalLink className="h-3 w-3" />
                     </a>
                   </div>
@@ -1930,27 +1930,16 @@ function PromotablePagesTable({
                   </StatusPill>
                 </td>
                 <td className="px-3 py-3 text-right">
-                  <div className="flex justify-end gap-2">
-                    <Button
-                      icon={<Edit3 className="h-3.5 w-3.5" />}
-                      onClick={() => onEdit(page)}
-                    >
-                      edit
-                    </Button>
-                    <Button
-                      icon={<Sparkles className="h-3.5 w-3.5" />}
-                      onClick={() => onGenerateKeywords(page)}
-                      disabled={keywordRunStatus === 'loading'}
-                    >
-                      keywords
-                    </Button>
-                    <Button
-                      kind={page.googlePromotion ? 'default' : 'primary'}
-                      icon={page.googlePromotion ? <Edit3 className="h-3.5 w-3.5" /> : <Search className="h-3.5 w-3.5" />}
+                  <div className="flex justify-end gap-1.5">
+                    <RowIconButton label="edit page" onClick={() => onEdit(page)}>
+                      <Edit3 className="h-3.5 w-3.5" />
+                    </RowIconButton>
+                    <RowIconButton
+                      label={page.googlePromotion ? 'edit google draft' : 'create google draft'}
                       onClick={() => onPromote(page)}
                     >
-                      {page.googlePromotion ? 'edit draft' : 'promote'}
-                    </Button>
+                      {page.googlePromotion ? <Edit3 className="h-3.5 w-3.5" /> : <CircleDollarSign className="h-3.5 w-3.5" />}
+                    </RowIconButton>
                   </div>
                 </td>
               </tr>
@@ -1958,6 +1947,100 @@ function PromotablePagesTable({
           })}
         </tbody>
       </table>
+    </div>
+  )
+}
+
+function SelectionMark({
+  selected,
+  label,
+  onClick,
+}: {
+  selected: boolean
+  label: string
+  onClick: () => void
+}) {
+  return (
+    <button
+      type="button"
+      aria-label={label}
+      title={label}
+      onClick={(event) => {
+        event.stopPropagation()
+        onClick()
+      }}
+      className={`inline-flex h-5 w-5 items-center justify-center border font-mono text-[10px] transition ${
+        selected
+          ? 'border-accent bg-accent-fill/12 text-accent shadow-glow-xs'
+          : 'border-edge/24 bg-pit-3 text-fg-4 hover:border-accent/55 hover:bg-accent-fill/6 hover:text-accent'
+      }`}
+    >
+      {selected ? <Check className="h-3.5 w-3.5" /> : null}
+    </button>
+  )
+}
+
+function RowIconButton({
+  label,
+  children,
+  onClick,
+}: {
+  label: string
+  children: ReactNode
+  onClick: () => void
+}) {
+  return (
+    <button
+      type="button"
+      aria-label={label}
+      title={label}
+      onClick={(event) => {
+        event.stopPropagation()
+        onClick()
+      }}
+      className="inline-flex h-8 w-8 items-center justify-center border border-edge/20 bg-pit-3 text-fg-3 transition hover:border-accent/55 hover:bg-accent-fill/6 hover:text-accent active:scale-[0.98]"
+    >
+      {children}
+    </button>
+  )
+}
+
+function SelectionActionTray({
+  count,
+  status,
+  onClear,
+  onGenerate,
+}: {
+  count: number
+  status: 'idle' | 'loading' | 'success'
+  onClear: () => void
+  onGenerate: () => void
+}) {
+  return (
+    <div className="fixed bottom-6 left-1/2 z-40 flex -translate-x-1/2 items-center gap-3 border border-edge/30 bg-pit-2/95 px-4 py-3 font-mono text-xs text-fg-2 shadow-popover backdrop-blur-sm">
+      <span className="text-fg-1">{count} selected</span>
+      <span className="h-4 w-px bg-edge/20" />
+      <Button
+        kind="primary"
+        icon={<Sparkles className="h-3.5 w-3.5" />}
+        onClick={onGenerate}
+        disabled={status === 'loading'}
+      >
+        {status === 'loading'
+          ? 'generating'
+          : status === 'success'
+            ? 'queued'
+            : `generate keywords for ${count === 1 ? 'this page' : 'these pages'}`}
+      </Button>
+      <button
+        type="button"
+        aria-label="clear selection"
+        title="clear selection"
+        onClick={onClear}
+        className="inline-flex h-8 w-8 items-center justify-center border border-transparent text-fg-4 transition hover:border-edge/20 hover:bg-accent-fill/4 hover:text-fg-1"
+      >
+        <X className="h-4 w-4" />
+      </button>
     </div>
   )
 }
@@ -2017,15 +2100,11 @@ function GoogleDraftsTable({
                   <div className="mt-1 text-[11px] text-fg-4">{formatMoneyMinor(totals.spendMinor, promotion.currencyCode)} spend</div>
                 </td>
                 <td className="px-3 py-3 text-right">
-                  <Button
-                    icon={<Edit3 className="h-3.5 w-3.5" />}
-                    onClick={() => {
-                      if (page) onEdit(page, promotion)
-                    }}
-                    disabled={!page}
-                  >
-                    edit
-                  </Button>
+                  {page ? (
+                    <RowIconButton label="edit google draft" onClick={() => onEdit(page, promotion)}>
+                      <Edit3 className="h-3.5 w-3.5" />
+                    </RowIconButton>
+                  ) : null}
                 </td>
               </tr>
             )
@@ -2095,9 +2174,9 @@ function PromotionsLearningPanel({
               <td className="px-3 py-3 text-fg-3">{row.detail}</td>
               <td className="px-3 py-3 text-right">
                 {row.page ? (
-                  <Button icon={<Search className="h-3.5 w-3.5" />} onClick={() => onPromote(row.page)}>
-                    promote
-                  </Button>
+                  <RowIconButton label="create google draft" onClick={() => onPromote(row.page)}>
+                    <CircleDollarSign className="h-3.5 w-3.5" />
+                  </RowIconButton>
                 ) : null}
               </td>
             </tr>
@@ -2112,18 +2191,21 @@ function GoogleSearchPromotionDrawer({
   page,
   promotion,
   onClose,
+  keywordRunStatus,
+  onGenerateKeywords,
   onSubmit,
 }: {
   page: PromotablePageRow
   promotion: AdPromotionRow | null
   onClose: () => void
+  keywordRunStatus: 'idle' | 'loading' | 'success'
+  onGenerateKeywords: () => void
   onSubmit: (payload: GoogleSearchPromotionDraftPayload) => void
 }) {
   const creative = readRecord(promotion?.creative)
   const targeting = readRecord(promotion?.targeting)
   const startDate = promotion?.startsAt ? new Date(promotion.startsAt) : defaultSocialScheduleDate(page.output)
   const endDate = promotion?.endsAt ? new Date(promotion.endsAt) : new Date(startDate.getTime() + 7 * 24 * 60 * 60 * 1000)
-  const generatedKeywords = usableKeywordIdeas(page).map((idea) => idea.keyword)
   const [adAccountExternalId, setAdAccountExternalId] = useState(promotion?.adAccountExternalId ?? '')
   const [objective, setObjective] = useState(promotion?.objective ?? 'website_visits')
   const [geo, setGeo] = useState(readString(targeting.geo) || 'MX')
@@ -2246,10 +2328,14 @@ function GoogleSearchPromotionDrawer({
               <FieldLabel>keywords</FieldLabel>
               <Button
                 icon={<Sparkles className="h-3.5 w-3.5" />}
-                onClick={() => setKeywordText(generatedKeywords.join('\n'))}
-                disabled={generatedKeywords.length === 0}
+                onClick={onGenerateKeywords}
+                disabled={keywordRunStatus === 'loading'}
               >
-                use ideas
+                {keywordRunStatus === 'loading'
+                  ? 'generating'
+                  : keywordRunStatus === 'success'
+                    ? 'queued'
+                    : 'generate keywords'}
               </Button>
             </div>
             <TermTextarea rows={7} value={keywordText} onChange={(event) => setKeywordText(event.target.value)} />
