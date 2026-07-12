@@ -52,11 +52,22 @@ const OUTER_NAV_ITEMS: readonly OuterNavItem[] = [
       { label: 'Newsletters', path: '/marketing/newsletters/content' },
       { label: 'Social', path: '/marketing/social' },
       { label: 'WhatsApp', path: '/marketing/whatsapp/templates', requiresWhatsApp: true },
+      { label: 'Promotions', path: '/marketing/promotions' },
       { label: 'Calendar', path: '/marketing/calendar' },
       { label: 'Analytics', path: '/marketing/analytics' },
     ],
   },
-  { label: 'Finance', path: '/finance/dashboard' },
+  {
+    label: 'Finance',
+    path: '/finance/dashboard',
+    children: [
+      { label: 'Dashboard', path: '/finance/dashboard' },
+      { label: 'Movements', path: '/finance/movements' },
+      { label: 'Accounts', path: '/finance/accounts' },
+      { label: 'Categories', path: '/finance/categories' },
+      { label: 'Forecasts', path: '/finance/forecasts' },
+    ],
+  },
   { label: 'Design', path: '/design' },
   { label: 'Settings', path: '/settings/repositories' },
 ]
