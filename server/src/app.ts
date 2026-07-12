@@ -21,6 +21,7 @@ import activityRoute from './routes/activity.js'
 import githubRoute from './routes/github.js'
 import githubWebhookRoute from './routes/github-webhooks.js'
 import socialRoute, { publicSocialRouter } from './routes/social.js'
+import googleRoute, { publicGoogleRouter } from './routes/google.js'
 import { requireAuth, requireUnscopedAccess } from './middleware/auth.js'
 import { startTaskTriggerRunner } from './services/task-triggers/runner.js'
 import { startMarketingAutomationRunner } from './services/marketing-automation/runner.js'
@@ -53,6 +54,8 @@ app.use('/finance', requireAuth, financeRoute)
 app.use('/marketing', requireAuth, marketingRoute)
 app.use('/api-keys', requireAuth, apiKeysRoute)
 app.use('/github', requireAuth, githubRoute)
+app.use('/google', publicGoogleRouter)
+app.use('/google', requireAuth, googleRoute)
 app.use('/social', publicSocialRouter)
 app.use('/social', requireAuth, socialRoute)
 app.use('/media', publicMediaRouter)

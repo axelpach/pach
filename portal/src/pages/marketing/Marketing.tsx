@@ -72,6 +72,31 @@ type ContentEventRow = Schema['tables']['mkt_content_events']['row']
 type ContentOutputRow = Schema['tables']['mkt_content_outputs']['row']
 type AdPromotionRow = Schema['tables']['mkt_ad_promotions']['row']
 type AdMetricSnapshotRow = Schema['tables']['mkt_ad_metric_snapshots']['row']
+
+type SearchConsolePropertyRow = {
+  id: string
+  organizationId: string
+  displayName: string
+  selected: boolean
+}
+
+type SearchConsoleMetricSnapshotRow = {
+  organizationId: string
+  contentItemId?: string | null
+  page?: string | null
+  query?: string | null
+  clicks: number
+  impressions: number
+  position?: string | null
+}
+
+type SearchConsoleUrlInspectionRow = {
+  id: string
+  organizationId: string
+  inspectionUrl: string
+  verdict?: string | null
+}
+
 type SocialChannelRow = Schema['tables']['social_channels']['row']
 type SocialPostRow = Schema['tables']['social_posts']['row']
 type SocialPostTargetRow = Schema['tables']['social_post_targets']['row']
@@ -238,6 +263,9 @@ export default function Marketing({ canAccessWhatsApp = false }: { canAccessWhat
   const [socialPostTargets] = useQuery(z.query.social_post_targets.orderBy('updatedAt', 'desc'))
   const [adPromotions] = useQuery(z.query.mkt_ad_promotions.orderBy('updatedAt', 'desc'))
   const [adMetricSnapshots] = useQuery(z.query.mkt_ad_metric_snapshots.orderBy('periodEnd', 'desc'))
+  const [searchConsoleProperties] = useQuery(z.query.search_console_properties.orderBy('updatedAt', 'desc'))
+  const [searchConsoleMetricSnapshots] = useQuery(z.query.search_console_metric_snapshots.orderBy('dataDate', 'desc'))
+  const [searchConsoleUrlInspections] = useQuery(z.query.search_console_url_inspections.orderBy('inspectedAt', 'desc'))
 
   const section = sectionFromPath(location.pathname)
   const newsletterTab = newsletterTabFromPath(location.pathname)
@@ -262,6 +290,9 @@ export default function Marketing({ canAccessWhatsApp = false }: { canAccessWhat
   const orgSocialPostTargets = useMemo(() => byOrganization(socialPostTargets, organizationId), [organizationId, socialPostTargets])
   const orgAdPromotions = useMemo(() => byOrganization(adPromotions, organizationId), [adPromotions, organizationId])
   const orgAdMetricSnapshots = useMemo(() => byOrganization(adMetricSnapshots, organizationId), [adMetricSnapshots, organizationId])
+  const orgSearchConsoleProperties = useMemo(() => byOrganization(searchConsoleProperties, organizationId), [organizationId, searchConsoleProperties])
+  const orgSearchConsoleMetrics = useMemo(() => byOrganization(searchConsoleMetricSnapshots, organizationId), [organizationId, searchConsoleMetricSnapshots])
+  const orgSearchConsoleInspections = useMemo(() => byOrganization(searchConsoleUrlInspections, organizationId), [organizationId, searchConsoleUrlInspections])
   const selectedContent = orgContentItems.find((item) => item.id === selectedContentId) ?? null
   const selectedPublication = orgPublications.find((item) => item.id === selectedPublicationId) ?? orgPublications[0] ?? null
   const contentItemIdFromUrl = new URLSearchParams(location.search).get('content')
@@ -586,6 +617,9 @@ export default function Marketing({ canAccessWhatsApp = false }: { canAccessWhat
               ctas={orgCtas}
               socialPostTargets={orgSocialPostTargets}
               adMetricSnapshots={orgAdMetricSnapshots}
+              searchConsoleProperties={orgSearchConsoleProperties}
+              searchConsoleMetrics={orgSearchConsoleMetrics}
+              searchConsoleInspections={orgSearchConsoleInspections}
             />
           ) : null}
         </div>
@@ -4066,6 +4100,9 @@ function AnalyticsSection({
   ctas,
   socialPostTargets,
   adMetricSnapshots,
+  searchConsoleProperties,
+  searchConsoleMetrics,
+  searchConsoleInspections,
 }: {
   contentItems: ContentItemRow[]
   audienceMembers: AudienceMemberRow[]
@@ -4074,11 +4111,20 @@ function AnalyticsSection({
   ctas: CtaRow[]
   socialPostTargets: SocialPostTargetRow[]
   adMetricSnapshots: AdMetricSnapshotRow[]
+  searchConsoleProperties: SearchConsolePropertyRow[]
+  searchConsoleMetrics: SearchConsoleMetricSnapshotRow[]
+  searchConsoleInspections: SearchConsoleUrlInspectionRow[]
 }) {
   const adTotals = sumAdMetricSnapshots(adMetricSnapshots)
+  const searchTotals = sumSearchConsoleMetrics(searchConsoleMetrics)
+  const topPages = aggregateSearchConsoleMetrics(searchConsoleMetrics, 'page').slice(0, 8)
+  const topQueries = aggregateSearchConsoleMetrics(searchConsoleMetrics, 'query').slice(0, 8)
+  const opportunities = searchConsoleOpportunities(searchConsoleMetrics).slice(0, 8)
+  const contentById = new Map(contentItems.map((item) => [item.id, item]))
+  const selectedProperty = searchConsoleProperties.find((property) => property.selected) ?? searchConsoleProperties[0] ?? null
   return (
     <div className="space-y-4">
-      <div className="grid gap-2 md:grid-cols-4 xl:grid-cols-8">
+      <div className="grid gap-2 md:grid-cols-4 xl:grid-cols-10">
         <Metric label="views" value={countEvents(events, 'view')} />
         <Metric label="clicks" value={countEvents(events, 'click')} />
         <Metric label="sends" value={countEvents(events, 'send')} />
@@ -4087,7 +4133,68 @@ function AnalyticsSection({
         <Metric label="unsubscribed" value={newsletterUnsubscriberCount(subscriptions)} />
         <Metric label="social posts" value={socialPostTargets.length} />
         <Metric label="ad views" value={formatCompactNumber(adTotals.impressions)} />
+        <Metric label="search clicks" value={formatCompactNumber(searchTotals.clicks)} />
+        <Metric label="search views" value={formatCompactNumber(searchTotals.impressions)} />
       </div>
+
+      <Panel
+        title="organic search"
+        right={selectedProperty ? (
+          <div className="font-mono text-[10px] uppercase tracking-label text-fg-4">
+            {selectedProperty.displayName} · {searchConsoleMetrics.length} rows
+          </div>
+        ) : null}
+      >
+        {searchConsoleProperties.length === 0 ? (
+          <EmptyState label="connect google search console in settings" />
+        ) : searchConsoleMetrics.length === 0 ? (
+          <EmptyState label="sync search analytics in settings" />
+        ) : (
+          <div className="grid gap-4 xl:grid-cols-3">
+            <SearchAnalyticsTable
+              title="top pages"
+              rows={topPages}
+              primaryLabel="page"
+              renderPrimary={(row) => (
+                <div className="min-w-0">
+                  <div className="truncate text-fg-1">{contentById.get(row.contentItemId ?? '')?.title ?? urlPathLabel(row.key)}</div>
+                  <div className="mt-1 truncate text-[11px] text-fg-4">{row.key}</div>
+                </div>
+              )}
+            />
+            <SearchAnalyticsTable
+              title="top queries"
+              rows={topQueries}
+              primaryLabel="query"
+              renderPrimary={(row) => <span className="truncate text-fg-1">{row.key || '-'}</span>}
+            />
+            <SearchAnalyticsTable
+              title="improve next"
+              rows={opportunities}
+              primaryLabel="candidate"
+              renderPrimary={(row) => (
+                <div className="min-w-0">
+                  <div className="truncate text-fg-1">{row.query || row.key || '-'}</div>
+                  <div className="mt-1 truncate text-[11px] text-fg-4">{contentById.get(row.contentItemId ?? '')?.title ?? urlPathLabel(row.page ?? '')}</div>
+                </div>
+              )}
+            />
+          </div>
+        )}
+        {searchConsoleInspections.length > 0 ? (
+          <div className="mt-4 border-t border-edge/12 pt-3">
+            <div className="mb-2 font-mono text-[10px] uppercase tracking-label text-fg-4">latest URL inspections</div>
+            <div className="grid gap-2 md:grid-cols-2">
+              {searchConsoleInspections.slice(0, 4).map((inspection) => (
+                <div key={inspection.id} className="flex items-center justify-between gap-3 border border-edge/12 bg-rim px-3 py-2 font-mono text-xs">
+                  <span className="min-w-0 truncate text-fg-2">{inspection.inspectionUrl}</span>
+                  <StatusPill kind={inspection.verdict === 'PASS' ? 'ok' : inspection.verdict ? 'warn' : 'idle'}>{inspection.verdict ?? 'unknown'}</StatusPill>
+                </div>
+              ))}
+            </div>
+          </div>
+        ) : null}
+      </Panel>
 
       <Panel title="newsletter activity">
         <div className="max-h-[calc(100vh-340px)] overflow-auto">
@@ -4125,6 +4232,60 @@ function AnalyticsSection({
         </div>
         {events.length === 0 ? <EmptyState label="no events" /> : null}
       </Panel>
+    </div>
+  )
+}
+
+type SearchAggregateRow = {
+  key: string
+  page?: string | null
+  query?: string | null
+  contentItemId?: string | null
+  clicks: number
+  impressions: number
+  ctr: number
+  position: number
+}
+
+function SearchAnalyticsTable({
+  title,
+  rows,
+  primaryLabel,
+  renderPrimary,
+}: {
+  title: string
+  rows: SearchAggregateRow[]
+  primaryLabel: string
+  renderPrimary: (row: SearchAggregateRow) => ReactNode
+}) {
+  return (
+    <div className="min-w-0">
+      <div className="mb-2 font-mono text-[10px] uppercase tracking-label text-fg-4">{title}</div>
+      <div className="overflow-auto border border-edge/12">
+        <table className="w-full min-w-[460px] text-left font-mono text-xs">
+          <thead className="bg-rim text-[10px] uppercase tracking-label text-fg-4">
+            <tr className="border-b border-edge/12">
+              <th className="px-3 py-2 font-normal">{primaryLabel}</th>
+              <th className="px-3 py-2 text-right font-normal">clicks</th>
+              <th className="px-3 py-2 text-right font-normal">views</th>
+              <th className="px-3 py-2 text-right font-normal">ctr</th>
+              <th className="px-3 py-2 text-right font-normal">pos</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((row) => (
+              <tr key={`${title}-${row.key}-${row.page ?? ''}-${row.query ?? ''}`} className="border-b border-edge/8 text-fg-2 last:border-b-0">
+                <td className="max-w-[220px] px-3 py-2.5">{renderPrimary(row)}</td>
+                <td className="px-3 py-2.5 text-right text-fg-1">{formatCompactNumber(row.clicks)}</td>
+                <td className="px-3 py-2.5 text-right">{formatCompactNumber(row.impressions)}</td>
+                <td className="px-3 py-2.5 text-right">{formatPercent(row.ctr)}</td>
+                <td className="px-3 py-2.5 text-right">{row.position ? row.position.toFixed(1) : '-'}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        {rows.length === 0 ? <EmptyState label="no rows" /> : null}
+      </div>
     </div>
   )
 }
@@ -4552,6 +4713,85 @@ function sumAdMetricSnapshots(snapshots: AdMetricSnapshotRow[]) {
     }),
     { impressions: 0, clicks: 0, spendMinor: 0, leads: 0, conversions: 0 },
   )
+}
+
+function sumSearchConsoleMetrics(snapshots: SearchConsoleMetricSnapshotRow[]) {
+  return snapshots.reduce(
+    (totals, snapshot) => ({
+      impressions: totals.impressions + snapshot.impressions,
+      clicks: totals.clicks + snapshot.clicks,
+    }),
+    { impressions: 0, clicks: 0 },
+  )
+}
+
+function aggregateSearchConsoleMetrics(snapshots: SearchConsoleMetricSnapshotRow[], key: 'page' | 'query') {
+  const byKey = new Map<string, SearchAggregateRow & { weightedPosition: number }>()
+  for (const snapshot of snapshots) {
+    const rawKey = key === 'page' ? snapshot.page : snapshot.query
+    if (!rawKey) continue
+    const current = byKey.get(rawKey) ?? {
+      key: rawKey,
+      page: snapshot.page,
+      query: snapshot.query,
+      contentItemId: snapshot.contentItemId,
+      clicks: 0,
+      impressions: 0,
+      ctr: 0,
+      position: 0,
+      weightedPosition: 0,
+    }
+    current.clicks += snapshot.clicks
+    current.impressions += snapshot.impressions
+    current.weightedPosition += readNumericText(snapshot.position) * Math.max(1, snapshot.impressions)
+    if (!current.contentItemId && snapshot.contentItemId) current.contentItemId = snapshot.contentItemId
+    byKey.set(rawKey, current)
+  }
+  return Array.from(byKey.values())
+    .map(({ weightedPosition, ...row }) => ({
+      ...row,
+      ctr: row.impressions ? row.clicks / row.impressions : 0,
+      position: row.impressions ? weightedPosition / row.impressions : 0,
+    }))
+    .sort((a, b) => b.clicks - a.clicks || b.impressions - a.impressions)
+}
+
+function searchConsoleOpportunities(snapshots: SearchConsoleMetricSnapshotRow[]) {
+  const byPair = new Map<string, SearchAggregateRow & { weightedPosition: number }>()
+  for (const snapshot of snapshots) {
+    if (!snapshot.page || !snapshot.query) continue
+    const key = `${snapshot.page}::${snapshot.query}`
+    const current = byPair.get(key) ?? {
+      key,
+      page: snapshot.page,
+      query: snapshot.query,
+      contentItemId: snapshot.contentItemId,
+      clicks: 0,
+      impressions: 0,
+      ctr: 0,
+      position: 0,
+      weightedPosition: 0,
+    }
+    current.clicks += snapshot.clicks
+    current.impressions += snapshot.impressions
+    current.weightedPosition += readNumericText(snapshot.position) * Math.max(1, snapshot.impressions)
+    if (!current.contentItemId && snapshot.contentItemId) current.contentItemId = snapshot.contentItemId
+    byPair.set(key, current)
+  }
+  return Array.from(byPair.values())
+    .map(({ weightedPosition, ...row }) => ({
+      ...row,
+      ctr: row.impressions ? row.clicks / row.impressions : 0,
+      position: row.impressions ? weightedPosition / row.impressions : 0,
+    }))
+    .filter((row) => row.impressions >= 10 && row.ctr < 0.05)
+    .sort((a, b) => b.impressions - a.impressions || a.position - b.position)
+}
+
+function readNumericText(value: string | null | undefined) {
+  if (!value) return 0
+  const number = Number(value)
+  return Number.isFinite(number) ? number : 0
 }
 
 function adPromotionHeadline(promotion: AdPromotionRow) {
@@ -5138,6 +5378,20 @@ function formatScheduledDate(value: number | null | undefined, timezone: string 
 
 function formatCompactNumber(value: number) {
   return new Intl.NumberFormat(undefined, { notation: 'compact', maximumFractionDigits: 1 }).format(value)
+}
+
+function formatPercent(value: number) {
+  return new Intl.NumberFormat(undefined, { style: 'percent', maximumFractionDigits: 1 }).format(value)
+}
+
+function urlPathLabel(value: string) {
+  if (!value) return '-'
+  try {
+    const url = new URL(value)
+    return url.pathname === '/' ? url.hostname : url.pathname
+  } catch {
+    return value
+  }
 }
 
 function formatMoneyMinor(value: number, currencyCode: string) {

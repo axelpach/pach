@@ -1,5 +1,5 @@
 import { useQuery, useZero } from '@rocicorp/zero/react'
-import { Building2, Check, Copy, Edit3, ExternalLink, Github, GitBranch, KeyRound, Link2, Linkedin, Plus, RefreshCw, Settings2, Trash2, Unlink } from 'lucide-react'
+import { Building2, Check, Copy, Edit3, ExternalLink, Github, GitBranch, KeyRound, Link2, Linkedin, Plus, RefreshCw, Search, Settings2, Trash2, Unlink } from 'lucide-react'
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { Button, Panel, StatusPill, TermInput } from '../../components/pach'
@@ -75,6 +75,52 @@ type SocialConnectionRow = Schema['tables']['social_connections']['row']
 type SocialChannelRow = Schema['tables']['social_channels']['row']
 type SocialChannelConnectionRow = Schema['tables']['social_channel_connections']['row']
 
+type GoogleConnectionRow = {
+  id: string
+  organizationId: string
+  providerAccountEmail?: string | null
+  providerAccountName?: string | null
+  scopes: string[]
+  credentialKind: string
+  tokenExpiresAt?: number | null
+  status: string
+  lastRefreshedAt?: number | null
+}
+
+type SearchConsolePropertyRow = {
+  id: string
+  organizationId: string
+  siteUrl: string
+  displayName: string
+  permissionLevel?: string | null
+  selected: boolean
+  lastSyncedAt?: number | null
+}
+
+type SearchConsoleSitemapRow = {
+  id: string
+  organizationId: string
+  propertyId: string
+  sitemapUrl: string
+  status: string
+}
+
+type SearchConsoleMetricSnapshotRow = {
+  organizationId: string
+  propertyId: string
+  dataDate: number
+  clicks: number
+  impressions: number
+}
+
+type SearchConsoleUrlInspectionRow = {
+  id: string
+  organizationId: string
+  propertyId: string
+  inspectionUrl: string
+  verdict?: string | null
+}
+
 type SocialProviderApp = {
   id: string
   organizationId: string
@@ -99,6 +145,12 @@ type SocialSettingsDefaults = {
   memberScopes: string[]
 }
 
+type GoogleSearchSettingsDefaults = {
+  configured: boolean
+  redirectUri: string
+  scopes: string[]
+}
+
 type ProviderAppFormPayload = {
   name: string
   purpose: string
@@ -109,11 +161,12 @@ type ProviderAppFormPayload = {
   status: string
 }
 
-type SettingsSection = 'api-keys' | 'repositories' | 'social'
+type SettingsSection = 'api-keys' | 'repositories' | 'social' | 'search'
 
 const SECTIONS: Array<{ id: SettingsSection; label: string }> = [
   { id: 'repositories', label: 'repositories' },
   { id: 'social', label: 'social' },
+  { id: 'search', label: 'search' },
   { id: 'api-keys', label: 'api keys' },
 ]
 
@@ -161,6 +214,11 @@ export default function SettingsPage() {
   const [socialConnections] = useQuery(z.query.social_connections.orderBy('createdAt', 'desc'))
   const [socialChannels] = useQuery(z.query.social_channels.orderBy('displayName', 'asc'))
   const [socialChannelConnections] = useQuery(z.query.social_channel_connections.orderBy('createdAt', 'desc'))
+  const [googleConnections] = useQuery(z.query.google_connections.orderBy('updatedAt', 'desc'))
+  const [searchConsoleProperties] = useQuery(z.query.search_console_properties.orderBy('updatedAt', 'desc'))
+  const [searchConsoleSitemaps] = useQuery(z.query.search_console_sitemaps.orderBy('updatedAt', 'desc'))
+  const [searchConsoleMetricSnapshots] = useQuery(z.query.search_console_metric_snapshots.orderBy('dataDate', 'desc'))
+  const [searchConsoleUrlInspections] = useQuery(z.query.search_console_url_inspections.orderBy('inspectedAt', 'desc'))
   const [organizationId, setOrganizationId] = useState('')
   const [apiKeys, setApiKeys] = useState<OrganizationApiKey[]>([])
   const [githubConnections, setGithubConnections] = useState<GithubConnection[]>([])
@@ -168,9 +226,11 @@ export default function SettingsPage() {
   const [organizationRepositories, setOrganizationRepositories] = useState<OrganizationRepository[]>([])
   const [socialProviderApps, setSocialProviderApps] = useState<SocialProviderApp[]>([])
   const [socialSettingsDefaults, setSocialSettingsDefaults] = useState<SocialSettingsDefaults | null>(null)
+  const [googleSearchDefaults, setGoogleSearchDefaults] = useState<GoogleSearchSettingsDefaults | null>(null)
   const [loadingKeys, setLoadingKeys] = useState(false)
   const [loadingGithub, setLoadingGithub] = useState(false)
   const [loadingSocial, setLoadingSocial] = useState(false)
+  const [loadingGoogleSearch, setLoadingGoogleSearch] = useState(false)
   const [createModalOpen, setCreateModalOpen] = useState(false)
   const [connectGithubOpen, setConnectGithubOpen] = useState(false)
   const [createLinkedInChannelOpen, setCreateLinkedInChannelOpen] = useState(false)
@@ -201,6 +261,26 @@ export default function SettingsPage() {
     () => socialChannelConnections.filter((link) => link.organizationId === organizationId),
     [organizationId, socialChannelConnections],
   )
+  const organizationGoogleConnections = useMemo(
+    () => googleConnections.filter((connection) => connection.organizationId === organizationId),
+    [googleConnections, organizationId],
+  )
+  const organizationSearchConsoleProperties = useMemo(
+    () => searchConsoleProperties.filter((property) => property.organizationId === organizationId),
+    [organizationId, searchConsoleProperties],
+  )
+  const organizationSearchConsoleSitemaps = useMemo(
+    () => searchConsoleSitemaps.filter((sitemap) => sitemap.organizationId === organizationId),
+    [organizationId, searchConsoleSitemaps],
+  )
+  const organizationSearchConsoleMetrics = useMemo(
+    () => searchConsoleMetricSnapshots.filter((snapshot) => snapshot.organizationId === organizationId),
+    [organizationId, searchConsoleMetricSnapshots],
+  )
+  const organizationSearchConsoleInspections = useMemo(
+    () => searchConsoleUrlInspections.filter((inspection) => inspection.organizationId === organizationId),
+    [organizationId, searchConsoleUrlInspections],
+  )
 
   useEffect(() => {
     if (section) return
@@ -221,11 +301,13 @@ export default function SettingsPage() {
       setOrganizationRepositories([])
       setSocialProviderApps([])
       setSocialSettingsDefaults(null)
+      setGoogleSearchDefaults(null)
       return
     }
     void loadApiKeys(organizationId)
     void loadGithubSettings(organizationId)
     void loadSocialSettings(organizationId)
+    void loadGoogleSearchSettings(organizationId)
   }, [organizationId])
 
   useEffect(() => {
@@ -241,6 +323,23 @@ export default function SettingsPage() {
       flash(params.get('message') || 'linkedin connection failed')
     }
     navigate('/settings/social', { replace: true })
+  }, [location.search, navigate, organizationId])
+
+  useEffect(() => {
+    const params = new URLSearchParams(location.search)
+    const googleStatus = params.get('google_search_console')
+    if (!googleStatus) return
+
+    if (googleStatus === 'connected') {
+      flash(params.get('message') || 'google search console connected')
+      if (organizationId) {
+        void loadGoogleSearchSettings(organizationId)
+        void syncSearchConsoleProperties()
+      }
+    } else if (googleStatus === 'failed') {
+      flash(params.get('message') || 'google search console connection failed')
+    }
+    navigate('/settings/search', { replace: true })
   }, [location.search, navigate, organizationId])
 
   async function loadApiKeys(nextOrganizationId = organizationId) {
@@ -288,6 +387,21 @@ export default function SettingsPage() {
       flash('social settings could not be loaded')
     } finally {
       setLoadingSocial(false)
+    }
+  }
+
+  async function loadGoogleSearchSettings(nextOrganizationId = organizationId) {
+    if (!nextOrganizationId) return
+    setLoadingGoogleSearch(true)
+    try {
+      const response = await authFetch(`${config.apiUrl}/google/search-console/settings?organizationId=${encodeURIComponent(nextOrganizationId)}`)
+      const payload = await readJson(response)
+      setGoogleSearchDefaults(payload.defaults ?? null)
+    } catch (error) {
+      console.error('Google Search settings load failed', error)
+      flash('google search settings could not be loaded')
+    } finally {
+      setLoadingGoogleSearch(false)
     }
   }
 
@@ -453,6 +567,69 @@ export default function SettingsPage() {
     }
   }
 
+  async function connectGoogleSearch() {
+    if (!organizationId) return
+    if (googleSearchDefaults && !googleSearchDefaults.configured) {
+      flash('set google client id and secret on the server first')
+      return
+    }
+
+    try {
+      const returnTo = `${window.location.origin}/settings/search`
+      const response = await authFetch(
+        `${config.apiUrl}/google/search-console/oauth/start?organizationId=${encodeURIComponent(organizationId)}&returnTo=${encodeURIComponent(returnTo)}`,
+      )
+      const payload = await readJson(response)
+      if (typeof payload.authorizationUrl !== 'string' || !payload.authorizationUrl) {
+        throw new Error('Google authorization URL was not returned.')
+      }
+      window.location.assign(payload.authorizationUrl)
+    } catch (error) {
+      console.error('Google Search connect failed', error)
+      flash(error instanceof Error ? error.message : 'google search connection failed')
+    }
+  }
+
+  async function syncSearchConsoleProperties() {
+    if (!organizationId) return
+    const response = await authFetch(`${config.apiUrl}/google/search-console/properties/sync`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ organizationId }),
+    })
+    const payload = await readJson(response)
+    const count = Array.isArray(payload.properties) ? payload.properties.length : 0
+    flash(`search properties synced · ${count}`)
+  }
+
+  async function selectSearchConsoleProperty(property: SearchConsolePropertyRow) {
+    const response = await authFetch(`${config.apiUrl}/google/search-console/properties/${property.id}/select`, {
+      method: 'POST',
+    })
+    await readJson(response)
+    flash('search property selected')
+  }
+
+  async function submitSearchConsoleSitemap(property: SearchConsolePropertyRow) {
+    const response = await authFetch(`${config.apiUrl}/google/search-console/sitemaps/submit`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ propertyId: property.id }),
+    })
+    await readJson(response)
+    flash('sitemap submitted')
+  }
+
+  async function syncSearchConsoleAnalytics(property: SearchConsolePropertyRow) {
+    const response = await authFetch(`${config.apiUrl}/google/search-console/search-analytics/sync`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ propertyId: property.id }),
+    })
+    const payload = await readJson(response)
+    flash(`search analytics synced · ${payload.rows ?? 0}`)
+  }
+
   async function copySecret(secret: string) {
     await navigator.clipboard.writeText(secret)
     flash('api key copied')
@@ -567,6 +744,24 @@ export default function SettingsPage() {
             onArchiveProviderApp={(providerApp) => void archiveProviderApp(providerApp)}
             onCreateChannel={() => setCreateLinkedInChannelOpen(true)}
             onDeleteChannel={(channel) => void deleteSocialChannel(channel)}
+          />
+        ) : null}
+
+        {section === 'search' ? (
+          <SearchSection
+            organization={organization}
+            defaults={googleSearchDefaults}
+            loading={loadingGoogleSearch}
+            connections={organizationGoogleConnections}
+            properties={organizationSearchConsoleProperties}
+            sitemaps={organizationSearchConsoleSitemaps}
+            metrics={organizationSearchConsoleMetrics}
+            inspections={organizationSearchConsoleInspections}
+            onConnect={() => void connectGoogleSearch()}
+            onSyncProperties={() => void syncSearchConsoleProperties()}
+            onSelectProperty={(property) => void selectSearchConsoleProperty(property)}
+            onSubmitSitemap={(property) => void submitSearchConsoleSitemap(property)}
+            onSyncAnalytics={(property) => void syncSearchConsoleAnalytics(property)}
           />
         ) : null}
 
@@ -1201,6 +1396,304 @@ function linkedinPrimaryAction({
     return { label: 'connect linkedin', icon: <Linkedin className="h-3.5 w-3.5" />, onClick: onConnect }
   }
   return { label: 'add destination', icon: <Plus className="h-3.5 w-3.5" />, onClick: onCreateChannel }
+}
+
+function SearchSection({
+  organization,
+  defaults,
+  loading,
+  connections,
+  properties,
+  sitemaps,
+  metrics,
+  inspections,
+  onConnect,
+  onSyncProperties,
+  onSelectProperty,
+  onSubmitSitemap,
+  onSyncAnalytics,
+}: {
+  organization: OrganizationRow | null
+  defaults: GoogleSearchSettingsDefaults | null
+  loading: boolean
+  connections: GoogleConnectionRow[]
+  properties: SearchConsolePropertyRow[]
+  sitemaps: SearchConsoleSitemapRow[]
+  metrics: SearchConsoleMetricSnapshotRow[]
+  inspections: SearchConsoleUrlInspectionRow[]
+  onConnect: () => void
+  onSyncProperties: () => void
+  onSelectProperty: (property: SearchConsolePropertyRow) => void
+  onSubmitSitemap: (property: SearchConsolePropertyRow) => void
+  onSyncAnalytics: (property: SearchConsolePropertyRow) => void
+}) {
+  const activeConnections = connections.filter((connection) => connection.status === 'active')
+  const selectedProperty = properties.find((property) => property.selected) ?? properties[0] ?? null
+  const selectedSitemaps = selectedProperty ? sitemaps.filter((sitemap) => sitemap.propertyId === selectedProperty.id) : []
+  const selectedMetrics = selectedProperty ? metrics.filter((metric) => metric.propertyId === selectedProperty.id) : metrics
+  const totalClicks = selectedMetrics.reduce((sum, metric) => sum + metric.clicks, 0)
+  const totalImpressions = selectedMetrics.reduce((sum, metric) => sum + metric.impressions, 0)
+  const syncedDates = new Set(selectedMetrics.map((metric) => metric.dataDate)).size
+  const setup = googleSearchSetupState({ defaults, activeConnections, properties })
+
+  return (
+    <div className="space-y-4">
+      <div className="flex flex-col gap-3 border-b border-edge/15 pb-3 md:flex-row md:items-end md:justify-between">
+        <div>
+          <div className="font-mono text-[10px] uppercase tracking-label text-fg-4">owned search</div>
+          <h1 className="mt-1 font-mono text-2xl font-bold lowercase text-fg-1">search console</h1>
+        </div>
+      </div>
+
+      <Panel className="border-accent/25 bg-accent-fill/3">
+        <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+          <div className="min-w-0 flex-1">
+            <div className="flex flex-wrap items-center gap-2">
+              <div className="inline-flex h-8 w-8 items-center justify-center border border-accent/35 bg-accent-fill/8 text-accent">
+                <Search className="h-4 w-4" />
+              </div>
+              <div>
+                <div className="font-mono text-base font-bold lowercase text-fg-1">google search console</div>
+                <div className="mt-0.5 font-mono text-[10px] uppercase tracking-label text-fg-4">organic discovery loop</div>
+              </div>
+              <StatusPill kind={setup.kind}>{setup.label}</StatusPill>
+            </div>
+
+            <div className="mt-4 overflow-hidden border border-edge/15 bg-rim divide-y divide-edge/12 md:grid md:grid-cols-3 md:divide-x md:divide-y-0">
+              <SearchSetupStep
+                label="oauth app"
+                value={defaults?.configured ? 'configured' : loading ? 'loading' : 'missing env'}
+                done={Boolean(defaults?.configured)}
+                warning={Boolean(defaults && !defaults.configured)}
+                help="Pach uses the Google OAuth client on the server to request Search Console access and store encrypted tokens."
+              />
+              <SearchSetupStep
+                label="account"
+                value={activeConnections.length ? `${activeConnections.length} active` : 'not connected'}
+                done={activeConnections.length > 0}
+                help="A connected Google account must have access to the Search Console property."
+              />
+              <SearchSetupStep
+                label="property"
+                value={selectedProperty?.displayName ?? (properties.length ? 'choose property' : 'none')}
+                done={Boolean(selectedProperty)}
+                warning={properties.length > 0 && !properties.some((property) => property.selected)}
+                help="The selected Search Console property is the source for query, page, sitemap, and indexing data."
+              />
+            </div>
+          </div>
+
+          <div className="flex shrink-0 flex-wrap gap-2 lg:justify-end">
+            <Button kind="primary" icon={<Search className="h-3.5 w-3.5" />} onClick={onConnect} disabled={!organization || Boolean(defaults && !defaults.configured)}>
+              connect google
+            </Button>
+            <Button icon={<RefreshCw className="h-3.5 w-3.5" />} onClick={onSyncProperties} disabled={!organization || activeConnections.length === 0}>
+              sync properties
+            </Button>
+          </div>
+        </div>
+        {defaults?.redirectUri ? (
+          <div className="mt-4 flex flex-col gap-2 border border-edge/12 bg-rim px-3 py-2 font-mono text-xs text-fg-3 md:flex-row md:items-center">
+            <span className="text-fg-4">redirect uri</span>
+            <code className="min-w-0 flex-1 truncate text-fg-1">{defaults.redirectUri}</code>
+            <Button className="px-2 py-1 text-[10px]" icon={<Copy className="h-3 w-3" />} onClick={() => void navigator.clipboard.writeText(defaults.redirectUri)}>
+              copy
+            </Button>
+          </div>
+        ) : null}
+      </Panel>
+
+      <div className="grid gap-3 md:grid-cols-3">
+        <SearchMetricCard label="clicks" value={formatCompactNumber(totalClicks)} />
+        <SearchMetricCard label="impressions" value={formatCompactNumber(totalImpressions)} />
+        <SearchMetricCard label="synced days" value={String(syncedDates)} />
+      </div>
+
+      <Panel title="google connections">
+        {connections.length > 0 ? (
+          <div className="grid gap-2 md:grid-cols-2">
+            {connections.map((connection) => (
+              <div key={connection.id} className="border border-edge/12 bg-rim px-3 py-3">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <div className="truncate font-mono text-sm text-fg-1">{connection.providerAccountEmail ?? connection.providerAccountName ?? 'Google account'}</div>
+                    <div className="mt-1 font-mono text-[11px] text-fg-4">
+                      {connection.credentialKind} · {connection.scopes.includes('https://www.googleapis.com/auth/webmasters') ? 'sitemap write' : 'readonly'}
+                    </div>
+                  </div>
+                  <StatusPill kind={connection.status === 'active' ? 'ok' : 'warn'}>{connection.status}</StatusPill>
+                </div>
+                <div className="mt-3 flex items-center justify-between gap-2">
+                  <div className="font-mono text-[11px] text-fg-4">refreshed {formatDate(connection.lastRefreshedAt)}</div>
+                  <div className="font-mono text-[11px] text-fg-4">expires {formatDate(connection.tokenExpiresAt)}</div>
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <div className="border border-dashed border-edge/15 py-8 text-center font-mono text-sm text-fg-4">
+            {loading ? 'loading google settings' : 'no google accounts connected'}
+          </div>
+        )}
+      </Panel>
+
+      <Panel
+        title="search console properties"
+        right={
+          selectedProperty ? (
+            <div className="flex flex-wrap gap-2">
+              <Button className="px-2 py-1 text-[10px]" icon={<Link2 className="h-3 w-3" />} onClick={() => onSubmitSitemap(selectedProperty)}>
+                submit sitemap
+              </Button>
+              <Button className="px-2 py-1 text-[10px]" icon={<RefreshCw className="h-3 w-3" />} onClick={() => onSyncAnalytics(selectedProperty)}>
+                sync analytics
+              </Button>
+            </div>
+          ) : null
+        }
+      >
+        <div className="overflow-auto">
+          <table className="w-full min-w-[920px] text-left font-mono text-xs">
+            <thead className="text-[10px] uppercase tracking-label text-fg-4">
+              <tr className="border-b border-edge/12">
+                <th className="pb-2 pr-3 font-normal">property</th>
+                <th className="pb-2 pr-3 font-normal">permission</th>
+                <th className="pb-2 pr-3 font-normal">selected</th>
+                <th className="pb-2 pr-3 font-normal">last sync</th>
+                <th className="pb-2 pr-3 font-normal">sitemap</th>
+                <th className="pb-2 font-normal">action</th>
+              </tr>
+            </thead>
+            <tbody>
+              {properties.map((property) => {
+                const propertySitemaps = sitemaps.filter((sitemap) => sitemap.propertyId === property.id)
+                return (
+                  <tr key={property.id} className="border-b border-edge/8 text-fg-2">
+                    <td className="max-w-[260px] py-2.5 pr-3">
+                      <div className="truncate text-fg-1">{property.displayName}</div>
+                      <div className="mt-1 truncate text-[11px] text-fg-4">{property.siteUrl}</div>
+                    </td>
+                    <td className="py-2.5 pr-3 text-fg-4">{property.permissionLevel ?? '-'}</td>
+                    <td className="py-2.5 pr-3">
+                      <StatusPill kind={property.selected ? 'ok' : 'idle'}>{property.selected ? 'selected' : 'available'}</StatusPill>
+                    </td>
+                    <td className="py-2.5 pr-3 text-fg-4">{formatDate(property.lastSyncedAt)}</td>
+                    <td className="max-w-[220px] py-2.5 pr-3 text-fg-4">
+                      {propertySitemaps[0]?.sitemapUrl ?? defaultSitemapUrlForProperty(property.siteUrl)}
+                    </td>
+                    <td className="py-2.5">
+                      <div className="flex flex-wrap gap-2">
+                        <Button className="px-2 py-1 text-[10px]" icon={<Check className="h-3 w-3" />} onClick={() => onSelectProperty(property)} disabled={property.selected}>
+                          select
+                        </Button>
+                        <Button className="px-2 py-1 text-[10px]" icon={<Link2 className="h-3 w-3" />} onClick={() => onSubmitSitemap(property)}>
+                          sitemap
+                        </Button>
+                        <Button className="px-2 py-1 text-[10px]" icon={<RefreshCw className="h-3 w-3" />} onClick={() => onSyncAnalytics(property)}>
+                          analytics
+                        </Button>
+                      </div>
+                    </td>
+                  </tr>
+                )
+              })}
+            </tbody>
+          </table>
+        </div>
+        {properties.length === 0 ? (
+          <div className="border border-dashed border-edge/15 py-8 text-center font-mono text-sm text-fg-4">
+            {activeConnections.length ? 'sync properties to choose a site' : 'connect google to sync properties'}
+          </div>
+        ) : null}
+      </Panel>
+
+      {selectedProperty ? (
+        <Panel title="selected property status">
+          <div className="grid gap-3 md:grid-cols-2">
+            <div className="border border-edge/12 bg-rim px-3 py-3">
+              <div className="font-mono text-[10px] uppercase tracking-label text-fg-4">sitemaps</div>
+              <div className="mt-2 space-y-2">
+                {selectedSitemaps.length ? selectedSitemaps.map((sitemap) => (
+                  <div key={sitemap.id} className="flex items-center justify-between gap-3 font-mono text-xs">
+                    <span className="min-w-0 truncate text-fg-2">{sitemap.sitemapUrl}</span>
+                    <StatusPill kind={sitemap.status === 'submitted' ? 'ok' : 'warn'}>{sitemap.status}</StatusPill>
+                  </div>
+                )) : <div className="font-mono text-xs text-fg-4">no sitemap submissions tracked</div>}
+              </div>
+            </div>
+            <div className="border border-edge/12 bg-rim px-3 py-3">
+              <div className="font-mono text-[10px] uppercase tracking-label text-fg-4">url inspections</div>
+              <div className="mt-2 space-y-2">
+                {inspections.filter((inspection) => inspection.propertyId === selectedProperty.id).slice(0, 3).map((inspection) => (
+                  <div key={inspection.id} className="flex items-center justify-between gap-3 font-mono text-xs">
+                    <span className="min-w-0 truncate text-fg-2">{inspection.inspectionUrl}</span>
+                    <StatusPill kind={inspection.verdict === 'PASS' ? 'ok' : inspection.verdict ? 'warn' : 'idle'}>{inspection.verdict ?? 'unknown'}</StatusPill>
+                  </div>
+                ))}
+                {inspections.filter((inspection) => inspection.propertyId === selectedProperty.id).length === 0 ? (
+                  <div className="font-mono text-xs text-fg-4">no URL inspections yet</div>
+                ) : null}
+              </div>
+            </div>
+          </div>
+        </Panel>
+      ) : null}
+    </div>
+  )
+}
+
+function SearchSetupStep({
+  label,
+  value,
+  done,
+  warning = false,
+  help,
+}: {
+  label: string
+  value: string
+  done: boolean
+  warning?: boolean
+  help: string
+}) {
+  const kind = done ? 'ok' : warning ? 'warn' : 'idle'
+  return (
+    <HelpTooltip label={help} block>
+      <div className={`flex min-h-[88px] w-full flex-col px-3 py-2.5 ${done ? 'bg-ok/4' : warning ? 'bg-warn/4' : 'bg-transparent'}`}>
+        <div>
+          <div className="font-mono text-[10px] uppercase tracking-label text-fg-4">{label}</div>
+          <div className="mt-2">
+            <StatusPill kind={kind}>{done ? 'done' : warning ? 'attention' : 'pending'}</StatusPill>
+          </div>
+        </div>
+        <div className="mt-auto truncate pt-3 font-mono text-xs text-fg-2">{value}</div>
+      </div>
+    </HelpTooltip>
+  )
+}
+
+function SearchMetricCard({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="border border-edge/12 bg-rim px-3 py-3">
+      <div className="font-mono text-[10px] uppercase tracking-label text-fg-4">{label}</div>
+      <div className="mt-2 font-mono text-2xl font-bold text-fg-1">{value}</div>
+    </div>
+  )
+}
+
+function googleSearchSetupState({
+  defaults,
+  activeConnections,
+  properties,
+}: {
+  defaults: GoogleSearchSettingsDefaults | null
+  activeConnections: GoogleConnectionRow[]
+  properties: SearchConsolePropertyRow[]
+}): { label: string; kind: 'ok' | 'warn' | 'fail' | 'info' | 'idle' } {
+  if (defaults && !defaults.configured) return { label: 'server setup needed', kind: 'warn' }
+  if (activeConnections.length === 0) return { label: 'connect account', kind: 'info' }
+  if (properties.length === 0) return { label: 'sync properties', kind: 'warn' }
+  if (!properties.some((property) => property.selected)) return { label: 'choose property', kind: 'warn' }
+  return { label: 'ready', kind: 'ok' }
 }
 
 function ApiKeysSection({
@@ -1879,6 +2372,15 @@ function normalizeLinkedInExternalId(value: string) {
   const trimmed = value.trim()
   if (/^\d+$/.test(trimmed)) return `urn:li:organization:${trimmed}`
   return trimmed
+}
+
+function defaultSitemapUrlForProperty(siteUrl: string) {
+  if (siteUrl.startsWith('sc-domain:')) return `https://${siteUrl.replace(/^sc-domain:/, '')}/sitemap.xml`
+  return `${siteUrl.replace(/\/+$/, '')}/sitemap.xml`
+}
+
+function formatCompactNumber(value: number) {
+  return new Intl.NumberFormat(undefined, { notation: 'compact', maximumFractionDigits: 1 }).format(value)
 }
 
 function formatDate(value: number | null | undefined) {

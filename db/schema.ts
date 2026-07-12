@@ -1156,6 +1156,132 @@ export const mktAdMetricSnapshots = pgTable('mkt_ad_metric_snapshots', {
   periodIdx: index('mkt_ad_metric_snapshots_period_idx').on(table.periodStart, table.periodEnd),
 }))
 
+/* ─────────────────────── SEARCH CONSOLE ─────────────────────── */
+
+export const googleConnections = pgTable('google_connections', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  organizationId: uuid('organization_id').notNull().references(() => organizations.id),
+  connectedByUserId: uuid('connected_by_user_id').references(() => users.id),
+  providerAccountId: text('provider_account_id'),
+  providerAccountEmail: text('provider_account_email'),
+  providerAccountName: text('provider_account_name'),
+  scopes: jsonb('scopes').$type<string[]>().notNull().default([]),
+  credentialKind: text('credential_kind').notNull().default('oauth2'),
+  encryptedAccessToken: text('encrypted_access_token'),
+  encryptedRefreshToken: text('encrypted_refresh_token'),
+  tokenExpiresAt: timestamp('token_expires_at', { withTimezone: true }),
+  status: text('status').notNull().default('active'),
+  statusMessage: text('status_message'),
+  lastUsedAt: timestamp('last_used_at', { withTimezone: true }),
+  lastRefreshedAt: timestamp('last_refreshed_at', { withTimezone: true }),
+  metadata: jsonb('metadata').$type<Record<string, unknown>>().notNull().default({}),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+}, (table) => ({
+  organizationIdx: index('google_connections_organization_idx').on(table.organizationId),
+  providerAccountIdx: index('google_connections_provider_account_idx').on(table.providerAccountEmail),
+  statusIdx: index('google_connections_status_idx').on(table.status),
+}))
+
+export const searchConsoleProperties = pgTable('search_console_properties', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  organizationId: uuid('organization_id').notNull().references(() => organizations.id),
+  connectionId: uuid('connection_id').references(() => googleConnections.id),
+  siteUrl: text('site_url').notNull(),
+  displayName: text('display_name').notNull(),
+  permissionLevel: text('permission_level'),
+  selected: boolean('selected').notNull().default(false),
+  status: text('status').notNull().default('active'),
+  lastSyncedAt: timestamp('last_synced_at', { withTimezone: true }),
+  metadata: jsonb('metadata').$type<Record<string, unknown>>().notNull().default({}),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+}, (table) => ({
+  organizationIdx: index('search_console_properties_organization_idx').on(table.organizationId),
+  connectionIdx: index('search_console_properties_connection_idx').on(table.connectionId),
+  organizationSiteIdx: uniqueIndex('search_console_properties_organization_site_idx').on(table.organizationId, table.siteUrl),
+  selectedIdx: index('search_console_properties_selected_idx').on(table.organizationId, table.selected),
+}))
+
+export const searchConsoleSitemaps = pgTable('search_console_sitemaps', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  organizationId: uuid('organization_id').notNull().references(() => organizations.id),
+  propertyId: uuid('property_id').notNull().references(() => searchConsoleProperties.id),
+  siteUrl: text('site_url').notNull(),
+  sitemapUrl: text('sitemap_url').notNull(),
+  status: text('status').notNull().default('submitted'),
+  lastSubmittedAt: timestamp('last_submitted_at', { withTimezone: true }),
+  lastSyncedAt: timestamp('last_synced_at', { withTimezone: true }),
+  error: text('error'),
+  metadata: jsonb('metadata').$type<Record<string, unknown>>().notNull().default({}),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+}, (table) => ({
+  organizationIdx: index('search_console_sitemaps_organization_idx').on(table.organizationId),
+  propertyIdx: index('search_console_sitemaps_property_idx').on(table.propertyId),
+  propertySitemapIdx: uniqueIndex('search_console_sitemaps_property_sitemap_idx').on(table.propertyId, table.sitemapUrl),
+}))
+
+export const searchConsoleMetricSnapshots = pgTable('search_console_metric_snapshots', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  organizationId: uuid('organization_id').notNull().references(() => organizations.id),
+  propertyId: uuid('property_id').notNull().references(() => searchConsoleProperties.id),
+  contentItemId: uuid('content_item_id').references(() => mktContentItems.id),
+  contentOutputId: uuid('content_output_id').references(() => mktContentOutputs.id),
+  dataDate: date('data_date').notNull(),
+  searchType: text('search_type').notNull().default('web'),
+  page: text('page'),
+  query: text('query'),
+  country: text('country'),
+  device: text('device'),
+  clicks: integer('clicks').notNull().default(0),
+  impressions: integer('impressions').notNull().default(0),
+  ctr: text('ctr'),
+  position: text('position'),
+  metadata: jsonb('metadata').$type<Record<string, unknown>>().notNull().default({}),
+  fetchedAt: timestamp('fetched_at', { withTimezone: true }).notNull().defaultNow(),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+}, (table) => ({
+  organizationIdx: index('search_console_metric_snapshots_organization_idx').on(table.organizationId),
+  propertyDateIdx: index('search_console_metric_snapshots_property_date_idx').on(table.propertyId, table.dataDate),
+  pageIdx: index('search_console_metric_snapshots_page_idx').on(table.page),
+  queryIdx: index('search_console_metric_snapshots_query_idx').on(table.query),
+  contentItemIdx: index('search_console_metric_snapshots_content_item_idx').on(table.contentItemId),
+  uniqueMetricIdx: uniqueIndex('search_console_metric_snapshots_unique_idx').on(
+    table.propertyId,
+    table.dataDate,
+    table.searchType,
+    table.page,
+    table.query,
+    table.country,
+    table.device,
+  ),
+}))
+
+export const searchConsoleUrlInspections = pgTable('search_console_url_inspections', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  organizationId: uuid('organization_id').notNull().references(() => organizations.id),
+  propertyId: uuid('property_id').notNull().references(() => searchConsoleProperties.id),
+  contentItemId: uuid('content_item_id').references(() => mktContentItems.id),
+  contentOutputId: uuid('content_output_id').references(() => mktContentOutputs.id),
+  inspectionUrl: text('inspection_url').notNull(),
+  verdict: text('verdict'),
+  coverageState: text('coverage_state'),
+  indexingState: text('indexing_state'),
+  robotsTxtState: text('robots_txt_state'),
+  lastCrawlTime: timestamp('last_crawl_time', { withTimezone: true }),
+  inspectedAt: timestamp('inspected_at', { withTimezone: true }).notNull().defaultNow(),
+  rawResult: jsonb('raw_result').$type<Record<string, unknown>>().notNull().default({}),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+}, (table) => ({
+  organizationIdx: index('search_console_url_inspections_organization_idx').on(table.organizationId),
+  propertyIdx: index('search_console_url_inspections_property_idx').on(table.propertyId),
+  inspectionUrlIdx: index('search_console_url_inspections_url_idx').on(table.inspectionUrl),
+  propertyUrlIdx: uniqueIndex('search_console_url_inspections_property_url_idx').on(table.propertyId, table.inspectionUrl),
+}))
+
 /* ─────────────────────── PROJECT MANAGEMENT ─────────────────────── */
 
 export const pmTeams = pgTable('pm_teams', {

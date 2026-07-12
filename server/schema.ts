@@ -905,6 +905,105 @@ const mktAdMetricSnapshots = table('mkt_ad_metric_snapshots')
   })
   .primaryKey('id')
 
+const googleConnections = table('google_connections')
+  .columns({
+    id: string(),
+    organizationId: string().from('organization_id'),
+    connectedByUserId: string().optional().from('connected_by_user_id'),
+    providerAccountId: string().optional().from('provider_account_id'),
+    providerAccountEmail: string().optional().from('provider_account_email'),
+    providerAccountName: string().optional().from('provider_account_name'),
+    scopes: json<string[]>(),
+    credentialKind: string().from('credential_kind'),
+    tokenExpiresAt: number().optional().from('token_expires_at'),
+    status: string(),
+    statusMessage: string().optional().from('status_message'),
+    lastUsedAt: number().optional().from('last_used_at'),
+    lastRefreshedAt: number().optional().from('last_refreshed_at'),
+    metadata: json(),
+    createdAt: number().from('created_at'),
+    updatedAt: number().from('updated_at'),
+  })
+  .primaryKey('id')
+
+const searchConsoleProperties = table('search_console_properties')
+  .columns({
+    id: string(),
+    organizationId: string().from('organization_id'),
+    connectionId: string().optional().from('connection_id'),
+    siteUrl: string().from('site_url'),
+    displayName: string().from('display_name'),
+    permissionLevel: string().optional().from('permission_level'),
+    selected: boolean(),
+    status: string(),
+    lastSyncedAt: number().optional().from('last_synced_at'),
+    metadata: json(),
+    createdAt: number().from('created_at'),
+    updatedAt: number().from('updated_at'),
+  })
+  .primaryKey('id')
+
+const searchConsoleSitemaps = table('search_console_sitemaps')
+  .columns({
+    id: string(),
+    organizationId: string().from('organization_id'),
+    propertyId: string().from('property_id'),
+    siteUrl: string().from('site_url'),
+    sitemapUrl: string().from('sitemap_url'),
+    status: string(),
+    lastSubmittedAt: number().optional().from('last_submitted_at'),
+    lastSyncedAt: number().optional().from('last_synced_at'),
+    error: string().optional(),
+    metadata: json(),
+    createdAt: number().from('created_at'),
+    updatedAt: number().from('updated_at'),
+  })
+  .primaryKey('id')
+
+const searchConsoleMetricSnapshots = table('search_console_metric_snapshots')
+  .columns({
+    id: string(),
+    organizationId: string().from('organization_id'),
+    propertyId: string().from('property_id'),
+    contentItemId: string().optional().from('content_item_id'),
+    contentOutputId: string().optional().from('content_output_id'),
+    dataDate: number().from('data_date'),
+    searchType: string().from('search_type'),
+    page: string().optional(),
+    query: string().optional(),
+    country: string().optional(),
+    device: string().optional(),
+    clicks: number(),
+    impressions: number(),
+    ctr: string().optional(),
+    position: string().optional(),
+    metadata: json(),
+    fetchedAt: number().from('fetched_at'),
+    createdAt: number().from('created_at'),
+    updatedAt: number().from('updated_at'),
+  })
+  .primaryKey('id')
+
+const searchConsoleUrlInspections = table('search_console_url_inspections')
+  .columns({
+    id: string(),
+    organizationId: string().from('organization_id'),
+    propertyId: string().from('property_id'),
+    contentItemId: string().optional().from('content_item_id'),
+    contentOutputId: string().optional().from('content_output_id'),
+    inspectionUrl: string().from('inspection_url'),
+    verdict: string().optional(),
+    coverageState: string().optional().from('coverage_state'),
+    indexingState: string().optional().from('indexing_state'),
+    robotsTxtState: string().optional().from('robots_txt_state'),
+    lastCrawlTime: number().optional().from('last_crawl_time'),
+    inspectedAt: number().from('inspected_at'),
+    rawResult: json().from('raw_result'),
+    createdAt: number().from('created_at'),
+    updatedAt: number().from('updated_at'),
+  })
+  .primaryKey('id')
+
 const pmTeams = table('pm_teams')
   .columns({
     id: string(),
@@ -1429,6 +1528,11 @@ export const schema = createSchema({
     socialPostTargets,
     mktAdPromotions,
     mktAdMetricSnapshots,
+    googleConnections,
+    searchConsoleProperties,
+    searchConsoleSitemaps,
+    searchConsoleMetricSnapshots,
+    searchConsoleUrlInspections,
     pmTeams,
     pmProjects,
     pmStatuses,
@@ -1573,6 +1677,11 @@ export const permissions = definePermissions<AuthData, Schema>(schema, () => {
     social_post_targets: organizationScoped<'social_post_targets'>(),
     mkt_ad_promotions: organizationScoped<'mkt_ad_promotions'>(),
     mkt_ad_metric_snapshots: organizationScoped<'mkt_ad_metric_snapshots'>(),
+    google_connections: organizationScoped<'google_connections'>(),
+    search_console_properties: organizationScoped<'search_console_properties'>(),
+    search_console_sitemaps: organizationScoped<'search_console_sitemaps'>(),
+    search_console_metric_snapshots: organizationScoped<'search_console_metric_snapshots'>(),
+    search_console_url_inspections: organizationScoped<'search_console_url_inspections'>(),
     pm_teams: authenticatedReadOnly,
     pm_projects: organizationScoped<'pm_projects'>('companyId'),
     pm_statuses: authenticatedReadOnly,
