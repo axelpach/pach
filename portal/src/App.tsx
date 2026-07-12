@@ -52,6 +52,7 @@ const OUTER_NAV_ITEMS: readonly OuterNavItem[] = [
       { label: 'Newsletters', path: '/marketing/newsletters/content' },
       { label: 'Social', path: '/marketing/social' },
       { label: 'WhatsApp', path: '/marketing/whatsapp/templates', requiresWhatsApp: true },
+      { label: 'Promotions', path: '/marketing/promotions' },
       { label: 'Calendar', path: '/marketing/calendar' },
       { label: 'Analytics', path: '/marketing/analytics' },
     ],
