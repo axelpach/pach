@@ -39,7 +39,7 @@ import {
   Users,
   X,
 } from 'lucide-react'
-import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { useEffect, useMemo, useRef, useState, type MouseEvent, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import { Navigate, Route, Routes, useLocation, useNavigate } from 'react-router-dom'
 import { Button, Metric, Panel, StatusPill, TermInput, TermTextarea } from '../../components/pach'
@@ -83,6 +83,7 @@ type SearchConsolePropertyRow = {
 type SearchConsoleMetricSnapshotRow = {
   organizationId: string
   propertyId: string
+  dataDate: number | string
   contentItemId?: string | null
   page?: string | null
   query?: string | null
@@ -4133,6 +4134,7 @@ function AnalyticsSection({
     ? searchConsoleInspections.filter((inspection) => inspection.propertyId === selectedProperty.id)
     : searchConsoleInspections
   const searchTotals = sumSearchConsoleMetrics(selectedSearchMetrics)
+  const searchTrendPoints = buildSearchTrendPoints(selectedSearchMetrics)
   const topPages = aggregateSearchConsoleMetrics(selectedSearchMetrics, 'page').slice(0, 8)
   const topQueries = aggregateSearchConsoleMetrics(selectedSearchMetrics, 'query').slice(0, 8)
   const opportunities = searchConsoleOpportunities(selectedSearchMetrics).slice(0, 8)
@@ -4176,6 +4178,7 @@ function AnalyticsSection({
               properties={searchConsoleProperties}
               metrics={selectedSearchMetrics}
               inspections={selectedSearchInspections}
+              trendPoints={searchTrendPoints}
               topPages={topPages}
               topQueries={topQueries}
               opportunities={opportunities}
@@ -4203,6 +4206,16 @@ type SearchAggregateRow = {
   page?: string | null
   query?: string | null
   contentItemId?: string | null
+  clicks: number
+  impressions: number
+  ctr: number
+  position: number
+}
+
+type SearchTrendPoint = {
+  id: string
+  label: string
+  timestamp: number
   clicks: number
   impressions: number
   ctr: number
@@ -4258,6 +4271,7 @@ function OrganicSearchAnalyticsPanel({
   properties,
   metrics,
   inspections,
+  trendPoints,
   topPages,
   topQueries,
   opportunities,
@@ -4267,6 +4281,7 @@ function OrganicSearchAnalyticsPanel({
   properties: SearchConsolePropertyRow[]
   metrics: SearchConsoleMetricSnapshotRow[]
   inspections: SearchConsoleUrlInspectionRow[]
+  trendPoints: SearchTrendPoint[]
   topPages: SearchAggregateRow[]
   topQueries: SearchAggregateRow[]
   opportunities: SearchAggregateRow[]
@@ -4291,6 +4306,10 @@ function OrganicSearchAnalyticsPanel({
         <span className="mx-2 text-fg-4">/</span>
         <span>{formatCompactNumber(totals.impressions)} views</span>
       </div>
+
+      {trendPoints.length > 0 ? (
+        <SearchConsoleTrendChart points={trendPoints} />
+      ) : null}
 
       {properties.length === 0 ? (
         <EmptyState label="connect google search console in settings" />
@@ -4332,6 +4351,168 @@ function OrganicSearchAnalyticsPanel({
           />
         </div>
       )}
+    </div>
+  )
+}
+
+function SearchConsoleTrendChart({ points }: { points: SearchTrendPoint[] }) {
+  const [hoverIndex, setHoverIndex] = useState<number | null>(null)
+  const wrapperRef = useRef<HTMLDivElement | null>(null)
+  const width = 760
+  const height = 240
+  const padTop = 20
+  const padBottom = 28
+  const chartHeight = height - padTop - padBottom
+  const maxClicks = Math.max(...points.map((point) => point.clicks), 1)
+  const maxImpressions = Math.max(...points.map((point) => point.impressions), 1)
+  const chartPoints = points.map((point, index) => {
+    const x = (index / Math.max(points.length - 1, 1)) * width
+    return {
+      ...point,
+      x,
+      clicksY: padTop + (1 - point.clicks / maxClicks) * chartHeight,
+      impressionsY: padTop + (1 - point.impressions / maxImpressions) * chartHeight,
+    }
+  })
+  const pathFor = (entries: typeof chartPoints, yKey: 'clicksY' | 'impressionsY') => (
+    entries.map((point, index) => `${index === 0 ? 'M' : 'L'} ${point.x},${point[yKey]}`).join(' ')
+  )
+  const clicksPath = pathFor(chartPoints, 'clicksY')
+  const impressionsPath = pathFor(chartPoints, 'impressionsY')
+  const impressionsAreaPath = `${impressionsPath} L ${width},${height - padBottom} L 0,${height - padBottom} Z`
+  const hoveredPoint = hoverIndex == null ? null : chartPoints[hoverIndex]
+  const tooltipXPercent = hoveredPoint ? (hoveredPoint.x / width) * 100 : 0
+  const tooltipTransform = hoverIndex === 0
+    ? 'translateY(-100%)'
+    : hoverIndex === chartPoints.length - 1
+      ? 'translate(-100%, -100%)'
+      : 'translate(-50%, -100%)'
+
+  function handleMouseMove(event: MouseEvent<HTMLDivElement>) {
+    if (!wrapperRef.current || points.length === 0) return
+    const rect = wrapperRef.current.getBoundingClientRect()
+    const ratio = Math.max(0, Math.min(1, (event.clientX - rect.left) / rect.width))
+    setHoverIndex(Math.round(ratio * (points.length - 1)))
+  }
+
+  return (
+    <div className="border border-edge/12 bg-pit-2">
+      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-edge/12 px-3 py-2">
+        <div>
+          <div className="font-mono text-[10px] uppercase tracking-label text-fg-4">daily search trend</div>
+          <div className="mt-1 font-mono text-xs text-fg-2">
+            {points[0]?.label ?? '-'} - {points[points.length - 1]?.label ?? '-'}
+          </div>
+        </div>
+        <div className="flex flex-wrap gap-3 font-mono text-[10px] uppercase tracking-label">
+          <span className="inline-flex items-center gap-1.5 text-info">
+            <span className="h-2 w-2 bg-info" />
+            clicks
+          </span>
+          <span className="inline-flex items-center gap-1.5 text-accent">
+            <span className="h-2 w-2 bg-accent" />
+            impressions
+          </span>
+        </div>
+      </div>
+      <div
+        ref={wrapperRef}
+        className="relative h-[280px] cursor-crosshair px-3 pb-8 pt-3"
+        onMouseMove={handleMouseMove}
+        onMouseLeave={() => setHoverIndex(null)}
+      >
+        <div className="absolute left-3 top-3 font-mono text-[10px] uppercase tracking-label text-info">
+          clicks {formatCompactNumber(maxClicks)}
+        </div>
+        <div className="absolute right-3 top-3 font-mono text-[10px] uppercase tracking-label text-accent">
+          views {formatCompactNumber(maxImpressions)}
+        </div>
+        <svg viewBox={`0 0 ${width} ${height}`} preserveAspectRatio="none" className="block h-full w-full">
+          <defs>
+            <linearGradient id="search-console-impressions-grad" x1="0" x2="0" y1="0" y2="1">
+              <stop offset="0%" stopColor="rgb(var(--accent-rgb))" stopOpacity="0.16" />
+              <stop offset="100%" stopColor="rgb(var(--accent-rgb))" stopOpacity="0" />
+            </linearGradient>
+          </defs>
+          {[0.2, 0.4, 0.6, 0.8].map((ratio) => (
+            <line
+              key={ratio}
+              x1="0"
+              x2={width}
+              y1={padTop + ratio * chartHeight}
+              y2={padTop + ratio * chartHeight}
+              stroke="rgb(var(--edge-rgb) / 0.12)"
+              strokeDasharray="2 5"
+              vectorEffect="non-scaling-stroke"
+            />
+          ))}
+          {impressionsPath ? <path d={impressionsAreaPath} fill="url(#search-console-impressions-grad)" /> : null}
+          {impressionsPath ? (
+            <path d={impressionsPath} fill="none" stroke="rgb(var(--accent-rgb))" strokeWidth="1.8" vectorEffect="non-scaling-stroke" />
+          ) : null}
+          {clicksPath ? (
+            <path d={clicksPath} fill="none" stroke="rgb(var(--info-rgb))" strokeWidth="1.8" vectorEffect="non-scaling-stroke" />
+          ) : null}
+          {hoveredPoint ? (
+            <line
+              x1={hoveredPoint.x}
+              x2={hoveredPoint.x}
+              y1={0}
+              y2={height}
+              stroke="rgb(var(--fg-1-rgb))"
+              strokeWidth="1"
+              strokeDasharray="2 3"
+              opacity="0.45"
+              vectorEffect="non-scaling-stroke"
+            />
+          ) : null}
+        </svg>
+        {chartPoints.map((point) => {
+          const xPercent = (point.x / width) * 100
+          return (
+            <span
+              key={point.id}
+              aria-hidden
+              className="pointer-events-none absolute h-1.5 w-1.5 rounded-full border border-info bg-pit"
+              style={{
+                left: `${xPercent}%`,
+                top: `calc(${(point.clicksY / height) * 100}% + 12px)`,
+                transform: 'translate(-50%, -50%)',
+              }}
+            />
+          )
+        })}
+        {hoveredPoint ? (
+          <div
+            className="pointer-events-none absolute z-20 min-w-48 border border-edge/24 bg-pit px-3 py-2 font-mono text-xs shadow-terminal-popover"
+            style={{
+              left: `${tooltipXPercent}%`,
+              top: `${(Math.min(hoveredPoint.clicksY, hoveredPoint.impressionsY) / height) * 100}%`,
+              marginTop: '8px',
+              transform: tooltipTransform,
+            }}
+          >
+            <div className="text-[10px] uppercase tracking-label text-fg-4">{hoveredPoint.label}</div>
+            <div className="mt-1 flex items-center justify-between gap-4 text-info">
+              <span>clicks</span>
+              <span className="text-fg-1 tabular-nums">{formatCompactNumber(hoveredPoint.clicks)}</span>
+            </div>
+            <div className="mt-1 flex items-center justify-between gap-4 text-accent">
+              <span>views</span>
+              <span className="text-fg-1 tabular-nums">{formatCompactNumber(hoveredPoint.impressions)}</span>
+            </div>
+            <div className="mt-1 flex items-center justify-between gap-4 text-fg-3">
+              <span>ctr</span>
+              <span className="text-fg-1 tabular-nums">{formatPercent(hoveredPoint.ctr)}</span>
+            </div>
+          </div>
+        ) : null}
+        <div className="pointer-events-none absolute bottom-2 left-3 right-3 flex justify-between font-mono text-[10px] uppercase tracking-label text-fg-4">
+          <span>{points[0]?.label ?? '-'}</span>
+          <span>{points[Math.floor(points.length / 2)]?.label ?? '-'}</span>
+          <span>{points[points.length - 1]?.label ?? '-'}</span>
+        </div>
+      </div>
     </div>
   )
 }
@@ -4996,6 +5177,43 @@ function sumSearchConsoleMetrics(snapshots: SearchConsoleMetricSnapshotRow[]) {
   )
 }
 
+function buildSearchTrendPoints(snapshots: SearchConsoleMetricSnapshotRow[]) {
+  const byDate = new Map<string, {
+    timestamp: number
+    clicks: number
+    impressions: number
+    weightedPosition: number
+  }>()
+
+  for (const snapshot of snapshots) {
+    const timestamp = searchMetricDateTimestamp(snapshot.dataDate)
+    if (!timestamp) continue
+    const key = new Date(timestamp).toISOString().slice(0, 10)
+    const current = byDate.get(key) ?? {
+      timestamp,
+      clicks: 0,
+      impressions: 0,
+      weightedPosition: 0,
+    }
+    current.clicks += snapshot.clicks
+    current.impressions += snapshot.impressions
+    current.weightedPosition += readNumericText(snapshot.position) * Math.max(1, snapshot.impressions)
+    byDate.set(key, current)
+  }
+
+  return Array.from(byDate.entries())
+    .map(([id, row]) => ({
+      id,
+      label: formatShortDate(row.timestamp),
+      timestamp: row.timestamp,
+      clicks: row.clicks,
+      impressions: row.impressions,
+      ctr: row.impressions ? row.clicks / row.impressions : 0,
+      position: row.impressions ? row.weightedPosition / row.impressions : 0,
+    }))
+    .sort((a, b) => a.timestamp - b.timestamp)
+}
+
 function aggregateSearchConsoleMetrics(snapshots: SearchConsoleMetricSnapshotRow[], key: 'page' | 'query') {
   const byKey = new Map<string, SearchAggregateRow & { weightedPosition: number }>()
   for (const snapshot of snapshots) {
@@ -5632,6 +5850,16 @@ function eventKind(eventType: string): Parameters<typeof StatusPill>[0]['kind'] 
 function formatDate(value: number | null | undefined) {
   if (!value) return '-'
   return new Intl.DateTimeFormat(undefined, { month: 'short', day: '2-digit', hour: '2-digit', minute: '2-digit' }).format(new Date(value))
+}
+
+function formatShortDate(value: number) {
+  return new Intl.DateTimeFormat(undefined, { month: 'short', day: '2-digit' }).format(new Date(value))
+}
+
+function searchMetricDateTimestamp(value: number | string | null | undefined) {
+  if (!value) return null
+  const parsed = typeof value === 'number' ? value : Date.parse(value)
+  return Number.isFinite(parsed) ? parsed : null
 }
 
 function formatScheduledDate(value: number | null | undefined, timezone: string | null | undefined) {

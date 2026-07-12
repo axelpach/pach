@@ -258,48 +258,13 @@ router.post('/search-console/sitemaps/submit', async (req, res) => {
 router.post('/search-console/search-analytics/sync', async (req, res) => {
   try {
     const body = ensureRecord(req.body)
-    const property = await requireSearchConsoleProperty({
+    const result = await syncSearchConsoleAnalyticsForProperty({
       propertyId: readRequiredString(body.propertyId, 'propertyId'),
       user: authenticatedUser(req),
+      req,
+      body,
     })
-    const connection = await requireGoogleConnection({
-      organizationId: property.organizationId,
-      connectionId: property.connectionId,
-      user: authenticatedUser(req),
-    })
-    const accessToken = await accessTokenForConnection(connection, req)
-    const range = searchAnalyticsRange(body)
-    const searchType = readOptionalString(body.searchType) ?? 'web'
-    const rowLimit = readPositiveInteger(body.rowLimit, 25_000)
-    const rows = await fetchSearchAnalytics({
-      accessToken,
-      siteUrl: property.siteUrl,
-      startDate: range.startDate,
-      endDate: range.endDate,
-      searchType,
-      rowLimit,
-    })
-    const inserted = await saveSearchAnalyticsRows({
-      organizationId: property.organizationId,
-      propertyId: property.id,
-      searchType,
-      rows,
-    })
-
-    const now = new Date()
-    await getDb()
-      .update(searchConsoleProperties)
-      .set({ lastSyncedAt: now, updatedAt: now })
-      .where(eq(searchConsoleProperties.id, property.id))
-
-    await recordGoogleActivity({
-      organizationId: property.organizationId,
-      eventType: 'search_console_search_analytics_synced',
-      summary: `Synced ${inserted} Search Console row${inserted === 1 ? '' : 's'}`,
-      details: { propertyId: property.id, siteUrl: property.siteUrl, ...range, searchType, rowLimit },
-    })
-
-    res.json({ ok: true, rows: inserted, ...range, searchType })
+    res.json({ ok: true, rows: result.rows, startDate: result.startDate, endDate: result.endDate, searchType: result.searchType })
   } catch (error) {
     handleRouteError(res, error, 'GOOGLE_SEARCH_ANALYTICS_SYNC_FAILED', 'Could not sync Search Console analytics.')
   }
@@ -526,6 +491,71 @@ async function submitSitemap({ accessToken, siteUrl, sitemapUrl }: { accessToken
   }
 }
 
+export async function syncSearchConsoleAnalyticsForProperty({
+  propertyId,
+  user,
+  req,
+  body = {},
+}: {
+  propertyId: string
+  user?: JWTPayload
+  req?: Request
+  body?: Record<string, unknown>
+}) {
+  const property = await readSearchConsolePropertyForSync({ propertyId, user })
+  const connection = await readGoogleConnectionForSync({
+    organizationId: property.organizationId,
+    connectionId: property.connectionId,
+    user,
+  })
+  const accessToken = await accessTokenForConnection(connection, req)
+  const range = searchAnalyticsRange(body)
+  const searchType = readOptionalString(body.searchType) ?? 'web'
+  const rowLimit = readPositiveInteger(body.rowLimit, 25_000)
+  const rows = await fetchSearchAnalytics({
+    accessToken,
+    siteUrl: property.siteUrl,
+    startDate: range.startDate,
+    endDate: range.endDate,
+    searchType,
+    rowLimit,
+  })
+  const inserted = await saveSearchAnalyticsRows({
+    organizationId: property.organizationId,
+    propertyId: property.id,
+    searchType,
+    rows,
+  })
+
+  const now = new Date()
+  await getDb()
+    .update(searchConsoleProperties)
+    .set({ lastSyncedAt: now, updatedAt: now })
+    .where(eq(searchConsoleProperties.id, property.id))
+
+  await recordGoogleActivity({
+    organizationId: property.organizationId,
+    eventType: 'search_console_search_analytics_synced',
+    summary: `Synced ${inserted} Search Console row${inserted === 1 ? '' : 's'}`,
+    details: {
+      propertyId: property.id,
+      siteUrl: property.siteUrl,
+      ...range,
+      searchType,
+      rowLimit,
+      trigger: readOptionalString(body.trigger) ?? (user ? 'manual' : 'scheduled'),
+    },
+  })
+
+  return {
+    property,
+    rows: inserted,
+    ...range,
+    searchType,
+    rowLimit,
+  }
+}
+
 async function fetchSearchAnalytics({
   accessToken,
   siteUrl,
@@ -743,11 +773,54 @@ async function requireGoogleConnection({
   return connection
 }
 
+async function readGoogleConnectionForSync({
+  organizationId,
+  connectionId,
+  user,
+}: {
+  organizationId: string
+  connectionId?: string | null
+  user?: JWTPayload
+}) {
+  if (user) return requireGoogleConnection({ organizationId, connectionId, user })
+  const [connection] = connectionId
+    ? await getDb()
+      .select()
+      .from(googleConnections)
+      .where(and(
+        eq(googleConnections.id, connectionId),
+        eq(googleConnections.organizationId, organizationId),
+        eq(googleConnections.status, 'active'),
+      ))
+      .limit(1)
+    : await getDb()
+      .select()
+      .from(googleConnections)
+      .where(and(eq(googleConnections.organizationId, organizationId), eq(googleConnections.status, 'active')))
+      .orderBy(desc(googleConnections.updatedAt))
+      .limit(1)
+
+  if (!connection) throw new ValidationError('Connect Google Search Console first.')
+  return connection
+}
+
 async function requireSearchConsoleProperty({ propertyId, user }: { propertyId: string; user?: JWTPayload }) {
   const [property] = await getDb().select().from(searchConsoleProperties).where(eq(searchConsoleProperties.id, propertyId)).limit(1)
   if (!property || !(await canAccessOrganization(property.organizationId, user))) {
     throw new NotFoundError('Search Console property not found.')
   }
+  if (!property.connectionId) throw new ValidationError('Search Console property has no Google connection.')
+  return property
+}
+
+async function readSearchConsolePropertyForSync({ propertyId, user }: { propertyId: string; user?: JWTPayload }) {
+  if (user) return requireSearchConsoleProperty({ propertyId, user })
+  const [property] = await getDb()
+    .select()
+    .from(searchConsoleProperties)
+    .where(and(eq(searchConsoleProperties.id, propertyId), eq(searchConsoleProperties.status, 'active')))
+    .limit(1)
+  if (!property) throw new NotFoundError('Search Console property not found.')
   if (!property.connectionId) throw new ValidationError('Search Console property has no Google connection.')
   return property
 }

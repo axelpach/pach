@@ -23,8 +23,7 @@ import githubWebhookRoute from './routes/github-webhooks.js'
 import socialRoute, { publicSocialRouter } from './routes/social.js'
 import googleRoute, { publicGoogleRouter } from './routes/google.js'
 import { requireAuth, requireUnscopedAccess } from './middleware/auth.js'
-import { startTaskTriggerRunner } from './services/task-triggers/runner.js'
-import { startMarketingAutomationRunner } from './services/marketing-automation/runner.js'
+import { startAutomationRunners } from './services/automation-runners.js'
 
 const app = express()
 const PORT = process.env.PORT || 3001
@@ -84,8 +83,7 @@ attachAgentTerminalWebSocket(server)
 
 server.listen(PORT, () => {
   console.log(`Pach server running on http://localhost:${PORT}`)
-  startTaskTriggerRunner()
-  startMarketingAutomationRunner()
+  startAutomationRunners()
 })
 
 function isPayloadTooLargeError(error: unknown): error is { type?: string; status?: number; statusCode?: number } {
