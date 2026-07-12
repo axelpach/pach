@@ -15,9 +15,14 @@ type DocumentRow = Schema['tables']['documents']['row']
 type IssueRow = Schema['tables']['pm_issues']['row']
 type StatusRow = Schema['tables']['pm_statuses']['row']
 type SavedViewRow = Schema['tables']['pm_saved_views']['row']
-type PaletteTab = { label: string; path: string; icon: ComponentType<{ className?: string }> }
+type PaletteTab = {
+  label: string
+  path: string
+  icon: ComponentType<{ className?: string }>
+  children?: PaletteTab[]
+}
 type PaletteResult =
-  | { kind: 'tab'; id: string; label: string; path: string; icon: ComponentType<{ className?: string }> }
+  | { kind: 'tab'; id: string; label: string; path: string; icon: ComponentType<{ className?: string }>; depth: number }
   | { kind: 'view'; id: string; view: SavedViewRow }
   | { kind: 'issue'; id: string; issue: IssueRow }
   | { kind: 'document'; id: string; document: DocumentRow }
@@ -108,9 +113,7 @@ export function SearchPalette({ tabs }: { tabs: PaletteTab[] }) {
         return b.updatedAt - a.updatedAt
       })
       .map((document) => ({ kind: 'document' as const, id: `document:${document.id}`, document }))
-    const tabResults = tabs
-      .filter((tab) => matches(tab.label) || matches(tab.path))
-      .map((tab) => ({ kind: 'tab' as const, id: `tab:${tab.path}`, label: tab.label, path: tab.path, icon: tab.icon }))
+    const tabResults = flattenTabResults(tabs, matches)
     const viewResults = personalSavedViews
       .filter((view) => matches(view.name) || matches(view.slug))
       .map((view) => ({ kind: 'view' as const, id: `view:${view.id}`, view }))
@@ -287,6 +290,34 @@ export function SearchPalette({ tabs }: { tabs: PaletteTab[] }) {
   )
 }
 
+function flattenTabResults(
+  tabs: PaletteTab[],
+  matches: (value: string | null | undefined) => boolean,
+  depth = 0,
+  includeAll = false,
+): Extract<PaletteResult, { kind: 'tab' }>[] {
+  const results: Extract<PaletteResult, { kind: 'tab' }>[] = []
+
+  for (const tab of tabs) {
+    const tabMatches = matches(tab.label) || matches(tab.path)
+    const childResults = flattenTabResults(tab.children ?? [], matches, depth + 1, includeAll || tabMatches)
+
+    if (includeAll || tabMatches || childResults.length > 0) {
+      results.push({
+        kind: 'tab',
+        id: `tab:${depth}:${tab.path}`,
+        label: tab.label,
+        path: tab.path,
+        icon: tab.icon,
+        depth,
+      })
+      results.push(...childResults)
+    }
+  }
+
+  return results
+}
+
 function PaletteResultButton({
   result,
   statusMap,
@@ -314,7 +345,10 @@ function PaletteResultButton({
     const Icon = result.icon
     return (
       <button data-result-index={index} onPointerMove={onPointerMove} onClick={onCommit} className={className}>
-        <span className="flex h-4 w-4 shrink-0 items-center justify-center text-fg-3">
+        <span
+          className="flex h-4 w-4 shrink-0 items-center justify-center text-fg-3"
+          style={{ marginLeft: `${result.depth * 20}px` }}
+        >
           <Icon className="h-4 w-4" />
         </span>
         <span className="min-w-0 flex-1 truncate text-sm text-fg-1">{result.label}</span>
