@@ -4420,11 +4420,10 @@ function SearchConsoleTrendChart({ points }: { points: SearchTrendPoint[] }) {
   const impressionsAreaPath = `${impressionsPath} L ${width},${height - padBottom} L 0,${height - padBottom} Z`
   const hoveredPoint = hoverIndex == null ? null : chartPoints[hoverIndex]
   const tooltipXPercent = hoveredPoint ? (hoveredPoint.x / width) * 100 : 0
-  const tooltipTransform = hoverIndex === 0
-    ? 'translateY(-100%)'
-    : hoverIndex === chartPoints.length - 1
-      ? 'translate(-100%, -100%)'
-      : 'translate(-50%, -100%)'
+  const tooltipYPercent = hoveredPoint ? (Math.min(hoveredPoint.clicksY, hoveredPoint.impressionsY) / height) * 100 : 0
+  const tooltipNearTop = tooltipYPercent < 28
+  const tooltipWidthRem = 13
+  const tooltipLeft = `clamp(0.75rem, ${tooltipXPercent}%, calc(100% - ${tooltipWidthRem}rem - 0.75rem))`
 
   function handleMouseMove(event: MouseEvent<HTMLDivElement>) {
     if (!wrapperRef.current || points.length === 0) return
@@ -4505,29 +4504,14 @@ function SearchConsoleTrendChart({ points }: { points: SearchTrendPoint[] }) {
             />
           ) : null}
         </svg>
-        {chartPoints.map((point) => {
-          const xPercent = (point.x / width) * 100
-          return (
-            <span
-              key={point.id}
-              aria-hidden
-              className="pointer-events-none absolute h-1.5 w-1.5 rounded-full border border-info bg-pit"
-              style={{
-                left: `${xPercent}%`,
-                top: `calc(${(point.clicksY / height) * 100}% + 12px)`,
-                transform: 'translate(-50%, -50%)',
-              }}
-            />
-          )
-        })}
         {hoveredPoint ? (
           <div
-            className="pointer-events-none absolute z-20 min-w-48 border border-edge/24 bg-pit px-3 py-2 font-mono text-xs shadow-terminal-popover"
+            className="pointer-events-none absolute z-20 w-52 border border-edge/24 bg-pit px-3 py-2 font-mono text-xs shadow-terminal-popover"
             style={{
-              left: `${tooltipXPercent}%`,
-              top: `${(Math.min(hoveredPoint.clicksY, hoveredPoint.impressionsY) / height) * 100}%`,
-              marginTop: '8px',
-              transform: tooltipTransform,
+              left: tooltipLeft,
+              top: `${tooltipYPercent}%`,
+              marginTop: tooltipNearTop ? '8px' : '-8px',
+              transform: tooltipNearTop ? 'translateY(0)' : 'translateY(-100%)',
             }}
           >
             <div className="text-[10px] uppercase tracking-label text-fg-4">{hoveredPoint.label}</div>
