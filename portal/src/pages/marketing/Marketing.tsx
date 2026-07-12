@@ -70,6 +70,7 @@ type PublicationSlotRow = Schema['tables']['mkt_publication_slots']['row']
 type CtaRow = Schema['tables']['mkt_ctas']['row']
 type ContentEventRow = Schema['tables']['mkt_content_events']['row']
 type ContentOutputRow = Schema['tables']['mkt_content_outputs']['row']
+type PromotablePageRecord = Schema['tables']['mkt_promotable_pages']['row']
 type AdPromotionRow = Schema['tables']['mkt_ad_promotions']['row']
 type AdMetricSnapshotRow = Schema['tables']['mkt_ad_metric_snapshots']['row']
 
@@ -286,6 +287,7 @@ export default function Marketing({ canAccessWhatsApp = false }: { canAccessWhat
   const [editorialIdeas] = useQuery(z.query.mkt_editorial_ideas.orderBy('updatedAt', 'desc'))
   const [publicationSlots] = useQuery(z.query.mkt_publication_slots.orderBy('scheduledAt', 'asc'))
   const [contentOutputs] = useQuery(z.query.mkt_content_outputs.orderBy('updatedAt', 'desc'))
+  const [promotablePageRecords] = useQuery(z.query.mkt_promotable_pages.orderBy('updatedAt', 'desc'))
   const [ctas] = useQuery(z.query.mkt_ctas.orderBy('updatedAt', 'desc'))
   const [events] = useQuery(z.query.mkt_content_events.orderBy('createdAt', 'desc'))
   const [documents] = useQuery(z.query.documents.orderBy('updatedAt', 'desc'))
@@ -316,6 +318,7 @@ export default function Marketing({ canAccessWhatsApp = false }: { canAccessWhat
   const orgSubscriptions = useMemo(() => byOrganization(subscriptions, organizationId), [subscriptions, organizationId])
   const orgRuns = useMemo(() => byOrganization(distributionRuns, organizationId), [distributionRuns, organizationId])
   const orgContentOutputs = useMemo(() => byOrganization(contentOutputs, organizationId), [contentOutputs, organizationId])
+  const orgPromotablePageRecords = useMemo(() => byOrganization(promotablePageRecords, organizationId), [organizationId, promotablePageRecords])
   const orgCtas = useMemo(() => byOrganization(ctas, organizationId), [ctas, organizationId])
   const orgEvents = useMemo(() => byOrganization(events, organizationId), [events, organizationId])
   const orgSocialChannels = useMemo(() => byOrganization(socialChannels, organizationId), [organizationId, socialChannels])
@@ -625,8 +628,10 @@ export default function Marketing({ canAccessWhatsApp = false }: { canAccessWhat
           {section === 'promotions' ? (
             <PromotionsSection
               z={z}
+              organizationId={organizationId}
               contentItems={orgContentItems}
               contentOutputs={orgContentOutputs}
+              promotablePageRecords={orgPromotablePageRecords}
               adPromotions={orgAdPromotions}
               adMetricSnapshots={orgAdMetricSnapshots}
               searchConsoleMetrics={orgSearchConsoleMetrics}
@@ -1554,8 +1559,10 @@ function LinkedInAdPromotionModal({
 type PromotionWorkspaceTab = 'pages' | 'drafts' | 'learning'
 
 type PromotablePageRow = {
-  item: ContentItemRow
-  output: ContentOutputRow
+  page: PromotablePageRecord
+  item: ContentItemRow | null
+  output: ContentOutputRow | null
+  title: string
   url: string
   searchMetrics: SearchConsoleMetricSnapshotRow[]
   searchTotals: { clicks: number; impressions: number }
@@ -1565,18 +1572,36 @@ type PromotablePageRow = {
   paidTotals: ReturnType<typeof sumAdMetricSnapshots>
 }
 
+type PromotablePageFormPayload = {
+  title: string
+  url: string
+  canonicalUrl: string
+  status: string
+}
+
+type SitemapImportResult = {
+  found: number
+  created: number
+  updated: number
+  skipped: number
+}
+
 function PromotionsSection({
   z,
+  organizationId,
   contentItems,
   contentOutputs,
+  promotablePageRecords,
   adPromotions,
   adMetricSnapshots,
   searchConsoleMetrics,
   onFlash,
 }: {
   z: ReturnType<typeof useZero<Schema, Mutators>>
+  organizationId: string
   contentItems: ContentItemRow[]
   contentOutputs: ContentOutputRow[]
+  promotablePageRecords: PromotablePageRecord[]
   adPromotions: AdPromotionRow[]
   adMetricSnapshots: AdMetricSnapshotRow[]
   searchConsoleMetrics: SearchConsoleMetricSnapshotRow[]
@@ -1584,9 +1609,11 @@ function PromotionsSection({
 }) {
   const [tab, setTab] = useState<PromotionWorkspaceTab>('pages')
   const [promoteTarget, setPromoteTarget] = useState<{ page: PromotablePageRow; promotion: AdPromotionRow | null } | null>(null)
+  const [pageEditor, setPageEditor] = useState<{ page: PromotablePageRecord | null } | null>(null)
+  const [sitemapImporterOpen, setSitemapImporterOpen] = useState(false)
   const pages = useMemo(
-    () => promotablePages(contentItems, contentOutputs, adPromotions, adMetricSnapshots, searchConsoleMetrics),
-    [adMetricSnapshots, adPromotions, contentItems, contentOutputs, searchConsoleMetrics],
+    () => promotablePages(promotablePageRecords, contentItems, contentOutputs, adPromotions, adMetricSnapshots, searchConsoleMetrics),
+    [adMetricSnapshots, adPromotions, contentItems, contentOutputs, promotablePageRecords, searchConsoleMetrics],
   )
   const googlePromotions = useMemo(() => adPromotions.filter((promotion) => promotion.provider === 'google'), [adPromotions])
   const googleMetrics = useMemo(() => adMetricSnapshotsForPromotions(googlePromotions, adMetricSnapshots), [adMetricSnapshots, googlePromotions])
@@ -1598,9 +1625,10 @@ function PromotionsSection({
 
   async function saveGoogleDraft(page: PromotablePageRow, promotion: AdPromotionRow | null, payload: GoogleSearchPromotionDraftPayload) {
     const values = {
-      organizationId: page.item.organizationId,
-      contentItemId: page.item.id,
-      contentOutputId: page.output.id,
+      organizationId: page.page.organizationId,
+      promotablePageId: page.page.id,
+      contentItemId: page.item?.id,
+      contentOutputId: page.output?.id,
       provider: 'google',
       adAccountExternalId: payload.adAccountExternalId || undefined,
       landingUrl: page.url,
@@ -1641,6 +1669,27 @@ function PromotionsSection({
     setTab('drafts')
   }
 
+  async function savePromotablePage(page: PromotablePageRecord | null, payload: PromotablePageFormPayload) {
+    const url = normalizePromotablePageUrl(payload.url)
+    const values = {
+      organizationId,
+      title: payload.title.trim() || pageTitleFromUrl(url),
+      url,
+      canonicalUrl: payload.canonicalUrl.trim() ? normalizePromotablePageUrl(payload.canonicalUrl) : url,
+      status: payload.status,
+      source: page?.source ?? 'manual',
+      metadata: { ...(page?.metadata ?? {}), updatedFrom: 'promotions' },
+    }
+    if (page) {
+      await z.mutate.mkt_promotable_pages.update({ id: page.id, ...values })
+      onFlash('page updated')
+    } else {
+      await z.mutate.mkt_promotable_pages.create({ id: crypto.randomUUID(), ...values })
+      onFlash('page added')
+    }
+    setPageEditor(null)
+  }
+
   return (
     <div className="space-y-4">
       <div className="grid gap-2 md:grid-cols-3 xl:grid-cols-6">
@@ -1665,13 +1714,26 @@ function PromotionsSection({
               learning · {unpromotedOpportunityPages.length + incompleteDrafts.length}
             </MarketingTabButton>
           </div>
-          <div className="pb-2 font-mono text-[10px] uppercase tracking-label text-fg-4">paid distribution</div>
+          <div className="flex flex-wrap items-center gap-2 pb-2">
+            {tab === 'pages' ? (
+              <>
+                <Button icon={<Rss className="h-3.5 w-3.5" />} onClick={() => setSitemapImporterOpen(true)}>
+                  import sitemap
+                </Button>
+                <Button icon={<Plus className="h-3.5 w-3.5" />} onClick={() => setPageEditor({ page: null })}>
+                  add page
+                </Button>
+              </>
+            ) : null}
+            <div className="font-mono text-[10px] uppercase tracking-label text-fg-4">paid distribution</div>
+          </div>
         </div>
 
         <div className="pt-4">
           {tab === 'pages' ? (
             <PromotablePagesTable
               pages={pages}
+              onEdit={(page) => setPageEditor({ page: page.page })}
               onPromote={(page) => setPromoteTarget({ page, promotion: page.googlePromotion })}
             />
           ) : null}
@@ -1702,11 +1764,36 @@ function PromotionsSection({
           onSubmit={(payload) => void saveGoogleDraft(promoteTarget.page, promoteTarget.promotion, payload)}
         />
       ) : null}
+      {pageEditor ? (
+        <PromotablePageDrawer
+          page={pageEditor.page}
+          onClose={() => setPageEditor(null)}
+          onSubmit={(payload) => savePromotablePage(pageEditor.page, payload)}
+        />
+      ) : null}
+      {sitemapImporterOpen ? (
+        <SitemapImportDrawer
+          organizationId={organizationId}
+          onClose={() => setSitemapImporterOpen(false)}
+          onImported={(result) => {
+            onFlash(`sitemap imported · ${result.created} new · ${result.updated} seen`)
+            setSitemapImporterOpen(false)
+          }}
+        />
+      ) : null}
     </div>
   )
 }
 
-function PromotablePagesTable({ pages, onPromote }: { pages: PromotablePageRow[]; onPromote: (page: PromotablePageRow) => void }) {
+function PromotablePagesTable({
+  pages,
+  onEdit,
+  onPromote,
+}: {
+  pages: PromotablePageRow[]
+  onEdit: (page: PromotablePageRow) => void
+  onPromote: (page: PromotablePageRow) => void
+}) {
   if (pages.length === 0) return <EmptyState label="no published pages" />
   return (
     <div className="overflow-auto border border-edge/12">
@@ -1722,9 +1809,9 @@ function PromotablePagesTable({ pages, onPromote }: { pages: PromotablePageRow[]
         </thead>
         <tbody>
           {pages.map((page) => (
-            <tr key={page.output.id} className="border-b border-edge/8 text-fg-2 last:border-b-0">
+            <tr key={page.page.id} className="border-b border-edge/8 text-fg-2 last:border-b-0">
               <td className="max-w-[360px] px-3 py-3">
-                <div className="truncate text-fg-1">{page.item.title}</div>
+                <div className="truncate text-fg-1">{page.title}</div>
                 <div className="mt-1 flex min-w-0 items-center gap-2 text-[11px] text-fg-4">
                   <span className="truncate">{page.url}</span>
                   <a href={page.url} target="_blank" rel="noreferrer" className="shrink-0 text-fg-4 transition hover:text-accent">
@@ -1743,10 +1830,17 @@ function PromotablePagesTable({ pages, onPromote }: { pages: PromotablePageRow[]
               </td>
               <td className="px-3 py-3">
                 <StatusPill kind={page.googlePromotion ? statusKind(page.googlePromotion.status) : 'idle'}>
-                  {page.googlePromotion?.status ?? page.output.status}
+                  {page.googlePromotion?.status ?? page.page.status}
                 </StatusPill>
               </td>
               <td className="px-3 py-3 text-right">
+                <div className="flex justify-end gap-2">
+                  <Button
+                    icon={<Edit3 className="h-3.5 w-3.5" />}
+                    onClick={() => onEdit(page)}
+                  >
+                    edit
+                  </Button>
                 <Button
                   kind={page.googlePromotion ? 'default' : 'primary'}
                   icon={page.googlePromotion ? <Edit3 className="h-3.5 w-3.5" /> : <Search className="h-3.5 w-3.5" />}
@@ -1754,6 +1848,7 @@ function PromotablePagesTable({ pages, onPromote }: { pages: PromotablePageRow[]
                 >
                   {page.googlePromotion ? 'edit draft' : 'promote'}
                 </Button>
+                </div>
               </td>
             </tr>
           ))}
@@ -1789,13 +1884,17 @@ function GoogleDraftsTable({
         </thead>
         <tbody>
           {promotions.map((promotion) => {
-            const page = pages.find((entry) => entry.output.id === promotion.contentOutputId || entry.item.id === promotion.contentItemId) ?? null
+            const page = pages.find((entry) => (
+              entry.page.id === promotion.promotablePageId ||
+              (entry.output?.id && entry.output.id === promotion.contentOutputId) ||
+              (entry.item?.id && entry.item.id === promotion.contentItemId)
+            )) ?? null
             const totals = sumAdMetricSnapshots(adMetricSnapshotsForPromotions([promotion], metrics))
             const keywords = promotionKeywords(promotion).slice(0, 4)
             return (
               <tr key={promotion.id} className="border-b border-edge/8 text-fg-2 last:border-b-0">
                 <td className="max-w-[320px] px-3 py-3">
-                  <div className="truncate text-fg-1">{adPromotionHeadline(promotion) || page?.item.title || 'google search draft'}</div>
+                  <div className="truncate text-fg-1">{adPromotionHeadline(promotion) || page?.title || 'google search draft'}</div>
                   <div className="mt-1 truncate text-[11px] text-fg-4">{promotion.landingUrl ?? page?.url ?? '-'}</div>
                   <div className="mt-2">
                     <StatusPill kind={statusKind(promotion.status)}>{promotion.status}</StatusPill>
@@ -1846,19 +1945,23 @@ function PromotionsLearningPanel({
 }) {
   const rows = [
     ...unpromotedPages.slice(0, 6).map((page) => ({
-      id: `page-${page.output.id}`,
+      id: `page-${page.page.id}`,
       signal: 'organic opportunity',
-      title: page.item.title,
+      title: page.title,
       detail: `${formatCompactNumber(page.searchTotals.impressions)} impressions · ${page.topQuery || 'search demand'}`,
       page,
       promotion: null as AdPromotionRow | null,
     })),
     ...incompleteDrafts.slice(0, 6).map((promotion) => {
-      const page = pages.find((entry) => entry.output.id === promotion.contentOutputId || entry.item.id === promotion.contentItemId) ?? null
+      const page = pages.find((entry) => (
+        entry.page.id === promotion.promotablePageId ||
+        (entry.output?.id && entry.output.id === promotion.contentOutputId) ||
+        (entry.item?.id && entry.item.id === promotion.contentItemId)
+      )) ?? null
       return {
         id: `draft-${promotion.id}`,
         signal: 'draft incomplete',
-        title: adPromotionHeadline(promotion) || page?.item.title || 'google search draft',
+        title: adPromotionHeadline(promotion) || page?.title || 'google search draft',
         detail: !promotion.budgetMinor ? 'budget missing' : 'account id missing',
         page,
         promotion,
@@ -1979,7 +2082,7 @@ function GoogleSearchPromotionDrawer({
 
         <div className="space-y-4 px-5 py-5">
           <div className="border border-edge/12 bg-rim px-3 py-3">
-            <div className="truncate font-mono text-sm text-fg-1">{page.item.title}</div>
+            <div className="truncate font-mono text-sm text-fg-1">{page.title}</div>
             <div className="mt-1 truncate font-mono text-[11px] text-fg-4">{page.url}</div>
           </div>
 
@@ -2091,6 +2194,218 @@ function GoogleSearchPromotionDrawer({
             disabled={!canSubmit}
           >
             save draft
+          </Button>
+        </div>
+      </div>
+    </div>,
+    document.body,
+  )
+}
+
+function PromotablePageDrawer({
+  page,
+  onClose,
+  onSubmit,
+}: {
+  page: PromotablePageRecord | null
+  onClose: () => void
+  onSubmit: (payload: PromotablePageFormPayload) => Promise<void> | void
+}) {
+  const [title, setTitle] = useState(page?.title ?? '')
+  const [url, setUrl] = useState(page?.url ?? '')
+  const [canonicalUrl, setCanonicalUrl] = useState(page?.canonicalUrl ?? page?.url ?? '')
+  const [status, setStatus] = useState(page?.status ?? 'ready')
+  const [submitting, setSubmitting] = useState(false)
+  const [error, setError] = useState('')
+  const statusOptions: PachSelectOption[] = [
+    { value: 'imported', label: 'imported' },
+    { value: 'ready', label: 'ready' },
+    { value: 'promoted', label: 'promoted' },
+    { value: 'paused', label: 'paused' },
+    { value: 'archived', label: 'archived' },
+  ]
+
+  async function submit() {
+    setError('')
+    let normalizedUrl = ''
+    let normalizedCanonicalUrl = ''
+    try {
+      normalizedUrl = normalizePromotablePageUrl(url)
+      normalizedCanonicalUrl = canonicalUrl.trim() ? normalizePromotablePageUrl(canonicalUrl) : normalizedUrl
+    } catch {
+      setError('enter a valid http or https URL')
+      return
+    }
+    setSubmitting(true)
+    try {
+      await onSubmit({
+        title: title.trim() || pageTitleFromUrl(normalizedUrl),
+        url: normalizedUrl,
+        canonicalUrl: normalizedCanonicalUrl,
+        status,
+      })
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'could not save page')
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  return createPortal(
+    <div className="fixed inset-0 z-50 flex justify-end bg-overlay/70 backdrop-blur-sm" onClick={onClose}>
+      <div
+        className="h-screen min-h-screen w-[560px] max-w-full overflow-y-auto border-l border-edge/25 bg-pit-2 shadow-terminal-overlay"
+        onClick={(event) => event.stopPropagation()}
+      >
+        <div className="sticky top-0 z-10 flex items-center justify-between gap-3 border-b border-edge/12 bg-pit-2 px-5 py-3">
+          <div className="min-w-0">
+            <div className="font-mono text-[10px] uppercase tracking-label text-fg-4">promotions · page</div>
+            <h2 className="mt-1 truncate font-mono text-lg font-bold lowercase text-fg-1">{page ? 'edit page' : 'add page'}</h2>
+          </div>
+          <button onClick={onClose} className="font-mono text-xs uppercase tracking-label text-fg-4 transition hover:text-fg-1">
+            [esc]
+          </button>
+        </div>
+
+        <div className="space-y-4 px-5 py-5">
+          {page ? (
+            <div className="grid gap-3 md:grid-cols-2">
+              <div className="border border-edge/12 bg-rim px-3 py-2 font-mono text-xs text-fg-2">
+                <div className="text-[10px] uppercase tracking-label text-fg-4">source</div>
+                <div className="mt-1 text-fg-1">{page.source}</div>
+              </div>
+              <div className="border border-edge/12 bg-rim px-3 py-2 font-mono text-xs text-fg-2">
+                <div className="text-[10px] uppercase tracking-label text-fg-4">status</div>
+                <div className="mt-1 text-fg-1">{page.status}</div>
+              </div>
+            </div>
+          ) : null}
+
+          <label className="block">
+            <FieldLabel>title</FieldLabel>
+            <TermInput value={title} onChange={(event) => setTitle(event.target.value)} placeholder="Ardia landing" />
+          </label>
+
+          <label className="block">
+            <FieldLabel>landing url</FieldLabel>
+            <TermInput value={url} onChange={(event) => setUrl(event.target.value)} placeholder="https://ardia.mx" />
+          </label>
+
+          <label className="block">
+            <FieldLabel>canonical url</FieldLabel>
+            <TermInput value={canonicalUrl} onChange={(event) => setCanonicalUrl(event.target.value)} placeholder="defaults to landing url" />
+          </label>
+
+          <div>
+            <FieldLabel>status</FieldLabel>
+            <PachSelect
+              value={status}
+              onChange={setStatus}
+              options={statusOptions}
+              display={statusOptions.find((entry) => entry.value === status)?.label ?? status}
+            />
+          </div>
+
+          {page?.sourceUrl ? (
+            <div className="border border-edge/12 bg-rim px-3 py-3 font-mono text-xs text-fg-3">
+              <div className="text-[10px] uppercase tracking-label text-fg-4">source url</div>
+              <div className="mt-1 truncate">{page.sourceUrl}</div>
+            </div>
+          ) : null}
+
+          {error ? <div className="border border-fail/25 bg-fail/5 px-3 py-2 font-mono text-xs text-fail">{error}</div> : null}
+        </div>
+
+        <div className="sticky bottom-0 flex items-center justify-end gap-2 border-t border-edge/12 bg-pit-2 px-5 py-3">
+          <Button onClick={onClose}>cancel</Button>
+          <Button kind="primary" icon={<Check className="h-3.5 w-3.5" />} onClick={() => void submit()} disabled={submitting || !url.trim()}>
+            {submitting ? 'saving' : 'save page'}
+          </Button>
+        </div>
+      </div>
+    </div>,
+    document.body,
+  )
+}
+
+function SitemapImportDrawer({
+  organizationId,
+  onClose,
+  onImported,
+}: {
+  organizationId: string
+  onClose: () => void
+  onImported: (result: SitemapImportResult) => void
+}) {
+  const [sitemapUrl, setSitemapUrl] = useState('')
+  const [importing, setImporting] = useState(false)
+  const [error, setError] = useState('')
+  const [result, setResult] = useState<SitemapImportResult | null>(null)
+
+  async function importSitemap() {
+    setError('')
+    setResult(null)
+    setImporting(true)
+    try {
+      const response = await authFetch(`${config.apiUrl}/marketing/promotions/import-sitemap`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ organizationId, sitemapUrl }),
+      })
+      const json = await readJson(response) as SitemapImportResult
+      setResult(json)
+      onImported(json)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'could not import sitemap')
+    } finally {
+      setImporting(false)
+    }
+  }
+
+  return createPortal(
+    <div className="fixed inset-0 z-50 flex justify-end bg-overlay/70 backdrop-blur-sm" onClick={onClose}>
+      <div
+        className="h-screen min-h-screen w-[560px] max-w-full overflow-y-auto border-l border-edge/25 bg-pit-2 shadow-terminal-overlay"
+        onClick={(event) => event.stopPropagation()}
+      >
+        <div className="sticky top-0 z-10 flex items-center justify-between gap-3 border-b border-edge/12 bg-pit-2 px-5 py-3">
+          <div className="min-w-0">
+            <div className="font-mono text-[10px] uppercase tracking-label text-fg-4">promotions · sitemap</div>
+            <h2 className="mt-1 truncate font-mono text-lg font-bold lowercase text-fg-1">import pages</h2>
+          </div>
+          <button onClick={onClose} className="font-mono text-xs uppercase tracking-label text-fg-4 transition hover:text-fg-1">
+            [esc]
+          </button>
+        </div>
+
+        <div className="space-y-4 px-5 py-5">
+          <label className="block">
+            <FieldLabel>sitemap url</FieldLabel>
+            <TermInput value={sitemapUrl} onChange={(event) => setSitemapUrl(event.target.value)} placeholder="https://ardia.mx/sitemap.xml" />
+          </label>
+
+          <div className="grid gap-3 md:grid-cols-3">
+            <div className="border border-edge/12 bg-rim px-3 py-2 font-mono text-xs text-fg-2">
+              <div className="text-[10px] uppercase tracking-label text-fg-4">new</div>
+              <div className="mt-1 text-fg-1">{result?.created ?? '-'}</div>
+            </div>
+            <div className="border border-edge/12 bg-rim px-3 py-2 font-mono text-xs text-fg-2">
+              <div className="text-[10px] uppercase tracking-label text-fg-4">seen</div>
+              <div className="mt-1 text-fg-1">{result?.updated ?? '-'}</div>
+            </div>
+            <div className="border border-edge/12 bg-rim px-3 py-2 font-mono text-xs text-fg-2">
+              <div className="text-[10px] uppercase tracking-label text-fg-4">found</div>
+              <div className="mt-1 text-fg-1">{result?.found ?? '-'}</div>
+            </div>
+          </div>
+
+          {error ? <div className="border border-fail/25 bg-fail/5 px-3 py-2 font-mono text-xs text-fail">{error}</div> : null}
+        </div>
+
+        <div className="sticky bottom-0 flex items-center justify-end gap-2 border-t border-edge/12 bg-pit-2 px-5 py-3">
+          <Button onClick={onClose}>cancel</Button>
+          <Button kind="primary" icon={<Rss className="h-3.5 w-3.5" />} onClick={() => void importSitemap()} disabled={importing || !sitemapUrl.trim()}>
+            {importing ? 'importing' : 'import pages'}
           </Button>
         </div>
       </div>
@@ -5817,6 +6132,7 @@ function adMetricSnapshotsForPromotions(promotions: AdPromotionRow[], snapshots:
 }
 
 function promotablePages(
+  pageRecords: PromotablePageRecord[],
   contentItems: ContentItemRow[],
   contentOutputs: ContentOutputRow[],
   adPromotions: AdPromotionRow[],
@@ -5824,23 +6140,27 @@ function promotablePages(
   searchConsoleMetrics: SearchConsoleMetricSnapshotRow[],
 ): PromotablePageRow[] {
   const contentById = new Map(contentItems.map((item) => [item.id, item]))
-  return contentOutputs
-    .filter((output) => output.publicUrl && ['published', 'scheduled'].includes(output.status))
-    .map((output) => {
-      const item = contentById.get(output.contentItemId)
-      if (!item || !output.publicUrl) return null
+  const outputById = new Map(contentOutputs.map((output) => [output.id, output]))
+  return pageRecords
+    .filter((page) => page.url && page.status !== 'archived')
+    .map((page) => {
+      const item = page.contentItemId ? contentById.get(page.contentItemId) ?? null : null
+      const output = page.contentOutputId ? outputById.get(page.contentOutputId) ?? null : null
       const promotions = adPromotions.filter((promotion) => (
-        promotion.contentOutputId === output.id ||
-        promotion.contentItemId === item.id ||
-        normalizeUrl(promotion.landingUrl) === normalizeUrl(output.publicUrl)
+        promotion.promotablePageId === page.id ||
+        (output?.id ? promotion.contentOutputId === output.id : false) ||
+        (item?.id ? promotion.contentItemId === item.id : false) ||
+        normalizeUrl(promotion.landingUrl) === normalizeUrl(page.url)
       ))
       const googlePromotion = promotions.find((promotion) => promotion.provider === 'google') ?? null
-      const searchMetrics = searchConsoleMetricsForOutput(output, item, searchConsoleMetrics)
+      const searchMetrics = searchConsoleMetricsForPage(page, output, item, searchConsoleMetrics)
       const paidMetrics = adMetricSnapshotsForPromotions(promotions, adMetricSnapshots)
       return {
+        page,
         item,
         output,
-        url: output.publicUrl,
+        title: page.title || item?.title || pageTitleFromUrl(page.url),
+        url: page.url,
         searchMetrics,
         searchTotals: sumSearchConsoleMetrics(searchMetrics),
         topQuery: topSearchQuery(searchMetrics),
@@ -5850,15 +6170,26 @@ function promotablePages(
       }
     })
     .filter((page): page is PromotablePageRow => Boolean(page))
-    .sort((a, b) => (b.output.publishedAt ?? b.output.updatedAt ?? 0) - (a.output.publishedAt ?? a.output.updatedAt ?? 0))
+    .sort((a, b) => (b.page.updatedAt ?? b.output?.publishedAt ?? 0) - (a.page.updatedAt ?? a.output?.publishedAt ?? 0))
 }
 
-function searchConsoleMetricsForOutput(output: ContentOutputRow, item: ContentItemRow, metrics: SearchConsoleMetricSnapshotRow[]) {
-  const outputUrls = new Set([output.publicUrl, output.canonicalUrl].filter(Boolean).map((url) => normalizeUrl(url)))
+function searchConsoleMetricsForPage(
+  page: PromotablePageRecord,
+  output: ContentOutputRow | null,
+  item: ContentItemRow | null,
+  metrics: SearchConsoleMetricSnapshotRow[],
+) {
+  const pageUrls = new Set([
+    page.url,
+    page.canonicalUrl,
+    page.sourceUrl,
+    output?.publicUrl,
+    output?.canonicalUrl,
+  ].filter(Boolean).map((url) => normalizeUrl(url)))
   return metrics.filter((metric) => (
-    metric.contentOutputId === output.id ||
-    metric.contentItemId === item.id ||
-    (metric.page ? outputUrls.has(normalizeUrl(metric.page)) : false)
+    (output?.id ? metric.contentOutputId === output.id : false) ||
+    (item?.id ? metric.contentItemId === item.id : false) ||
+    (metric.page ? pageUrls.has(normalizeUrl(metric.page)) : false)
   ))
 }
 
@@ -6081,9 +6412,10 @@ function defaultGoogleKeywords(page: PromotablePageRow) {
     .filter((query): query is string => Boolean(query))
     .slice(0, 8)
   const titleKeywords = [
-    page.item.title,
-    page.item.excerpt,
-    firstParagraphText(page.item.body),
+    page.title,
+    page.item?.excerpt,
+    page.item ? firstParagraphText(page.item.body) : undefined,
+    urlPathLabel(page.url),
   ]
     .flatMap((value) => keywordCandidates(value))
     .slice(0, 8)
@@ -6091,22 +6423,22 @@ function defaultGoogleKeywords(page: PromotablePageRow) {
 }
 
 function defaultGoogleHeadlines(page: PromotablePageRow) {
-  const title = page.item.title.trim()
+  const title = page.title.trim()
   const path = urlPathLabel(page.url)
   return uniqueStrings([
     title,
-    title.length > 26 ? title.slice(0, 27).trim() : `${title} en Pach`,
+    title.length > 26 ? title.slice(0, 27).trim() : title,
     page.topQuery ? `Mejora ${page.topQuery}` : '',
     path && path !== '-' ? path.replace(/[-/]/g, ' ').trim() : '',
   ].filter(Boolean)).slice(0, 6)
 }
 
 function defaultGoogleDescriptions(page: PromotablePageRow) {
-  const excerpt = page.item.excerpt || firstParagraphText(page.item.body)
+  const excerpt = page.item?.excerpt || (page.item ? firstParagraphText(page.item.body) : '')
   return uniqueStrings([
     excerpt,
     page.topQuery ? `Contenido para entender ${page.topQuery} y decidir el siguiente paso.` : '',
-    `Conoce ${page.item.title} y encuentra el recurso correcto para avanzar.`,
+    `Conoce ${page.title} y encuentra el recurso correcto para avanzar.`,
   ].filter(Boolean)).slice(0, 4)
 }
 
@@ -6153,6 +6485,33 @@ function normalizeUrl(value: string | null | undefined) {
     return url.toString().replace(/\/+$/, '').toLowerCase()
   } catch {
     return value.trim().replace(/\/+$/, '').toLowerCase()
+  }
+}
+
+function normalizePromotablePageUrl(value: string) {
+  const trimmed = value.trim()
+  const input = /^https?:\/\//i.test(trimmed)
+    ? trimmed
+    : /^(localhost|127\.0\.0\.1|\[::1])(?::\d+)?(?:\/|$)/i.test(trimmed)
+      ? `http://${trimmed}`
+      : `https://${trimmed}`
+  const url = new URL(input)
+  if (url.protocol !== 'http:' && url.protocol !== 'https:') throw new Error('Invalid URL')
+  url.protocol = url.protocol.toLowerCase()
+  url.hostname = url.hostname.toLowerCase()
+  url.hash = ''
+  if (url.pathname.length > 1) url.pathname = url.pathname.replace(/\/+$/, '')
+  url.searchParams.sort()
+  return url.toString()
+}
+
+function pageTitleFromUrl(value: string) {
+  try {
+    const url = new URL(value)
+    const part = url.pathname.split('/').filter(Boolean).pop() || url.hostname
+    return decodeURIComponent(part).replace(/[-_]+/g, ' ').replace(/\s+/g, ' ').trim() || url.hostname
+  } catch {
+    return value
   }
 }
 

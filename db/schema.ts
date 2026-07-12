@@ -940,6 +940,33 @@ export const mktContentOutputs = pgTable('mkt_content_outputs', {
   channelStatusIdx: index('mkt_content_outputs_channel_status_idx').on(table.channel, table.status),
 }))
 
+export const mktPromotablePages = pgTable('mkt_promotable_pages', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  organizationId: uuid('organization_id').notNull().references(() => organizations.id),
+  contentItemId: uuid('content_item_id').references(() => mktContentItems.id),
+  contentOutputId: uuid('content_output_id').references(() => mktContentOutputs.id),
+  /** manual | sitemap | content_output */
+  source: text('source').notNull().default('manual'),
+  title: text('title').notNull().default(''),
+  url: text('url').notNull(),
+  canonicalUrl: text('canonical_url'),
+  sourceUrl: text('source_url'),
+  /** imported | enriched | ready | promoted | paused | archived */
+  status: text('status').notNull().default('imported'),
+  sitemapUrl: text('sitemap_url'),
+  sitemapLastmod: timestamp('sitemap_lastmod', { withTimezone: true }),
+  lastSeenAt: timestamp('last_seen_at', { withTimezone: true }),
+  metadata: jsonb('metadata').$type<Record<string, unknown>>().notNull().default({}),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+}, (table) => ({
+  organizationIdx: index('mkt_promotable_pages_organization_idx').on(table.organizationId),
+  contentItemIdx: index('mkt_promotable_pages_content_item_idx').on(table.contentItemId),
+  contentOutputIdx: index('mkt_promotable_pages_content_output_idx').on(table.contentOutputId),
+  sourceStatusIdx: index('mkt_promotable_pages_source_status_idx').on(table.source, table.status),
+  organizationUrlIdx: uniqueIndex('mkt_promotable_pages_organization_url_idx').on(table.organizationId, table.url),
+}))
+
 /* ─────────────────────── SOCIAL PUBLISHING ─────────────────────── */
 
 export const socialProviderApps = pgTable('social_provider_apps', {
@@ -1090,7 +1117,8 @@ export const socialPostTargets = pgTable('social_post_targets', {
 export const mktAdPromotions = pgTable('mkt_ad_promotions', {
   id: uuid('id').primaryKey().defaultRandom(),
   organizationId: uuid('organization_id').notNull().references(() => organizations.id),
-  contentItemId: uuid('content_item_id').notNull().references(() => mktContentItems.id),
+  promotablePageId: uuid('promotable_page_id').references(() => mktPromotablePages.id),
+  contentItemId: uuid('content_item_id').references(() => mktContentItems.id),
   contentOutputId: uuid('content_output_id').references(() => mktContentOutputs.id),
   socialPostId: uuid('social_post_id').references(() => socialPosts.id),
   socialPostTargetId: uuid('social_post_target_id').references(() => socialPostTargets.id),
@@ -1115,6 +1143,7 @@ export const mktAdPromotions = pgTable('mkt_ad_promotions', {
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
 }, (table) => ({
   organizationIdx: index('mkt_ad_promotions_organization_idx').on(table.organizationId),
+  promotablePageIdx: index('mkt_ad_promotions_promotable_page_idx').on(table.promotablePageId),
   contentItemIdx: index('mkt_ad_promotions_content_item_idx').on(table.contentItemId),
   contentOutputIdx: index('mkt_ad_promotions_content_output_idx').on(table.contentOutputId),
   socialPostIdx: index('mkt_ad_promotions_social_post_idx').on(table.socialPostId),

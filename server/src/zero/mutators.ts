@@ -46,6 +46,7 @@ type ScopedTable =
   | 'mkt_content_events'
   | 'mkt_publication_consumers'
   | 'mkt_content_outputs'
+  | 'mkt_promotable_pages'
   | 'social_provider_apps'
   | 'social_connections'
   | 'social_channels'
@@ -104,6 +105,7 @@ const ORG_COLUMN_BY_TABLE: Record<ScopedTable, string> = {
   mkt_content_events: 'organization_id',
   mkt_publication_consumers: 'organization_id',
   mkt_content_outputs: 'organization_id',
+  mkt_promotable_pages: 'organization_id',
   social_provider_apps: 'organization_id',
   social_connections: 'organization_id',
   social_channels: 'organization_id',
@@ -1383,6 +1385,36 @@ export function createServerMutators(authData?: JWTPayload) {
       },
     },
 
+    mkt_promotable_pages: {
+      async create(tx: Tx, args: any) {
+        requireOrganizationAccess(args.organizationId)
+        if (args.contentItemId) await requireExistingOrganizationAccess(tx, 'mkt_content_items', args.contentItemId)
+        if (args.contentOutputId) await requireExistingOrganizationAccess(tx, 'mkt_content_outputs', args.contentOutputId)
+        const now = Date.now()
+        await tx.mutate.mkt_promotable_pages.insert({
+          source: 'manual',
+          title: '',
+          status: 'imported',
+          metadata: {},
+          ...args,
+          createdAt: now,
+          updatedAt: now,
+        })
+      },
+      async update(tx: Tx, args: any) {
+        await requireExistingOrganizationAccess(tx, 'mkt_promotable_pages', args.id)
+        if ('organizationId' in args) requireOrganizationAccess(args.organizationId)
+        if (args.contentItemId) await requireExistingOrganizationAccess(tx, 'mkt_content_items', args.contentItemId)
+        if (args.contentOutputId) await requireExistingOrganizationAccess(tx, 'mkt_content_outputs', args.contentOutputId)
+        const { id, ...updates } = args
+        await tx.mutate.mkt_promotable_pages.update({ id, ...updates, updatedAt: Date.now() })
+      },
+      async delete(tx: Tx, args: { id: string }) {
+        await requireExistingOrganizationAccess(tx, 'mkt_promotable_pages', args.id)
+        await tx.mutate.mkt_promotable_pages.delete({ id: args.id })
+      },
+    },
+
     social_connections: {
       async update(tx: Tx, args: any) {
         await requireExistingOrganizationAccess(tx, 'social_connections', args.id)
@@ -1494,7 +1526,8 @@ export function createServerMutators(authData?: JWTPayload) {
     mkt_ad_promotions: {
       async create(tx: Tx, args: any) {
         requireOrganizationAccess(args.organizationId)
-        await requireExistingOrganizationAccess(tx, 'mkt_content_items', args.contentItemId)
+        if (args.promotablePageId) await requireExistingOrganizationAccess(tx, 'mkt_promotable_pages', args.promotablePageId)
+        if (args.contentItemId) await requireExistingOrganizationAccess(tx, 'mkt_content_items', args.contentItemId)
         if (args.contentOutputId) await requireExistingOrganizationAccess(tx, 'mkt_content_outputs', args.contentOutputId)
         if (args.socialPostId) await requireExistingOrganizationAccess(tx, 'social_posts', args.socialPostId)
         if (args.socialPostTargetId) await requireExistingOrganizationAccess(tx, 'social_post_targets', args.socialPostTargetId)
@@ -1515,6 +1548,7 @@ export function createServerMutators(authData?: JWTPayload) {
       async update(tx: Tx, args: any) {
         await requireExistingOrganizationAccess(tx, 'mkt_ad_promotions', args.id)
         if ('organizationId' in args) requireOrganizationAccess(args.organizationId)
+        if (args.promotablePageId) await requireExistingOrganizationAccess(tx, 'mkt_promotable_pages', args.promotablePageId)
         if (args.contentItemId) await requireExistingOrganizationAccess(tx, 'mkt_content_items', args.contentItemId)
         if (args.contentOutputId) await requireExistingOrganizationAccess(tx, 'mkt_content_outputs', args.contentOutputId)
         if (args.socialPostId) await requireExistingOrganizationAccess(tx, 'social_posts', args.socialPostId)

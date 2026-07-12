@@ -393,6 +393,13 @@
       "when": 1784044800000,
       "tag": "0055_search_console_daily_snapshots",
       "breakpoints": true
+    },
+    {
+      "idx": 56,
+      "version": "7",
+      "when": 1784131200000,
+      "tag": "0056_promotable_pages",
+      "breakpoints": true
     }
   ]
 }

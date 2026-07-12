@@ -1,4 +1,5 @@
 import { createHmac, timingSafeEqual } from 'node:crypto'
+import { gunzipSync } from 'node:zlib'
 import { Router, type NextFunction, type Request, type Response } from 'express'
 import { and, desc, eq, inArray, isNull, sql } from 'drizzle-orm'
 import { getDb } from '../db.js'
@@ -11,6 +12,7 @@ import {
   mktContentEvents,
   mktContentItems,
   mktContentOutputs,
+  mktPromotablePages,
   mktCtas,
   mktDistributionRuns,
   mktPublications,
@@ -531,6 +533,23 @@ router.get('/content-items', asyncRoute(async (req, res) => {
   res.json({ contentItems: serializeDates(rows) })
 }))
 
+router.post('/promotions/import-sitemap', asyncRoute(async (req, res) => {
+  const organizationId = readRequiredString(req.body.organizationId)
+  const sitemapUrl = normalizePromotableUrl(readRequiredString(req.body.sitemapUrl))
+  requireOrganizationAccess(req, organizationId)
+
+  const result = await importPromotablePagesFromSitemap({ organizationId, sitemapUrl })
+  res.json({
+    ok: true,
+    sitemapUrl,
+    found: result.found,
+    created: result.created.length,
+    updated: result.updated,
+    skipped: result.skipped,
+    pages: serializeDates(result.created),
+  })
+}))
+
 router.post('/content/from-document', asyncRoute(async (req, res) => {
   const documentId = readRequiredString(req.body.documentId)
   const channels = readStringArray(req.body.supportedChannels, ['blog', 'newsletter'])
@@ -955,7 +974,300 @@ export async function publishBlogRun(runId: string, req?: Request) {
       createdAt: now,
     }).returning()
 
+  await upsertPromotablePageForContentOutput({ item, output: contentOutput })
+
   return { distributionRun: savedRun, contentOutput }
+}
+
+const MAX_SITEMAP_FILES = 100
+const MAX_SITEMAP_URLS = 5000
+const MAX_SITEMAP_DEPTH = 5
+const MAX_SITEMAP_BYTES = 15 * 1024 * 1024
+
+type SitemapUrlEntry = {
+  url: string
+  lastmod: Date | null
+}
+
+async function upsertPromotablePageForContentOutput({
+  item,
+  output,
+}: {
+  item: typeof mktContentItems.$inferSelect
+  output: typeof mktContentOutputs.$inferSelect
+}) {
+  const sourceUrl = readOptionalString(output.publicUrl)
+  const outputUrl = readOptionalString(output.canonicalUrl) ?? sourceUrl
+  if (!outputUrl) return
+
+  const normalizedOutputUrl = normalizePromotableUrl(outputUrl)
+  const normalizedSourceUrl = sourceUrl ? normalizePromotableUrl(sourceUrl) : undefined
+  const db = getDb()
+  const now = new Date()
+  const [existing] = await db
+    .select()
+    .from(mktPromotablePages)
+    .where(and(
+      eq(mktPromotablePages.organizationId, output.organizationId),
+      eq(mktPromotablePages.contentOutputId, output.id),
+    ))
+    .limit(1)
+  const existingByUrl = existing
+    ? null
+    : await db
+      .select()
+      .from(mktPromotablePages)
+      .where(and(
+        eq(mktPromotablePages.organizationId, output.organizationId),
+        eq(mktPromotablePages.url, normalizedOutputUrl),
+      ))
+      .limit(1)
+      .then((rows) => rows[0] ?? null)
+  const page = existing ?? existingByUrl
+  const metadata = {
+    ...(page?.metadata ?? {}),
+    contentOutputStatus: output.status,
+    source: 'publish-blog',
+  }
+
+  if (page) {
+    await db
+      .update(mktPromotablePages)
+      .set({
+        contentItemId: page.contentItemId ?? item.id,
+        contentOutputId: page.contentOutputId ?? output.id,
+        source: page.source === 'manual' ? page.source : 'content_output',
+        title: page.title || item.title,
+        canonicalUrl: page.canonicalUrl ?? output.canonicalUrl ?? null,
+        sourceUrl: normalizedSourceUrl ?? page.sourceUrl ?? null,
+        status: page.status === 'archived' ? page.status : 'ready',
+        metadata,
+        updatedAt: now,
+      })
+      .where(eq(mktPromotablePages.id, page.id))
+    return
+  }
+
+  await db.insert(mktPromotablePages).values({
+    id: crypto.randomUUID(),
+    organizationId: output.organizationId,
+    contentItemId: item.id,
+    contentOutputId: output.id,
+    source: 'content_output',
+    title: item.title,
+    url: normalizedOutputUrl,
+    canonicalUrl: output.canonicalUrl ? normalizePromotableUrl(output.canonicalUrl) : normalizedOutputUrl,
+    sourceUrl: normalizedSourceUrl,
+    status: output.status === 'published' ? 'ready' : 'imported',
+    metadata,
+    createdAt: now,
+    updatedAt: now,
+  })
+}
+
+async function importPromotablePagesFromSitemap({ organizationId, sitemapUrl }: { organizationId: string; sitemapUrl: string }) {
+  const state = {
+    seenSitemaps: new Set<string>(),
+    filesRead: 0,
+    urlsRead: 0,
+  }
+  const entries = await collectSitemapUrlEntries(sitemapUrl, state, 0)
+  const byUrl = new Map<string, SitemapUrlEntry>()
+  for (const entry of entries) {
+    if (!entry.url || byUrl.has(entry.url)) continue
+    byUrl.set(entry.url, entry)
+  }
+
+  const db = getDb()
+  const now = new Date()
+  const existingPages = await db
+    .select()
+    .from(mktPromotablePages)
+    .where(eq(mktPromotablePages.organizationId, organizationId))
+  const existingByUrl = new Map(existingPages.map((page) => [normalizePromotableUrl(page.url), page]))
+  const createdValues: Array<typeof mktPromotablePages.$inferInsert> = []
+  let updated = 0
+
+  for (const entry of byUrl.values()) {
+    const existing = existingByUrl.get(entry.url)
+    if (existing) {
+      await db
+        .update(mktPromotablePages)
+        .set({
+          sitemapUrl,
+          sitemapLastmod: entry.lastmod ?? existing.sitemapLastmod ?? null,
+          lastSeenAt: now,
+          metadata: {
+            ...(existing.metadata ?? {}),
+            lastSitemapImportAt: now.toISOString(),
+          },
+          updatedAt: now,
+        })
+        .where(eq(mktPromotablePages.id, existing.id))
+      updated += 1
+      continue
+    }
+
+    createdValues.push({
+      id: crypto.randomUUID(),
+      organizationId,
+      source: 'sitemap',
+      title: pageTitleFromUrl(entry.url),
+      url: entry.url,
+      canonicalUrl: entry.url,
+      status: 'imported',
+      sitemapUrl,
+      sitemapLastmod: entry.lastmod ?? null,
+      lastSeenAt: now,
+      metadata: { firstSeenVia: 'sitemap', importedAt: now.toISOString() },
+      createdAt: now,
+      updatedAt: now,
+    })
+  }
+
+  const created: Array<typeof mktPromotablePages.$inferSelect> = []
+  for (const batch of chunkArray(createdValues, 500)) {
+    const rows = await db.insert(mktPromotablePages).values(batch).onConflictDoNothing().returning()
+    created.push(...rows)
+  }
+
+  return {
+    found: byUrl.size,
+    created,
+    updated,
+    skipped: byUrl.size - created.length - updated,
+  }
+}
+
+async function collectSitemapUrlEntries(
+  sitemapUrl: string,
+  state: { seenSitemaps: Set<string>; filesRead: number; urlsRead: number },
+  depth: number,
+): Promise<SitemapUrlEntry[]> {
+  if (depth > MAX_SITEMAP_DEPTH) throw new MarketingInputError('Sitemap index is too deep', 400)
+  if (state.seenSitemaps.has(sitemapUrl)) return []
+  if (state.filesRead >= MAX_SITEMAP_FILES) throw new MarketingInputError(`Sitemap limit exceeded (${MAX_SITEMAP_FILES} files)`, 400)
+  state.seenSitemaps.add(sitemapUrl)
+  state.filesRead += 1
+
+  const xml = await fetchSitemapText(sitemapUrl)
+  const sitemapBlocks = xmlBlocks(xml, 'sitemap')
+  if (sitemapBlocks.length) {
+    const childUrls = sitemapBlocks
+      .map((block) => xmlTagValue(block, 'loc'))
+      .filter((url): url is string => Boolean(url))
+      .map((url) => normalizePromotableUrl(url, sitemapUrl))
+    const entries: SitemapUrlEntry[] = []
+    for (const childUrl of childUrls) {
+      entries.push(...await collectSitemapUrlEntries(childUrl, state, depth + 1))
+      if (state.urlsRead >= MAX_SITEMAP_URLS) break
+    }
+    return entries
+  }
+
+  const urlBlocks = xmlBlocks(xml, 'url')
+  const entries = urlBlocks
+    .map((block) => {
+      const loc = xmlTagValue(block, 'loc')
+      if (!loc) return null
+      return {
+        url: normalizePromotableUrl(loc, sitemapUrl),
+        lastmod: parseSitemapDate(xmlTagValue(block, 'lastmod')),
+      }
+    })
+    .filter((entry): entry is SitemapUrlEntry => Boolean(entry))
+
+  if (!entries.length) {
+    const fallbackEntries = xmlTagValues(xml, 'loc')
+      .map((url) => ({ url: normalizePromotableUrl(url, sitemapUrl), lastmod: null }))
+      .slice(0, Math.max(0, MAX_SITEMAP_URLS - state.urlsRead))
+    state.urlsRead += fallbackEntries.length
+    return fallbackEntries
+  }
+
+  state.urlsRead += entries.length
+  if (state.urlsRead > MAX_SITEMAP_URLS) return entries.slice(0, Math.max(0, entries.length - (state.urlsRead - MAX_SITEMAP_URLS)))
+  return entries
+}
+
+async function fetchSitemapText(sitemapUrl: string) {
+  const response = await fetch(sitemapUrl, {
+    headers: {
+      accept: 'application/xml,text/xml,application/rss+xml,application/atom+xml,*/*',
+      'user-agent': 'PachBot/1.0 (+https://pach.world)',
+    },
+  })
+  if (!response.ok) throw new MarketingInputError(`Sitemap fetch failed with ${response.status}`, 400)
+  const contentLength = Number(response.headers.get('content-length') ?? 0)
+  if (contentLength > MAX_SITEMAP_BYTES) throw new MarketingInputError('Sitemap is too large', 400)
+  const bytes = Buffer.from(await response.arrayBuffer())
+  if (bytes.byteLength > MAX_SITEMAP_BYTES) throw new MarketingInputError('Sitemap is too large', 400)
+  const body = bytes[0] === 0x1f && bytes[1] === 0x8b ? gunzipSync(bytes) : bytes
+  return body.toString('utf8').replace(/^\uFEFF/, '')
+}
+
+function xmlBlocks(xml: string, tag: string) {
+  return Array.from(xml.matchAll(new RegExp(`<(?:[\\w-]+:)?${tag}\\b[^>]*>[\\s\\S]*?<\\/(?:[\\w-]+:)?${tag}>`, 'gi')))
+    .map((match) => match[0])
+}
+
+function xmlTagValues(xml: string, tag: string) {
+  return Array.from(xml.matchAll(new RegExp(`<(?:[\\w-]+:)?${tag}\\b[^>]*>([\\s\\S]*?)<\\/(?:[\\w-]+:)?${tag}>`, 'gi')))
+    .map((match) => decodeXmlText(match[1] ?? ''))
+    .filter(Boolean)
+}
+
+function xmlTagValue(xml: string, tag: string) {
+  return xmlTagValues(xml, tag)[0]
+}
+
+function decodeXmlText(value: string) {
+  return value
+    .replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, '$1')
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&apos;/g, "'")
+    .trim()
+}
+
+function parseSitemapDate(value: string | undefined) {
+  if (!value) return null
+  const date = new Date(value)
+  return Number.isNaN(date.getTime()) ? null : date
+}
+
+function normalizePromotableUrl(value: string, base?: string) {
+  try {
+    const input = base || /^https?:\/\//i.test(value.trim()) ? value : normalizePublicBaseUrl(value)
+    const url = new URL(input, base)
+    if (url.protocol !== 'http:' && url.protocol !== 'https:') throw new Error('Unsupported URL')
+    url.protocol = url.protocol.toLowerCase()
+    url.hostname = url.hostname.toLowerCase()
+    url.hash = ''
+    if (url.pathname.length > 1) url.pathname = url.pathname.replace(/\/+$/, '')
+    url.searchParams.sort()
+    return url.toString()
+  } catch {
+    throw new MarketingInputError('Invalid URL', 400)
+  }
+}
+
+function pageTitleFromUrl(value: string) {
+  try {
+    const url = new URL(value)
+    const part = url.pathname.split('/').filter(Boolean).pop() || url.hostname
+    return decodeURIComponent(part).replace(/[-_]+/g, ' ').replace(/\s+/g, ' ').trim() || url.hostname
+  } catch {
+    return value
+  }
+}
+
+function chunkArray<T>(values: T[], size: number) {
+  const chunks: T[][] = []
+  for (let index = 0; index < values.length; index += size) chunks.push(values.slice(index, index + size))
+  return chunks
 }
 
 async function renderNewsletterRun(runId: string) {

@@ -749,6 +749,27 @@ const mktContentOutputs = table('mkt_content_outputs')
   })
   .primaryKey('id')
 
+const mktPromotablePages = table('mkt_promotable_pages')
+  .columns({
+    id: string(),
+    organizationId: string().from('organization_id'),
+    contentItemId: string().optional().from('content_item_id'),
+    contentOutputId: string().optional().from('content_output_id'),
+    source: string(),
+    title: string(),
+    url: string(),
+    canonicalUrl: string().optional().from('canonical_url'),
+    sourceUrl: string().optional().from('source_url'),
+    status: string(),
+    sitemapUrl: string().optional().from('sitemap_url'),
+    sitemapLastmod: number().optional().from('sitemap_lastmod'),
+    lastSeenAt: number().optional().from('last_seen_at'),
+    metadata: json<Record<string, unknown>>(),
+    createdAt: number().from('created_at'),
+    updatedAt: number().from('updated_at'),
+  })
+  .primaryKey('id')
+
 const socialConnections = table('social_connections')
   .columns({
     id: string(),
@@ -849,7 +870,8 @@ const mktAdPromotions = table('mkt_ad_promotions')
   .columns({
     id: string(),
     organizationId: string().from('organization_id'),
-    contentItemId: string().from('content_item_id'),
+    promotablePageId: string().optional().from('promotable_page_id'),
+    contentItemId: string().optional().from('content_item_id'),
     contentOutputId: string().optional().from('content_output_id'),
     socialPostId: string().optional().from('social_post_id'),
     socialPostTargetId: string().optional().from('social_post_target_id'),
@@ -1538,6 +1560,7 @@ export const schema = createSchema({
     mktContentEvents,
     mktPublicationConsumers,
     mktContentOutputs,
+    mktPromotablePages,
     socialConnections,
     socialChannels,
     socialChannelConnections,

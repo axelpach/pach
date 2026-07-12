@@ -670,6 +670,28 @@ export const mutators = {
     },
   },
 
+  mkt_promotable_pages: {
+    async create(tx: Tx, args: any) {
+      const now = Date.now()
+      await tx.mutate.mkt_promotable_pages.insert({
+        source: 'manual',
+        title: '',
+        status: 'imported',
+        metadata: {},
+        ...args,
+        createdAt: now,
+        updatedAt: now,
+      })
+    },
+    async update(tx: Tx, args: any) {
+      const { id, ...updates } = args
+      await tx.mutate.mkt_promotable_pages.update({ id, ...updates, updatedAt: Date.now() })
+    },
+    async delete(tx: Tx, args: { id: string }) {
+      await tx.mutate.mkt_promotable_pages.delete({ id: args.id })
+    },
+  },
+
   social_connections: {
     async update(tx: Tx, args: any) {
       const { id, ...updates } = args
