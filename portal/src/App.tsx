@@ -31,6 +31,12 @@ type OuterNavItem = {
   label: string
   path: string
   requiresWhatsApp?: boolean
+  children?: readonly OuterNavItem[]
+}
+
+type VisibleNavItem = Omit<OuterNavItem, 'children'> & {
+  icon: ComponentType<{ className?: string }>
+  children?: VisibleNavItem[]
 }
 
 const OUTER_NAV_ITEMS: readonly OuterNavItem[] = [
@@ -39,7 +45,17 @@ const OUTER_NAV_ITEMS: readonly OuterNavItem[] = [
   { label: 'Calendar', path: '/calendar' },
   { label: 'Docs', path: '/docs' },
   { label: 'CRM', path: '/crm' },
-  { label: 'Marketing', path: '/marketing/newsletters/content' },
+  {
+    label: 'Marketing',
+    path: '/marketing/newsletters/content',
+    children: [
+      { label: 'Newsletters', path: '/marketing/newsletters/content' },
+      { label: 'Social', path: '/marketing/social' },
+      { label: 'WhatsApp', path: '/marketing/whatsapp/templates', requiresWhatsApp: true },
+      { label: 'Calendar', path: '/marketing/calendar' },
+      { label: 'Analytics', path: '/marketing/analytics' },
+    ],
+  },
   { label: 'Finance', path: '/finance/dashboard' },
   { label: 'Design', path: '/design' },
   { label: 'Settings', path: '/settings/repositories' },
@@ -411,7 +427,14 @@ function AppShell() {
         <Topbar />
         <MobileHeader onMenuClick={() => setMobileMenuOpen(true)} />
         <MobileMenu open={mobileMenuOpen} onClose={() => setMobileMenuOpen(false)} />
-        <SearchPalette tabs={visibleOuterNavItems.map((item) => ({ label: item.label, path: item.path, icon: item.icon }))} />
+        <SearchPalette
+          tabs={visibleOuterNavItems.map((item) => ({
+            label: item.label,
+            path: item.path,
+            icon: item.icon,
+            children: item.children,
+          }))}
+        />
         <div className="flex flex-1 min-h-0 overflow-hidden">
           <Sidebar />
           <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
@@ -467,21 +490,28 @@ function useVisibleOuterNavItems() {
     () =>
       OUTER_NAV_ITEMS
         .filter((item) => !item.requiresWhatsApp || canAccessWhatsApp)
-        .map((item) => ({
-          ...item,
-          icon:
-            item.path === '/issues' ? Rows3 :
-            item.path === '/activity' ? ActivityIcon :
-            item.path === '/calendar' ? CalendarDays :
-            item.path === '/docs' ? FileText :
-            item.path === '/crm' ? FolderKanban :
-            item.path.startsWith('/marketing') ? Megaphone :
-            item.path.startsWith('/finance') ? CircleDollarSign :
-            item.path.startsWith('/settings') ? Settings2 :
-            Palette,
-        })),
+        .map((item) => withVisibleNavMetadata(item, canAccessWhatsApp)),
     [canAccessWhatsApp],
   )
+}
+
+function withVisibleNavMetadata(item: OuterNavItem, canAccessWhatsApp: boolean): VisibleNavItem {
+  return {
+    ...item,
+    children: item.children
+      ?.filter((child) => !child.requiresWhatsApp || canAccessWhatsApp)
+      .map((child) => withVisibleNavMetadata(child, canAccessWhatsApp)),
+    icon:
+      item.path === '/issues' ? Rows3 :
+      item.path === '/activity' ? ActivityIcon :
+      item.path === '/calendar' ? CalendarDays :
+      item.path === '/docs' ? FileText :
+      item.path === '/crm' ? FolderKanban :
+      item.path.startsWith('/marketing') ? Megaphone :
+      item.path.startsWith('/finance') ? CircleDollarSign :
+      item.path.startsWith('/settings') ? Settings2 :
+      Palette,
+  }
 }
 
 function LegacyDeckRedirect() {
