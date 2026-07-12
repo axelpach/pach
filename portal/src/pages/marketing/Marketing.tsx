@@ -92,6 +92,15 @@ type SearchConsoleMetricSnapshotRow = {
   position?: string | null
 }
 
+type SearchConsoleDailySnapshotRow = {
+  organizationId: string
+  propertyId: string
+  dataDate: number | string
+  clicks: number
+  impressions: number
+  position?: string | null
+}
+
 type SearchConsoleUrlInspectionRow = {
   id: string
   organizationId: string
@@ -99,6 +108,8 @@ type SearchConsoleUrlInspectionRow = {
   inspectionUrl: string
   verdict?: string | null
 }
+
+const SEARCH_ANALYTICS_LOOKBACK_DAYS = 92
 
 type AnalyticsDetailTab = 'search' | 'newsletter' | 'social' | 'ads'
 
@@ -270,6 +281,7 @@ export default function Marketing({ canAccessWhatsApp = false }: { canAccessWhat
   const [adMetricSnapshots] = useQuery(z.query.mkt_ad_metric_snapshots.orderBy('periodEnd', 'desc'))
   const [searchConsoleProperties] = useQuery(z.query.search_console_properties.orderBy('updatedAt', 'desc'))
   const [searchConsoleMetricSnapshots] = useQuery(z.query.search_console_metric_snapshots.orderBy('dataDate', 'desc'))
+  const [searchConsoleDailySnapshots] = useQuery(z.query.search_console_daily_snapshots.orderBy('dataDate', 'desc'))
   const [searchConsoleUrlInspections] = useQuery(z.query.search_console_url_inspections.orderBy('inspectedAt', 'desc'))
 
   const section = sectionFromPath(location.pathname)
@@ -297,6 +309,7 @@ export default function Marketing({ canAccessWhatsApp = false }: { canAccessWhat
   const orgAdMetricSnapshots = useMemo(() => byOrganization(adMetricSnapshots, organizationId), [adMetricSnapshots, organizationId])
   const orgSearchConsoleProperties = useMemo(() => byOrganization(searchConsoleProperties, organizationId), [organizationId, searchConsoleProperties])
   const orgSearchConsoleMetrics = useMemo(() => byOrganization(searchConsoleMetricSnapshots, organizationId), [organizationId, searchConsoleMetricSnapshots])
+  const orgSearchConsoleDailySnapshots = useMemo(() => byOrganization(searchConsoleDailySnapshots, organizationId), [organizationId, searchConsoleDailySnapshots])
   const orgSearchConsoleInspections = useMemo(() => byOrganization(searchConsoleUrlInspections, organizationId), [organizationId, searchConsoleUrlInspections])
   const selectedContent = orgContentItems.find((item) => item.id === selectedContentId) ?? null
   const selectedPublication = orgPublications.find((item) => item.id === selectedPublicationId) ?? orgPublications[0] ?? null
@@ -625,6 +638,7 @@ export default function Marketing({ canAccessWhatsApp = false }: { canAccessWhat
               adMetricSnapshots={orgAdMetricSnapshots}
               searchConsoleProperties={orgSearchConsoleProperties}
               searchConsoleMetrics={orgSearchConsoleMetrics}
+              searchConsoleDailySnapshots={orgSearchConsoleDailySnapshots}
               searchConsoleInspections={orgSearchConsoleInspections}
             />
           ) : null}
@@ -4109,6 +4123,7 @@ function AnalyticsSection({
   adMetricSnapshots,
   searchConsoleProperties,
   searchConsoleMetrics,
+  searchConsoleDailySnapshots,
   searchConsoleInspections,
 }: {
   contentItems: ContentItemRow[]
@@ -4121,6 +4136,7 @@ function AnalyticsSection({
   adMetricSnapshots: AdMetricSnapshotRow[]
   searchConsoleProperties: SearchConsolePropertyRow[]
   searchConsoleMetrics: SearchConsoleMetricSnapshotRow[]
+  searchConsoleDailySnapshots: SearchConsoleDailySnapshotRow[]
   searchConsoleInspections: SearchConsoleUrlInspectionRow[]
 }) {
   const [activeTab, setActiveTab] = useState<AnalyticsDetailTab>('search')
@@ -4130,14 +4146,34 @@ function AnalyticsSection({
   const selectedSearchMetrics = selectedProperty
     ? searchConsoleMetrics.filter((metric) => metric.propertyId === selectedProperty.id)
     : searchConsoleMetrics
+  const selectedSearchDailySnapshots = selectedProperty
+    ? searchConsoleDailySnapshots.filter((snapshot) => snapshot.propertyId === selectedProperty.id)
+    : searchConsoleDailySnapshots
+  const searchWindowAnchor = latestSearchSnapshotTimestamp(
+    selectedSearchDailySnapshots.length > 0 ? selectedSearchDailySnapshots : selectedSearchMetrics,
+  )
+  const visibleSearchDailySnapshots = filterSearchSnapshotsByTrailingDays(
+    selectedSearchDailySnapshots,
+    searchWindowAnchor,
+    SEARCH_ANALYTICS_LOOKBACK_DAYS,
+  )
+  const visibleSearchMetrics = filterSearchSnapshotsByTrailingDays(
+    selectedSearchMetrics,
+    searchWindowAnchor,
+    SEARCH_ANALYTICS_LOOKBACK_DAYS,
+  )
   const selectedSearchInspections = selectedProperty
     ? searchConsoleInspections.filter((inspection) => inspection.propertyId === selectedProperty.id)
     : searchConsoleInspections
-  const searchTotals = sumSearchConsoleMetrics(selectedSearchMetrics)
-  const searchTrendPoints = buildSearchTrendPoints(selectedSearchMetrics)
-  const topPages = aggregateSearchConsoleMetrics(selectedSearchMetrics, 'page').slice(0, 8)
-  const topQueries = aggregateSearchConsoleMetrics(selectedSearchMetrics, 'query').slice(0, 8)
-  const opportunities = searchConsoleOpportunities(selectedSearchMetrics).slice(0, 8)
+  const searchTotals = visibleSearchDailySnapshots.length > 0
+    ? sumSearchConsoleDailySnapshots(visibleSearchDailySnapshots)
+    : sumSearchConsoleMetrics(visibleSearchMetrics)
+  const searchTrendPoints = visibleSearchDailySnapshots.length > 0
+    ? buildSearchDailyTrendPoints(visibleSearchDailySnapshots)
+    : buildSearchTrendPoints(visibleSearchMetrics)
+  const topPages = aggregateSearchConsoleMetrics(visibleSearchMetrics, 'page').slice(0, 8)
+  const topQueries = aggregateSearchConsoleMetrics(visibleSearchMetrics, 'query').slice(0, 8)
+  const opportunities = searchConsoleOpportunities(visibleSearchMetrics).slice(0, 8)
   return (
     <div className="space-y-4">
       <div className="grid gap-2 md:grid-cols-3 xl:grid-cols-6">
@@ -4176,9 +4212,10 @@ function AnalyticsSection({
               contentById={contentById}
               selectedProperty={selectedProperty}
               properties={searchConsoleProperties}
-              metrics={selectedSearchMetrics}
+              metrics={visibleSearchMetrics}
               inspections={selectedSearchInspections}
               trendPoints={searchTrendPoints}
+              totals={searchTotals}
               topPages={topPages}
               topQueries={topQueries}
               opportunities={opportunities}
@@ -4272,6 +4309,7 @@ function OrganicSearchAnalyticsPanel({
   metrics,
   inspections,
   trendPoints,
+  totals,
   topPages,
   topQueries,
   opportunities,
@@ -4282,11 +4320,11 @@ function OrganicSearchAnalyticsPanel({
   metrics: SearchConsoleMetricSnapshotRow[]
   inspections: SearchConsoleUrlInspectionRow[]
   trendPoints: SearchTrendPoint[]
+  totals: { clicks: number; impressions: number }
   topPages: SearchAggregateRow[]
   topQueries: SearchAggregateRow[]
   opportunities: SearchAggregateRow[]
 }) {
-  const totals = sumSearchConsoleMetrics(metrics)
   const passCount = inspections.filter((inspection) => inspection.verdict === 'PASS').length
 
   return (
@@ -5175,6 +5213,69 @@ function sumSearchConsoleMetrics(snapshots: SearchConsoleMetricSnapshotRow[]) {
     }),
     { impressions: 0, clicks: 0 },
   )
+}
+
+function sumSearchConsoleDailySnapshots(snapshots: SearchConsoleDailySnapshotRow[]) {
+  return snapshots.reduce(
+    (totals, snapshot) => ({
+      impressions: totals.impressions + snapshot.impressions,
+      clicks: totals.clicks + snapshot.clicks,
+    }),
+    { impressions: 0, clicks: 0 },
+  )
+}
+
+function latestSearchSnapshotTimestamp(snapshots: Array<{ dataDate: number | string }>) {
+  return snapshots.reduce((latest, snapshot) => {
+    const timestamp = searchMetricDateTimestamp(snapshot.dataDate)
+    return timestamp ? Math.max(latest, timestamp) : latest
+  }, 0)
+}
+
+function filterSearchSnapshotsByTrailingDays<T extends { dataDate: number | string }>(snapshots: T[], anchorTimestamp: number, days: number) {
+  if (!anchorTimestamp) return snapshots
+  const startTimestamp = anchorTimestamp - (days - 1) * 24 * 60 * 60 * 1000
+  return snapshots.filter((snapshot) => {
+    const timestamp = searchMetricDateTimestamp(snapshot.dataDate)
+    return timestamp ? timestamp >= startTimestamp && timestamp <= anchorTimestamp : false
+  })
+}
+
+function buildSearchDailyTrendPoints(snapshots: SearchConsoleDailySnapshotRow[]) {
+  const byDate = new Map<string, {
+    timestamp: number
+    clicks: number
+    impressions: number
+    weightedPosition: number
+  }>()
+
+  for (const snapshot of snapshots) {
+    const timestamp = searchMetricDateTimestamp(snapshot.dataDate)
+    if (!timestamp) continue
+    const key = new Date(timestamp).toISOString().slice(0, 10)
+    const current = byDate.get(key) ?? {
+      timestamp,
+      clicks: 0,
+      impressions: 0,
+      weightedPosition: 0,
+    }
+    current.clicks += snapshot.clicks
+    current.impressions += snapshot.impressions
+    current.weightedPosition += readNumericText(snapshot.position) * Math.max(1, snapshot.impressions)
+    byDate.set(key, current)
+  }
+
+  return Array.from(byDate.entries())
+    .map(([id, row]) => ({
+      id,
+      label: formatShortDate(row.timestamp),
+      timestamp: row.timestamp,
+      clicks: row.clicks,
+      impressions: row.impressions,
+      ctr: row.impressions ? row.clicks / row.impressions : 0,
+      position: row.impressions ? row.weightedPosition / row.impressions : 0,
+    }))
+    .sort((a, b) => a.timestamp - b.timestamp)
 }
 
 function buildSearchTrendPoints(snapshots: SearchConsoleMetricSnapshotRow[]) {

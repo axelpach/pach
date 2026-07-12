@@ -642,7 +642,7 @@ export default function SettingsPage() {
         body: JSON.stringify({ propertyId: property.id }),
       })
       const payload = await readJson(response)
-      return `search analytics synced · ${payload.rows ?? 0}`
+      return `search analytics synced · ${payload.dailyRows ?? 0} days · ${payload.rows ?? 0} rows`
     })
   }
 

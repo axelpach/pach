@@ -1259,6 +1259,30 @@ export const searchConsoleMetricSnapshots = pgTable('search_console_metric_snaps
   ),
 }))
 
+export const searchConsoleDailySnapshots = pgTable('search_console_daily_snapshots', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  organizationId: uuid('organization_id').notNull().references(() => organizations.id),
+  propertyId: uuid('property_id').notNull().references(() => searchConsoleProperties.id),
+  dataDate: date('data_date').notNull(),
+  searchType: text('search_type').notNull().default('web'),
+  clicks: integer('clicks').notNull().default(0),
+  impressions: integer('impressions').notNull().default(0),
+  ctr: text('ctr'),
+  position: text('position'),
+  metadata: jsonb('metadata').$type<Record<string, unknown>>().notNull().default({}),
+  fetchedAt: timestamp('fetched_at', { withTimezone: true }).notNull().defaultNow(),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+}, (table) => ({
+  organizationIdx: index('search_console_daily_snapshots_organization_idx').on(table.organizationId),
+  propertyDateIdx: index('search_console_daily_snapshots_property_date_idx').on(table.propertyId, table.dataDate),
+  uniqueDailySnapshotIdx: uniqueIndex('search_console_daily_snapshots_unique_idx').on(
+    table.propertyId,
+    table.dataDate,
+    table.searchType,
+  ),
+}))
+
 export const searchConsoleUrlInspections = pgTable('search_console_url_inspections', {
   id: uuid('id').primaryKey().defaultRandom(),
   organizationId: uuid('organization_id').notNull().references(() => organizations.id),

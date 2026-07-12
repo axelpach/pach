@@ -983,6 +983,24 @@ const searchConsoleMetricSnapshots = table('search_console_metric_snapshots')
   })
   .primaryKey('id')
 
+const searchConsoleDailySnapshots = table('search_console_daily_snapshots')
+  .columns({
+    id: string(),
+    organizationId: string().from('organization_id'),
+    propertyId: string().from('property_id'),
+    dataDate: number().from('data_date'),
+    searchType: string().from('search_type'),
+    clicks: number(),
+    impressions: number(),
+    ctr: string().optional(),
+    position: string().optional(),
+    metadata: json(),
+    fetchedAt: number().from('fetched_at'),
+    createdAt: number().from('created_at'),
+    updatedAt: number().from('updated_at'),
+  })
+  .primaryKey('id')
+
 const searchConsoleUrlInspections = table('search_console_url_inspections')
   .columns({
     id: string(),
@@ -1531,6 +1549,7 @@ export const schema = createSchema({
     searchConsoleProperties,
     searchConsoleSitemaps,
     searchConsoleMetricSnapshots,
+    searchConsoleDailySnapshots,
     searchConsoleUrlInspections,
     pmTeams,
     pmProjects,

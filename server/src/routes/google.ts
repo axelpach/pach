@@ -6,6 +6,7 @@ import {
   googleConnections,
   mktContentOutputs,
   organizations,
+  searchConsoleDailySnapshots,
   searchConsoleMetricSnapshots,
   searchConsoleProperties,
   searchConsoleSitemaps,
@@ -31,6 +32,10 @@ const DEFAULT_SEARCH_CONSOLE_SCOPES = [
   'https://www.googleapis.com/auth/webmasters.readonly',
   'https://www.googleapis.com/auth/webmasters',
 ]
+const DEFAULT_SEARCH_ANALYTICS_LOOKBACK_DAYS = 92
+const SEARCH_ANALYTICS_FINAL_DATA_LAG_DAYS = 2
+const SEARCH_ANALYTICS_DETAILED_DIMENSIONS = ['date', 'page', 'query', 'country', 'device'] as const
+const SEARCH_ANALYTICS_DAILY_DIMENSIONS = ['date'] as const
 
 type OAuthState = {
   organizationId: string
@@ -264,7 +269,14 @@ router.post('/search-console/search-analytics/sync', async (req, res) => {
       req,
       body,
     })
-    res.json({ ok: true, rows: result.rows, startDate: result.startDate, endDate: result.endDate, searchType: result.searchType })
+    res.json({
+      ok: true,
+      rows: result.rows,
+      dailyRows: result.dailyRows,
+      startDate: result.startDate,
+      endDate: result.endDate,
+      searchType: result.searchType,
+    })
   } catch (error) {
     handleRouteError(res, error, 'GOOGLE_SEARCH_ANALYTICS_SYNC_FAILED', 'Could not sync Search Console analytics.')
   }
@@ -512,19 +524,36 @@ export async function syncSearchConsoleAnalyticsForProperty({
   const range = searchAnalyticsRange(body)
   const searchType = readOptionalString(body.searchType) ?? 'web'
   const rowLimit = readPositiveInteger(body.rowLimit, 25_000)
+  const dailyRowLimit = readPositiveInteger(body.dailyRowLimit, 5_000)
   const rows = await fetchSearchAnalytics({
     accessToken,
     siteUrl: property.siteUrl,
     startDate: range.startDate,
     endDate: range.endDate,
     searchType,
+    dimensions: SEARCH_ANALYTICS_DETAILED_DIMENSIONS,
     rowLimit,
+  })
+  const dailyRows = await fetchSearchAnalytics({
+    accessToken,
+    siteUrl: property.siteUrl,
+    startDate: range.startDate,
+    endDate: range.endDate,
+    searchType,
+    dimensions: SEARCH_ANALYTICS_DAILY_DIMENSIONS,
+    rowLimit: dailyRowLimit,
   })
   const inserted = await saveSearchAnalyticsRows({
     organizationId: property.organizationId,
     propertyId: property.id,
     searchType,
     rows,
+  })
+  const dailyInserted = await saveSearchAnalyticsDailyRows({
+    organizationId: property.organizationId,
+    propertyId: property.id,
+    searchType,
+    rows: dailyRows,
   })
 
   const now = new Date()
@@ -536,13 +565,14 @@ export async function syncSearchConsoleAnalyticsForProperty({
   await recordGoogleActivity({
     organizationId: property.organizationId,
     eventType: 'search_console_search_analytics_synced',
-    summary: `Synced ${inserted} Search Console row${inserted === 1 ? '' : 's'}`,
+    summary: `Synced ${inserted} Search Console row${inserted === 1 ? '' : 's'} and ${dailyInserted} daily total${dailyInserted === 1 ? '' : 's'}`,
     details: {
       propertyId: property.id,
       siteUrl: property.siteUrl,
       ...range,
       searchType,
       rowLimit,
+      dailyRowLimit,
       trigger: readOptionalString(body.trigger) ?? (user ? 'manual' : 'scheduled'),
     },
   })
@@ -550,9 +580,11 @@ export async function syncSearchConsoleAnalyticsForProperty({
   return {
     property,
     rows: inserted,
+    dailyRows: dailyInserted,
     ...range,
     searchType,
     rowLimit,
+    dailyRowLimit,
   }
 }
 
@@ -562,6 +594,7 @@ async function fetchSearchAnalytics({
   startDate,
   endDate,
   searchType,
+  dimensions,
   rowLimit,
 }: {
   accessToken: string
@@ -569,6 +602,7 @@ async function fetchSearchAnalytics({
   startDate: string
   endDate: string
   searchType: string
+  dimensions: readonly string[]
   rowLimit: number
 }) {
   const response = await fetch(`${SEARCH_CONSOLE_API_BASE}/sites/${encodeURIComponent(siteUrl)}/searchAnalytics/query`, {
@@ -581,7 +615,7 @@ async function fetchSearchAnalytics({
     body: JSON.stringify({
       startDate,
       endDate,
-      dimensions: ['date', 'page', 'query', 'country', 'device'],
+      dimensions,
       type: searchType,
       dataState: 'final',
       rowLimit,
@@ -668,6 +702,67 @@ async function saveSearchAnalyticsRows({
         set: {
           contentItemId: sql`excluded.content_item_id`,
           contentOutputId: sql`excluded.content_output_id`,
+          clicks: sql`excluded.clicks`,
+          impressions: sql`excluded.impressions`,
+          ctr: sql`excluded.ctr`,
+          position: sql`excluded.position`,
+          fetchedAt: now,
+          updatedAt: now,
+        },
+      })
+    saved += chunk.length
+  }
+  return saved
+}
+
+async function saveSearchAnalyticsDailyRows({
+  organizationId,
+  propertyId,
+  searchType,
+  rows,
+}: {
+  organizationId: string
+  propertyId: string
+  searchType: string
+  rows: SearchAnalyticsRow[]
+}) {
+  if (rows.length === 0) return 0
+  const now = new Date()
+  const values = rows.map((row) => {
+    const keys = Array.isArray(row.keys) ? row.keys : []
+    const dataDate = readKey(keys, 0)
+    if (!dataDate) throw new ValidationError('Search Console returned a daily row without a date.')
+    return {
+      id: randomUUID(),
+      organizationId,
+      propertyId,
+      dataDate,
+      searchType,
+      clicks: Math.round(readNumber(row.clicks)),
+      impressions: Math.round(readNumber(row.impressions)),
+      ctr: String(readNumber(row.ctr)),
+      position: String(readNumber(row.position)),
+      metadata: {},
+      fetchedAt: now,
+      createdAt: now,
+      updatedAt: now,
+    }
+  })
+
+  const chunkSize = 500
+  let saved = 0
+  for (let index = 0; index < values.length; index += chunkSize) {
+    const chunk = values.slice(index, index + chunkSize)
+    await getDb()
+      .insert(searchConsoleDailySnapshots)
+      .values(chunk)
+      .onConflictDoUpdate({
+        target: [
+          searchConsoleDailySnapshots.propertyId,
+          searchConsoleDailySnapshots.dataDate,
+          searchConsoleDailySnapshots.searchType,
+        ],
+        set: {
           clicks: sql`excluded.clicks`,
           impressions: sql`excluded.impressions`,
           ctr: sql`excluded.ctr`,
@@ -986,8 +1081,8 @@ function safeEqual(left: string, right: string) {
 }
 
 function searchAnalyticsRange(body: Record<string, unknown>) {
-  const startDate = readOptionalString(body.startDate) ?? isoDateDaysAgo(32)
-  const endDate = readOptionalString(body.endDate) ?? isoDateDaysAgo(2)
+  const startDate = readOptionalString(body.startDate) ?? isoDateDaysAgo(DEFAULT_SEARCH_ANALYTICS_LOOKBACK_DAYS)
+  const endDate = readOptionalString(body.endDate) ?? isoDateDaysAgo(SEARCH_ANALYTICS_FINAL_DATA_LAG_DAYS)
   return { startDate, endDate }
 }
 

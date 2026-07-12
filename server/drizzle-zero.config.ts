@@ -44,6 +44,7 @@ export default {
     search_console_properties: { row: { select: ['true'], insert: ['true'], update: ['true'], delete: ['true'] } },
     search_console_sitemaps: { row: { select: ['true'], insert: ['true'], update: ['true'], delete: ['true'] } },
     search_console_metric_snapshots: { row: { select: ['true'], insert: ['true'], update: ['true'], delete: ['true'] } },
+    search_console_daily_snapshots: { row: { select: ['true'], insert: ['true'], update: ['true'], delete: ['true'] } },
     search_console_url_inspections: { row: { select: ['true'], insert: ['true'], update: ['true'], delete: ['true'] } },
     decks: { row: { select: ['true'], insert: ['true'], update: ['true'], delete: ['true'] } },
     design_systems: { row: { select: ['true'], insert: ['true'], update: ['true'], delete: ['true'] } },
