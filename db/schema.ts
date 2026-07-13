@@ -1278,18 +1278,17 @@ export const searchConsoleSitemaps = pgTable('search_console_sitemaps', {
   propertySitemapIdx: uniqueIndex('search_console_sitemaps_property_sitemap_idx').on(table.propertyId, table.sitemapUrl),
 }))
 
-export const searchConsoleMetricSnapshots = pgTable('search_console_metric_snapshots', {
+export const searchConsoleDimensionSummaries = pgTable('search_console_dimension_summaries', {
   id: uuid('id').primaryKey().defaultRandom(),
   organizationId: uuid('organization_id').notNull().references(() => organizations.id),
   propertyId: uuid('property_id').notNull().references(() => searchConsoleProperties.id),
   contentItemId: uuid('content_item_id').references(() => mktContentItems.id),
   contentOutputId: uuid('content_output_id').references(() => mktContentOutputs.id),
-  dataDate: date('data_date').notNull(),
+  summaryType: text('summary_type').notNull(),
+  summaryKey: text('summary_key').notNull(),
   searchType: text('search_type').notNull().default('web'),
   page: text('page'),
   query: text('query'),
-  country: text('country'),
-  device: text('device'),
   clicks: integer('clicks').notNull().default(0),
   impressions: integer('impressions').notNull().default(0),
   ctr: text('ctr'),
@@ -1299,19 +1298,16 @@ export const searchConsoleMetricSnapshots = pgTable('search_console_metric_snaps
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
 }, (table) => ({
-  organizationIdx: index('search_console_metric_snapshots_organization_idx').on(table.organizationId),
-  propertyDateIdx: index('search_console_metric_snapshots_property_date_idx').on(table.propertyId, table.dataDate),
-  pageIdx: index('search_console_metric_snapshots_page_idx').on(table.page),
-  queryIdx: index('search_console_metric_snapshots_query_idx').on(table.query),
-  contentItemIdx: index('search_console_metric_snapshots_content_item_idx').on(table.contentItemId),
-  uniqueMetricIdx: uniqueIndex('search_console_metric_snapshots_unique_idx').on(
+  organizationIdx: index('search_console_dimension_summaries_organization_idx').on(table.organizationId),
+  propertyTypeIdx: index('search_console_dimension_summaries_property_type_idx').on(table.propertyId, table.summaryType),
+  pageIdx: index('search_console_dimension_summaries_page_idx').on(table.page),
+  queryIdx: index('search_console_dimension_summaries_query_idx').on(table.query),
+  contentItemIdx: index('search_console_dimension_summaries_content_item_idx').on(table.contentItemId),
+  uniqueSummaryIdx: uniqueIndex('search_console_dimension_summaries_unique_idx').on(
     table.propertyId,
-    table.dataDate,
+    table.summaryType,
     table.searchType,
-    table.page,
-    table.query,
-    table.country,
-    table.device,
+    table.summaryKey,
   ),
 }))
 

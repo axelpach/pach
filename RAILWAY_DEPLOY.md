@@ -36,7 +36,7 @@ Zero requires. So we run our own Postgres container — same image and flags as
 2. **Settings → Source → Image** → `postgres:16`.
 3. **Settings → Deploy → Custom Start Command**:
    ```
-   docker-entrypoint.sh postgres -c wal_level=logical -c max_wal_senders=10 -c max_replication_slots=10
+   docker-entrypoint.sh postgres -c wal_level=logical -c max_wal_senders=10 -c max_replication_slots=10 -c max_slot_wal_keep_size=1GB
    ```
 4. **Variables**:
    ```
@@ -48,6 +48,11 @@ Zero requires. So we run our own Postgres container — same image and flags as
 5. **Settings → Volumes** → mount `/var/lib/postgresql/data`.
 6. **Settings → Networking** → enable a private TCP port on `5432`. No public
    port (only `server` and `zero` need to reach it).
+
+`max_slot_wal_keep_size` prevents an offline Zero consumer from retaining WAL
+until the Postgres volume fills. If Zero falls more than 1 GB behind, Postgres
+can invalidate the slot; rebuild the Zero replica/slot instead of allowing the
+primary database to run out of disk.
 
 Once running, capture the internal URL:
 `postgres://pach:<password>@${{postgres.RAILWAY_PRIVATE_DOMAIN}}:5432/pach`

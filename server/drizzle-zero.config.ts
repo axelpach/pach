@@ -47,7 +47,7 @@ export default {
     google_connections: { row: { select: ['true'], insert: ['true'], update: ['true'], delete: ['true'] } },
     search_console_properties: { row: { select: ['true'], insert: ['true'], update: ['true'], delete: ['true'] } },
     search_console_sitemaps: { row: { select: ['true'], insert: ['true'], update: ['true'], delete: ['true'] } },
-    search_console_metric_snapshots: { row: { select: ['true'], insert: ['true'], update: ['true'], delete: ['true'] } },
+    search_console_dimension_summaries: { row: { select: ['true'], insert: ['true'], update: ['true'], delete: ['true'] } },
     search_console_daily_snapshots: { row: { select: ['true'], insert: ['true'], update: ['true'], delete: ['true'] } },
     search_console_url_inspections: { row: { select: ['true'], insert: ['true'], update: ['true'], delete: ['true'] } },
     decks: { row: { select: ['true'], insert: ['true'], update: ['true'], delete: ['true'] } },

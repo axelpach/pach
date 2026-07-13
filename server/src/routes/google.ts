@@ -1,13 +1,13 @@
 import { createHmac, randomUUID, timingSafeEqual } from 'node:crypto'
 import { Router, type Request, type Response as ExpressResponse } from 'express'
-import { and, desc, eq, sql } from 'drizzle-orm'
+import { and, desc, eq, notInArray, sql } from 'drizzle-orm'
 import {
   activityEvents,
   googleConnections,
   mktContentOutputs,
   organizations,
   searchConsoleDailySnapshots,
-  searchConsoleMetricSnapshots,
+  searchConsoleDimensionSummaries,
   searchConsoleProperties,
   searchConsoleSitemaps,
   searchConsoleUrlInspections,
@@ -34,8 +34,16 @@ const DEFAULT_SEARCH_CONSOLE_SCOPES = [
 ]
 const DEFAULT_SEARCH_ANALYTICS_LOOKBACK_DAYS = 92
 const SEARCH_ANALYTICS_FINAL_DATA_LAG_DAYS = 2
-const SEARCH_ANALYTICS_DETAILED_DIMENSIONS = ['date', 'page', 'query', 'country', 'device'] as const
 const SEARCH_ANALYTICS_DAILY_DIMENSIONS = ['date'] as const
+const SEARCH_ANALYTICS_PAGE_DIMENSIONS = ['page'] as const
+const SEARCH_ANALYTICS_QUERY_DIMENSIONS = ['query'] as const
+const SEARCH_ANALYTICS_PAGE_QUERY_DIMENSIONS = ['page', 'query'] as const
+const DEFAULT_SEARCH_ANALYTICS_PAGE_LIMIT = 100
+const DEFAULT_SEARCH_ANALYTICS_QUERY_LIMIT = 100
+const DEFAULT_SEARCH_ANALYTICS_OPPORTUNITY_LIMIT = 250
+const DEFAULT_SEARCH_ANALYTICS_DAILY_LIMIT = 500
+
+type SearchAnalyticsSummaryType = 'page' | 'query' | 'page_query'
 
 type OAuthState = {
   organizationId: string
@@ -273,6 +281,9 @@ router.post('/search-console/search-analytics/sync', async (req, res) => {
       ok: true,
       rows: result.rows,
       dailyRows: result.dailyRows,
+      summaries: result.summaries,
+      summaryBreakdown: result.summaryBreakdown,
+      writes: result.writes,
       startDate: result.startDate,
       endDate: result.endDate,
       searchType: result.searchType,
@@ -523,38 +534,81 @@ export async function syncSearchConsoleAnalyticsForProperty({
   const accessToken = await accessTokenForConnection(connection, req)
   const range = searchAnalyticsRange(body)
   const searchType = readOptionalString(body.searchType) ?? 'web'
-  const rowLimit = readPositiveInteger(body.rowLimit, 25_000)
-  const dailyRowLimit = readPositiveInteger(body.dailyRowLimit, 5_000)
-  const rows = await fetchSearchAnalytics({
-    accessToken,
-    siteUrl: property.siteUrl,
-    startDate: range.startDate,
-    endDate: range.endDate,
-    searchType,
-    dimensions: SEARCH_ANALYTICS_DETAILED_DIMENSIONS,
-    rowLimit,
-  })
-  const dailyRows = await fetchSearchAnalytics({
-    accessToken,
-    siteUrl: property.siteUrl,
-    startDate: range.startDate,
-    endDate: range.endDate,
-    searchType,
-    dimensions: SEARCH_ANALYTICS_DAILY_DIMENSIONS,
-    rowLimit: dailyRowLimit,
-  })
-  const inserted = await saveSearchAnalyticsRows({
+  const pageLimit = boundedSearchRowLimit(body.pageLimit ?? body.rowLimit, DEFAULT_SEARCH_ANALYTICS_PAGE_LIMIT, 500)
+  const queryLimit = boundedSearchRowLimit(body.queryLimit ?? body.rowLimit, DEFAULT_SEARCH_ANALYTICS_QUERY_LIMIT, 500)
+  const opportunityLimit = boundedSearchRowLimit(body.opportunityLimit, DEFAULT_SEARCH_ANALYTICS_OPPORTUNITY_LIMIT, 1_000)
+  const dailyRowLimit = boundedSearchRowLimit(body.dailyRowLimit, DEFAULT_SEARCH_ANALYTICS_DAILY_LIMIT, 500)
+  const [pageRows, queryRows, opportunityRows, dailyRows] = await Promise.all([
+    fetchSearchAnalytics({
+      accessToken,
+      siteUrl: property.siteUrl,
+      startDate: range.startDate,
+      endDate: range.endDate,
+      searchType,
+      dimensions: SEARCH_ANALYTICS_PAGE_DIMENSIONS,
+      rowLimit: pageLimit,
+    }),
+    fetchSearchAnalytics({
+      accessToken,
+      siteUrl: property.siteUrl,
+      startDate: range.startDate,
+      endDate: range.endDate,
+      searchType,
+      dimensions: SEARCH_ANALYTICS_QUERY_DIMENSIONS,
+      rowLimit: queryLimit,
+    }),
+    fetchSearchAnalytics({
+      accessToken,
+      siteUrl: property.siteUrl,
+      startDate: range.startDate,
+      endDate: range.endDate,
+      searchType,
+      dimensions: SEARCH_ANALYTICS_PAGE_QUERY_DIMENSIONS,
+      rowLimit: opportunityLimit,
+    }),
+    fetchSearchAnalytics({
+      accessToken,
+      siteUrl: property.siteUrl,
+      startDate: range.startDate,
+      endDate: range.endDate,
+      searchType,
+      dimensions: SEARCH_ANALYTICS_DAILY_DIMENSIONS,
+      rowLimit: dailyRowLimit,
+    }),
+  ])
+  const outputByUrl = await searchAnalyticsOutputByUrl(property.organizationId)
+  const pageSummaries = await saveSearchAnalyticsSummaries({
     organizationId: property.organizationId,
     propertyId: property.id,
     searchType,
-    rows,
+    summaryType: 'page',
+    rows: pageRows,
+    outputByUrl,
   })
-  const dailyInserted = await saveSearchAnalyticsDailyRows({
+  const querySummaries = await saveSearchAnalyticsSummaries({
+    organizationId: property.organizationId,
+    propertyId: property.id,
+    searchType,
+    summaryType: 'query',
+    rows: queryRows,
+    outputByUrl,
+  })
+  const opportunitySummaries = await saveSearchAnalyticsSummaries({
+    organizationId: property.organizationId,
+    propertyId: property.id,
+    searchType,
+    summaryType: 'page_query',
+    rows: opportunityRows,
+    outputByUrl,
+  })
+  const dailySummary = await saveSearchAnalyticsDailyRows({
     organizationId: property.organizationId,
     propertyId: property.id,
     searchType,
     rows: dailyRows,
   })
+  const summaryRows = pageSummaries.rows + querySummaries.rows + opportunitySummaries.rows
+  const writes = pageSummaries.writes + querySummaries.writes + opportunitySummaries.writes + dailySummary.writes
 
   const now = new Date()
   await getDb()
@@ -565,13 +619,19 @@ export async function syncSearchConsoleAnalyticsForProperty({
   await recordGoogleActivity({
     organizationId: property.organizationId,
     eventType: 'search_console_search_analytics_synced',
-    summary: `Synced ${inserted} Search Console row${inserted === 1 ? '' : 's'} and ${dailyInserted} daily total${dailyInserted === 1 ? '' : 's'}`,
+    summary: `Synced ${summaryRows} Search Console summaries and ${dailySummary.rows} daily totals`,
     details: {
       propertyId: property.id,
       siteUrl: property.siteUrl,
       ...range,
       searchType,
-      rowLimit,
+      pageRows: pageSummaries.rows,
+      queryRows: querySummaries.rows,
+      opportunityRows: opportunitySummaries.rows,
+      writes,
+      pageLimit,
+      queryLimit,
+      opportunityLimit,
       dailyRowLimit,
       trigger: readOptionalString(body.trigger) ?? (user ? 'manual' : 'scheduled'),
     },
@@ -579,11 +639,20 @@ export async function syncSearchConsoleAnalyticsForProperty({
 
   return {
     property,
-    rows: inserted,
-    dailyRows: dailyInserted,
+    rows: summaryRows,
+    dailyRows: dailySummary.rows,
+    summaries: summaryRows,
+    summaryBreakdown: {
+      pages: pageSummaries.rows,
+      queries: querySummaries.rows,
+      opportunities: opportunitySummaries.rows,
+    },
+    writes,
     ...range,
     searchType,
-    rowLimit,
+    pageLimit,
+    queryLimit,
+    opportunityLimit,
     dailyRowLimit,
   }
 }
@@ -627,18 +696,7 @@ async function fetchSearchAnalytics({
   return Array.isArray(rows) ? rows.filter(isRecord) as SearchAnalyticsRow[] : []
 }
 
-async function saveSearchAnalyticsRows({
-  organizationId,
-  propertyId,
-  searchType,
-  rows,
-}: {
-  organizationId: string
-  propertyId: string
-  searchType: string
-  rows: SearchAnalyticsRow[]
-}) {
-  if (rows.length === 0) return 0
+async function searchAnalyticsOutputByUrl(organizationId: string) {
   const outputs = await getDb()
     .select()
     .from(mktContentOutputs)
@@ -648,71 +706,120 @@ async function saveSearchAnalyticsRows({
     if (output.publicUrl) outputByUrl.set(normalizeUrl(output.publicUrl), output)
     if (output.canonicalUrl) outputByUrl.set(normalizeUrl(output.canonicalUrl), output)
   }
+  return outputByUrl
+}
+
+async function saveSearchAnalyticsSummaries({
+  organizationId,
+  propertyId,
+  searchType,
+  summaryType,
+  rows,
+  outputByUrl,
+}: {
+  organizationId: string
+  propertyId: string
+  searchType: string
+  summaryType: SearchAnalyticsSummaryType
+  rows: SearchAnalyticsRow[]
+  outputByUrl: Map<string, typeof mktContentOutputs.$inferSelect>
+}) {
+  const db = getDb()
+  const existing = await db
+    .select()
+    .from(searchConsoleDimensionSummaries)
+    .where(and(
+      eq(searchConsoleDimensionSummaries.propertyId, propertyId),
+      eq(searchConsoleDimensionSummaries.searchType, searchType),
+      eq(searchConsoleDimensionSummaries.summaryType, summaryType),
+    ))
+  const existingByKey = new Map(existing.map((row) => [row.summaryKey, row]))
 
   const now = new Date()
-  const values = rows.map((row) => {
+  const valuesByKey = new Map<string, typeof searchConsoleDimensionSummaries.$inferInsert>()
+  for (const row of rows) {
     const keys = Array.isArray(row.keys) ? row.keys : []
-    const dataDate = readKey(keys, 0)
-    const page = readKey(keys, 1)
-    const query = readKey(keys, 2)
-    const country = readKey(keys, 3)
-    const device = readKey(keys, 4)
-    if (!dataDate) throw new ValidationError('Search Console returned a row without a date.')
+    const page = summaryType === 'query' ? null : readKey(keys, 0)
+    const query = summaryType === 'page' ? null : readKey(keys, summaryType === 'query' ? 0 : 1)
+    if (summaryType !== 'query' && !page) throw new ValidationError('Search Console returned a page summary without a page.')
+    if (summaryType !== 'page' && !query) throw new ValidationError('Search Console returned a query summary without a query.')
+    const summaryKey = summaryType === 'page'
+      ? page!
+      : summaryType === 'query'
+        ? query!
+        : JSON.stringify([page, query])
     const output = page ? outputByUrl.get(normalizeUrl(page)) : null
-    return {
-      id: randomUUID(),
+    const current = existingByKey.get(summaryKey)
+    valuesByKey.set(summaryKey, {
+      id: current?.id ?? randomUUID(),
       organizationId,
       propertyId,
       contentItemId: output?.contentItemId ?? null,
       contentOutputId: output?.id ?? null,
-      dataDate,
+      summaryType,
+      summaryKey,
       searchType,
       page,
       query,
-      country,
-      device,
       clicks: Math.round(readNumber(row.clicks)),
       impressions: Math.round(readNumber(row.impressions)),
       ctr: String(readNumber(row.ctr)),
       position: String(readNumber(row.position)),
       metadata: {},
       fetchedAt: now,
-      createdAt: now,
+      createdAt: current?.createdAt ?? now,
       updatedAt: now,
-    }
+    })
+  }
+  const values = Array.from(valuesByKey.values())
+  const changed = values.filter((value) => {
+    const current = existingByKey.get(value.summaryKey)
+    return !current || searchAnalyticsSummaryChanged(current, value)
   })
 
   const chunkSize = 500
-  let saved = 0
-  for (let index = 0; index < values.length; index += chunkSize) {
-    const chunk = values.slice(index, index + chunkSize)
-    await getDb()
-      .insert(searchConsoleMetricSnapshots)
+  for (let index = 0; index < changed.length; index += chunkSize) {
+    const chunk = changed.slice(index, index + chunkSize)
+    await db
+      .insert(searchConsoleDimensionSummaries)
       .values(chunk)
       .onConflictDoUpdate({
         target: [
-          searchConsoleMetricSnapshots.propertyId,
-          searchConsoleMetricSnapshots.dataDate,
-          searchConsoleMetricSnapshots.searchType,
-          searchConsoleMetricSnapshots.page,
-          searchConsoleMetricSnapshots.query,
-          searchConsoleMetricSnapshots.country,
-          searchConsoleMetricSnapshots.device,
+          searchConsoleDimensionSummaries.propertyId,
+          searchConsoleDimensionSummaries.summaryType,
+          searchConsoleDimensionSummaries.searchType,
+          searchConsoleDimensionSummaries.summaryKey,
         ],
         set: {
           contentItemId: sql`excluded.content_item_id`,
           contentOutputId: sql`excluded.content_output_id`,
+          page: sql`excluded.page`,
+          query: sql`excluded.query`,
           clicks: sql`excluded.clicks`,
           impressions: sql`excluded.impressions`,
           ctr: sql`excluded.ctr`,
           position: sql`excluded.position`,
+          metadata: sql`excluded.metadata`,
           fetchedAt: now,
           updatedAt: now,
         },
       })
-    saved += chunk.length
   }
-  return saved
+
+  const summaryKeys = values.map((value) => value.summaryKey)
+  const scope = and(
+    eq(searchConsoleDimensionSummaries.propertyId, propertyId),
+    eq(searchConsoleDimensionSummaries.searchType, searchType),
+    eq(searchConsoleDimensionSummaries.summaryType, summaryType),
+  )
+  const deleted = await db
+    .delete(searchConsoleDimensionSummaries)
+    .where(summaryKeys.length > 0
+      ? and(scope, notInArray(searchConsoleDimensionSummaries.summaryKey, summaryKeys))
+      : scope)
+    .returning({ id: searchConsoleDimensionSummaries.id })
+
+  return { rows: values.length, writes: changed.length + deleted.length }
 }
 
 async function saveSearchAnalyticsDailyRows({
@@ -726,14 +833,23 @@ async function saveSearchAnalyticsDailyRows({
   searchType: string
   rows: SearchAnalyticsRow[]
 }) {
-  if (rows.length === 0) return 0
+  const db = getDb()
+  const existing = await db
+    .select()
+    .from(searchConsoleDailySnapshots)
+    .where(and(
+      eq(searchConsoleDailySnapshots.propertyId, propertyId),
+      eq(searchConsoleDailySnapshots.searchType, searchType),
+    ))
+  const existingByDate = new Map(existing.map((row) => [row.dataDate, row]))
   const now = new Date()
   const values = rows.map((row) => {
     const keys = Array.isArray(row.keys) ? row.keys : []
     const dataDate = readKey(keys, 0)
     if (!dataDate) throw new ValidationError('Search Console returned a daily row without a date.')
+    const current = existingByDate.get(dataDate)
     return {
-      id: randomUUID(),
+      id: current?.id ?? randomUUID(),
       organizationId,
       propertyId,
       dataDate,
@@ -744,16 +860,19 @@ async function saveSearchAnalyticsDailyRows({
       position: String(readNumber(row.position)),
       metadata: {},
       fetchedAt: now,
-      createdAt: now,
+      createdAt: current?.createdAt ?? now,
       updatedAt: now,
     }
   })
+  const changed = values.filter((value) => {
+    const current = existingByDate.get(value.dataDate)
+    return !current || searchAnalyticsDailyRowChanged(current, value)
+  })
 
   const chunkSize = 500
-  let saved = 0
-  for (let index = 0; index < values.length; index += chunkSize) {
-    const chunk = values.slice(index, index + chunkSize)
-    await getDb()
+  for (let index = 0; index < changed.length; index += chunkSize) {
+    const chunk = changed.slice(index, index + chunkSize)
+    await db
       .insert(searchConsoleDailySnapshots)
       .values(chunk)
       .onConflictDoUpdate({
@@ -771,9 +890,36 @@ async function saveSearchAnalyticsDailyRows({
           updatedAt: now,
         },
       })
-    saved += chunk.length
   }
-  return saved
+  return { rows: values.length, writes: changed.length }
+}
+
+function searchAnalyticsSummaryChanged(
+  current: typeof searchConsoleDimensionSummaries.$inferSelect,
+  next: typeof searchConsoleDimensionSummaries.$inferInsert,
+) {
+  return current.contentItemId !== next.contentItemId ||
+    current.contentOutputId !== next.contentOutputId ||
+    current.page !== next.page ||
+    current.query !== next.query ||
+    current.clicks !== next.clicks ||
+    current.impressions !== next.impressions ||
+    current.ctr !== next.ctr ||
+    current.position !== next.position
+}
+
+function searchAnalyticsDailyRowChanged(
+  current: typeof searchConsoleDailySnapshots.$inferSelect,
+  next: typeof searchConsoleDailySnapshots.$inferInsert,
+) {
+  return current.clicks !== next.clicks ||
+    current.impressions !== next.impressions ||
+    current.ctr !== next.ctr ||
+    current.position !== next.position
+}
+
+function boundedSearchRowLimit(value: unknown, fallback: number, maximum: number) {
+  return Math.min(readPositiveInteger(value, fallback), maximum)
 }
 
 async function inspectUrl({ accessToken, siteUrl, inspectionUrl }: { accessToken: string; siteUrl: string; inspectionUrl: string }) {

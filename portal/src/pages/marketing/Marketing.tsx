@@ -84,10 +84,11 @@ type SearchConsolePropertyRow = {
   selected: boolean
 }
 
-type SearchConsoleMetricSnapshotRow = {
+type SearchConsoleDimensionSummaryRow = {
   organizationId: string
   propertyId: string
-  dataDate: number | string
+  summaryType: 'page' | 'query' | 'page_query' | string
+  summaryKey: string
   contentItemId?: string | null
   contentOutputId?: string | null
   page?: string | null
@@ -305,7 +306,7 @@ export default function Marketing({ canAccessWhatsApp = false }: { canAccessWhat
   const [adPromotions] = useQuery(z.query.mkt_ad_promotions.orderBy('updatedAt', 'desc'))
   const [adMetricSnapshots] = useQuery(z.query.mkt_ad_metric_snapshots.orderBy('periodEnd', 'desc'))
   const [searchConsoleProperties] = useQuery(z.query.search_console_properties.orderBy('updatedAt', 'desc'))
-  const [searchConsoleMetricSnapshots] = useQuery(z.query.search_console_metric_snapshots.orderBy('dataDate', 'desc'))
+  const [searchConsoleDimensionSummaries] = useQuery(z.query.search_console_dimension_summaries.orderBy('impressions', 'desc'))
   const [searchConsoleDailySnapshots] = useQuery(z.query.search_console_daily_snapshots.orderBy('dataDate', 'desc'))
   const [searchConsoleUrlInspections] = useQuery(z.query.search_console_url_inspections.orderBy('inspectedAt', 'desc'))
   const [agentRuns] = useQuery(z.query.agent_runs.orderBy('createdAt', 'desc'))
@@ -337,7 +338,7 @@ export default function Marketing({ canAccessWhatsApp = false }: { canAccessWhat
   const orgAdPromotions = useMemo(() => byOrganization(adPromotions, organizationId), [adPromotions, organizationId])
   const orgAdMetricSnapshots = useMemo(() => byOrganization(adMetricSnapshots, organizationId), [adMetricSnapshots, organizationId])
   const orgSearchConsoleProperties = useMemo(() => byOrganization(searchConsoleProperties, organizationId), [organizationId, searchConsoleProperties])
-  const orgSearchConsoleMetrics = useMemo(() => byOrganization(searchConsoleMetricSnapshots, organizationId), [organizationId, searchConsoleMetricSnapshots])
+  const orgSearchConsoleSummaries = useMemo(() => byOrganization(searchConsoleDimensionSummaries, organizationId), [organizationId, searchConsoleDimensionSummaries])
   const orgSearchConsoleDailySnapshots = useMemo(() => byOrganization(searchConsoleDailySnapshots, organizationId), [organizationId, searchConsoleDailySnapshots])
   const orgSearchConsoleInspections = useMemo(() => byOrganization(searchConsoleUrlInspections, organizationId), [organizationId, searchConsoleUrlInspections])
   const orgKeywordAgentRuns = useMemo(() => keywordGenerationRunsForOrganization(agentRuns, organizationId), [agentRuns, organizationId])
@@ -650,7 +651,7 @@ export default function Marketing({ canAccessWhatsApp = false }: { canAccessWhat
               keywordIdeas={orgKeywordIdeas}
               adPromotions={orgAdPromotions}
               adMetricSnapshots={orgAdMetricSnapshots}
-              searchConsoleMetrics={orgSearchConsoleMetrics}
+              searchConsoleSummaries={orgSearchConsoleSummaries}
               keywordAgentRuns={orgKeywordAgentRuns}
               keywordProgressReports={orgKeywordAgentRunProgressReports}
               onFlash={flash}
@@ -687,7 +688,7 @@ export default function Marketing({ canAccessWhatsApp = false }: { canAccessWhat
               socialPostTargets={orgSocialPostTargets}
               adMetricSnapshots={orgAdMetricSnapshots}
               searchConsoleProperties={orgSearchConsoleProperties}
-              searchConsoleMetrics={orgSearchConsoleMetrics}
+              searchConsoleSummaries={orgSearchConsoleSummaries}
               searchConsoleDailySnapshots={orgSearchConsoleDailySnapshots}
               searchConsoleInspections={orgSearchConsoleInspections}
             />
@@ -1583,7 +1584,7 @@ type PromotablePageRow = {
   title: string
   url: string
   keywordIdeas: KeywordIdeaRow[]
-  searchMetrics: SearchConsoleMetricSnapshotRow[]
+  searchSummaries: SearchConsoleDimensionSummaryRow[]
   searchTotals: { clicks: number; impressions: number }
   topQuery: string
   promotions: AdPromotionRow[]
@@ -1622,7 +1623,7 @@ function PromotionsSection({
   keywordIdeas,
   adPromotions,
   adMetricSnapshots,
-  searchConsoleMetrics,
+  searchConsoleSummaries,
   keywordAgentRuns,
   keywordProgressReports,
   onFlash,
@@ -1635,7 +1636,7 @@ function PromotionsSection({
   keywordIdeas: KeywordIdeaRow[]
   adPromotions: AdPromotionRow[]
   adMetricSnapshots: AdMetricSnapshotRow[]
-  searchConsoleMetrics: SearchConsoleMetricSnapshotRow[]
+  searchConsoleSummaries: SearchConsoleDimensionSummaryRow[]
   keywordAgentRuns: AgentRunRow[]
   keywordProgressReports: AgentRunProgressReportRow[]
   onFlash: (message: string) => void
@@ -1647,8 +1648,8 @@ function PromotionsSection({
   const [selectedPageIds, setSelectedPageIds] = useState<string[]>([])
   const [keywordRunStatus, setKeywordRunStatus] = useState<'idle' | 'loading' | 'success'>('idle')
   const pages = useMemo(
-    () => promotablePages(promotablePageRecords, contentItems, contentOutputs, keywordIdeas, adPromotions, adMetricSnapshots, searchConsoleMetrics),
-    [adMetricSnapshots, adPromotions, contentItems, contentOutputs, keywordIdeas, promotablePageRecords, searchConsoleMetrics],
+    () => promotablePages(promotablePageRecords, contentItems, contentOutputs, keywordIdeas, adPromotions, adMetricSnapshots, searchConsoleSummaries),
+    [adMetricSnapshots, adPromotions, contentItems, contentOutputs, keywordIdeas, promotablePageRecords, searchConsoleSummaries],
   )
   const googlePromotions = useMemo(() => adPromotions.filter((promotion) => promotion.provider === 'google'), [adPromotions])
   const googleMetrics = useMemo(() => adMetricSnapshotsForPromotions(googlePromotions, adMetricSnapshots), [adMetricSnapshots, googlePromotions])
@@ -5289,7 +5290,7 @@ function AnalyticsSection({
   socialPostTargets,
   adMetricSnapshots,
   searchConsoleProperties,
-  searchConsoleMetrics,
+  searchConsoleSummaries,
   searchConsoleDailySnapshots,
   searchConsoleInspections,
 }: {
@@ -5302,7 +5303,7 @@ function AnalyticsSection({
   socialPostTargets: SocialPostTargetRow[]
   adMetricSnapshots: AdMetricSnapshotRow[]
   searchConsoleProperties: SearchConsolePropertyRow[]
-  searchConsoleMetrics: SearchConsoleMetricSnapshotRow[]
+  searchConsoleSummaries: SearchConsoleDimensionSummaryRow[]
   searchConsoleDailySnapshots: SearchConsoleDailySnapshotRow[]
   searchConsoleInspections: SearchConsoleUrlInspectionRow[]
 }) {
@@ -5310,22 +5311,15 @@ function AnalyticsSection({
   const adTotals = sumAdMetricSnapshots(adMetricSnapshots)
   const contentById = new Map(contentItems.map((item) => [item.id, item]))
   const selectedProperty = searchConsoleProperties.find((property) => property.selected) ?? searchConsoleProperties[0] ?? null
-  const selectedSearchMetrics = selectedProperty
-    ? searchConsoleMetrics.filter((metric) => metric.propertyId === selectedProperty.id)
-    : searchConsoleMetrics
+  const selectedSearchSummaries = selectedProperty
+    ? searchConsoleSummaries.filter((summary) => summary.propertyId === selectedProperty.id)
+    : searchConsoleSummaries
   const selectedSearchDailySnapshots = selectedProperty
     ? searchConsoleDailySnapshots.filter((snapshot) => snapshot.propertyId === selectedProperty.id)
     : searchConsoleDailySnapshots
-  const searchWindowAnchor = latestSearchSnapshotTimestamp(
-    selectedSearchDailySnapshots.length > 0 ? selectedSearchDailySnapshots : selectedSearchMetrics,
-  )
+  const searchWindowAnchor = latestSearchSnapshotTimestamp(selectedSearchDailySnapshots)
   const visibleSearchDailySnapshots = filterSearchSnapshotsByTrailingDays(
     selectedSearchDailySnapshots,
-    searchWindowAnchor,
-    SEARCH_ANALYTICS_LOOKBACK_DAYS,
-  )
-  const visibleSearchMetrics = filterSearchSnapshotsByTrailingDays(
-    selectedSearchMetrics,
     searchWindowAnchor,
     SEARCH_ANALYTICS_LOOKBACK_DAYS,
   )
@@ -5334,15 +5328,13 @@ function AnalyticsSection({
     : searchConsoleInspections
   const searchTotals = visibleSearchDailySnapshots.length > 0
     ? sumSearchConsoleDailySnapshots(visibleSearchDailySnapshots)
-    : sumSearchConsoleMetrics(visibleSearchMetrics)
-  const searchTrendPoints = visibleSearchDailySnapshots.length > 0
-    ? buildSearchDailyTrendPoints(visibleSearchDailySnapshots)
-    : buildSearchTrendPoints(visibleSearchMetrics)
-  const topPages = aggregateSearchConsoleMetrics(visibleSearchMetrics, 'page').slice(0, 8)
-  const topQueries = aggregateSearchConsoleMetrics(visibleSearchMetrics, 'query').slice(0, 8)
+    : sumSearchConsoleSummaries(selectedSearchSummaries.filter((summary) => summary.summaryType === 'page'))
+  const searchTrendPoints = buildSearchDailyTrendPoints(visibleSearchDailySnapshots)
+  const topPages = searchConsoleSummaryRows(selectedSearchSummaries, 'page').slice(0, 8)
+  const topQueries = searchConsoleSummaryRows(selectedSearchSummaries, 'query').slice(0, 8)
   const topRemotePage = topPages[0] ?? null
   const topRemoteQuery = topQueries[0] ?? null
-  const opportunities = searchConsoleOpportunities(visibleSearchMetrics).slice(0, 8)
+  const opportunities = searchConsoleOpportunities(selectedSearchSummaries).slice(0, 8)
   return (
     <div className="space-y-4">
       <div className="grid gap-2 md:grid-cols-3 xl:grid-cols-6">
@@ -5400,7 +5392,7 @@ function AnalyticsSection({
               contentById={contentById}
               selectedProperty={selectedProperty}
               properties={searchConsoleProperties}
-              metrics={visibleSearchMetrics}
+              summaries={selectedSearchSummaries}
               inspections={selectedSearchInspections}
               trendPoints={searchTrendPoints}
               totals={searchTotals}
@@ -5538,7 +5530,7 @@ function OrganicSearchAnalyticsPanel({
   contentById,
   selectedProperty,
   properties,
-  metrics,
+  summaries,
   inspections,
   trendPoints,
   totals,
@@ -5549,7 +5541,7 @@ function OrganicSearchAnalyticsPanel({
   contentById: Map<string, ContentItemRow>
   selectedProperty: SearchConsolePropertyRow | null
   properties: SearchConsolePropertyRow[]
-  metrics: SearchConsoleMetricSnapshotRow[]
+  summaries: SearchConsoleDimensionSummaryRow[]
   inspections: SearchConsoleUrlInspectionRow[]
   trendPoints: SearchTrendPoint[]
   totals: { clicks: number; impressions: number }
@@ -5563,7 +5555,7 @@ function OrganicSearchAnalyticsPanel({
     <div className="space-y-4">
       <div className="grid gap-2 md:grid-cols-4">
         <Metric label="properties" value={properties.length} />
-        <Metric label="rows" value={formatCompactNumber(metrics.length)} />
+        <Metric label="summaries" value={formatCompactNumber(summaries.length)} />
         <Metric label="inspections" value={inspections.length} />
         <Metric label="indexed" value={passCount} />
       </div>
@@ -5583,7 +5575,7 @@ function OrganicSearchAnalyticsPanel({
 
       {properties.length === 0 ? (
         <EmptyState label="connect google search console in settings" />
-      ) : metrics.length === 0 ? (
+      ) : summaries.length === 0 ? (
         <EmptyState label="sync search analytics in settings" />
       ) : (
         <div className="grid gap-4 xl:grid-cols-3">
@@ -6415,7 +6407,7 @@ function promotablePages(
   keywordIdeas: KeywordIdeaRow[],
   adPromotions: AdPromotionRow[],
   adMetricSnapshots: AdMetricSnapshotRow[],
-  searchConsoleMetrics: SearchConsoleMetricSnapshotRow[],
+  searchConsoleSummaries: SearchConsoleDimensionSummaryRow[],
 ): PromotablePageRow[] {
   const contentById = new Map(contentItems.map((item) => [item.id, item]))
   const outputById = new Map(contentOutputs.map((output) => [output.id, output]))
@@ -6437,7 +6429,7 @@ function promotablePages(
         normalizeUrl(promotion.landingUrl) === normalizeUrl(page.url)
       ))
       const googlePromotion = promotions.find((promotion) => promotion.provider === 'google') ?? null
-      const searchMetrics = searchConsoleMetricsForPage(page, output, item, searchConsoleMetrics)
+      const searchSummaries = searchConsoleSummariesForPage(page, output, item, searchConsoleSummaries)
       const paidMetrics = adMetricSnapshotsForPromotions(promotions, adMetricSnapshots)
       return {
         page,
@@ -6446,9 +6438,9 @@ function promotablePages(
         title: page.title || item?.title || pageTitleFromUrl(page.url),
         url: page.url,
         keywordIdeas: (keywordsByPageId.get(page.id) ?? []).sort((a, b) => b.priority - a.priority || a.keyword.localeCompare(b.keyword)),
-        searchMetrics,
-        searchTotals: sumSearchConsoleMetrics(searchMetrics),
-        topQuery: topSearchQuery(searchMetrics),
+        searchSummaries,
+        searchTotals: sumSearchConsoleSummaries(searchSummaries.filter((summary) => summary.summaryType === 'page')),
+        topQuery: topSearchQuery(searchSummaries),
         promotions,
         googlePromotion,
         paidTotals: sumAdMetricSnapshots(paidMetrics),
@@ -6458,11 +6450,11 @@ function promotablePages(
     .sort((a, b) => (b.page.updatedAt ?? b.output?.publishedAt ?? 0) - (a.page.updatedAt ?? a.output?.publishedAt ?? 0))
 }
 
-function searchConsoleMetricsForPage(
+function searchConsoleSummariesForPage(
   page: PromotablePageRecord,
   output: ContentOutputRow | null,
   item: ContentItemRow | null,
-  metrics: SearchConsoleMetricSnapshotRow[],
+  summaries: SearchConsoleDimensionSummaryRow[],
 ) {
   const pageUrls = new Set([
     page.url,
@@ -6471,15 +6463,15 @@ function searchConsoleMetricsForPage(
     output?.publicUrl,
     output?.canonicalUrl,
   ].filter(Boolean).map((url) => normalizeUrl(url)))
-  return metrics.filter((metric) => (
-    (output?.id ? metric.contentOutputId === output.id : false) ||
-    (item?.id ? metric.contentItemId === item.id : false) ||
-    (metric.page ? pageUrls.has(normalizeUrl(metric.page)) : false)
+  return summaries.filter((summary) => (
+    (output?.id ? summary.contentOutputId === output.id : false) ||
+    (item?.id ? summary.contentItemId === item.id : false) ||
+    (summary.page ? pageUrls.has(normalizeUrl(summary.page)) : false)
   ))
 }
 
-function topSearchQuery(metrics: SearchConsoleMetricSnapshotRow[]) {
-  return aggregateSearchConsoleMetrics(metrics, 'query')[0]?.query ?? ''
+function topSearchQuery(summaries: SearchConsoleDimensionSummaryRow[]) {
+  return searchConsoleSummaryRows(summaries, 'page_query')[0]?.query ?? ''
 }
 
 function sumAdMetricSnapshots(snapshots: AdMetricSnapshotRow[]) {
@@ -6495,11 +6487,11 @@ function sumAdMetricSnapshots(snapshots: AdMetricSnapshotRow[]) {
   )
 }
 
-function sumSearchConsoleMetrics(snapshots: SearchConsoleMetricSnapshotRow[]) {
-  return snapshots.reduce(
-    (totals, snapshot) => ({
-      impressions: totals.impressions + snapshot.impressions,
-      clicks: totals.clicks + snapshot.clicks,
+function sumSearchConsoleSummaries(summaries: SearchConsoleDimensionSummaryRow[]) {
+  return summaries.reduce(
+    (totals, summary) => ({
+      impressions: totals.impressions + summary.impressions,
+      clicks: totals.clicks + summary.clicks,
     }),
     { impressions: 0, clicks: 0 },
   )
@@ -6568,102 +6560,24 @@ function buildSearchDailyTrendPoints(snapshots: SearchConsoleDailySnapshotRow[])
     .sort((a, b) => a.timestamp - b.timestamp)
 }
 
-function buildSearchTrendPoints(snapshots: SearchConsoleMetricSnapshotRow[]) {
-  const byDate = new Map<string, {
-    timestamp: number
-    clicks: number
-    impressions: number
-    weightedPosition: number
-  }>()
-
-  for (const snapshot of snapshots) {
-    const timestamp = searchMetricDateTimestamp(snapshot.dataDate)
-    if (!timestamp) continue
-    const key = new Date(timestamp).toISOString().slice(0, 10)
-    const current = byDate.get(key) ?? {
-      timestamp,
-      clicks: 0,
-      impressions: 0,
-      weightedPosition: 0,
-    }
-    current.clicks += snapshot.clicks
-    current.impressions += snapshot.impressions
-    current.weightedPosition += readNumericText(snapshot.position) * Math.max(1, snapshot.impressions)
-    byDate.set(key, current)
-  }
-
-  return Array.from(byDate.entries())
-    .map(([id, row]) => ({
-      id,
-      label: formatShortDate(row.timestamp),
-      timestamp: row.timestamp,
-      clicks: row.clicks,
-      impressions: row.impressions,
-      ctr: row.impressions ? row.clicks / row.impressions : 0,
-      position: row.impressions ? row.weightedPosition / row.impressions : 0,
-    }))
-    .sort((a, b) => a.timestamp - b.timestamp)
-}
-
-function aggregateSearchConsoleMetrics(snapshots: SearchConsoleMetricSnapshotRow[], key: 'page' | 'query') {
-  const byKey = new Map<string, SearchAggregateRow & { weightedPosition: number }>()
-  for (const snapshot of snapshots) {
-    const rawKey = key === 'page' ? snapshot.page : snapshot.query
-    if (!rawKey) continue
-    const current = byKey.get(rawKey) ?? {
-      key: rawKey,
-      page: snapshot.page,
-      query: snapshot.query,
-      contentItemId: snapshot.contentItemId,
-      clicks: 0,
-      impressions: 0,
-      ctr: 0,
-      position: 0,
-      weightedPosition: 0,
-    }
-    current.clicks += snapshot.clicks
-    current.impressions += snapshot.impressions
-    current.weightedPosition += readNumericText(snapshot.position) * Math.max(1, snapshot.impressions)
-    if (!current.contentItemId && snapshot.contentItemId) current.contentItemId = snapshot.contentItemId
-    byKey.set(rawKey, current)
-  }
-  return Array.from(byKey.values())
-    .map(({ weightedPosition, ...row }) => ({
-      ...row,
-      ctr: row.impressions ? row.clicks / row.impressions : 0,
-      position: row.impressions ? weightedPosition / row.impressions : 0,
+function searchConsoleSummaryRows(summaries: SearchConsoleDimensionSummaryRow[], summaryType: 'page' | 'query' | 'page_query') {
+  return summaries
+    .filter((summary) => summary.summaryType === summaryType)
+    .map((summary) => ({
+      key: summary.summaryKey,
+      page: summary.page,
+      query: summary.query,
+      contentItemId: summary.contentItemId,
+      clicks: summary.clicks,
+      impressions: summary.impressions,
+      ctr: summary.impressions ? summary.clicks / summary.impressions : 0,
+      position: readNumericText(summary.position),
     }))
     .sort((a, b) => b.clicks - a.clicks || b.impressions - a.impressions)
 }
 
-function searchConsoleOpportunities(snapshots: SearchConsoleMetricSnapshotRow[]) {
-  const byPair = new Map<string, SearchAggregateRow & { weightedPosition: number }>()
-  for (const snapshot of snapshots) {
-    if (!snapshot.page || !snapshot.query) continue
-    const key = `${snapshot.page}::${snapshot.query}`
-    const current = byPair.get(key) ?? {
-      key,
-      page: snapshot.page,
-      query: snapshot.query,
-      contentItemId: snapshot.contentItemId,
-      clicks: 0,
-      impressions: 0,
-      ctr: 0,
-      position: 0,
-      weightedPosition: 0,
-    }
-    current.clicks += snapshot.clicks
-    current.impressions += snapshot.impressions
-    current.weightedPosition += readNumericText(snapshot.position) * Math.max(1, snapshot.impressions)
-    if (!current.contentItemId && snapshot.contentItemId) current.contentItemId = snapshot.contentItemId
-    byPair.set(key, current)
-  }
-  return Array.from(byPair.values())
-    .map(({ weightedPosition, ...row }) => ({
-      ...row,
-      ctr: row.impressions ? row.clicks / row.impressions : 0,
-      position: row.impressions ? weightedPosition / row.impressions : 0,
-    }))
+function searchConsoleOpportunities(summaries: SearchConsoleDimensionSummaryRow[]) {
+  return searchConsoleSummaryRows(summaries, 'page_query')
     .filter((row) => row.impressions >= 10 && row.ctr < 0.05)
     .sort((a, b) => b.impressions - a.impressions || a.position - b.position)
 }
@@ -6695,7 +6609,7 @@ function defaultGoogleKeywords(page: PromotablePageRow) {
   const generatedKeywords = usableKeywordIdeas(page)
     .map((idea) => idea.keyword)
     .slice(0, 16)
-  const queryKeywords = aggregateSearchConsoleMetrics(page.searchMetrics, 'query')
+  const queryKeywords = searchConsoleSummaryRows(page.searchSummaries, 'page_query')
     .map((row) => row.query)
     .filter((query): query is string => Boolean(query))
     .slice(0, 8)

@@ -1002,19 +1002,18 @@ const searchConsoleSitemaps = table('search_console_sitemaps')
   })
   .primaryKey('id')
 
-const searchConsoleMetricSnapshots = table('search_console_metric_snapshots')
+const searchConsoleDimensionSummaries = table('search_console_dimension_summaries')
   .columns({
     id: string(),
     organizationId: string().from('organization_id'),
     propertyId: string().from('property_id'),
     contentItemId: string().optional().from('content_item_id'),
     contentOutputId: string().optional().from('content_output_id'),
-    dataDate: number().from('data_date'),
+    summaryType: string().from('summary_type'),
+    summaryKey: string().from('summary_key'),
     searchType: string().from('search_type'),
     page: string().optional(),
     query: string().optional(),
-    country: string().optional(),
-    device: string().optional(),
     clicks: number(),
     impressions: number(),
     ctr: string().optional(),
@@ -1593,7 +1592,7 @@ export const schema = createSchema({
     googleConnections,
     searchConsoleProperties,
     searchConsoleSitemaps,
-    searchConsoleMetricSnapshots,
+    searchConsoleDimensionSummaries,
     searchConsoleDailySnapshots,
     searchConsoleUrlInspections,
     pmTeams,
@@ -1745,7 +1744,7 @@ export const permissions = definePermissions<AuthData, Schema>(schema, () => {
     google_connections: organizationScoped<'google_connections'>(),
     search_console_properties: organizationScoped<'search_console_properties'>(),
     search_console_sitemaps: organizationScoped<'search_console_sitemaps'>(),
-    search_console_metric_snapshots: organizationScoped<'search_console_metric_snapshots'>(),
+    search_console_dimension_summaries: organizationScoped<'search_console_dimension_summaries'>(),
     search_console_daily_snapshots: organizationScoped<'search_console_daily_snapshots'>(),
     search_console_url_inspections: organizationScoped<'search_console_url_inspections'>(),
     pm_teams: authenticatedReadOnly,

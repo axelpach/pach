@@ -105,7 +105,7 @@ type SearchConsoleSitemapRow = {
   status: string
 }
 
-type SearchConsoleMetricSnapshotRow = {
+type SearchConsoleDailySnapshotRow = {
   organizationId: string
   propertyId: string
   dataDate: number
@@ -222,7 +222,7 @@ export default function SettingsPage() {
   const [googleConnections] = useQuery(z.query.google_connections.orderBy('updatedAt', 'desc'))
   const [searchConsoleProperties] = useQuery(z.query.search_console_properties.orderBy('updatedAt', 'desc'))
   const [searchConsoleSitemaps] = useQuery(z.query.search_console_sitemaps.orderBy('updatedAt', 'desc'))
-  const [searchConsoleMetricSnapshots] = useQuery(z.query.search_console_metric_snapshots.orderBy('dataDate', 'desc'))
+  const [searchConsoleDailySnapshots] = useQuery(z.query.search_console_daily_snapshots.orderBy('dataDate', 'desc'))
   const [searchConsoleUrlInspections] = useQuery(z.query.search_console_url_inspections.orderBy('inspectedAt', 'desc'))
   const [organizationId, setOrganizationId] = useState('')
   const [apiKeys, setApiKeys] = useState<OrganizationApiKey[]>([])
@@ -279,9 +279,9 @@ export default function SettingsPage() {
     () => searchConsoleSitemaps.filter((sitemap) => sitemap.organizationId === organizationId),
     [organizationId, searchConsoleSitemaps],
   )
-  const organizationSearchConsoleMetrics = useMemo(
-    () => searchConsoleMetricSnapshots.filter((snapshot) => snapshot.organizationId === organizationId),
-    [organizationId, searchConsoleMetricSnapshots],
+  const organizationSearchConsoleDailySnapshots = useMemo(
+    () => searchConsoleDailySnapshots.filter((snapshot) => snapshot.organizationId === organizationId),
+    [organizationId, searchConsoleDailySnapshots],
   )
   const organizationSearchConsoleInspections = useMemo(
     () => searchConsoleUrlInspections.filter((inspection) => inspection.organizationId === organizationId),
@@ -642,7 +642,7 @@ export default function SettingsPage() {
         body: JSON.stringify({ propertyId: property.id }),
       })
       const payload = await readJson(response)
-      return `search analytics synced · ${payload.dailyRows ?? 0} days · ${payload.rows ?? 0} rows`
+      return `search analytics synced · ${payload.dailyRows ?? 0} days · ${payload.summaries ?? 0} summaries`
     })
   }
 
@@ -790,7 +790,7 @@ export default function SettingsPage() {
             connections={organizationGoogleConnections}
             properties={organizationSearchConsoleProperties}
             sitemaps={organizationSearchConsoleSitemaps}
-            metrics={organizationSearchConsoleMetrics}
+            metrics={organizationSearchConsoleDailySnapshots}
             inspections={organizationSearchConsoleInspections}
             actionState={searchAction}
             onConnect={() => void connectGoogleSearch()}
@@ -1456,7 +1456,7 @@ function SearchSection({
   connections: GoogleConnectionRow[]
   properties: SearchConsolePropertyRow[]
   sitemaps: SearchConsoleSitemapRow[]
-  metrics: SearchConsoleMetricSnapshotRow[]
+  metrics: SearchConsoleDailySnapshotRow[]
   inspections: SearchConsoleUrlInspectionRow[]
   actionState: SearchActionState
   onConnect: () => void
