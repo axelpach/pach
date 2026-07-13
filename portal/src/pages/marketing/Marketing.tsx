@@ -114,6 +114,9 @@ type SearchConsoleUrlInspectionRow = {
   verdict?: string | null
 }
 
+type AgentRunRow = Schema['tables']['agent_runs']['row']
+type AgentRunProgressReportRow = Schema['tables']['agent_run_progress_reports']['row']
+
 const SEARCH_ANALYTICS_LOOKBACK_DAYS = 92
 
 type AnalyticsDetailTab = 'search' | 'newsletter' | 'social' | 'ads'
@@ -305,6 +308,8 @@ export default function Marketing({ canAccessWhatsApp = false }: { canAccessWhat
   const [searchConsoleMetricSnapshots] = useQuery(z.query.search_console_metric_snapshots.orderBy('dataDate', 'desc'))
   const [searchConsoleDailySnapshots] = useQuery(z.query.search_console_daily_snapshots.orderBy('dataDate', 'desc'))
   const [searchConsoleUrlInspections] = useQuery(z.query.search_console_url_inspections.orderBy('inspectedAt', 'desc'))
+  const [agentRuns] = useQuery(z.query.agent_runs.orderBy('createdAt', 'desc'))
+  const [agentRunProgressReports] = useQuery(z.query.agent_run_progress_reports.orderBy('createdAt', 'desc'))
 
   const section = sectionFromPath(location.pathname)
   const newsletterTab = newsletterTabFromPath(location.pathname)
@@ -335,6 +340,11 @@ export default function Marketing({ canAccessWhatsApp = false }: { canAccessWhat
   const orgSearchConsoleMetrics = useMemo(() => byOrganization(searchConsoleMetricSnapshots, organizationId), [organizationId, searchConsoleMetricSnapshots])
   const orgSearchConsoleDailySnapshots = useMemo(() => byOrganization(searchConsoleDailySnapshots, organizationId), [organizationId, searchConsoleDailySnapshots])
   const orgSearchConsoleInspections = useMemo(() => byOrganization(searchConsoleUrlInspections, organizationId), [organizationId, searchConsoleUrlInspections])
+  const orgKeywordAgentRuns = useMemo(() => keywordGenerationRunsForOrganization(agentRuns, organizationId), [agentRuns, organizationId])
+  const orgKeywordAgentRunProgressReports = useMemo(
+    () => keywordGenerationProgressReportsForRuns(agentRunProgressReports, orgKeywordAgentRuns),
+    [agentRunProgressReports, orgKeywordAgentRuns],
+  )
   const selectedContent = orgContentItems.find((item) => item.id === selectedContentId) ?? null
   const selectedPublication = orgPublications.find((item) => item.id === selectedPublicationId) ?? orgPublications[0] ?? null
   const contentItemIdFromUrl = new URLSearchParams(location.search).get('content')
@@ -641,6 +651,8 @@ export default function Marketing({ canAccessWhatsApp = false }: { canAccessWhat
               adPromotions={orgAdPromotions}
               adMetricSnapshots={orgAdMetricSnapshots}
               searchConsoleMetrics={orgSearchConsoleMetrics}
+              keywordAgentRuns={orgKeywordAgentRuns}
+              keywordProgressReports={orgKeywordAgentRunProgressReports}
               onFlash={flash}
             />
           ) : null}
@@ -1579,6 +1591,14 @@ type PromotablePageRow = {
   paidTotals: ReturnType<typeof sumAdMetricSnapshots>
 }
 
+type KeywordGenerationPageRunState = {
+  status: 'queued' | 'running' | 'needs_human' | 'done' | 'failed' | 'canceled'
+  label: string
+  detail: string
+  run: AgentRunRow | null
+  progress: AgentRunProgressReportRow | null
+}
+
 type PromotablePageFormPayload = {
   title: string
   url: string
@@ -1603,6 +1623,8 @@ function PromotionsSection({
   adPromotions,
   adMetricSnapshots,
   searchConsoleMetrics,
+  keywordAgentRuns,
+  keywordProgressReports,
   onFlash,
 }: {
   z: ReturnType<typeof useZero<Schema, Mutators>>
@@ -1614,6 +1636,8 @@ function PromotionsSection({
   adPromotions: AdPromotionRow[]
   adMetricSnapshots: AdMetricSnapshotRow[]
   searchConsoleMetrics: SearchConsoleMetricSnapshotRow[]
+  keywordAgentRuns: AgentRunRow[]
+  keywordProgressReports: AgentRunProgressReportRow[]
   onFlash: (message: string) => void
 }) {
   const [tab, setTab] = useState<PromotionWorkspaceTab>('pages')
@@ -1635,6 +1659,10 @@ function PromotionsSection({
   const incompleteDrafts = draftPromotions.filter((promotion) => !promotion.budgetMinor || !promotion.adAccountExternalId)
   const selectedPages = pages.filter((page) => selectedPageIds.includes(page.page.id))
   const allPagesSelected = pages.length > 0 && selectedPageIds.length === pages.length
+  const keywordRunStateByPageId = useMemo(
+    () => keywordGenerationRunStateByPage(pages, keywordAgentRuns, keywordProgressReports),
+    [keywordAgentRuns, keywordProgressReports, pages],
+  )
 
   useEffect(() => {
     setSelectedPageIds((ids) => ids.filter((id) => pages.some((page) => page.page.id === id)))
@@ -1774,6 +1802,7 @@ function PromotionsSection({
               pages={pages}
               selectedPageIds={selectedPageIds}
               allPagesSelected={allPagesSelected}
+              keywordRunStateByPageId={keywordRunStateByPageId}
               onToggleAll={() => setSelectedPageIds(allPagesSelected ? [] : pages.map((page) => page.page.id))}
               onTogglePage={(pageId) => setSelectedPageIds((ids) => (
                 ids.includes(pageId) ? ids.filter((id) => id !== pageId) : [...ids, pageId]
@@ -1844,6 +1873,7 @@ function PromotablePagesTable({
   pages,
   selectedPageIds,
   allPagesSelected,
+  keywordRunStateByPageId,
   onToggleAll,
   onTogglePage,
   onEdit,
@@ -1852,6 +1882,7 @@ function PromotablePagesTable({
   pages: PromotablePageRow[]
   selectedPageIds: string[]
   allPagesSelected: boolean
+  keywordRunStateByPageId: Map<string, KeywordGenerationPageRunState>
   onToggleAll: () => void
   onTogglePage: (pageId: string) => void
   onEdit: (page: PromotablePageRow) => void
@@ -1883,6 +1914,7 @@ function PromotablePagesTable({
             const positiveKeywords = usableKeywordIdeas(page).length
             const negativeKeywords = page.keywordIdeas.filter((idea) => idea.negative && idea.status !== 'rejected').length
             const selected = selectedPageIds.includes(page.page.id)
+            const keywordRunState = keywordRunStateByPageId.get(page.page.id)
             return (
               <tr
                 key={page.page.id}
@@ -1917,8 +1949,12 @@ function PromotablePagesTable({
                   {page.topQuery ? <div className="mt-1 text-[11px] text-accent">{page.topQuery}</div> : null}
                 </td>
                 <td className="px-3 py-3">
-                  <div className="text-fg-1">{positiveKeywords ? `${positiveKeywords} ideas` : 'not generated'}</div>
-                  <div className="mt-1 text-[11px] text-fg-4">{negativeKeywords ? `${negativeKeywords} negative` : keywordStatusLabel(page.page)}</div>
+                  <KeywordIdeasCell
+                    page={page.page}
+                    positiveKeywords={positiveKeywords}
+                    negativeKeywords={negativeKeywords}
+                    runState={keywordRunState}
+                  />
                 </td>
                 <td className="px-3 py-3 text-right">
                   <div className="text-fg-1">{page.promotions.length ? `${page.promotions.length} draft${page.promotions.length === 1 ? '' : 's'}` : 'not promoted'}</div>
@@ -1947,6 +1983,47 @@ function PromotablePagesTable({
           })}
         </tbody>
       </table>
+    </div>
+  )
+}
+
+function KeywordIdeasCell({
+  page,
+  positiveKeywords,
+  negativeKeywords,
+  runState,
+}: {
+  page: PromotablePageRecord
+  positiveKeywords: number
+  negativeKeywords: number
+  runState?: KeywordGenerationPageRunState
+}) {
+  if (runState) {
+    const doneWithIdeas = runState.status === 'done' && positiveKeywords > 0
+    return (
+      <div className="min-w-0">
+        <div className="flex min-w-0 items-center gap-2">
+          <div className="truncate text-fg-1">
+            {doneWithIdeas ? `${positiveKeywords} ideas` : runState.label}
+          </div>
+          <StatusPill kind={keywordGenerationStatusKind(runState.status)}>
+            {runState.status === 'done' ? 'done' : runState.status}
+          </StatusPill>
+        </div>
+        <div className="mt-1 max-w-[240px] truncate text-[11px] text-fg-4" title={runState.detail}>
+          {runState.detail}
+        </div>
+        {doneWithIdeas && negativeKeywords ? (
+          <div className="mt-1 text-[11px] text-fg-4">{negativeKeywords} negative</div>
+        ) : null}
+      </div>
+    )
+  }
+
+  return (
+    <div className="min-w-0">
+      <div className="text-fg-1">{positiveKeywords ? `${positiveKeywords} ideas` : 'not generated'}</div>
+      <div className="mt-1 text-[11px] text-fg-4">{negativeKeywords ? `${negativeKeywords} negative` : keywordStatusLabel(page)}</div>
     </div>
   )
 }
@@ -6643,6 +6720,164 @@ function usableKeywordIdeas(page: PromotablePageRow) {
     })
 }
 
+function keywordGenerationRunsForOrganization(runs: AgentRunRow[], organizationId: string) {
+  if (!organizationId) return []
+  return runs
+    .filter((run) => {
+      const metadata = readRecord(run.metadata)
+      const isKeywordRun = run.subjectType === 'mkt_keyword_generation'
+        || readString(metadata.handler) === 'keyword-generation-mcp'
+        || readString(metadata.workflow) === 'google_search_keyword_generation'
+      if (!isKeywordRun) return false
+      return run.subjectId === organizationId || readString(metadata.organizationId) === organizationId
+    })
+    .sort((a, b) => (b.createdAt ?? 0) - (a.createdAt ?? 0))
+}
+
+function keywordGenerationProgressReportsForRuns(reports: AgentRunProgressReportRow[], runs: AgentRunRow[]) {
+  const runIds = new Set(runs.map((run) => run.id))
+  return reports
+    .filter((report) => runIds.has(report.runId))
+    .sort((a, b) => (b.createdAt ?? 0) - (a.createdAt ?? 0))
+}
+
+function keywordGenerationRunStateByPage(
+  pages: PromotablePageRow[],
+  runs: AgentRunRow[],
+  reports: AgentRunProgressReportRow[],
+) {
+  const runsById = new Map(runs.map((run) => [run.id, run]))
+  const reportsByRunId = new Map<string, AgentRunProgressReportRow[]>()
+  for (const report of reports) {
+    const list = reportsByRunId.get(report.runId) ?? []
+    list.push(report)
+    reportsByRunId.set(report.runId, list)
+  }
+
+  const runsByPageId = new Map<string, AgentRunRow[]>()
+  for (const run of runs) {
+    for (const pageId of keywordGenerationRunPageIds(run)) {
+      const list = runsByPageId.get(pageId) ?? []
+      list.push(run)
+      runsByPageId.set(pageId, list)
+    }
+  }
+
+  const byPageId = new Map<string, KeywordGenerationPageRunState>()
+  for (const page of pages) {
+    const metadata = readRecord(page.page.metadata)
+    const lastRunId = readString(metadata.lastKeywordRunId)
+    const candidates = uniqueRuns([
+      lastRunId ? runsById.get(lastRunId) ?? null : null,
+      ...(runsByPageId.get(page.page.id) ?? []),
+    ])
+    const run = candidates.sort((a, b) => (b.createdAt ?? 0) - (a.createdAt ?? 0))[0] ?? null
+    const progress = run ? reportsByRunId.get(run.id)?.[0] ?? null : null
+    const state = keywordGenerationRunStateForPage(page, run, progress)
+    if (state) byPageId.set(page.page.id, state)
+  }
+  return byPageId
+}
+
+function keywordGenerationRunPageIds(run: AgentRunRow) {
+  const metadata = readRecord(run.metadata)
+  const pageIds = new Set(readStringList(metadata.pageIds))
+  const pages = Array.isArray(metadata.pages) ? metadata.pages : []
+  for (const page of pages) {
+    const id = readString(readRecord(page).id)
+    if (id) pageIds.add(id)
+  }
+  return [...pageIds]
+}
+
+function uniqueRuns(runs: Array<AgentRunRow | null>) {
+  const seen = new Set<string>()
+  const output: AgentRunRow[] = []
+  for (const run of runs) {
+    if (!run || seen.has(run.id)) continue
+    seen.add(run.id)
+    output.push(run)
+  }
+  return output
+}
+
+function keywordGenerationRunStateForPage(
+  page: PromotablePageRow,
+  run: AgentRunRow | null,
+  progress: AgentRunProgressReportRow | null,
+): KeywordGenerationPageRunState | null {
+  const metadata = readRecord(page.page.metadata)
+  const metadataStatus = readString(metadata.keywordGenerationStatus)
+  const positiveKeywords = usableKeywordIdeas(page).length
+  const generatedAt = readTimestamp(metadata.lastKeywordGeneratedAt)
+  const status = normalizeKeywordGenerationStatus(run?.status, metadataStatus, positiveKeywords)
+  if (!status) return null
+
+  const detail = keywordGenerationDetail({
+    status,
+    run,
+    progress,
+    generatedAt,
+    positiveKeywords,
+  })
+
+  return {
+    status,
+    label: keywordGenerationLabel(status),
+    detail,
+    run,
+    progress,
+  }
+}
+
+function normalizeKeywordGenerationStatus(runStatus: string | undefined, metadataStatus: string, positiveKeywords: number): KeywordGenerationPageRunState['status'] | null {
+  if (runStatus === 'failed') return 'failed'
+  if (runStatus === 'canceled') return 'canceled'
+  if (runStatus === 'needs_human') return 'needs_human'
+  if (runStatus === 'running') return 'running'
+  if (runStatus === 'bootstrapping' || runStatus === 'reserved' || runStatus === 'queued') return 'queued'
+  if (runStatus === 'completed' || metadataStatus === 'done' || positiveKeywords > 0) return 'done'
+  if (metadataStatus === 'running') return 'running'
+  if (metadataStatus === 'queued') return 'queued'
+  return null
+}
+
+function keywordGenerationLabel(status: KeywordGenerationPageRunState['status']) {
+  if (status === 'queued') return 'queued'
+  if (status === 'running') return 'generating'
+  if (status === 'needs_human') return 'needs review'
+  if (status === 'done') return 'generated'
+  if (status === 'failed') return 'failed'
+  return 'canceled'
+}
+
+function keywordGenerationDetail({
+  status,
+  run,
+  progress,
+  generatedAt,
+  positiveKeywords,
+}: {
+  status: KeywordGenerationPageRunState['status']
+  run: AgentRunRow | null
+  progress: AgentRunProgressReportRow | null
+  generatedAt: number | null
+  positiveKeywords: number
+}) {
+  if (status === 'done') {
+    if (generatedAt) return `generated ${formatDate(generatedAt)}`
+    if (positiveKeywords > 0) return `${positiveKeywords} ideas available`
+  }
+  return progress?.message || run?.statusMessage || keywordGenerationLabel(status)
+}
+
+function keywordGenerationStatusKind(status: KeywordGenerationPageRunState['status']): Parameters<typeof StatusPill>[0]['kind'] {
+  if (status === 'done') return 'ok'
+  if (status === 'failed' || status === 'canceled') return 'fail'
+  if (status === 'queued' || status === 'needs_human') return 'warn'
+  return 'info'
+}
+
 function keywordStatusRank(status: string) {
   if (status === 'approved') return 3
   if (status === 'used') return 2
@@ -6712,6 +6947,13 @@ function readStringList(value: unknown) {
   if (Array.isArray(value)) return value.filter((entry): entry is string => typeof entry === 'string' && Boolean(entry.trim()))
   if (typeof value === 'string' && value.trim()) return [value.trim()]
   return []
+}
+
+function readTimestamp(value: unknown) {
+  if (typeof value === 'number' && Number.isFinite(value)) return value
+  if (typeof value !== 'string' || !value.trim()) return null
+  const parsed = Date.parse(value)
+  return Number.isFinite(parsed) ? parsed : null
 }
 
 function normalizeUrl(value: string | null | undefined) {
