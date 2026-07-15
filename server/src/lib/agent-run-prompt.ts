@@ -175,7 +175,7 @@ function buildEditorialMcpPrompt(run: AgentRunPromptRecord) {
     '2. Report progress with pach.progress.report and include the agent run id.',
     '3. Read pach.document.format.get before writing document body content. Also read pach.editorial.profile.get for the issue organization when the issue has an organization. If the issue names a newsletter/publication, pass publicationSlug or publicationId so publication-level guidance overrides the organization profile.',
     guidelinesPolicy === 'newsletter_guidelines_required'
-      ? '4. Before drafting, use pach.editorial.profile.get to read the relevant marketing publication editorial profile. Use effectiveProfile.newsletterGuidelines when present. If the issue names a publication but the selector is ambiguous or no publication-level newsletterGuidelines are available, report phase "blocked" and explain what publication guidance is missing instead of drafting. Do not search Docs for Newsletter Guidelines.'
+      ? '4. Before drafting, use pach.editorial.profile.get to read the relevant marketing publication editorial profile. Use effectiveProfile.newsletterGuidelines when present. Inspect effectiveProfile.researchSources and follow a relevant source\'s reusable API instructions when the worker exposes its credential alias. If the issue names a publication but the selector is ambiguous or no publication-level newsletterGuidelines are available, report phase "blocked" and explain what publication guidance is missing instead of drafting. Do not search Docs for Newsletter Guidelines.'
       : '4. Do not search Docs for Newsletter Guidelines. Use pach.editorial.profile.get only when the issue or feedback explicitly asks for newsletter/article/blog-post guidelines.',
     '5. Create or update a Pach document as the review artifact. For new article/newsletter/blog drafts, use pach.document.create. For edits to an existing referenced document, use pach.document.update with the default version workflow unless the issue explicitly asks to update live content.',
     '6. For article/newsletter/blog drafts, use Pach markdown and keep a useful review structure: brief/context, sources if any, outline if useful, then the draft body. Preserve visible source blocks for source material when relevant.',
@@ -236,7 +236,7 @@ function buildNewsletterIdeaBacklogPrompt(run: AgentRunPromptRecord) {
     '',
     'Workflow:',
     '1. Report progress with pach.progress.report using this run id.',
-    '2. Read pach.editorial.profile.get for the publication. Use effectiveProfile.ideaGuidelines when present, and otherwise match the newsletter guidelines.',
+    '2. Read pach.editorial.profile.get for the publication. Use effectiveProfile.ideaGuidelines when present, and otherwise match the newsletter guidelines. Inspect effectiveProfile.researchSources and use relevant enabled sources through the credential aliases exposed by the worker.',
     '3. Read pach.marketing.idea.list for the publication. Avoid repeating available, reserved, used, or rejected ideas.',
     `4. Create at least ${neededIdeas} distinct ideas with pach.marketing.idea.create. Use useful titles, concrete angles, sourceNotes when relevant, and stable dedupeKey values.`,
     '5. Put the final result in pach.progress.report with phase "final_result", including the ideas created and any duplicates skipped.',
@@ -269,7 +269,7 @@ function buildNewsletterSlotFulfillmentPrompt(run: AgentRunPromptRecord) {
     'Workflow:',
     '1. Report progress with pach.progress.report using this run id.',
     '2. Read pach.marketing.slot.get for the slot. Use its linked idea if present; otherwise list/create an idea with pach.marketing.idea.list and pach.marketing.idea.create.',
-    '3. Read pach.document.format.get and pach.editorial.profile.get for the publication. Use effectiveProfile.newsletterGuidelines when present.',
+    '3. Read pach.document.format.get and pach.editorial.profile.get for the publication. Use effectiveProfile.newsletterGuidelines when present. Inspect effectiveProfile.researchSources and use relevant enabled sources through the credential aliases exposed by the worker.',
     '4. Create one publishable article document with pach.document.create. Set metadata with source "newsletter_autonomy", publicationSlotId, editorialIdeaId when present, and agentRunId.',
     '5. Call pach.marketing.slot.fulfill with slotId, documentId, ideaId when present, runId, subject, and preheader. This snapshots the document into marketing content and schedules the broadcast.',
     '6. Put the final result in pach.progress.report with phase "final_result", including the document id/link, content item id, distribution run id, scheduled time, and whether guidelines were used.',

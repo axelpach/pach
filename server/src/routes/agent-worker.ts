@@ -2,7 +2,18 @@ import { randomUUID } from 'node:crypto'
 import { Router } from 'express'
 import type { Request } from 'express'
 import { and, desc, eq, inArray, isNull, or } from 'drizzle-orm'
-import { agentRunProgressReports, agentRuns, agentWorkers, githubBranches, githubPullRequests, mcpTokens, pmIssues } from '../../../db/schema.js'
+import {
+  agentRunProgressReports,
+  agentRuns,
+  agentWorkers,
+  githubBranches,
+  githubPullRequests,
+  mcpTokens,
+  mktPublications,
+  mktPublicationSlots,
+  organizationCredentials,
+  pmIssues,
+} from '../../../db/schema.js'
 import { getDb } from '../db.js'
 import { buildAgentRunSpec, buildGeneralMcpPrompt } from '../lib/agent-run-prompt.js'
 import { hydrateAgentInputMediaMetadata } from '../lib/agent-input-media.js'
@@ -10,6 +21,7 @@ import { insertIssueActivityEvent } from '../lib/activity-events.js'
 import { readGithubCredentialForRepository } from '../lib/github-credentials.js'
 import { hashMcpToken, hasMcpCapability, type McpAuthContext, type McpCapability } from '../lib/mcp-token.js'
 import { syncIssueStatusForPullRequest } from '../lib/pull-request-issue-status.js'
+import { decryptSecret } from '../lib/secret-encryption.js'
 
 const router = Router()
 const ACTIVE_RUN_STATUSES = ['reserved', 'bootstrapping', 'running', 'needs_human'] as const
@@ -340,6 +352,79 @@ router.post('/runs/:id/github-token', async (req: AgentWorkerRequest, res) => {
   }
 })
 
+router.post('/runs/:id/credentials', async (req: AgentWorkerRequest, res) => {
+  try {
+    requireCapability(req, 'agent.run.claim')
+
+    const body = ensureObject(req.body ?? {})
+    const workerId = readRequiredString(body.workerId, 'workerId')
+    const { run } = await readOwnedRun(readRouteParam(req.params.id, 'id'), workerId)
+    if (!isActiveRunStatus(run.status)) {
+      res.status(409).json({ ok: false, error: 'Agent run is not active.' })
+      return
+    }
+    if (!isEditorialRun(run)) {
+      res.status(403).json({ ok: false, error: 'Organization credentials are only available to editorial runs.' })
+      return
+    }
+
+    const publication = await readRunPublication(run)
+    if (!publication) {
+      res.json({ ok: true, publicationId: null, credentials: [] })
+      return
+    }
+    if (!canWorkerAccessOrganization(req.agentWorkerAuth, publication.organizationId)) {
+      res.status(403).json({ ok: false, error: 'Worker token cannot access this organization.' })
+      return
+    }
+
+    const sources = readPublicationResearchSources(publication.editorialProfile)
+    const credentialIds = Array.from(new Set(sources.map((source) => source.credentialId).filter(Boolean)))
+    if (credentialIds.length === 0) {
+      res.json({ ok: true, publicationId: publication.id, credentials: [] })
+      return
+    }
+
+    const rows = await getDb()
+      .select()
+      .from(organizationCredentials)
+      .where(and(
+        eq(organizationCredentials.organizationId, publication.organizationId),
+        inArray(organizationCredentials.id, credentialIds),
+        eq(organizationCredentials.status, 'active'),
+        isNull(organizationCredentials.revokedAt),
+      ))
+    const usable = rows.filter((credential) => readStringArray(credential.allowedUses).includes('editorial'))
+    const credentials = usable.map((credential) => ({
+      id: credential.id,
+      name: credential.name,
+      provider: credential.provider,
+      envVarName: credential.envVarName,
+      secret: decryptSecret(credential.encryptedSecret),
+      researchSourceNames: sources
+        .filter((source) => source.credentialId === credential.id)
+        .map((source) => source.name),
+    }))
+    const usedAt = new Date()
+
+    if (credentials.length > 0) {
+      await getDb()
+        .update(organizationCredentials)
+        .set({ lastUsedAt: usedAt, updatedAt: usedAt })
+        .where(inArray(organizationCredentials.id, credentials.map((credential) => credential.id)))
+    }
+
+    res.json({
+      ok: true,
+      publicationId: publication.id,
+      credentials,
+    })
+  } catch (error) {
+    console.error('Editorial credential handoff failed', error)
+    res.status(500).json({ ok: false, error: 'Editorial credential handoff failed' })
+  }
+})
+
 router.post('/runs/:id/pull-request', async (req: AgentWorkerRequest, res) => {
   try {
     requireCapability(req, 'agent.run.progress')
@@ -515,6 +600,62 @@ async function readOwnedRun(runId: string, workerId: string) {
   const [worker] = await db.select().from(agentWorkers).where(eq(agentWorkers.id, workerId)).limit(1)
   if (!worker) throw new Error('Worker not found')
   return { run, worker }
+}
+
+async function readRunPublication(run: typeof agentRuns.$inferSelect) {
+  const metadata = readObject(run.metadata)
+  const metadataPublicationId = readOptionalString(metadata.publicationId)
+  const publicationId = metadataPublicationId
+    ?? (run.subjectType === 'mkt_publication' ? run.subjectId : undefined)
+
+  if (publicationId) {
+    const [publication] = await getDb()
+      .select()
+      .from(mktPublications)
+      .where(eq(mktPublications.id, publicationId))
+      .limit(1)
+    return publication ?? null
+  }
+
+  if (run.subjectType === 'publication_slot' && run.subjectId) {
+    const [slot] = await getDb()
+      .select({ publicationId: mktPublicationSlots.publicationId })
+      .from(mktPublicationSlots)
+      .where(eq(mktPublicationSlots.id, run.subjectId))
+      .limit(1)
+    if (!slot) return null
+
+    const [publication] = await getDb()
+      .select()
+      .from(mktPublications)
+      .where(eq(mktPublications.id, slot.publicationId))
+      .limit(1)
+    return publication ?? null
+  }
+
+  return null
+}
+
+function readPublicationResearchSources(editorialProfile: unknown) {
+  const raw = readObject(editorialProfile).researchSources
+  if (!Array.isArray(raw)) return []
+
+  return raw.flatMap((value) => {
+    const source = readObject(value)
+    const credentialId = readOptionalString(source.credentialId)
+    const name = readOptionalString(source.name)
+    if (!credentialId || !name || source.enabled === false) return []
+    return [{ credentialId, name }]
+  })
+}
+
+function isEditorialRun(run: typeof agentRuns.$inferSelect) {
+  const metadata = readObject(run.metadata)
+  return metadata.agentProfile === 'editorial' || metadata.handler === 'editorial-mcp'
+}
+
+function canWorkerAccessOrganization(auth: McpAuthContext | undefined, organizationId: string) {
+  return Boolean(auth?.allOrganizations || auth?.organizationIds.includes(organizationId))
 }
 
 async function appendRunActivity(

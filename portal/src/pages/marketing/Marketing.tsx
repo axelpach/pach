@@ -118,6 +118,27 @@ type SearchConsoleUrlInspectionRow = {
 type AgentRunRow = Schema['tables']['agent_runs']['row']
 type AgentRunProgressReportRow = Schema['tables']['agent_run_progress_reports']['row']
 
+type OrganizationCredentialSummary = {
+  id: string
+  organizationId: string
+  name: string
+  provider: string
+  envVarName: string
+  secretLast4: string
+  allowedUses: string[]
+  status: string
+}
+
+type PublicationResearchSource = {
+  id: string
+  name: string
+  credentialId: string
+  baseUrl: string
+  docsUrl: string
+  instructions: string
+  enabled: boolean
+}
+
 const SEARCH_ANALYTICS_LOOKBACK_DAYS = 92
 
 type AnalyticsDetailTab = 'search' | 'newsletter' | 'social' | 'ads'
@@ -3556,6 +3577,31 @@ function PublicationDetailPage({
   const [guidelinesEditorKind, setGuidelinesEditorKind] = useState<'idea' | 'newsletter' | null>(null)
   const [guidelinesDraft, setGuidelinesDraft] = useState('')
   const guidelinesEditorRef = useRef<RichEditorHandle | null>(null)
+  const [organizationCredentials, setOrganizationCredentials] = useState<OrganizationCredentialSummary[]>([])
+  const [researchSourceModal, setResearchSourceModal] = useState<PublicationResearchSource | 'new' | null>(null)
+
+  useEffect(() => {
+    if (!publication?.organizationId) {
+      setOrganizationCredentials([])
+      return
+    }
+
+    let active = true
+    void authFetch(`${config.apiUrl}/api-keys?organizationId=${encodeURIComponent(publication.organizationId)}`)
+      .then(readJson)
+      .then((payload) => {
+        if (!active) return
+        setOrganizationCredentials(Array.isArray(payload.credentials) ? payload.credentials : [])
+      })
+      .catch((error) => {
+        console.error('Provider credential load failed', error)
+        if (active) setOrganizationCredentials([])
+      })
+
+    return () => {
+      active = false
+    }
+  }, [publication?.organizationId])
 
   if (!publication) {
     return (
@@ -3587,6 +3633,8 @@ function PublicationDetailPage({
   const metadata = readRecord(publication.metadata)
   const newsletterGuidelines = publicationNewsletterGuidelines(publication)
   const ideaGuidelines = publicationIdeaGuidelines(publication)
+  const researchSources = publicationResearchSources(publication)
+  const editorialCredentials = organizationCredentials.filter((credential) => credential.status === 'active' && credential.allowedUses.includes('editorial'))
 
   async function updateEmailWrapper(updates: Partial<PublicationEmailWrapper>) {
     const current = publicationEmailWrapper(publication)
@@ -3645,6 +3693,32 @@ function PublicationDetailPage({
     })
     setGuidelinesEditorKind(null)
     onFlash('editorial profile saved')
+  }
+
+  async function saveResearchSource(source: PublicationResearchSource) {
+    const nextSources = researchSources.some((entry) => entry.id === source.id)
+      ? researchSources.map((entry) => entry.id === source.id ? source : entry)
+      : [...researchSources, source]
+    await z.mutate.mkt_publications.update({
+      id: publication.id,
+      editorialProfile: {
+        ...readRecord(publication.editorialProfile),
+        researchSources: nextSources,
+      },
+    })
+    setResearchSourceModal(null)
+    onFlash('research source saved')
+  }
+
+  async function removeResearchSource(sourceId: string) {
+    await z.mutate.mkt_publications.update({
+      id: publication.id,
+      editorialProfile: {
+        ...readRecord(publication.editorialProfile),
+        researchSources: researchSources.filter((source) => source.id !== sourceId),
+      },
+    })
+    onFlash('research source removed')
   }
 
   const guidelinesEditorTitle = guidelinesEditorKind === 'idea' ? 'idea guidelines' : 'newsletter guidelines'
@@ -3755,6 +3829,57 @@ function PublicationDetailPage({
                 })}
               </div>
               {slots.length === 0 ? <EmptyState label="no slots yet" /> : null}
+            </Panel>
+
+            <Panel title={<InfoTitle label="research sources" info="Reusable API documentation and access grants the editorial agent can consult when researching this publication." />}>
+              <div className="mb-3 flex justify-end">
+                <Button
+                  className="px-2 py-1 text-[10px]"
+                  icon={<Plus className="h-3 w-3" />}
+                  onClick={() => setResearchSourceModal('new')}
+                  disabled={editorialCredentials.length === 0}
+                >
+                  source
+                </Button>
+              </div>
+              <div className="divide-y divide-edge/8 border-y border-edge/8">
+                {researchSources.map((source) => {
+                  const credential = organizationCredentials.find((entry) => entry.id === source.credentialId)
+                  return (
+                    <div key={source.id} className="grid gap-3 px-3 py-3 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-center">
+                      <div className="min-w-0">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className="truncate text-sm text-fg-1">{source.name}</span>
+                          <StatusPill kind={source.enabled && credential?.status === 'active' ? 'ok' : 'warn'}>
+                            {source.enabled ? credential?.status ?? 'credential missing' : 'disabled'}
+                          </StatusPill>
+                        </div>
+                        <div className="mt-2 grid gap-2 font-mono text-[11px] text-fg-4 sm:grid-cols-2">
+                          <span className="truncate">{credential ? `${credential.name} · ${credential.envVarName}` : 'No credential'}</span>
+                          {source.docsUrl ? (
+                            <a className="inline-flex min-w-0 items-center gap-1 text-fg-3 transition hover:text-accent" href={source.docsUrl} target="_blank" rel="noreferrer">
+                              <ExternalLink className="h-3 w-3 shrink-0" />
+                              <span className="truncate">{source.docsUrl}</span>
+                            </a>
+                          ) : <span>No documentation URL</span>}
+                        </div>
+                        {source.instructions ? <p className="mt-2 line-clamp-2 text-xs leading-relaxed text-fg-3">{source.instructions}</p> : null}
+                      </div>
+                      <div className="flex items-center gap-2 lg:justify-self-end">
+                        <Button className="px-2 py-1 text-[10px]" icon={<Edit3 className="h-3 w-3" />} onClick={() => setResearchSourceModal(source)}>
+                          edit
+                        </Button>
+                        <Button kind="danger" className="px-2 py-1 text-[10px]" icon={<Trash2 className="h-3 w-3" />} onClick={() => void removeResearchSource(source.id)}>
+                          remove
+                        </Button>
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+              {researchSources.length === 0 ? (
+                <EmptyState label={editorialCredentials.length === 0 ? 'add an editorial provider credential in settings first' : 'no research sources'} />
+              ) : null}
             </Panel>
 
             <div className="grid gap-4 lg:grid-cols-2">
@@ -3942,6 +4067,15 @@ function PublicationDetailPage({
         </div>
       </div>
 
+      {researchSourceModal ? (
+        <ResearchSourceModal
+          source={researchSourceModal === 'new' ? null : researchSourceModal}
+          credentials={editorialCredentials}
+          onClose={() => setResearchSourceModal(null)}
+          onSubmit={(source) => void saveResearchSource(source)}
+        />
+      ) : null}
+
       {guidelinesEditorKind ? (
         <div
           className="fixed inset-0 z-[70] flex items-start justify-center overflow-auto bg-overlay/75 px-4 py-8 backdrop-blur-sm"
@@ -3992,6 +4126,111 @@ function PublicationDetailPage({
           </div>
         </div>
       ) : null}
+    </div>
+  )
+}
+
+function ResearchSourceModal({
+  source,
+  credentials,
+  onClose,
+  onSubmit,
+}: {
+  source: PublicationResearchSource | null
+  credentials: OrganizationCredentialSummary[]
+  onClose: () => void
+  onSubmit: (source: PublicationResearchSource) => void
+}) {
+  const [name, setName] = useState(source?.name ?? '')
+  const [credentialId, setCredentialId] = useState(source?.credentialId ?? credentials[0]?.id ?? '')
+  const [baseUrl, setBaseUrl] = useState(source?.baseUrl ?? '')
+  const [docsUrl, setDocsUrl] = useState(source?.docsUrl ?? '')
+  const [instructions, setInstructions] = useState(source?.instructions ?? '')
+  const [enabled, setEnabled] = useState(source?.enabled ?? true)
+  const credentialOptions = credentials.map((credential) => ({
+    value: credential.id,
+    label: `${credential.name} · ${credential.envVarName}`,
+  }))
+  const selectedCredential = credentials.find((credential) => credential.id === credentialId)
+
+  return (
+    <div className="fixed inset-0 z-[70] flex items-start justify-center overflow-auto bg-overlay/75 px-4 py-8 backdrop-blur-sm" onClick={onClose}>
+      <div className="w-full max-w-2xl border border-edge/25 bg-pit shadow-terminal-popover" onClick={(event) => event.stopPropagation()}>
+        <div className="flex items-start justify-between gap-4 border-b border-edge/12 px-4 py-3">
+          <div>
+            <div className="font-mono text-[10px] uppercase tracking-label text-fg-4">research source</div>
+            <div className="mt-1 font-mono text-base font-bold lowercase text-fg-1">{source ? 'edit source' : 'new source'}</div>
+          </div>
+          <button type="button" onClick={onClose} className="border border-edge/20 p-2 text-fg-3 transition hover:border-accent hover:text-accent" aria-label="Close research source editor">
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+
+        <div className="space-y-4 px-4 py-4">
+          <label className="block">
+            <FieldLabel>name</FieldLabel>
+            <TermInput autoFocus value={name} onChange={(event) => setName(event.target.value)} placeholder="S&P market data" />
+          </label>
+          <div>
+            <FieldLabel>credential</FieldLabel>
+            <PachSelect
+              value={credentialId}
+              onChange={setCredentialId}
+              options={credentialOptions}
+              display={selectedCredential ? `${selectedCredential.name} · ${selectedCredential.envVarName}` : 'Select credential'}
+            />
+          </div>
+          <div className="grid gap-3 md:grid-cols-2">
+            <label className="block">
+              <FieldLabel>base URL</FieldLabel>
+              <TermInput value={baseUrl} onChange={(event) => setBaseUrl(event.target.value)} placeholder="https://api.example.com" />
+            </label>
+            <label className="block">
+              <FieldLabel>documentation URL</FieldLabel>
+              <TermInput value={docsUrl} onChange={(event) => setDocsUrl(event.target.value)} placeholder="https://docs.example.com/api" />
+            </label>
+          </div>
+          <label className="block">
+            <FieldLabel>usage instructions</FieldLabel>
+            <TermTextarea
+              rows={7}
+              value={instructions}
+              onChange={(event) => setInstructions(event.target.value)}
+              placeholder="Describe authentication placement, useful endpoints, response fields, limits, and attribution requirements."
+            />
+          </label>
+          <button
+            type="button"
+            onClick={() => setEnabled((value) => !value)}
+            className={`flex w-full items-center justify-between border px-3 py-2 text-left font-mono text-xs transition ${
+              enabled ? 'border-accent/50 bg-accent-fill/10 text-accent' : 'border-edge/12 bg-rim text-fg-3'
+            }`}
+          >
+            enabled
+            {enabled ? <Check className="h-3.5 w-3.5" /> : null}
+          </button>
+        </div>
+
+        <div className="flex justify-end gap-2 border-t border-edge/12 px-4 py-3">
+          <Button onClick={onClose}>cancel</Button>
+          <Button
+            kind="primary"
+            icon={<Check className="h-3.5 w-3.5" />}
+            onClick={() => onSubmit({
+              id: source?.id ?? crypto.randomUUID(),
+              name: name.trim(),
+              credentialId,
+              baseUrl: baseUrl.trim(),
+              docsUrl: docsUrl.trim(),
+              instructions: instructions.trim(),
+              enabled,
+            })}
+            disabled={!name.trim() || !selectedCredential || !instructions.trim()}
+          >
+            save
+          </Button>
+        </div>
+      </div>
     </div>
   )
 }
@@ -7342,6 +7581,28 @@ function publicationIdeaGuidelines(publication: PublicationRow | null) {
   if (typeof editorialProfile.ideaGuidelines === 'string') return editorialProfile.ideaGuidelines
   if (typeof editorialProfile.editorialIdeaGuidelines === 'string') return editorialProfile.editorialIdeaGuidelines
   return ''
+}
+
+function publicationResearchSources(publication: PublicationRow | null): PublicationResearchSource[] {
+  const raw = readRecord(publication?.editorialProfile).researchSources
+  if (!Array.isArray(raw)) return []
+
+  return raw.flatMap((value) => {
+    const source = readRecord(value)
+    const id = typeof source.id === 'string' ? source.id.trim() : ''
+    const name = typeof source.name === 'string' ? source.name.trim() : ''
+    const credentialId = typeof source.credentialId === 'string' ? source.credentialId.trim() : ''
+    if (!id || !name || !credentialId) return []
+    return [{
+      id,
+      name,
+      credentialId,
+      baseUrl: typeof source.baseUrl === 'string' ? source.baseUrl : '',
+      docsUrl: typeof source.docsUrl === 'string' ? source.docsUrl : '',
+      instructions: typeof source.instructions === 'string' ? source.instructions : '',
+      enabled: source.enabled !== false,
+    }]
+  })
 }
 
 function publicationCadencePayload(cadence: PublicationCadenceConfig) {

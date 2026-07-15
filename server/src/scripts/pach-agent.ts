@@ -57,6 +57,15 @@ type GithubCredentialHandoff = {
   source?: string | null
 }
 
+type RunCredential = {
+  id: string
+  name: string
+  provider: string
+  envVarName: string
+  secret: string
+  researchSourceNames: string[]
+}
+
 type GithubPullRequestResponse = {
   id: number
   number: number
@@ -208,6 +217,7 @@ async function executeGeneralMcpRun(worker: WorkerRecord, run: AgentRunRecord) {
   console.log(`[${new Date().toISOString()}] claimed general MCP run ${run.id} for ${run.subjectType ?? 'issue'} ${run.subjectId ?? run.issueId ?? run.id}`)
 
   let codexCwd: string | undefined
+  let runCredentials: RunCredential[] = []
 
   await reportRunProgress(worker, run, {
     phase: 'codex_start',
@@ -246,9 +256,12 @@ async function executeGeneralMcpRun(worker: WorkerRecord, run: AgentRunRecord) {
       })
     }
 
-    const prompt = resolveExecutionPrompt(run)
+    runCredentials = await readEditorialRunCredentials(worker, run)
+    const prompt = resolveExecutionPrompt(run, runCredentials)
     const startedAt = Date.now()
-    const { stdout, stderr } = await runCodexExec(prompt, run, worker, codexCwd)
+    const result = await runCodexExec(prompt, run, worker, codexCwd, runCredentials)
+    const stdout = redactCredentialValues(result.stdout, runCredentials)
+    const stderr = redactCredentialValues(result.stderr, runCredentials)
     const durationMs = Date.now() - startedAt
     const finalMessage = summarizeCodexOutput(stdout) || `Codex completed general MCP run ${run.id}`
     const codexSessionId = readCodexSessionId(stdout, stderr) ?? readMetadataString(run.metadata, 'codexSessionId')
@@ -319,7 +332,7 @@ async function executeGeneralMcpRun(worker: WorkerRecord, run: AgentRunRecord) {
     const message = canceled
       ? 'Codex run canceled by user request'
       : error instanceof Error ? error.message : 'Codex general MCP run failed'
-    const output = readExecErrorOutput(error)
+    const output = redactExecErrorOutput(readExecErrorOutput(error), runCredentials)
 
     await reportRunProgress(worker, run, {
       phase: canceled ? 'canceled' : 'codex_failed',
@@ -353,6 +366,7 @@ async function runCodexExec(
   run: AgentRunRecord,
   worker: WorkerRecord,
   cwd?: string,
+  credentials: RunCredential[] = [],
 ): Promise<CommandResult> {
   return new Promise((resolve, reject) => {
     let stdout = ''
@@ -367,10 +381,7 @@ async function runCodexExec(
 
     const child = spawn(codexCommand, args, {
       cwd,
-      env: {
-        ...process.env,
-        PACH_MCP_TOKEN: agentToken,
-      },
+      env: buildCodexEnvironment(credentials),
       stdio: ['ignore', 'pipe', 'pipe'],
     })
 
@@ -426,13 +437,13 @@ async function runCodexExec(
     child.stdout?.on('data', (chunk: Buffer) => {
       const text = chunk.toString()
       stdout += text
-      process.stdout.write(text)
+      if (credentials.length === 0) process.stdout.write(text)
     })
 
     child.stderr?.on('data', (chunk: Buffer) => {
       const text = chunk.toString()
       stderr += text
-      process.stderr.write(text)
+      if (credentials.length === 0) process.stderr.write(text)
     })
 
     child.on('error', (error) => {
@@ -930,11 +941,11 @@ async function reportRunProgress(
   })
 }
 
-function resolveExecutionPrompt(run: AgentRunRecord) {
+function resolveExecutionPrompt(run: AgentRunRecord, credentials: RunCredential[] = []) {
   const serverPrompt = run.executionPrompt?.trim()
-  if (serverPrompt) return serverPrompt
+  if (serverPrompt) return appendEditorialApiAccess(serverPrompt, credentials)
 
-  return [
+  const fallbackPrompt = [
     'You are Pach worker.',
     '',
     'The Pach server did not send a specialized execution prompt. Treat this as a compatibility fallback, not as policy.',
@@ -946,6 +957,68 @@ function resolveExecutionPrompt(run: AgentRunRecord) {
     '',
     'If the task requires repository changes, work only in the current working directory and summarize what remains for server-owned finalization.',
   ].filter((line): line is string => Boolean(line)).join('\n')
+
+  return appendEditorialApiAccess(fallbackPrompt, credentials)
+}
+
+function appendEditorialApiAccess(prompt: string, credentials: RunCredential[]) {
+  if (credentials.length === 0) return prompt
+
+  return [
+    prompt,
+    '',
+    'External research API access:',
+    ...credentials.map((credential) => {
+      const sources = credential.researchSourceNames.length > 0 ? ` for ${credential.researchSourceNames.join(', ')}` : ''
+      return `- ${credential.name} (${credential.provider})${sources}: ${credential.envVarName}`
+    }),
+    'Use direct HTTP requests when the issue or publication guidance identifies a relevant endpoint. This path is provider-agnostic and does not require a Pach MCP tool for each data provider.',
+    'Read credential values from the environment at command execution time. Never print, echo, persist, return, or place a credential value in Pach state, documents, source citations, progress reports, command text, or URLs. Prefer authorization headers when the provider supports them.',
+    'Treat retrieved data as source material: preserve source URLs and retrieval dates, distinguish facts from interpretation, and report a blocked run when required access is unavailable.',
+  ].join('\n')
+}
+
+function buildCodexEnvironment(credentials: RunCredential[]): NodeJS.ProcessEnv {
+  const env: NodeJS.ProcessEnv = {
+    ...process.env,
+    PACH_MCP_TOKEN: agentToken,
+  }
+  delete env.PACH_ENCRYPTION_KEY
+  delete env.SECRET_ENCRYPTION_KEY
+  delete env.ZERO_AUTH_SECRET
+  delete env.PACH_AGENT_TOKEN
+  for (const credential of credentials) env[credential.envVarName] = credential.secret
+  return env
+}
+
+function isEditorialRun(run: AgentRunRecord) {
+  return run.runSpec?.agentProfile === 'editorial'
+    || readMetadataString(run.metadata, 'agentProfile') === 'editorial'
+    || readMetadataString(run.metadata, 'handler') === 'editorial-mcp'
+}
+
+async function readEditorialRunCredentials(worker: WorkerRecord, run: AgentRunRecord) {
+  if (!isEditorialRun(run)) return []
+
+  const payload = await postJson<{ credentials?: RunCredential[] }>(`/agent-worker/runs/${run.id}/credentials`, {
+    workerId: worker.id,
+  })
+  return Array.isArray(payload.credentials) ? payload.credentials : []
+}
+
+function redactCredentialValues(value: string, credentials: RunCredential[]) {
+  return credentials.reduce(
+    (redacted, credential) => credential.secret ? redacted.split(credential.secret).join('[REDACTED]') : redacted,
+    value,
+  )
+}
+
+function redactExecErrorOutput(output: Record<string, unknown>, credentials: RunCredential[]) {
+  return {
+    ...output,
+    stdout: redactCredentialValues(typeof output.stdout === 'string' ? output.stdout : '', credentials),
+    stderr: redactCredentialValues(typeof output.stderr === 'string' ? output.stderr : '', credentials),
+  }
 }
 
 function shouldFinalizePullRequest(run: AgentRunRecord) {

@@ -66,6 +66,34 @@ export const organizationApiKeys = pgTable('organization_api_keys', {
   revokedAtIdx: index('organization_api_keys_revoked_at_idx').on(table.revokedAt),
 }))
 
+export const organizationCredentials = pgTable('organization_credentials', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  organizationId: uuid('organization_id').notNull().references(() => organizations.id),
+  createdByUserId: uuid('created_by_user_id').references(() => users.id),
+  name: text('name').notNull(),
+  provider: text('provider').notNull(),
+  /** api_key for now; leaves room for bearer_token and basic_auth credentials. */
+  kind: text('kind').notNull().default('api_key'),
+  /** Stable alias exposed to an authorized child process, never the secret value. */
+  envVarName: text('env_var_name').notNull(),
+  encryptedSecret: text('encrypted_secret').notNull(),
+  secretLast4: text('secret_last4').notNull(),
+  /** editorial for now; future agent capabilities can be granted explicitly. */
+  allowedUses: jsonb('allowed_uses').$type<string[]>().notNull().default([]),
+  status: text('status').notNull().default('active'),
+  statusMessage: text('status_message'),
+  lastUsedAt: timestamp('last_used_at', { withTimezone: true }),
+  revokedAt: timestamp('revoked_at', { withTimezone: true }),
+  metadata: jsonb('metadata').$type<Record<string, unknown>>().notNull().default({}),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+}, (table) => ({
+  organizationIdIdx: index('organization_credentials_organization_idx').on(table.organizationId),
+  organizationEnvVarIdx: uniqueIndex('organization_credentials_organization_env_var_idx').on(table.organizationId, table.envVarName),
+  providerIdx: index('organization_credentials_provider_idx').on(table.provider),
+  statusIdx: index('organization_credentials_status_idx').on(table.status),
+}))
+
 export const activityOriginEnum = pgEnum('activity_origin', ['pach_work', 'organization_work', 'organization_user_work'])
 
 export const activityEvents = pgTable('activity_events', {

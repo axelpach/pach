@@ -25,6 +25,23 @@ type OrganizationApiKey = {
   updatedAt: number
 }
 
+type OrganizationCredential = {
+  id: string
+  organizationId: string
+  name: string
+  provider: string
+  kind: string
+  envVarName: string
+  secretLast4: string
+  allowedUses: string[]
+  status: string
+  statusMessage: string | null
+  lastUsedAt: number | null
+  revokedAt: number | null
+  createdAt: number
+  updatedAt: number
+}
+
 type GithubConnection = {
   id: string
   name: string
@@ -226,6 +243,7 @@ export default function SettingsPage() {
   const [searchConsoleUrlInspections] = useQuery(z.query.search_console_url_inspections.orderBy('inspectedAt', 'desc'))
   const [organizationId, setOrganizationId] = useState('')
   const [apiKeys, setApiKeys] = useState<OrganizationApiKey[]>([])
+  const [organizationCredentials, setOrganizationCredentials] = useState<OrganizationCredential[]>([])
   const [githubConnections, setGithubConnections] = useState<GithubConnection[]>([])
   const [githubRepositories, setGithubRepositories] = useState<GithubRepository[]>([])
   const [organizationRepositories, setOrganizationRepositories] = useState<OrganizationRepository[]>([])
@@ -238,6 +256,7 @@ export default function SettingsPage() {
   const [loadingGoogleSearch, setLoadingGoogleSearch] = useState(false)
   const [searchAction, setSearchAction] = useState<SearchActionState>(null)
   const [createModalOpen, setCreateModalOpen] = useState(false)
+  const [credentialModal, setCredentialModal] = useState<OrganizationCredential | 'new' | null>(null)
   const [connectGithubOpen, setConnectGithubOpen] = useState(false)
   const [createLinkedInChannelOpen, setCreateLinkedInChannelOpen] = useState(false)
   const [providerAppModal, setProviderAppModal] = useState<SocialProviderApp | 'new' | null>(null)
@@ -302,6 +321,7 @@ export default function SettingsPage() {
   useEffect(() => {
     if (!organizationId) {
       setApiKeys([])
+      setOrganizationCredentials([])
       setGithubConnections([])
       setGithubRepositories([])
       setOrganizationRepositories([])
@@ -355,6 +375,7 @@ export default function SettingsPage() {
       const response = await authFetch(`${config.apiUrl}/api-keys?organizationId=${encodeURIComponent(nextOrganizationId)}`)
       const payload = await readJson(response)
       setApiKeys(Array.isArray(payload.apiKeys) ? payload.apiKeys : [])
+      setOrganizationCredentials(Array.isArray(payload.credentials) ? payload.credentials : [])
     } catch (error) {
       console.error('API key load failed', error)
       flash('api keys could not be loaded')
@@ -430,6 +451,40 @@ export default function SettingsPage() {
     await readJson(response)
     await loadApiKeys()
     flash('api key revoked')
+  }
+
+  async function saveProviderCredential(
+    payload: { name: string; provider: string; envVarName: string; secret?: string; allowedUses: string[] },
+    credential: OrganizationCredential | null,
+  ) {
+    if (!organizationId) return
+    try {
+      const response = await authFetch(
+        credential ? `${config.apiUrl}/api-keys/credentials/${credential.id}` : `${config.apiUrl}/api-keys/credentials`,
+        {
+          method: credential ? 'PATCH' : 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ organizationId, ...payload }),
+        },
+      )
+      await readJson(response)
+      setCredentialModal(null)
+      await loadApiKeys()
+      flash(credential ? 'provider credential updated' : 'provider credential saved')
+    } catch (error) {
+      flash(error instanceof Error ? error.message : 'provider credential could not be saved')
+    }
+  }
+
+  async function revokeProviderCredential(credential: OrganizationCredential) {
+    try {
+      const response = await authFetch(`${config.apiUrl}/api-keys/credentials/${credential.id}`, { method: 'DELETE' })
+      await readJson(response)
+      await loadApiKeys()
+      flash('provider credential revoked')
+    } catch (error) {
+      flash(error instanceof Error ? error.message : 'provider credential could not be revoked')
+    }
   }
 
   async function connectGithub(payload: { name: string; token: string; credentialKind: string }) {
@@ -804,10 +859,14 @@ export default function SettingsPage() {
         {section === 'api-keys' ? (
           <ApiKeysSection
             apiKeys={apiKeys}
+            credentials={organizationCredentials}
             loading={loadingKeys}
             organization={organization}
-            onCreate={() => setCreateModalOpen(true)}
+            onCreateApiKey={() => setCreateModalOpen(true)}
+            onCreateCredential={() => setCredentialModal('new')}
+            onEditCredential={(credential) => setCredentialModal(credential)}
             onRevoke={(apiKey) => void revokeApiKey(apiKey)}
+            onRevokeCredential={(credential) => void revokeProviderCredential(credential)}
           />
         ) : null}
       </main>
@@ -817,6 +876,15 @@ export default function SettingsPage() {
           organization={organization}
           onClose={() => setCreateModalOpen(false)}
           onSubmit={(payload) => void createApiKey(payload)}
+        />
+      ) : null}
+
+      {credentialModal ? (
+        <ProviderCredentialModal
+          organization={organization}
+          credential={credentialModal === 'new' ? null : credentialModal}
+          onClose={() => setCredentialModal(null)}
+          onSubmit={(payload) => void saveProviderCredential(payload, credentialModal === 'new' ? null : credentialModal)}
         />
       ) : null}
 
@@ -1788,16 +1856,24 @@ function googleSearchSetupState({
 
 function ApiKeysSection({
   apiKeys,
+  credentials,
   loading,
   organization,
-  onCreate,
+  onCreateApiKey,
+  onCreateCredential,
+  onEditCredential,
   onRevoke,
+  onRevokeCredential,
 }: {
   apiKeys: OrganizationApiKey[]
+  credentials: OrganizationCredential[]
   loading: boolean
   organization: OrganizationRow | null
-  onCreate: () => void
+  onCreateApiKey: () => void
+  onCreateCredential: () => void
+  onEditCredential: (credential: OrganizationCredential) => void
   onRevoke: (apiKey: OrganizationApiKey) => void
+  onRevokeCredential: (credential: OrganizationCredential) => void
 }) {
   return (
     <div className="space-y-4">
@@ -1806,12 +1882,80 @@ function ApiKeysSection({
           <div className="font-mono text-[10px] uppercase tracking-label text-fg-4">connections</div>
           <h1 className="mt-1 font-mono text-2xl font-bold lowercase text-fg-1">api keys</h1>
         </div>
-        <Button kind="primary" icon={<Plus className="h-3.5 w-3.5" />} onClick={onCreate} disabled={!organization}>
-          api key
-        </Button>
+        <div className="flex flex-wrap items-center gap-2">
+          <Button icon={<KeyRound className="h-3.5 w-3.5" />} onClick={onCreateApiKey} disabled={!organization}>
+            Pach key
+          </Button>
+          <Button kind="primary" icon={<Plus className="h-3.5 w-3.5" />} onClick={onCreateCredential} disabled={!organization}>
+            provider credential
+          </Button>
+        </div>
       </div>
 
-      <Panel title="organization api keys">
+      <Panel title="provider credentials">
+        <div className="mb-4 border border-edge/12 bg-rim px-3 py-2 font-mono text-xs text-fg-3">
+          Encrypted credentials that approved Pach agent runs can use for external services. Secret values are never returned to the portal after saving.
+        </div>
+        <div className="overflow-auto">
+          <table className="w-full min-w-[940px] text-left font-mono text-xs">
+            <thead className="text-[10px] uppercase tracking-label text-fg-4">
+              <tr className="border-b border-edge/12">
+                <th className="pb-2 pr-3 font-normal">name</th>
+                <th className="pb-2 pr-3 font-normal">provider</th>
+                <th className="pb-2 pr-3 font-normal">environment alias</th>
+                <th className="pb-2 pr-3 font-normal">secret</th>
+                <th className="pb-2 pr-3 font-normal">allowed use</th>
+                <th className="pb-2 pr-3 font-normal">status</th>
+                <th className="pb-2 pr-3 font-normal">last used</th>
+                <th className="pb-2 font-normal">actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {credentials.map((credential) => (
+                <tr key={credential.id} className="border-b border-edge/8 text-fg-2">
+                  <td className="max-w-[220px] truncate py-2.5 pr-3 text-fg-1">{credential.name}</td>
+                  <td className="py-2.5 pr-3 text-fg-4">{credential.provider}</td>
+                  <td className="py-2.5 pr-3 text-fg-3">{credential.envVarName}</td>
+                  <td className="py-2.5 pr-3 text-fg-4">ending {credential.secretLast4}</td>
+                  <td className="py-2.5 pr-3">{credential.allowedUses.join(', ') || '-'}</td>
+                  <td className="py-2.5 pr-3">
+                    <StatusPill kind={credential.status === 'active' ? 'ok' : 'idle'}>{credential.status}</StatusPill>
+                  </td>
+                  <td className="py-2.5 pr-3 text-fg-4">{formatDate(credential.lastUsedAt)}</td>
+                  <td className="py-2.5">
+                    <div className="flex items-center gap-2">
+                      <Button
+                        className="px-2 py-1 text-[10px]"
+                        icon={<Edit3 className="h-3 w-3" />}
+                        onClick={() => onEditCredential(credential)}
+                        disabled={credential.status !== 'active'}
+                      >
+                        edit
+                      </Button>
+                      <Button
+                        kind="danger"
+                        className="px-2 py-1 text-[10px]"
+                        icon={<Trash2 className="h-3 w-3" />}
+                        onClick={() => onRevokeCredential(credential)}
+                        disabled={credential.status !== 'active'}
+                      >
+                        revoke
+                      </Button>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        {credentials.length === 0 ? (
+          <div className="border border-dashed border-edge/15 py-8 text-center font-mono text-sm text-fg-4">
+            {loading ? 'loading provider credentials' : 'no provider credentials'}
+          </div>
+        ) : null}
+      </Panel>
+
+      <Panel title="Pach API keys">
         <div className="mb-4 border border-edge/12 bg-rim px-3 py-2 font-mono text-xs text-fg-3">
           Connected apps should call Pach from their own server with <span className="text-fg-1">PACH_API_KEY</span>. Never expose this key through public browser env vars.
         </div>
@@ -1955,6 +2099,148 @@ function CreateApiKeyModal({
             disabled={!name.trim() || scopes.length === 0}
           >
             generate
+          </Button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function ProviderCredentialModal({
+  organization,
+  credential,
+  onClose,
+  onSubmit,
+}: {
+  organization: OrganizationRow | null
+  credential: OrganizationCredential | null
+  onClose: () => void
+  onSubmit: (payload: { name: string; provider: string; envVarName: string; secret?: string; allowedUses: string[] }) => void
+}) {
+  const [name, setName] = useState(() => credential?.name ?? (organization ? `${organization.name} data API` : 'Data API'))
+  const [provider, setProvider] = useState(() => credential?.provider ?? '')
+  const [envVarName, setEnvVarName] = useState(() => credential?.envVarName ?? '')
+  const [envVarEdited, setEnvVarEdited] = useState(Boolean(credential))
+  const [secret, setSecret] = useState('')
+  const [editorialAllowed, setEditorialAllowed] = useState(() => credential?.allowedUses.includes('editorial') ?? true)
+
+  function updateProvider(value: string) {
+    setProvider(value)
+    if (!envVarEdited) {
+      const alias = value
+        .trim()
+        .toUpperCase()
+        .replace(/[^A-Z0-9]+/g, '_')
+        .replace(/^_+|_+$/g, '')
+      setEnvVarName(alias ? `${alias}_API_KEY` : '')
+    }
+  }
+
+  const normalizedEnvVarName = envVarName.trim().toUpperCase()
+  const envVarNameReserved = normalizedEnvVarName.startsWith('PACH_')
+    || ['PATH', 'HOME', 'NODE_OPTIONS'].includes(normalizedEnvVarName)
+  const canSubmit = Boolean(
+    name.trim()
+    && provider.trim()
+    && /^[A-Z_][A-Z0-9_]*$/.test(normalizedEnvVarName)
+    && !envVarNameReserved
+    && editorialAllowed
+    && (credential || secret.trim()),
+  )
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-start justify-center overflow-auto bg-overlay/70 px-4 py-[10vh] backdrop-blur-sm"
+      onClick={onClose}
+    >
+      <div
+        className="w-full max-w-xl border border-edge/20 bg-pit-2 shadow-terminal-overlay"
+        onClick={(event) => event.stopPropagation()}
+      >
+        <div className="flex items-center justify-between border-b border-edge/12 px-5 py-3">
+          <div className="flex items-center gap-2 font-mono text-xs">
+            <span className="inline-flex items-center gap-1.5 border border-edge/25 bg-accent-fill/5 px-2 py-0.5 font-mono text-[10px] uppercase tracking-label text-accent">
+              settings
+            </span>
+            <span className="text-fg-4">›</span>
+            <span className="text-fg-2 lowercase">provider credential</span>
+          </div>
+          <button
+            onClick={onClose}
+            className="font-mono text-xs uppercase tracking-label text-fg-4 transition hover:text-fg-1"
+            title="close"
+          >
+            [esc]
+          </button>
+        </div>
+
+        <div className="border-b border-edge/12 px-5 py-4">
+          <h2 className="font-mono text-2xl font-bold lowercase text-fg-1">{credential ? 'edit provider credential' : 'new provider credential'}</h2>
+        </div>
+
+        <div className="space-y-4 px-5 py-5">
+          <label className="block">
+            <FieldLabel>name</FieldLabel>
+            <TermInput autoFocus value={name} onChange={(event) => setName(event.target.value)} />
+          </label>
+          <div className="grid gap-3 md:grid-cols-2">
+            <label className="block">
+              <FieldLabel>provider</FieldLabel>
+              <TermInput value={provider} onChange={(event) => updateProvider(event.target.value)} placeholder="sp_global" />
+            </label>
+            <label className="block">
+              <FieldLabel>environment alias</FieldLabel>
+              <TermInput
+                value={envVarName}
+                onChange={(event) => {
+                  setEnvVarEdited(true)
+                  setEnvVarName(event.target.value.toUpperCase().replace(/[^A-Z0-9_]/g, '_'))
+                }}
+                placeholder="SP_GLOBAL_API_KEY"
+              />
+              {envVarNameReserved ? (
+                <div className="mt-1 font-mono text-[10px] text-danger">Pach and system environment aliases are reserved.</div>
+              ) : null}
+            </label>
+          </div>
+          <label className="block">
+            <FieldLabel>{credential ? 'replacement secret' : 'secret'}</FieldLabel>
+            <TermInput
+              type="password"
+              value={secret}
+              onChange={(event) => setSecret(event.target.value)}
+              placeholder={credential ? `Leave blank to keep secret ending ${credential.secretLast4}` : 'Provider-issued API key'}
+            />
+          </label>
+          <button
+            type="button"
+            onClick={() => setEditorialAllowed((value) => !value)}
+            className={`flex w-full items-center justify-between border px-3 py-2 text-left font-mono text-xs transition ${
+              editorialAllowed
+                ? 'border-accent/50 bg-accent-fill/10 text-accent'
+                : 'border-edge/12 bg-rim text-fg-3 hover:border-edge/30 hover:text-fg-1'
+            }`}
+          >
+            editorial runs
+            {editorialAllowed ? <Check className="h-3.5 w-3.5" /> : null}
+          </button>
+        </div>
+
+        <div className="flex items-center justify-end gap-2 border-t border-edge/12 px-5 py-3">
+          <Button onClick={onClose}>cancel</Button>
+          <Button
+            kind="primary"
+            icon={<KeyRound className="h-3.5 w-3.5" />}
+            onClick={() => onSubmit({
+              name: name.trim(),
+              provider: provider.trim(),
+              envVarName: normalizedEnvVarName,
+              ...(secret.trim() ? { secret: secret.trim() } : {}),
+              allowedUses: editorialAllowed ? ['editorial'] : [],
+            })}
+            disabled={!canSubmit}
+          >
+            {credential ? 'save' : 'store credential'}
           </Button>
         </div>
       </div>
@@ -2481,7 +2767,7 @@ function formatDate(value: number | null | undefined) {
 async function readJson(response: Response) {
   const payload = await response.json().catch(() => ({}))
   if (!response.ok) {
-    throw new Error(payload.error || payload.message || `Request failed: ${response.status}`)
+    throw new Error(payload.message || payload.error || `Request failed: ${response.status}`)
   }
   return payload
 }

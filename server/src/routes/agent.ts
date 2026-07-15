@@ -25,6 +25,7 @@ import {
   githubBranches,
   githubRepositories,
   githubPullRequests,
+  mktPublications,
   organizationRepositories,
   organizations,
   pmIssueLabels,
@@ -299,6 +300,7 @@ router.post('/issues/:issueId/runs/queue', async (req, res) => {
       updatedAt: now,
     })
 
+    const editorialPublication = route.mode === 'editorial' ? await resolveIssuePublication(issue) : null
     const runMetadata = {
       executionClass: 'general',
       handler: route.handler,
@@ -314,6 +316,9 @@ router.post('/issues/:issueId/runs/queue', async (req, res) => {
       routeReason: route.reason,
       editorialIntent: route.editorialIntent,
       guidelinesPolicy: route.guidelinesPolicy,
+      organizationId: issue.contextCompanyId ?? undefined,
+      publicationId: editorialPublication?.id,
+      publicationSlug: editorialPublication?.slug,
     }
 
     const [run] = await db.insert(agentRuns).values({
@@ -1429,6 +1434,27 @@ async function readIssueRouteContext(issue: typeof pmIssues.$inferSelect) {
     statusType: status?.type,
     labelNames: labels.map((label) => label.name),
   }
+}
+
+async function resolveIssuePublication(issue: typeof pmIssues.$inferSelect) {
+  if (!issue.contextCompanyId) return null
+
+  const publications = await getDb()
+    .select()
+    .from(mktPublications)
+    .where(and(
+      eq(mktPublications.organizationId, issue.contextCompanyId),
+      eq(mktPublications.status, 'active'),
+    ))
+  if (publications.length === 1) return publications[0]
+
+  const issueText = `${issue.title}\n${issue.description ?? ''}`.toLowerCase()
+  const matches = publications.filter((publication) => {
+    const name = publication.name.trim().toLowerCase()
+    const slug = publication.slug.trim().toLowerCase()
+    return Boolean((name && issueText.includes(name)) || (slug && issueText.includes(slug)))
+  })
+  return matches.length === 1 ? matches[0] : null
 }
 
 async function selectRepositoryForIssue(issue: typeof pmIssues.$inferSelect, preferredRepositoryId?: string) {

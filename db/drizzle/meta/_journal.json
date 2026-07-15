@@ -414,6 +414,13 @@
       "when": 1784304000000,
       "tag": "0058_search_console_summaries",
       "breakpoints": true
+    },
+    {
+      "idx": 59,
+      "version": "7",
+      "when": 1784390400000,
+      "tag": "0059_organization_credentials",
+      "breakpoints": true
     }
   ]
 }
