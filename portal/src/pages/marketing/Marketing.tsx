@@ -766,9 +766,9 @@ function MarketingSubtabMenu<T extends string>({
 
 function RowMeta({ label, children, className = '' }: { label: string; children: ReactNode; className?: string }) {
   return (
-    <div className={`min-w-0 ${className}`}>
+    <div className={`min-w-0 overflow-hidden ${className}`}>
       <div className="font-mono text-[9px] uppercase tracking-label text-fg-4">{label}</div>
-      <div className="mt-1 min-w-0 font-mono text-xs text-fg-2">{children}</div>
+      <div className="mt-1 min-w-0 overflow-hidden font-mono text-xs text-fg-2">{children}</div>
     </div>
   )
 }
@@ -3729,7 +3729,7 @@ function PublicationDetailPage({
   return (
     <div className="flex min-h-full flex-col bg-pit text-fg-1">
       <div className="border-b border-edge/15 bg-pit/60 px-5 py-3 backdrop-blur-sm md:px-8">
-        <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+        <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
           <div className="min-w-0">
             <button
               type="button"
@@ -3741,11 +3741,11 @@ function PublicationDetailPage({
             </button>
             <div className="flex min-w-0 items-center gap-3">
               <h1 className="truncate font-mono text-2xl font-bold lowercase text-fg-1">{publication.name}</h1>
-              <StatusPill kind={statusKind(publication.status)}>{publication.status}</StatusPill>
+              <span className="shrink-0"><StatusPill kind={statusKind(publication.status)}>{publication.status}</StatusPill></span>
             </div>
             <div className="mt-1 truncate font-mono text-xs text-fg-4">{organization?.name ?? 'organization'} / {publication.slug}</div>
           </div>
-          <div className="grid grid-cols-2 gap-2 md:grid-cols-4">
+          <div className="grid min-w-0 grid-cols-2 gap-2 sm:grid-cols-4 xl:w-[504px] xl:shrink-0">
             <Metric label="subscribers" value={subscriberCount} />
             <Metric label="ideas" value={availableIdeaCount} />
             <Metric label="reserved" value={reservedIdeaCount} />
@@ -3755,38 +3755,45 @@ function PublicationDetailPage({
       </div>
 
       <div className="flex-1 overflow-auto px-5 py-5 md:px-8">
-        <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_360px]">
-          <div className="space-y-4">
-            <Panel title={<InfoTitle label="editorial ideas" info="Unused, reserved, and used topics the autonomous editor can draft from without repeating prior newsletter work." />}>
+        <div className="grid min-w-0 gap-4 2xl:grid-cols-[minmax(0,1fr)_340px]">
+          <div className="min-w-0 space-y-4">
+            <Panel className="overflow-hidden" title={<InfoTitle label="editorial ideas" info="Unused, reserved, and used topics the autonomous editor can draft from without repeating prior newsletter work." />}>
               <div className="divide-y divide-edge/8">
                 {ideas.slice(0, 80).map((idea) => {
                   const document = idea.documentId ? documents.find((entry) => entry.id === idea.documentId) : null
                   return (
-                    <div key={idea.id} className="grid gap-3 px-3 py-3 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-center">
-                      <div className="min-w-0">
-                        <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-                          <div className="min-w-0 truncate text-sm text-fg-1">{idea.title}</div>
-                          <StatusPill kind={statusKind(idea.status)}>{idea.status}</StatusPill>
+                    <div key={idea.id} className="min-w-0 px-3 py-3.5">
+                      <div className="grid min-w-0 gap-2 lg:grid-cols-[minmax(0,1fr)_minmax(160px,240px)] lg:items-start">
+                        <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1">
+                          <div className="min-w-0 max-w-full truncate text-sm text-fg-1 sm:flex-1" title={idea.title}>{idea.title}</div>
+                          <span className="shrink-0"><StatusPill kind={statusKind(idea.status)}>{idea.status}</StatusPill></span>
                         </div>
-                        <div className="mt-2 grid gap-2 sm:grid-cols-3">
-                          <RowMeta label="angle"><span className="truncate">{idea.angle || '-'}</span></RowMeta>
-                          <RowMeta label="dedupe"><span className="truncate text-fg-4">{idea.dedupeKey}</span></RowMeta>
-                          <RowMeta label="updated">{formatDate(idea.updatedAt)}</RowMeta>
+                        <div className="w-full min-w-0 overflow-hidden lg:text-right">
+                          {document ? (
+                            <button
+                              type="button"
+                              className="inline-flex w-full min-w-0 max-w-full items-center gap-1 overflow-hidden font-mono text-xs text-fg-3 transition hover:text-accent lg:justify-end"
+                              onClick={() => navigate(`/docs/${document.id}`)}
+                              title={document.title}
+                            >
+                              <ExternalLink className="h-3 w-3 shrink-0" />
+                              <span className="min-w-0 truncate">{document.title}</span>
+                            </button>
+                          ) : (
+                            <span className="font-mono text-xs text-fg-4">no document</span>
+                          )}
                         </div>
                       </div>
-                      <div className="lg:justify-self-end">
-                        {document ? (
-                          <button
-                            type="button"
-                            className="inline-flex max-w-full items-center gap-1 font-mono text-xs text-fg-3 transition hover:text-accent"
-                            onClick={() => navigate(`/docs/${document.id}`)}
-                          >
-                            <ExternalLink className="h-3 w-3 shrink-0" />
-                            <span className="truncate">{document.title}</span>
-                          </button>
-                        ) : (
-                          <span className="font-mono text-xs text-fg-4">no document</span>
-                        )}
+                      <div className="mt-3 grid min-w-0 gap-x-4 gap-y-2 border-t border-edge/6 pt-2.5 lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)_max-content]">
+                        <RowMeta label="angle">
+                          <span className="block line-clamp-2 break-words" title={idea.angle || undefined}>{idea.angle || '-'}</span>
+                        </RowMeta>
+                        <RowMeta label="dedupe">
+                          <span className="block truncate text-fg-4" title={idea.dedupeKey}>{idea.dedupeKey}</span>
+                        </RowMeta>
+                        <RowMeta label="updated" className="lg:text-right">
+                          <span className="whitespace-nowrap">{formatDate(idea.updatedAt)}</span>
+                        </RowMeta>
                       </div>
                     </div>
                   )
@@ -3939,7 +3946,7 @@ function PublicationDetailPage({
             </Panel>
           </div>
 
-          <aside className="space-y-4">
+          <aside className="min-w-0 space-y-4">
             <Panel title={<InfoTitle label="publication" info="Core newsletter identity, sender, status, and subscriber access for this publication." />}>
               <div className="space-y-3">
                 <CommitInput label="name" value={publication.name} onCommit={(name) => { void z.mutate.mkt_publications.update({ id: publication.id, name }) }} />
