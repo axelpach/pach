@@ -353,7 +353,7 @@ export const mutators = {
   },
 
   cal_availability_overrides: {
-    async create(tx: Tx, args: { id: string; organizationId: string; eventTypeId: string; date: string; startMinute?: number; endMinute?: number; isAvailable?: boolean; reason?: string }) {
+    async create(tx: Tx, args: { id: string; organizationId: string; eventTypeId: string; date: number; startMinute?: number; endMinute?: number; isAvailable?: boolean; reason?: string }) {
       const now = Date.now()
       await tx.mutate.cal_availability_overrides.insert({
         isAvailable: false,

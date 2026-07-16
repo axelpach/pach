@@ -333,7 +333,7 @@ const calAvailabilityOverrides = table('cal_availability_overrides')
     id: string(),
     organizationId: string().from('organization_id'),
     eventTypeId: string().from('event_type_id'),
-    date: string(),
+    date: number(),
     startMinute: number().optional().from('start_minute'),
     endMinute: number().optional().from('end_minute'),
     isAvailable: boolean().from('is_available'),

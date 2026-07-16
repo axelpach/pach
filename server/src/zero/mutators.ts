@@ -965,7 +965,7 @@ export function createServerMutators(authData?: JWTPayload) {
     },
 
     cal_availability_overrides: {
-      async create(tx: Tx, args: { id: string; organizationId?: string; eventTypeId: string; date: string; startMinute?: number; endMinute?: number; isAvailable?: boolean; reason?: string }) {
+      async create(tx: Tx, args: { id: string; organizationId?: string; eventTypeId: string; date: number; startMinute?: number; endMinute?: number; isAvailable?: boolean; reason?: string }) {
         const organizationId = args.organizationId ?? await readOrganizationId(tx, 'cal_event_types', args.eventTypeId)
         requireOrganizationAccess(organizationId)
         const now = Date.now()
