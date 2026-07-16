@@ -330,10 +330,21 @@ function renderReactPreviewShell(
       }
 
       function downloadDataUrl(dataUrl, filename) {
+        if (window.parent && window.parent !== window) {
+          window.parent.postMessage({
+            type: 'pach-design-download',
+            filename,
+            dataUrl,
+          }, '*')
+          return
+        }
+
         const link = document.createElement('a')
         link.download = filename
         link.href = dataUrl
+        document.body.append(link)
         link.click()
+        link.remove()
       }
 
       async function waitForRenderAssets() {

@@ -2226,6 +2226,31 @@ function TemplatePreview({
 
   const previewUrl = getTemplatePreviewUrl(version)
 
+  useEffect(() => {
+    if (!previewUrl) return
+
+    const handleMessage = (event: MessageEvent) => {
+      if (event.source !== iframeRef.current?.contentWindow) return
+      if (!event.data || typeof event.data !== 'object') return
+      if (event.data.type !== 'pach-design-download') return
+
+      const dataUrl = event.data.dataUrl
+      const filename = event.data.filename
+      if (typeof dataUrl !== 'string' || !dataUrl.startsWith('data:')) return
+      if (typeof filename !== 'string' || filename.trim().length === 0) return
+
+      const link = document.createElement('a')
+      link.download = filename
+      link.href = dataUrl
+      document.body.append(link)
+      link.click()
+      link.remove()
+    }
+
+    window.addEventListener('message', handleMessage)
+    return () => window.removeEventListener('message', handleMessage)
+  }, [previewUrl])
+
   if (previewUrl) {
     const previewDimensions = getTemplatePreviewDimensions(version)
     const sendExportCommand = (format: 'png' | 'pdf') => {
