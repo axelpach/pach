@@ -55,6 +55,8 @@ export function buildFollowUpContinuationPrompt({
 }) {
   const attachments = formatAgentInputMediaPrompt(metadata, { includeInstruction: false })
   return [
+    'Return pach.progress.report message content in Markdown. Use concise Markdown for progress updates and a useful Markdown summary for phase "final_result".',
+    '',
     feedback.trim(),
     attachments,
   ].filter((line): line is string => Boolean(line)).join('\n\n')
