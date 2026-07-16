@@ -18,8 +18,10 @@ COPY pach.config.ts drizzle.config.ts tsconfig.json ./
 COPY db ./db
 COPY server ./server
 
+ARG PACH_RELEASE_ID
 ENV NODE_ENV=production
 ENV PORT=3002
+ENV PACH_RELEASE_ID=$PACH_RELEASE_ID
 EXPOSE 3002
 
 CMD ["sh", "server/scripts/deploy-start.sh"]

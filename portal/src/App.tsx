@@ -1,10 +1,11 @@
 import { Routes, Route, NavLink, Navigate, useLocation, useNavigate, useParams } from 'react-router-dom'
 import { useQuery, useZero, ZeroProvider } from '@rocicorp/zero/react'
-import { Activity as ActivityIcon, CalendarDays, CircleDollarSign, FileText, FolderKanban, LogOut, Megaphone, Menu, Moon, Palette, Rows3, Settings2, Sun, X } from 'lucide-react'
+import { Activity as ActivityIcon, AlertTriangle, CalendarDays, CircleDollarSign, FileText, FolderKanban, LogOut, Megaphone, Menu, Moon, Palette, RefreshCw, Rows3, Settings2, Sun, X } from 'lucide-react'
 import { createContext, useContext, useEffect, useMemo, useState, type ComponentType, type ReactNode } from 'react'
 import { schema, type Schema } from './zero-schema'
 import { mutators, type Mutators } from './mutators'
 import { config } from './config'
+import { CLIENT_RELEASE_ID, CLIENT_ZERO_SCHEMA_VERSION } from './release'
 import { AuthProvider, useAuth } from './lib/auth'
 import Design from './pages/design/Design'
 import CRM from './pages/crm/CRM'
@@ -75,6 +76,7 @@ const OUTER_NAV_ITEMS: readonly OuterNavItem[] = [
 type ThemeMode = 'dark' | 'light'
 
 const THEME_STORAGE_KEY = 'pach.theme'
+const RELEASE_CHECK_INTERVAL_MS = 60_000
 
 const ThemeContext = createContext<{
   theme: ThemeMode
@@ -119,6 +121,112 @@ function useTheme() {
   const value = useContext(ThemeContext)
   if (!value) throw new Error('useTheme must be used inside ThemeProvider')
   return value
+}
+
+type ReleaseMetadata = {
+  releaseId: string
+  zeroSchemaVersion: number
+  checkedAt: number
+}
+
+type ReleaseMismatch = {
+  server: ReleaseMetadata
+  reason: 'release' | 'zero-schema'
+}
+
+function useReleaseMismatch(enabled: boolean) {
+  const [mismatch, setMismatch] = useState<ReleaseMismatch | null>(null)
+
+  useEffect(() => {
+    if (!enabled || mismatch) return
+
+    let intervalId: number | undefined
+    let abortController: AbortController | undefined
+
+    async function checkRelease() {
+      abortController?.abort()
+      abortController = new AbortController()
+
+      try {
+        const res = await fetch(`${config.apiUrl}/meta/release`, {
+          cache: 'no-store',
+          signal: abortController.signal,
+        })
+        if (!res.ok) return
+
+        const server = await res.json() as ReleaseMetadata
+        if (server.zeroSchemaVersion !== CLIENT_ZERO_SCHEMA_VERSION) {
+          setMismatch({ server, reason: 'zero-schema' })
+          return
+        }
+        if (server.releaseId && server.releaseId !== CLIENT_RELEASE_ID) {
+          setMismatch({ server, reason: 'release' })
+        }
+      } catch (error) {
+        if (error instanceof DOMException && error.name === 'AbortError') return
+        // If release metadata is temporarily unavailable, keep the active session.
+      }
+    }
+
+    function checkWhenVisible() {
+      if (document.visibilityState === 'visible') void checkRelease()
+    }
+
+    void checkRelease()
+    intervalId = window.setInterval(checkRelease, RELEASE_CHECK_INTERVAL_MS)
+    document.addEventListener('visibilitychange', checkWhenVisible)
+
+    return () => {
+      abortController?.abort()
+      if (intervalId) window.clearInterval(intervalId)
+      document.removeEventListener('visibilitychange', checkWhenVisible)
+    }
+  }, [enabled, mismatch])
+
+  return mismatch
+}
+
+function ReloadRequiredScreen({ mismatch }: { mismatch: ReleaseMismatch }) {
+  const reasonLabel = mismatch.reason === 'zero-schema' ? 'Zero schema changed' : 'New release available'
+
+  return (
+    <div className="min-h-screen bg-void text-fg-1 flex items-center justify-center px-4">
+      <div className="w-full max-w-md border border-edge/25 bg-pit-2 shadow-terminal-popover">
+        <div className="flex items-center gap-3 border-b border-edge/15 px-4 py-3">
+          <span className="flex h-9 w-9 items-center justify-center border border-warn/30 bg-warn/10 text-warn">
+            <AlertTriangle className="h-4 w-4" />
+          </span>
+          <div>
+            <div className="text-sm font-medium text-fg-1">Refresh required</div>
+            <div className="text-[10px] uppercase tracking-label text-fg-4">{reasonLabel}</div>
+          </div>
+        </div>
+        <div className="space-y-4 px-4 py-4 text-sm leading-6 text-fg-2">
+          <p>
+            Pach has been updated while this browser tab was open. Refresh before continuing so the portal and Zero use the same schema.
+          </p>
+          <div className="grid grid-cols-2 gap-2 border border-edge/15 bg-void/45 p-3 font-mono text-[11px] text-fg-4">
+            <span>browser</span>
+            <span className="min-w-0 truncate text-right text-fg-2">{CLIENT_RELEASE_ID}</span>
+            <span>api</span>
+            <span className="min-w-0 truncate text-right text-fg-2">{mismatch.server.releaseId}</span>
+            <span>zero schema</span>
+            <span className="min-w-0 truncate text-right text-fg-2">
+              {CLIENT_ZERO_SCHEMA_VERSION} -&gt; {mismatch.server.zeroSchemaVersion}
+            </span>
+          </div>
+          <button
+            type="button"
+            onClick={() => window.location.reload()}
+            className="flex w-full items-center justify-center gap-2 border border-accent-fill/35 bg-accent-fill/12 px-4 py-3 text-xs font-medium uppercase tracking-label text-accent transition hover:bg-accent-fill/18"
+          >
+            <RefreshCw className="h-4 w-4" />
+            Refresh now
+          </button>
+        </div>
+      </div>
+    </div>
+  )
 }
 
 function isNavPathActive(targetPath: string, pathname: string) {
@@ -547,6 +655,7 @@ function useVisibleMobileNavItems() {
 function GatedApp() {
   const { user, token } = useAuth()
   const location = useLocation()
+  const releaseMismatch = useReleaseMismatch(Boolean(token && user))
 
   if (!token || !user) {
     if (location.pathname === '/login') return <Login />
@@ -554,6 +663,8 @@ function GatedApp() {
   }
 
   if (location.pathname === '/login') return <Navigate to={HOME_PATH} replace />
+
+  if (releaseMismatch) return <ReloadRequiredScreen mismatch={releaseMismatch} />
 
   return (
     <ZeroProvider
