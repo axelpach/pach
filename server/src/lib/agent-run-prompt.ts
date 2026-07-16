@@ -39,6 +39,9 @@ export type AgentRunSpec = {
   }
 }
 
+const MARKDOWN_REPORTING_INSTRUCTION =
+  'Return pach.progress.report message content in Markdown. Use concise Markdown for progress updates and a useful Markdown summary for phase "final_result".'
+
 export function buildAgentRunSpec(run: AgentRunPromptRecord): AgentRunSpec {
   const executionMode = readMetadataString(run.metadata, 'executionMode')
   const codeWorktree = executionMode === 'code_worktree'
@@ -103,6 +106,7 @@ export function buildGeneralMcpPrompt(run: AgentRunPromptRecord) {
     codeWorktree ? 'You are Pach engineering issue worker.' : 'You are Pach general MCP issue worker.',
     '',
     'Use Pach MCP tools for Pach state. You may call Pach MCP tools directly and repeatedly as needed.',
+    MARKDOWN_REPORTING_INSTRUCTION,
     codeWorktree
       ? 'For this worker, Codex is running with full local trust. Still act conservatively: do not send external messages, publish content, merge pull requests, or perform irreversible external actions. When you believe the work is successfully done, ask Pach to finalize the branch and create a ready-for-review pull request by calling pach.github.pull_request.create with this agent run id.'
       : 'For this worker, Codex is running with full local trust. Still act conservatively: do not send external messages, publish content, push code, open pull requests, or perform irreversible external actions unless the issue explicitly asks for it.',
@@ -158,6 +162,7 @@ function buildEditorialMcpPrompt(run: AgentRunPromptRecord) {
     'You are Pach editorial MCP issue worker.',
     '',
     'Use Pach MCP tools for Pach state. You may call Pach MCP tools directly and repeatedly as needed.',
+    MARKDOWN_REPORTING_INSTRUCTION,
     'For this worker, Codex is running with full local trust. Still act conservatively: do not send external messages, publish content, create marketing broadcasts, or perform irreversible external actions unless the issue explicitly asks and the available Pach tool is clearly safe.',
     `Issue id: ${run.issueId}`,
     `Agent run id: ${run.id}`,
@@ -198,6 +203,7 @@ function buildKeywordGenerationMcpPrompt(run: AgentRunPromptRecord) {
     'You are Pach paid search keyword MCP worker.',
     '',
     'Use Pach MCP tools for Pach state. This is a safe planning run: do not create ad campaigns, publish content, send messages, or spend money.',
+    MARKDOWN_REPORTING_INSTRUCTION,
     `Agent run id: ${run.id}`,
     organizationId ? `Organization id: ${organizationId}` : null,
     organizationName ? `Organization: ${organizationName}` : null,
@@ -227,6 +233,7 @@ function buildNewsletterIdeaBacklogPrompt(run: AgentRunPromptRecord) {
     'You are Pach autonomous newsletter editorial worker.',
     '',
     'Use Pach MCP tools for Pach state. You may call Pach MCP tools directly and repeatedly as needed.',
+    MARKDOWN_REPORTING_INSTRUCTION,
     'This run creates editorial ideas only. Do not create documents, content items, broadcasts, or external publications.',
     `Agent run id: ${run.id}`,
     publicationId ? `Publication id: ${publicationId}` : null,
@@ -257,6 +264,7 @@ function buildNewsletterSlotFulfillmentPrompt(run: AgentRunPromptRecord) {
     'You are Pach autonomous newsletter editorial worker.',
     '',
     'Use Pach MCP tools for Pach state. You may call Pach MCP tools directly and repeatedly as needed.',
+    MARKDOWN_REPORTING_INSTRUCTION,
     'This run is allowed to schedule a newsletter only by calling pach.marketing.slot.fulfill. Do not send the newsletter now and do not use raw database writes.',
     `Agent run id: ${run.id}`,
     slotId ? `Publication slot id: ${slotId}` : null,
@@ -291,6 +299,7 @@ function buildDesignTemplateMcpPrompt(run: AgentRunPromptRecord) {
     'You are Pach design template MCP worker.',
     '',
     'Use Pach MCP tools for Pach state. You may call Pach MCP tools directly and repeatedly as needed.',
+    MARKDOWN_REPORTING_INSTRUCTION,
     'For this worker, Codex is running with full local trust. Still act conservatively: do not send external messages, publish content, push code, open pull requests, or perform irreversible external actions unless the prompt explicitly asks for it.',
     `Agent run id: ${run.id}`,
     designTemplateRunId ? `Design template run id: ${designTemplateRunId}` : null,
@@ -327,6 +336,7 @@ function buildDesignTemplateFollowUpPrompt(run: AgentRunPromptRecord) {
 
   return [
     [
+      MARKDOWN_REPORTING_INSTRUCTION,
       `Agent run id for this follow-up: ${run.id}`,
       designTemplateRunId ? `Design template run id for this follow-up: ${designTemplateRunId}` : null,
     ].filter((line): line is string => Boolean(line)).join('\n'),

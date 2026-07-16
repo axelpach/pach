@@ -24,6 +24,7 @@ import {
   X,
 } from 'lucide-react'
 import { PachSelect, type PachSelectOption } from '../../components/PachSelect'
+import { AgentMarkdown } from '../../components/agents/AgentMarkdown'
 import { config } from '../../config'
 import { authFetch } from '../../lib/auth'
 import type { Schema } from '../../zero-schema'
@@ -1661,11 +1662,11 @@ function TemplateRunCard({
             )}
             {typeof latestProgress.percent === 'number' ? <span>{latestProgress.percent}%</span> : null}
           </div>
-          <p className="text-[11px] leading-4 text-fg-3">{latestProgress.message}</p>
+          <AgentMarkdown className="text-[11px] leading-4 text-fg-3">{latestProgress.message}</AgentMarkdown>
         </div>
       ) : (
         (agentRun?.statusMessage || run.statusMessage) && (
-          <p className="mt-2 text-[11px] leading-4 text-fg-4">{agentRun?.statusMessage ?? run.statusMessage}</p>
+          <AgentMarkdown className="mt-2 text-[11px] leading-4 text-fg-4">{agentRun?.statusMessage ?? run.statusMessage ?? ''}</AgentMarkdown>
         )
       )}
     </div>

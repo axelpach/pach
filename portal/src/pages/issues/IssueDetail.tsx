@@ -30,6 +30,7 @@ import { config } from '../../config'
 import { PachSelect } from '../../components/PachSelect'
 import { RichEditor } from '../../components/rich-editor/RichEditor'
 import { AgentConversationView } from '../../components/agents/AgentConversationView'
+import { AgentMarkdown } from '../../components/agents/AgentMarkdown'
 import { StatusIcon } from './StatusIcon'
 import { PriorityIcon } from './PriorityIcon'
 import { closePopupFromOutsideClick } from './popupEvents'
@@ -2677,7 +2678,7 @@ function AgentMessageEntry({ message }: { message: Schema['tables']['agent_messa
         <span className={message.role === 'user' ? 'text-accent' : 'text-fg-4'}>{message.role}</span>
         <span className="shrink-0 text-fg-4">{formatRelative(message.createdAt)}</span>
       </div>
-      <div className="whitespace-pre-wrap leading-relaxed text-fg-2">{message.body}</div>
+      <AgentMarkdown className="text-fg-2">{message.body}</AgentMarkdown>
     </div>
   )
 }
@@ -2739,7 +2740,9 @@ function AgentRunProgressShell({
         </div>
         <span className="shrink-0 text-fg-4">{formatRelative(createdAt)}</span>
       </div>
-      <div className="max-h-52 overflow-auto whitespace-pre-wrap leading-relaxed text-fg-2">{message}</div>
+      <div className="max-h-52 overflow-auto text-fg-2">
+        <AgentMarkdown>{message}</AgentMarkdown>
+      </div>
       {typeof percent === 'number' ? (
         <div className="mt-2 h-1 border border-edge/12 bg-pit-2">
           <div className="h-full bg-accent" style={{ width: `${Math.max(0, Math.min(100, percent))}%` }} />

@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom'
 import { FileImage, GitPullRequest, MessageSquare, Paperclip, Send, TerminalSquare, X } from 'lucide-react'
 import type { Schema } from '../../zero-schema'
 import { PachSelect } from '../PachSelect'
+import { AgentMarkdown } from './AgentMarkdown'
 
 type PendingAgentInputMedia = {
   id: string
@@ -662,7 +663,7 @@ function AgentConversationStreamItem({ item }: { item: AgentConversationStreamIt
           </div>
           <span className="shrink-0 text-fg-4">{formatRelative(item.createdAt)}</span>
         </div>
-        <div className="whitespace-pre-wrap text-sm leading-relaxed">{item.body}</div>
+        <AgentMarkdown className="text-fg-2">{item.body}</AgentMarkdown>
         {typeof item.percent === 'number' ? (
           <div className="mt-2 h-1 border border-edge/12 bg-pit-2">
             <div className="h-full bg-accent" style={{ width: `${Math.max(0, Math.min(100, item.percent))}%` }} />
