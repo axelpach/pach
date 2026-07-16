@@ -1,4 +1,5 @@
 import { bigint, boolean, date, index, pgEnum, pgTable, uniqueIndex, uuid, text, timestamp, integer, jsonb } from 'drizzle-orm/pg-core'
+import { sql } from 'drizzle-orm'
 
 /* ─────────────────────────── USERS ─────────────────────────── */
 
@@ -1181,11 +1182,13 @@ export const mktAdPromotions = pgTable('mkt_ad_promotions', {
   provider: text('provider').notNull().default('linkedin'),
   adAccountExternalId: text('ad_account_external_id'),
   campaignGroupExternalId: text('campaign_group_external_id'),
+  campaignBudgetExternalId: text('campaign_budget_external_id'),
   campaignExternalId: text('campaign_external_id'),
+  adGroupExternalId: text('ad_group_external_id'),
   creativeExternalId: text('creative_external_id'),
   landingUrl: text('landing_url'),
   objective: text('objective').notNull().default('website_visits'),
-  /** draft | ready | scheduled | active | paused | completed | failed | archived */
+  /** draft | ready | publishing | scheduled | active | paused | completed | failed | archived */
   status: text('status').notNull().default('draft'),
   budgetMinor: integer('budget_minor'),
   currencyCode: text('currency_code').notNull().default('MXN'),
@@ -1193,6 +1196,10 @@ export const mktAdPromotions = pgTable('mkt_ad_promotions', {
   endsAt: timestamp('ends_at', { withTimezone: true }),
   targeting: jsonb('targeting').$type<Record<string, unknown>>().notNull().default({}),
   creative: jsonb('creative').$type<Record<string, unknown>>().notNull().default({}),
+  publishOperationKey: text('publish_operation_key'),
+  publishError: text('publish_error'),
+  providerResponse: jsonb('provider_response').$type<Record<string, unknown>>(),
+  publishedAt: timestamp('published_at', { withTimezone: true }),
   metadata: jsonb('metadata').$type<Record<string, unknown>>().notNull().default({}),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
@@ -1265,6 +1272,33 @@ export const googleConnections = pgTable('google_connections', {
   organizationIdx: index('google_connections_organization_idx').on(table.organizationId),
   providerAccountIdx: index('google_connections_provider_account_idx').on(table.providerAccountEmail),
   statusIdx: index('google_connections_status_idx').on(table.status),
+}))
+
+export const googleAdsAccounts = pgTable('google_ads_accounts', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  organizationId: uuid('organization_id').notNull().references(() => organizations.id),
+  connectionId: uuid('connection_id').notNull().references(() => googleConnections.id),
+  customerId: text('customer_id').notNull(),
+  managerCustomerId: text('manager_customer_id'),
+  descriptiveName: text('descriptive_name').notNull(),
+  currencyCode: text('currency_code').notNull(),
+  timeZone: text('time_zone').notNull(),
+  isManager: boolean('is_manager').notNull().default(false),
+  isTestAccount: boolean('is_test_account').notNull().default(false),
+  selected: boolean('selected').notNull().default(false),
+  status: text('status').notNull().default('active'),
+  statusMessage: text('status_message'),
+  lastSyncedAt: timestamp('last_synced_at', { withTimezone: true }),
+  metadata: jsonb('metadata').$type<Record<string, unknown>>().notNull().default({}),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+}, (table) => ({
+  organizationIdx: index('google_ads_accounts_organization_idx').on(table.organizationId),
+  connectionIdx: index('google_ads_accounts_connection_idx').on(table.connectionId),
+  organizationCustomerIdx: uniqueIndex('google_ads_accounts_organization_customer_idx').on(table.organizationId, table.customerId),
+  selectedIdx: index('google_ads_accounts_selected_idx').on(table.organizationId, table.selected),
+  oneSelectedPerOrganizationIdx: uniqueIndex('google_ads_accounts_one_selected_per_organization_idx').on(table.organizationId).where(sql`${table.selected} = true`),
+  statusIdx: index('google_ads_accounts_status_idx').on(table.status),
 }))
 
 export const searchConsoleProperties = pgTable('search_console_properties', {

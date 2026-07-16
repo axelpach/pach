@@ -104,6 +104,8 @@ type GoogleConnectionRow = {
   lastRefreshedAt?: number | null
 }
 
+type GoogleAdsAccountRow = Schema['tables']['google_ads_accounts']['row']
+
 type SearchConsolePropertyRow = {
   id: string
   organizationId: string
@@ -164,6 +166,14 @@ type SocialSettingsDefaults = {
 
 type GoogleSearchSettingsDefaults = {
   configured: boolean
+  redirectUri: string
+  scopes: string[]
+}
+
+type GoogleAdsSettingsDefaults = {
+  oauthConfigured: boolean
+  developerTokenConfigured: boolean
+  apiVersion: string
   redirectUri: string
   scopes: string[]
 }
@@ -237,6 +247,7 @@ export default function SettingsPage() {
   const [socialChannels] = useQuery(z.query.social_channels.orderBy('displayName', 'asc'))
   const [socialChannelConnections] = useQuery(z.query.social_channel_connections.orderBy('createdAt', 'desc'))
   const [googleConnections] = useQuery(z.query.google_connections.orderBy('updatedAt', 'desc'))
+  const [googleAdsAccounts] = useQuery(z.query.google_ads_accounts.orderBy('descriptiveName', 'asc'))
   const [searchConsoleProperties] = useQuery(z.query.search_console_properties.orderBy('updatedAt', 'desc'))
   const [searchConsoleSitemaps] = useQuery(z.query.search_console_sitemaps.orderBy('updatedAt', 'desc'))
   const [searchConsoleDailySnapshots] = useQuery(z.query.search_console_daily_snapshots.orderBy('dataDate', 'desc'))
@@ -250,6 +261,7 @@ export default function SettingsPage() {
   const [socialProviderApps, setSocialProviderApps] = useState<SocialProviderApp[]>([])
   const [socialSettingsDefaults, setSocialSettingsDefaults] = useState<SocialSettingsDefaults | null>(null)
   const [googleSearchDefaults, setGoogleSearchDefaults] = useState<GoogleSearchSettingsDefaults | null>(null)
+  const [googleAdsDefaults, setGoogleAdsDefaults] = useState<GoogleAdsSettingsDefaults | null>(null)
   const [loadingKeys, setLoadingKeys] = useState(false)
   const [loadingGithub, setLoadingGithub] = useState(false)
   const [loadingSocial, setLoadingSocial] = useState(false)
@@ -290,6 +302,10 @@ export default function SettingsPage() {
     () => googleConnections.filter((connection) => connection.organizationId === organizationId),
     [googleConnections, organizationId],
   )
+  const organizationGoogleAdsAccounts = useMemo(
+    () => googleAdsAccounts.filter((account) => account.organizationId === organizationId),
+    [googleAdsAccounts, organizationId],
+  )
   const organizationSearchConsoleProperties = useMemo(
     () => searchConsoleProperties.filter((property) => property.organizationId === organizationId),
     [organizationId, searchConsoleProperties],
@@ -328,6 +344,7 @@ export default function SettingsPage() {
       setSocialProviderApps([])
       setSocialSettingsDefaults(null)
       setGoogleSearchDefaults(null)
+      setGoogleAdsDefaults(null)
       return
     }
     void loadApiKeys(organizationId)
@@ -421,9 +438,13 @@ export default function SettingsPage() {
     if (!nextOrganizationId) return
     setLoadingGoogleSearch(true)
     try {
-      const response = await authFetch(`${config.apiUrl}/google/search-console/settings?organizationId=${encodeURIComponent(nextOrganizationId)}`)
-      const payload = await readJson(response)
-      setGoogleSearchDefaults(payload.defaults ?? null)
+      const [searchResponse, adsResponse] = await Promise.all([
+        authFetch(`${config.apiUrl}/google/search-console/settings?organizationId=${encodeURIComponent(nextOrganizationId)}`),
+        authFetch(`${config.apiUrl}/google/ads/settings?organizationId=${encodeURIComponent(nextOrganizationId)}`),
+      ])
+      const [searchPayload, adsPayload] = await Promise.all([readJson(searchResponse), readJson(adsResponse)])
+      setGoogleSearchDefaults(searchPayload.defaults ?? null)
+      setGoogleAdsDefaults(adsPayload.defaults ?? null)
     } catch (error) {
       console.error('Google Search settings load failed', error)
       flash('google search settings could not be loaded')
@@ -667,6 +688,28 @@ export default function SettingsPage() {
     })
   }
 
+  async function syncGoogleAdsAccounts() {
+    if (!organizationId) return
+    await runSearchAction('sync-ads-accounts', async () => {
+      const response = await authFetch(`${config.apiUrl}/google/ads/accounts/sync`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ organizationId }),
+      })
+      const payload = await readJson(response)
+      const count = Array.isArray(payload.accounts) ? payload.accounts.length : 0
+      return `google ads accounts synced · ${count}`
+    })
+  }
+
+  async function selectGoogleAdsAccount(account: GoogleAdsAccountRow) {
+    await runSearchAction(`select-ads:${account.id}`, async () => {
+      const response = await authFetch(`${config.apiUrl}/google/ads/accounts/${account.id}/select`, { method: 'POST' })
+      await readJson(response)
+      return 'google ads account selected'
+    })
+  }
+
   async function selectSearchConsoleProperty(property: SearchConsolePropertyRow) {
     await runSearchAction(`select:${property.id}`, async () => {
       const response = await authFetch(`${config.apiUrl}/google/search-console/properties/${property.id}/select`, {
@@ -841,8 +884,10 @@ export default function SettingsPage() {
           <SearchSection
             organization={organization}
             defaults={googleSearchDefaults}
+            adsDefaults={googleAdsDefaults}
             loading={loadingGoogleSearch}
             connections={organizationGoogleConnections}
+            adsAccounts={organizationGoogleAdsAccounts}
             properties={organizationSearchConsoleProperties}
             sitemaps={organizationSearchConsoleSitemaps}
             metrics={organizationSearchConsoleDailySnapshots}
@@ -850,6 +895,8 @@ export default function SettingsPage() {
             actionState={searchAction}
             onConnect={() => void connectGoogleSearch()}
             onSyncProperties={() => void syncSearchConsoleProperties()}
+            onSyncAdsAccounts={() => void syncGoogleAdsAccounts()}
+            onSelectAdsAccount={(account) => void selectGoogleAdsAccount(account)}
             onSelectProperty={(property) => void selectSearchConsoleProperty(property)}
             onSubmitSitemap={(property) => void submitSearchConsoleSitemap(property)}
             onSyncAnalytics={(property) => void syncSearchConsoleAnalytics(property)}
@@ -1505,8 +1552,10 @@ function linkedinPrimaryAction({
 function SearchSection({
   organization,
   defaults,
+  adsDefaults,
   loading,
   connections,
+  adsAccounts,
   properties,
   sitemaps,
   metrics,
@@ -1514,14 +1563,18 @@ function SearchSection({
   actionState,
   onConnect,
   onSyncProperties,
+  onSyncAdsAccounts,
+  onSelectAdsAccount,
   onSelectProperty,
   onSubmitSitemap,
   onSyncAnalytics,
 }: {
   organization: OrganizationRow | null
   defaults: GoogleSearchSettingsDefaults | null
+  adsDefaults: GoogleAdsSettingsDefaults | null
   loading: boolean
   connections: GoogleConnectionRow[]
+  adsAccounts: GoogleAdsAccountRow[]
   properties: SearchConsolePropertyRow[]
   sitemaps: SearchConsoleSitemapRow[]
   metrics: SearchConsoleDailySnapshotRow[]
@@ -1529,6 +1582,8 @@ function SearchSection({
   actionState: SearchActionState
   onConnect: () => void
   onSyncProperties: () => void
+  onSyncAdsAccounts: () => void
+  onSelectAdsAccount: (account: GoogleAdsAccountRow) => void
   onSelectProperty: (property: SearchConsolePropertyRow) => void
   onSubmitSitemap: (property: SearchConsolePropertyRow) => void
   onSyncAnalytics: (property: SearchConsolePropertyRow) => void
@@ -1651,6 +1706,91 @@ function SearchSection({
             {loading ? 'loading google settings' : 'no google accounts connected'}
           </div>
         )}
+      </Panel>
+
+      <Panel
+        title="google ads accounts"
+        right={
+          <Button
+            className="px-2 py-1 text-[10px]"
+            icon={searchActionIcon(actionState, 'sync-ads-accounts', <RefreshCw className="h-3 w-3" />)}
+            onClick={onSyncAdsAccounts}
+            disabled={actionLoading || activeConnections.length === 0 || !adsDefaults?.developerTokenConfigured}
+          >
+            {searchActionLabel(actionState, 'sync-ads-accounts', 'sync accounts', 'syncing', 'synced')}
+          </Button>
+        }
+      >
+        <div className="mb-4 grid gap-2 md:grid-cols-3">
+          <SearchSetupStep
+            label="oauth scope"
+            value={activeConnections.some((connection) => connection.scopes.includes('https://www.googleapis.com/auth/adwords')) ? 'granted' : 'reconnect required'}
+            done={activeConnections.some((connection) => connection.scopes.includes('https://www.googleapis.com/auth/adwords'))}
+            warning={activeConnections.length > 0}
+            help="The shared Google connection needs the Google Ads OAuth scope. Reconnect Google once if this account predates Ads support."
+          />
+          <SearchSetupStep
+            label="developer token"
+            value={adsDefaults?.developerTokenConfigured ? `configured · ${adsDefaults.apiVersion}` : 'missing env'}
+            done={Boolean(adsDefaults?.developerTokenConfigured)}
+            warning={Boolean(adsDefaults && !adsDefaults.developerTokenConfigured)}
+            help="Set GOOGLE_ADS_DEVELOPER_TOKEN on the server. Pach sends it only in server-to-server Google Ads API requests."
+          />
+          <SearchSetupStep
+            label="advertiser"
+            value={adsAccounts.find((account) => account.selected)?.descriptiveName ?? (adsAccounts.length ? 'choose account' : 'none')}
+            done={adsAccounts.some((account) => account.selected)}
+            warning={adsAccounts.length > 0 && !adsAccounts.some((account) => account.selected)}
+            help="The selected non-manager advertiser account is used by promotion drafts and safe paused publishing."
+          />
+        </div>
+        <div className="overflow-auto">
+          <table className="w-full min-w-[920px] text-left font-mono text-xs">
+            <thead className="text-[10px] uppercase tracking-label text-fg-4">
+              <tr className="border-b border-edge/12">
+                <th className="pb-2 pr-3 font-normal">account</th>
+                <th className="pb-2 pr-3 font-normal">customer id</th>
+                <th className="pb-2 pr-3 font-normal">currency</th>
+                <th className="pb-2 pr-3 font-normal">timezone</th>
+                <th className="pb-2 pr-3 font-normal">type</th>
+                <th className="pb-2 font-normal">action</th>
+              </tr>
+            </thead>
+            <tbody>
+              {adsAccounts.map((account) => (
+                <tr key={account.id} className="border-b border-edge/8 text-fg-2">
+                  <td className="max-w-[260px] py-2.5 pr-3">
+                    <div className="truncate text-fg-1">{account.descriptiveName}</div>
+                    <div className="mt-1 text-[11px] text-fg-4">{account.status}</div>
+                  </td>
+                  <td className="py-2.5 pr-3 text-fg-3">{formatGoogleAdsCustomerId(account.customerId)}</td>
+                  <td className="py-2.5 pr-3 text-fg-4">{account.currencyCode}</td>
+                  <td className="py-2.5 pr-3 text-fg-4">{account.timeZone}</td>
+                  <td className="py-2.5 pr-3">
+                    <StatusPill kind={account.isManager ? 'idle' : account.selected ? 'ok' : 'info'}>
+                      {account.isManager ? 'manager' : account.selected ? 'selected' : account.isTestAccount ? 'test advertiser' : 'advertiser'}
+                    </StatusPill>
+                  </td>
+                  <td className="py-2.5">
+                    <Button
+                      className="px-2 py-1 text-[10px]"
+                      icon={searchActionIcon(actionState, `select-ads:${account.id}`, <Check className="h-3 w-3" />)}
+                      onClick={() => onSelectAdsAccount(account)}
+                      disabled={actionLoading || account.selected || account.isManager || account.status !== 'active'}
+                    >
+                      {searchActionLabel(actionState, `select-ads:${account.id}`, 'select', 'selecting', 'selected')}
+                    </Button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        {adsAccounts.length === 0 ? (
+          <div className="border border-dashed border-edge/15 py-8 text-center font-mono text-sm text-fg-4">
+            {adsDefaults?.developerTokenConfigured ? 'connect or reconnect Google, then sync Ads accounts' : 'set GOOGLE_ADS_DEVELOPER_TOKEN before syncing accounts'}
+          </div>
+        ) : null}
       </Panel>
 
       <Panel
@@ -2757,6 +2897,11 @@ function defaultSitemapUrlForProperty(siteUrl: string) {
 
 function formatCompactNumber(value: number) {
   return new Intl.NumberFormat(undefined, { notation: 'compact', maximumFractionDigits: 1 }).format(value)
+}
+
+function formatGoogleAdsCustomerId(value: string) {
+  const digits = value.replace(/\D/g, '')
+  return digits.length === 10 ? `${digits.slice(0, 3)}-${digits.slice(3, 6)}-${digits.slice(6)}` : value
 }
 
 function formatDate(value: number | null | undefined) {

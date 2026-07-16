@@ -1,4 +1,5 @@
 import { bigint, boolean, date, index, pgEnum, pgTable, uniqueIndex, uuid, text, timestamp, integer, jsonb } from 'drizzle-orm/pg-core';
+import { sql } from 'drizzle-orm';
 /* ─────────────────────────── USERS ─────────────────────────── */
 export const users = pgTable('users', {
     id: uuid('id').primaryKey().defaultRandom(),
@@ -58,6 +59,33 @@ export const organizationApiKeys = pgTable('organization_api_keys', {
     tokenHashIdx: index('organization_api_keys_token_hash_idx').on(table.tokenHash),
     tokenPrefixIdx: index('organization_api_keys_token_prefix_idx').on(table.tokenPrefix),
     revokedAtIdx: index('organization_api_keys_revoked_at_idx').on(table.revokedAt),
+}));
+export const organizationCredentials = pgTable('organization_credentials', {
+    id: uuid('id').primaryKey().defaultRandom(),
+    organizationId: uuid('organization_id').notNull().references(() => organizations.id),
+    createdByUserId: uuid('created_by_user_id').references(() => users.id),
+    name: text('name').notNull(),
+    provider: text('provider').notNull(),
+    /** api_key for now; leaves room for bearer_token and basic_auth credentials. */
+    kind: text('kind').notNull().default('api_key'),
+    /** Stable alias exposed to an authorized child process, never the secret value. */
+    envVarName: text('env_var_name').notNull(),
+    encryptedSecret: text('encrypted_secret').notNull(),
+    secretLast4: text('secret_last4').notNull(),
+    /** editorial for now; future agent capabilities can be granted explicitly. */
+    allowedUses: jsonb('allowed_uses').$type().notNull().default([]),
+    status: text('status').notNull().default('active'),
+    statusMessage: text('status_message'),
+    lastUsedAt: timestamp('last_used_at', { withTimezone: true }),
+    revokedAt: timestamp('revoked_at', { withTimezone: true }),
+    metadata: jsonb('metadata').$type().notNull().default({}),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+}, (table) => ({
+    organizationIdIdx: index('organization_credentials_organization_idx').on(table.organizationId),
+    organizationEnvVarIdx: uniqueIndex('organization_credentials_organization_env_var_idx').on(table.organizationId, table.envVarName),
+    providerIdx: index('organization_credentials_provider_idx').on(table.provider),
+    statusIdx: index('organization_credentials_status_idx').on(table.status),
 }));
 export const activityOriginEnum = pgEnum('activity_origin', ['pach_work', 'organization_work', 'organization_user_work']);
 export const activityEvents = pgTable('activity_events', {
@@ -1087,11 +1115,13 @@ export const mktAdPromotions = pgTable('mkt_ad_promotions', {
     provider: text('provider').notNull().default('linkedin'),
     adAccountExternalId: text('ad_account_external_id'),
     campaignGroupExternalId: text('campaign_group_external_id'),
+    campaignBudgetExternalId: text('campaign_budget_external_id'),
     campaignExternalId: text('campaign_external_id'),
+    adGroupExternalId: text('ad_group_external_id'),
     creativeExternalId: text('creative_external_id'),
     landingUrl: text('landing_url'),
     objective: text('objective').notNull().default('website_visits'),
-    /** draft | ready | scheduled | active | paused | completed | failed | archived */
+    /** draft | ready | publishing | scheduled | active | paused | completed | failed | archived */
     status: text('status').notNull().default('draft'),
     budgetMinor: integer('budget_minor'),
     currencyCode: text('currency_code').notNull().default('MXN'),
@@ -1099,6 +1129,10 @@ export const mktAdPromotions = pgTable('mkt_ad_promotions', {
     endsAt: timestamp('ends_at', { withTimezone: true }),
     targeting: jsonb('targeting').$type().notNull().default({}),
     creative: jsonb('creative').$type().notNull().default({}),
+    publishOperationKey: text('publish_operation_key'),
+    publishError: text('publish_error'),
+    providerResponse: jsonb('provider_response').$type(),
+    publishedAt: timestamp('published_at', { withTimezone: true }),
     metadata: jsonb('metadata').$type().notNull().default({}),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
@@ -1168,6 +1202,32 @@ export const googleConnections = pgTable('google_connections', {
     organizationIdx: index('google_connections_organization_idx').on(table.organizationId),
     providerAccountIdx: index('google_connections_provider_account_idx').on(table.providerAccountEmail),
     statusIdx: index('google_connections_status_idx').on(table.status),
+}));
+export const googleAdsAccounts = pgTable('google_ads_accounts', {
+    id: uuid('id').primaryKey().defaultRandom(),
+    organizationId: uuid('organization_id').notNull().references(() => organizations.id),
+    connectionId: uuid('connection_id').notNull().references(() => googleConnections.id),
+    customerId: text('customer_id').notNull(),
+    managerCustomerId: text('manager_customer_id'),
+    descriptiveName: text('descriptive_name').notNull(),
+    currencyCode: text('currency_code').notNull(),
+    timeZone: text('time_zone').notNull(),
+    isManager: boolean('is_manager').notNull().default(false),
+    isTestAccount: boolean('is_test_account').notNull().default(false),
+    selected: boolean('selected').notNull().default(false),
+    status: text('status').notNull().default('active'),
+    statusMessage: text('status_message'),
+    lastSyncedAt: timestamp('last_synced_at', { withTimezone: true }),
+    metadata: jsonb('metadata').$type().notNull().default({}),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+}, (table) => ({
+    organizationIdx: index('google_ads_accounts_organization_idx').on(table.organizationId),
+    connectionIdx: index('google_ads_accounts_connection_idx').on(table.connectionId),
+    organizationCustomerIdx: uniqueIndex('google_ads_accounts_organization_customer_idx').on(table.organizationId, table.customerId),
+    selectedIdx: index('google_ads_accounts_selected_idx').on(table.organizationId, table.selected),
+    oneSelectedPerOrganizationIdx: uniqueIndex('google_ads_accounts_one_selected_per_organization_idx').on(table.organizationId).where(sql `${table.selected} = true`),
+    statusIdx: index('google_ads_accounts_status_idx').on(table.status),
 }));
 export const searchConsoleProperties = pgTable('search_console_properties', {
     id: uuid('id').primaryKey().defaultRandom(),

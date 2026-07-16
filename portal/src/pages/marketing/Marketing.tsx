@@ -30,6 +30,8 @@ import {
   Megaphone,
   MessageCircleMore,
   Newspaper,
+  Pause,
+  Play,
   Plus,
   Radio,
   RefreshCw,
@@ -76,6 +78,7 @@ type PromotablePageRecord = Schema['tables']['mkt_promotable_pages']['row']
 type KeywordIdeaRow = Schema['tables']['mkt_keyword_ideas']['row']
 type AdPromotionRow = Schema['tables']['mkt_ad_promotions']['row']
 type AdMetricSnapshotRow = Schema['tables']['mkt_ad_metric_snapshots']['row']
+type GoogleAdsAccountRow = Schema['tables']['google_ads_accounts']['row']
 
 type SearchConsolePropertyRow = {
   id: string
@@ -187,16 +190,23 @@ type LinkedInAdPromotionDraftPayload = {
 type GoogleSearchPromotionDraftPayload = {
   adAccountExternalId: string
   objective: string
+  containsEuPoliticalAdvertising: GoogleAdsEuPoliticalAdvertisingDeclaration
   geo: string
   language: string
   budgetMinor?: number
   currencyCode: string
-  startsAt?: number
-  endsAt?: number
+  startDate?: string
+  endDate?: string
   keywords: string[]
   headlines: string[]
   descriptions: string[]
 }
+
+type GoogleAdsEuPoliticalAdvertisingDeclaration =
+  | 'CONTAINS_EU_POLITICAL_ADVERTISING'
+  | 'DOES_NOT_CONTAIN_EU_POLITICAL_ADVERTISING'
+
+type GoogleAdsLifecycleStatus = 'active' | 'paused'
 
 type MarketingSection = 'newsletters' | 'social' | 'whatsapp' | 'promotions' | 'calendar' | 'analytics'
 type NewsletterTab = 'content' | 'publications' | 'subscribers' | 'broadcasts' | 'ctas'
@@ -215,6 +225,7 @@ type MarketingCalendarEvent = {
   contentTitle: string
   timezone: string
   href: string
+  promotionId?: string
   tone: MarketingCalendarEventTone
 }
 type StoredMarketingCalendarState = {
@@ -326,6 +337,7 @@ export default function Marketing({ canAccessWhatsApp = false }: { canAccessWhat
   const [socialPostTargets] = useQuery(z.query.social_post_targets.orderBy('updatedAt', 'desc'))
   const [adPromotions] = useQuery(z.query.mkt_ad_promotions.orderBy('updatedAt', 'desc'))
   const [adMetricSnapshots] = useQuery(z.query.mkt_ad_metric_snapshots.orderBy('periodEnd', 'desc'))
+  const [googleAdsAccounts] = useQuery(z.query.google_ads_accounts.orderBy('descriptiveName', 'asc'))
   const [searchConsoleProperties] = useQuery(z.query.search_console_properties.orderBy('updatedAt', 'desc'))
   const [searchConsoleDimensionSummaries] = useQuery(z.query.search_console_dimension_summaries.orderBy('impressions', 'desc'))
   const [searchConsoleDailySnapshots] = useQuery(z.query.search_console_daily_snapshots.orderBy('dataDate', 'desc'))
@@ -358,6 +370,7 @@ export default function Marketing({ canAccessWhatsApp = false }: { canAccessWhat
   const orgSocialPostTargets = useMemo(() => byOrganization(socialPostTargets, organizationId), [organizationId, socialPostTargets])
   const orgAdPromotions = useMemo(() => byOrganization(adPromotions, organizationId), [adPromotions, organizationId])
   const orgAdMetricSnapshots = useMemo(() => byOrganization(adMetricSnapshots, organizationId), [adMetricSnapshots, organizationId])
+  const orgGoogleAdsAccounts = useMemo(() => byOrganization(googleAdsAccounts, organizationId), [googleAdsAccounts, organizationId])
   const orgSearchConsoleProperties = useMemo(() => byOrganization(searchConsoleProperties, organizationId), [organizationId, searchConsoleProperties])
   const orgSearchConsoleSummaries = useMemo(() => byOrganization(searchConsoleDimensionSummaries, organizationId), [organizationId, searchConsoleDimensionSummaries])
   const orgSearchConsoleDailySnapshots = useMemo(() => byOrganization(searchConsoleDailySnapshots, organizationId), [organizationId, searchConsoleDailySnapshots])
@@ -672,6 +685,7 @@ export default function Marketing({ canAccessWhatsApp = false }: { canAccessWhat
               keywordIdeas={orgKeywordIdeas}
               adPromotions={orgAdPromotions}
               adMetricSnapshots={orgAdMetricSnapshots}
+              googleAdsAccounts={orgGoogleAdsAccounts}
               searchConsoleSummaries={orgSearchConsoleSummaries}
               keywordAgentRuns={orgKeywordAgentRuns}
               keywordProgressReports={orgKeywordAgentRunProgressReports}
@@ -696,6 +710,9 @@ export default function Marketing({ canAccessWhatsApp = false }: { canAccessWhat
               socialPosts={orgSocialPosts}
               socialPostTargets={orgSocialPostTargets}
               adPromotions={orgAdPromotions}
+              adMetricSnapshots={orgAdMetricSnapshots}
+              googleAdsAccounts={orgGoogleAdsAccounts}
+              onFlash={flash}
             />
           ) : null}
           {section === 'analytics' ? (
@@ -973,8 +990,8 @@ function ContentSection({
       status: 'draft',
       budgetMinor: payload.budgetMinor,
       currencyCode: payload.currencyCode,
-      startsAt: payload.startsAt,
-      endsAt: payload.endsAt,
+      startsAt: payload.startDate ? Date.parse(`${payload.startDate}T00:00:00.000Z`) : undefined,
+      endsAt: payload.endDate ? Date.parse(`${payload.endDate}T00:00:00.000Z`) : undefined,
       targeting: {
         preset: payload.audiencePreset,
       },
@@ -1644,6 +1661,7 @@ function PromotionsSection({
   keywordIdeas,
   adPromotions,
   adMetricSnapshots,
+  googleAdsAccounts,
   searchConsoleSummaries,
   keywordAgentRuns,
   keywordProgressReports,
@@ -1657,6 +1675,7 @@ function PromotionsSection({
   keywordIdeas: KeywordIdeaRow[]
   adPromotions: AdPromotionRow[]
   adMetricSnapshots: AdMetricSnapshotRow[]
+  googleAdsAccounts: GoogleAdsAccountRow[]
   searchConsoleSummaries: SearchConsoleDimensionSummaryRow[]
   keywordAgentRuns: AgentRunRow[]
   keywordProgressReports: AgentRunProgressReportRow[]
@@ -1664,6 +1683,15 @@ function PromotionsSection({
 }) {
   const [tab, setTab] = useState<PromotionWorkspaceTab>('pages')
   const [promoteTarget, setPromoteTarget] = useState<{ page: PromotablePageRow; promotion: AdPromotionRow | null } | null>(null)
+  const [publishTarget, setPublishTarget] = useState<AdPromotionRow | null>(null)
+  const [publishingPromotion, setPublishingPromotion] = useState(false)
+  const [publishError, setPublishError] = useState<string | null>(null)
+  const [lifecycleTarget, setLifecycleTarget] = useState<{ promotion: AdPromotionRow; nextStatus: GoogleAdsLifecycleStatus } | null>(null)
+  const [updatingLifecycle, setUpdatingLifecycle] = useState(false)
+  const [lifecycleError, setLifecycleError] = useState<string | null>(null)
+  const [detailPromotionId, setDetailPromotionId] = useState<string | null>(null)
+  const [syncingMetricsPromotionId, setSyncingMetricsPromotionId] = useState<string | null>(null)
+  const [metricsSyncError, setMetricsSyncError] = useState<string | null>(null)
   const [pageEditor, setPageEditor] = useState<{ page: PromotablePageRecord | null } | null>(null)
   const [sitemapImporterOpen, setSitemapImporterOpen] = useState(false)
   const [selectedPageIds, setSelectedPageIds] = useState<string[]>([])
@@ -1675,10 +1703,20 @@ function PromotionsSection({
   const googlePromotions = useMemo(() => adPromotions.filter((promotion) => promotion.provider === 'google'), [adPromotions])
   const googleMetrics = useMemo(() => adMetricSnapshotsForPromotions(googlePromotions, adMetricSnapshots), [adMetricSnapshots, googlePromotions])
   const googleTotals = sumAdMetricSnapshots(googleMetrics)
-  const draftPromotions = googlePromotions.filter((promotion) => promotion.status === 'draft' || promotion.status === 'ready')
+  const draftPromotions = googlePromotions.filter((promotion) => ['draft', 'ready', 'failed'].includes(promotion.status))
   const activePromotions = googlePromotions.filter((promotion) => ['active', 'scheduled', 'paused'].includes(promotion.status))
+  const selectedGoogleAdsAccount = googleAdsAccounts.find((account) => account.selected && account.status === 'active') ?? null
+  const detailPromotion = detailPromotionId ? googlePromotions.find((promotion) => promotion.id === detailPromotionId) ?? null : null
+  const detailPage = detailPromotion ? pages.find((entry) => (
+    entry.page.id === detailPromotion.promotablePageId ||
+    (entry.output?.id && entry.output.id === detailPromotion.contentOutputId) ||
+    (entry.item?.id && entry.item.id === detailPromotion.contentItemId)
+  )) ?? null : null
+  const detailAccount = detailPromotion
+    ? googleAdsAccounts.find((account) => account.customerId === detailPromotion.adAccountExternalId) ?? null
+    : null
   const unpromotedOpportunityPages = pages.filter((page) => !page.googlePromotion && page.searchTotals.impressions > 0)
-  const incompleteDrafts = draftPromotions.filter((promotion) => !promotion.budgetMinor || !promotion.adAccountExternalId)
+  const incompleteDrafts = draftPromotions.filter((promotion) => !promotion.budgetMinor || !selectedGoogleAdsAccount)
   const selectedPages = pages.filter((page) => selectedPageIds.includes(page.page.id))
   const allPagesSelected = pages.length > 0 && selectedPageIds.length === pages.length
   const keywordRunStateByPageId = useMemo(
@@ -1697,20 +1735,23 @@ function PromotionsSection({
       contentItemId: page.item?.id,
       contentOutputId: page.output?.id,
       provider: 'google',
-      adAccountExternalId: payload.adAccountExternalId || undefined,
+      adAccountExternalId: selectedGoogleAdsAccount?.customerId,
       landingUrl: page.url,
       objective: payload.objective,
       status: 'draft',
       budgetMinor: payload.budgetMinor,
-      currencyCode: payload.currencyCode,
-      startsAt: payload.startsAt,
-      endsAt: payload.endsAt,
+      currencyCode: selectedGoogleAdsAccount?.currencyCode ?? payload.currencyCode,
+      startsAt: payload.startDate ? Date.parse(`${payload.startDate}T00:00:00.000Z`) : undefined,
+      endsAt: payload.endDate ? Date.parse(`${payload.endDate}T00:00:00.000Z`) : undefined,
       targeting: {
         campaignType: 'search',
+        containsEuPoliticalAdvertising: payload.containsEuPoliticalAdvertising,
         keywords: payload.keywords,
         matchType: 'phrase',
         geo: payload.geo,
         language: payload.language,
+        startDate: payload.startDate,
+        endDate: payload.endDate,
       },
       creative: {
         finalUrl: page.url,
@@ -1734,6 +1775,68 @@ function PromotionsSection({
     }
     setPromoteTarget(null)
     setTab('drafts')
+  }
+
+  async function publishGoogleDraft(promotion: AdPromotionRow) {
+    if (publishingPromotion) return
+    setPublishingPromotion(true)
+    try {
+      const response = await authFetch(`${config.apiUrl}/google/ads/promotions/${promotion.id}/publish`, { method: 'POST' })
+      const payload = await readJson(response)
+      setPublishError(null)
+      onFlash(payload.idempotent ? 'google campaign was already published' : 'google campaign published · paused')
+      setPublishTarget(null)
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Google campaign could not be published.'
+      setPublishError(message)
+      onFlash(message)
+    } finally {
+      setPublishingPromotion(false)
+    }
+  }
+
+  async function updateGoogleCampaignStatus(promotion: AdPromotionRow, nextStatus: GoogleAdsLifecycleStatus) {
+    if (updatingLifecycle) return
+    setUpdatingLifecycle(true)
+    try {
+      const response = await authFetch(`${config.apiUrl}/google/ads/promotions/${promotion.id}/status`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: nextStatus }),
+      })
+      await readJson(response)
+      setLifecycleError(null)
+      const account = googleAdsAccounts.find((entry) => entry.customerId === promotion.adAccountExternalId)
+      onFlash(nextStatus === 'active'
+        ? account?.isTestAccount
+          ? 'test campaign enabled · no delivery or charges'
+          : 'google campaign activated'
+        : 'google campaign paused')
+      setLifecycleTarget(null)
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Google campaign status could not be updated.'
+      setLifecycleError(message)
+      onFlash(message)
+    } finally {
+      setUpdatingLifecycle(false)
+    }
+  }
+
+  async function syncGoogleCampaignMetrics(promotion: AdPromotionRow) {
+    if (syncingMetricsPromotionId) return
+    setSyncingMetricsPromotionId(promotion.id)
+    setMetricsSyncError(null)
+    try {
+      const response = await authFetch(`${config.apiUrl}/google/ads/promotions/${promotion.id}/metrics/sync`, { method: 'POST' })
+      const payload = await readJson(response) as { writes?: number }
+      onFlash(`google ads metrics synced · ${payload.writes ?? 0} daily row${payload.writes === 1 ? '' : 's'}`)
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Google Ads metrics could not be synchronized.'
+      setMetricsSyncError(message)
+      onFlash(message)
+    } finally {
+      setSyncingMetricsPromotionId(null)
+    }
   }
 
   async function savePromotablePage(page: PromotablePageRecord | null, payload: PromotablePageFormPayload) {
@@ -1830,15 +1933,27 @@ function PromotionsSection({
                 ids.includes(pageId) ? ids.filter((id) => id !== pageId) : [...ids, pageId]
               ))}
               onEdit={(page) => setPageEditor({ page: page.page })}
-              onPromote={(page) => setPromoteTarget({ page, promotion: page.googlePromotion })}
+              onPromote={(page) => page.googlePromotion?.campaignExternalId ? setTab('drafts') : setPromoteTarget({ page, promotion: page.googlePromotion })}
             />
           ) : null}
           {tab === 'drafts' ? (
             <GoogleDraftsTable
-              promotions={draftPromotions}
+              promotions={googlePromotions}
               pages={pages}
               metrics={adMetricSnapshots}
               onEdit={(page, promotion) => setPromoteTarget({ page, promotion })}
+              onPublish={(promotion) => {
+                setPublishError(null)
+                setPublishTarget(promotion)
+              }}
+              onLifecycle={(promotion, nextStatus) => {
+                setLifecycleError(null)
+                setLifecycleTarget({ promotion, nextStatus })
+              }}
+              onOpen={(promotion) => {
+                setMetricsSyncError(null)
+                setDetailPromotionId(promotion.id)
+              }}
             />
           ) : null}
           {tab === 'learning' ? (
@@ -1846,7 +1961,7 @@ function PromotionsSection({
               unpromotedPages={unpromotedOpportunityPages}
               incompleteDrafts={incompleteDrafts}
               pages={pages}
-              onPromote={(page) => setPromoteTarget({ page, promotion: page.googlePromotion })}
+              onPromote={(page) => page.googlePromotion?.campaignExternalId ? setTab('drafts') : setPromoteTarget({ page, promotion: page.googlePromotion })}
             />
           ) : null}
         </div>
@@ -1856,10 +1971,54 @@ function PromotionsSection({
         <GoogleSearchPromotionDrawer
           page={promoteTarget.page}
           promotion={promoteTarget.promotion}
+          accounts={googleAdsAccounts}
           onClose={() => setPromoteTarget(null)}
           keywordRunStatus={keywordRunStatus}
           onGenerateKeywords={() => void queueKeywordGeneration([promoteTarget.page])}
           onSubmit={(payload) => void saveGoogleDraft(promoteTarget.page, promoteTarget.promotion, payload)}
+        />
+      ) : null}
+      {detailPromotion ? (
+        <GoogleAdsCampaignDetailDrawer
+          promotion={detailPromotion}
+          page={detailPage}
+          account={detailAccount}
+          metrics={adMetricSnapshotsForPromotions([detailPromotion], adMetricSnapshots)}
+          onClose={() => setDetailPromotionId(null)}
+          onSyncMetrics={() => void syncGoogleCampaignMetrics(detailPromotion)}
+          syncingMetrics={syncingMetricsPromotionId === detailPromotion.id}
+          metricsSyncError={metricsSyncError}
+          onLifecycle={(nextStatus) => {
+            setLifecycleError(null)
+            setLifecycleTarget({ promotion: detailPromotion, nextStatus })
+          }}
+        />
+      ) : null}
+      {publishTarget ? (
+        <GoogleAdsPublishConfirmation
+          promotion={publishTarget}
+          account={selectedGoogleAdsAccount}
+          publishing={publishingPromotion}
+          error={publishError}
+          onClose={() => {
+            setPublishError(null)
+            setPublishTarget(null)
+          }}
+          onConfirm={() => void publishGoogleDraft(publishTarget)}
+        />
+      ) : null}
+      {lifecycleTarget ? (
+        <GoogleAdsLifecycleConfirmation
+          promotion={lifecycleTarget.promotion}
+          account={googleAdsAccounts.find((account) => account.customerId === lifecycleTarget.promotion.adAccountExternalId) ?? null}
+          nextStatus={lifecycleTarget.nextStatus}
+          updating={updatingLifecycle}
+          error={lifecycleError}
+          onClose={() => {
+            setLifecycleError(null)
+            setLifecycleTarget(null)
+          }}
+          onConfirm={() => void updateGoogleCampaignStatus(lifecycleTarget.promotion, lifecycleTarget.nextStatus)}
         />
       ) : null}
       {pageEditor ? (
@@ -2149,11 +2308,17 @@ function GoogleDraftsTable({
   pages,
   metrics,
   onEdit,
+  onPublish,
+  onLifecycle,
+  onOpen,
 }: {
   promotions: AdPromotionRow[]
   pages: PromotablePageRow[]
   metrics: AdMetricSnapshotRow[]
   onEdit: (page: PromotablePageRow, promotion: AdPromotionRow) => void
+  onPublish: (promotion: AdPromotionRow) => void
+  onLifecycle: (promotion: AdPromotionRow, nextStatus: GoogleAdsLifecycleStatus) => void
+  onOpen: (promotion: AdPromotionRow) => void
 }) {
   if (promotions.length === 0) return <EmptyState label="no google drafts" />
   return (
@@ -2178,13 +2343,23 @@ function GoogleDraftsTable({
             const totals = sumAdMetricSnapshots(adMetricSnapshotsForPromotions([promotion], metrics))
             const keywords = promotionKeywords(promotion).slice(0, 4)
             return (
-              <tr key={promotion.id} className="border-b border-edge/8 text-fg-2 last:border-b-0">
+              <tr
+                key={promotion.id}
+                onClick={() => onOpen(promotion)}
+                className="cursor-pointer border-b border-edge/8 text-fg-2 transition hover:bg-accent-fill/3 last:border-b-0"
+              >
                 <td className="max-w-[320px] px-3 py-3">
                   <div className="truncate text-fg-1">{adPromotionHeadline(promotion) || page?.title || 'google search draft'}</div>
                   <div className="mt-1 truncate text-[11px] text-fg-4">{promotion.landingUrl ?? page?.url ?? '-'}</div>
                   <div className="mt-2">
                     <StatusPill kind={statusKind(promotion.status)}>{promotion.status}</StatusPill>
                   </div>
+                  {promotion.campaignExternalId ? (
+                    <div className="mt-1 text-[10px] text-fg-4">
+                      account {promotion.adAccountExternalId ? formatGoogleAdsCustomerId(promotion.adAccountExternalId) : '-'} · budget {promotion.campaignBudgetExternalId ?? '-'} · campaign {promotion.campaignExternalId} · ad group {promotion.adGroupExternalId ?? '-'} · ad {promotion.creativeExternalId ?? '-'}
+                    </div>
+                  ) : null}
+                  {promotion.publishError ? <div className="mt-1 text-[10px] text-fail">{promotion.publishError}</div> : null}
                 </td>
                 <td className="max-w-[260px] px-3 py-3">
                   <div className="truncate text-fg-1">{keywords.join(', ') || '-'}</div>
@@ -2199,11 +2374,31 @@ function GoogleDraftsTable({
                   <div className="mt-1 text-[11px] text-fg-4">{formatMoneyMinor(totals.spendMinor, promotion.currencyCode)} spend</div>
                 </td>
                 <td className="px-3 py-3 text-right">
-                  {page ? (
-                    <RowIconButton label="edit google draft" onClick={() => onEdit(page, promotion)}>
-                      <Edit3 className="h-3.5 w-3.5" />
+                  <div className="flex justify-end gap-1" onClick={(event) => event.stopPropagation()}>
+                    <RowIconButton label="view google campaign details" onClick={() => onOpen(promotion)}>
+                      <Info className="h-3.5 w-3.5" />
                     </RowIconButton>
-                  ) : null}
+                    {page && !promotion.campaignExternalId ? (
+                        <RowIconButton label="edit google draft" onClick={() => onEdit(page, promotion)}>
+                          <Edit3 className="h-3.5 w-3.5" />
+                        </RowIconButton>
+                    ) : null}
+                    {page && !promotion.campaignExternalId && promotion.status !== 'publishing' ? (
+                      <RowIconButton label="publish paused google campaign" onClick={() => onPublish(promotion)}>
+                        <Send className="h-3.5 w-3.5" />
+                      </RowIconButton>
+                    ) : null}
+                    {promotion.campaignExternalId && promotion.status === 'paused' ? (
+                      <RowIconButton label="activate google campaign" onClick={() => onLifecycle(promotion, 'active')}>
+                        <Play className="h-3.5 w-3.5" />
+                      </RowIconButton>
+                    ) : null}
+                    {promotion.campaignExternalId && ['active', 'scheduled'].includes(promotion.status) ? (
+                      <RowIconButton label="pause google campaign" onClick={() => onLifecycle(promotion, 'paused')}>
+                        <Pause className="h-3.5 w-3.5" />
+                      </RowIconButton>
+                    ) : null}
+                  </div>
                 </td>
               </tr>
             )
@@ -2289,6 +2484,7 @@ function PromotionsLearningPanel({
 function GoogleSearchPromotionDrawer({
   page,
   promotion,
+  accounts,
   onClose,
   keywordRunStatus,
   onGenerateKeywords,
@@ -2296,6 +2492,7 @@ function GoogleSearchPromotionDrawer({
 }: {
   page: PromotablePageRow
   promotion: AdPromotionRow | null
+  accounts: GoogleAdsAccountRow[]
   onClose: () => void
   keywordRunStatus: 'idle' | 'loading' | 'success'
   onGenerateKeywords: () => void
@@ -2303,16 +2500,22 @@ function GoogleSearchPromotionDrawer({
 }) {
   const creative = readRecord(promotion?.creative)
   const targeting = readRecord(promotion?.targeting)
+  const selectedAccount = accounts.find((account) => account.selected && account.status === 'active') ?? null
   const startDate = promotion?.startsAt ? new Date(promotion.startsAt) : defaultSocialScheduleDate(page.output)
   const endDate = promotion?.endsAt ? new Date(promotion.endsAt) : new Date(startDate.getTime() + 7 * 24 * 60 * 60 * 1000)
-  const [adAccountExternalId, setAdAccountExternalId] = useState(promotion?.adAccountExternalId ?? '')
+  const adAccountExternalId = selectedAccount?.customerId ?? ''
   const [objective, setObjective] = useState(promotion?.objective ?? 'website_visits')
+  const [containsEuPoliticalAdvertising, setContainsEuPoliticalAdvertising] = useState(
+    readString(targeting.containsEuPoliticalAdvertising) as GoogleAdsEuPoliticalAdvertisingDeclaration | '',
+  )
   const [geo, setGeo] = useState(readString(targeting.geo) || 'MX')
   const [language, setLanguage] = useState(readString(targeting.language) || 'es')
   const [budgetMajor, setBudgetMajor] = useState(promotion?.budgetMinor ? String(Math.round(promotion.budgetMinor / 100)) : '150')
-  const [currencyCode, setCurrencyCode] = useState(promotion?.currencyCode ?? 'MXN')
-  const [startsAt, setStartsAt] = useState(() => toDatetimeLocalValue(startDate))
-  const [endsAt, setEndsAt] = useState(() => toDatetimeLocalValue(endDate))
+  const currencyCode = selectedAccount?.currencyCode ?? promotion?.currencyCode ?? 'MXN'
+  const accountTimeZone = selectedAccount?.timeZone ?? 'UTC'
+  const accountToday = dateInputValueInTimeZone(new Date(), accountTimeZone)
+  const [startsOn, setStartsOn] = useState(() => readString(targeting.startDate) || toDateInputValue(startDate))
+  const [endsOn, setEndsOn] = useState(() => readString(targeting.endDate) || toDateInputValue(endDate))
   const [keywordText, setKeywordText] = useState(() => {
     const existing = readStringList(targeting.keywords)
     return (existing.length ? existing : defaultGoogleKeywords(page)).join('\n')
@@ -2326,8 +2529,6 @@ function GoogleSearchPromotionDrawer({
     return (existing.length ? existing : defaultGoogleDescriptions(page)).join('\n')
   })
 
-  const startsAtMs = startsAt ? Date.parse(startsAt) : undefined
-  const endsAtMs = endsAt ? Date.parse(endsAt) : undefined
   const budgetNumber = budgetMajor.trim() ? Number(budgetMajor) : undefined
   const budgetMinor = typeof budgetNumber === 'number' && Number.isFinite(budgetNumber) && budgetNumber > 0
     ? Math.round(budgetNumber * 100)
@@ -2336,24 +2537,44 @@ function GoogleSearchPromotionDrawer({
   const headlines = lineList(headlineText).slice(0, 15)
   const descriptions = lineList(descriptionText).slice(0, 4)
   const invalidBudget = Boolean(budgetMajor.trim()) && !budgetMinor
-  const invalidDates = (startsAt && (!startsAtMs || Number.isNaN(startsAtMs)))
-    || (endsAt && (!endsAtMs || Number.isNaN(endsAtMs)))
-    || (startsAtMs && endsAtMs ? endsAtMs <= startsAtMs : false)
-  const canSubmit = Boolean(page.url && keywords.length && headlines.length && descriptions.length && !invalidBudget && !invalidDates)
+  const dateError = !isDateInputValue(startsOn) || !isDateInputValue(endsOn)
+    ? 'Select a valid start and end date.'
+    : startsOn < accountToday
+      ? `Start date cannot be before ${accountToday} in ${accountTimeZone}.`
+      : endsOn <= startsOn
+        ? 'End date must be after start date.'
+        : null
+  const invalidDates = Boolean(dateError)
+  const draftErrors = [
+    ...(!containsEuPoliticalAdvertising ? ['Declare whether this campaign contains EU political advertising.'] : []),
+    ...(!keywords.length ? ['Add at least one keyword.'] : []),
+    ...keywords.flatMap((keyword, index) => keyword.length > 80
+      ? [`Keyword ${index + 1} is ${keyword.length}/80 characters.`]
+      : []),
+    ...(headlines.length < 3 ? [`Add at least three headlines (${headlines.length}/3).`] : []),
+    ...headlines.flatMap((headline, index) => headline.length > 30
+      ? [`Headline ${index + 1} is ${headline.length}/30 characters: “${headline}”`]
+      : []),
+    ...(descriptions.length < 2 ? [`Add at least two descriptions (${descriptions.length}/2).`] : []),
+    ...descriptions.flatMap((description, index) => description.length > 90
+      ? [`Description ${index + 1} is ${description.length}/90 characters.`]
+      : []),
+  ]
+  const canSubmit = Boolean(page.url && !invalidBudget && !invalidDates && draftErrors.length === 0)
   const objectiveOptions: PachSelectOption[] = [
     { value: 'website_visits', label: 'website visits' },
     { value: 'lead_generation', label: 'lead generation' },
     { value: 'newsletter_signup', label: 'newsletter signup' },
   ]
-  const currencyOptions: PachSelectOption[] = [
-    { value: 'MXN', label: 'MXN' },
-    { value: 'USD', label: 'USD' },
+  const euPoliticalAdvertisingOptions: PachSelectOption[] = [
+    { value: 'DOES_NOT_CONTAIN_EU_POLITICAL_ADVERTISING', label: 'does not contain EU political advertising' },
+    { value: 'CONTAINS_EU_POLITICAL_ADVERTISING', label: 'contains EU political advertising' },
   ]
 
   return createPortal(
     <div className="fixed inset-0 z-50 flex justify-end bg-overlay/70 backdrop-blur-sm" onClick={onClose}>
       <div
-        className="h-screen min-h-screen w-[720px] max-w-full overflow-y-auto border-l border-edge/25 bg-pit-2 shadow-terminal-overlay"
+        className="h-screen min-h-screen w-[1180px] max-w-[calc(100vw-1rem)] overflow-y-auto border-l border-edge/25 bg-pit-2 shadow-terminal-overlay"
         onClick={(event) => event.stopPropagation()}
       >
         <div className="sticky top-0 z-10 flex items-center justify-between gap-3 border-b border-edge/12 bg-pit-2 px-5 py-3">
@@ -2373,14 +2594,12 @@ function GoogleSearchPromotionDrawer({
           </div>
 
           <div className="grid gap-3 md:grid-cols-2">
-            <label className="block">
+            <div className="block">
               <FieldLabel>google ads customer id</FieldLabel>
-              <TermInput
-                value={adAccountExternalId}
-                onChange={(event) => setAdAccountExternalId(event.target.value)}
-                placeholder="optional until account sync exists"
-              />
-            </label>
+              <div className="flex h-9 items-center border border-edge/18 bg-rim px-3 font-mono text-xs text-fg-2">
+                {selectedAccount ? `${selectedAccount.descriptiveName} · ${formatGoogleAdsCustomerId(selectedAccount.customerId)}` : 'select an account in settings · search'}
+              </div>
+            </div>
             <div>
               <FieldLabel>goal</FieldLabel>
               <PachSelect
@@ -2399,7 +2618,7 @@ function GoogleSearchPromotionDrawer({
             </label>
             <div>
               <FieldLabel>currency</FieldLabel>
-              <PachSelect value={currencyCode} onChange={setCurrencyCode} options={currencyOptions} display={currencyCode} />
+              <div className="flex h-9 items-center border border-edge/18 bg-rim px-3 font-mono text-xs text-fg-2">{currencyCode}</div>
             </div>
             <label className="block">
               <FieldLabel>geo</FieldLabel>
@@ -2411,63 +2630,99 @@ function GoogleSearchPromotionDrawer({
             </label>
           </div>
 
+          <div className={`border px-3 py-3 ${containsEuPoliticalAdvertising ? 'border-edge/18 bg-rim' : 'border-warn/35 bg-warn/5'}`}>
+            <div className="flex flex-wrap items-start justify-between gap-2">
+              <div>
+                <FieldLabel>EU political advertising · required</FieldLabel>
+                <div className="mt-1 font-mono text-[11px] text-fg-4">Google requires this declaration for every new campaign, regardless of target country.</div>
+              </div>
+              {!containsEuPoliticalAdvertising ? <StatusPill kind="warn">select one</StatusPill> : null}
+            </div>
+            <div className="mt-3 grid gap-2 md:grid-cols-2">
+              {euPoliticalAdvertisingOptions.map((option) => {
+                const selected = containsEuPoliticalAdvertising === option.value
+                return (
+                  <button
+                    key={option.value}
+                    type="button"
+                    aria-pressed={selected}
+                    onClick={() => setContainsEuPoliticalAdvertising(option.value as GoogleAdsEuPoliticalAdvertisingDeclaration)}
+                    className={`border px-3 py-2.5 text-left font-mono text-xs transition ${selected ? 'border-accent bg-accent-fill/10 text-accent' : 'border-edge/18 bg-pit-2 text-fg-3 hover:border-edge/35 hover:text-fg-1'}`}
+                  >
+                    <span className="mr-2">{selected ? '●' : '○'}</span>{option.label}
+                  </button>
+                )
+              })}
+            </div>
+          </div>
+
           <div className="grid gap-3 md:grid-cols-2">
             <label className="block">
-              <FieldLabel>starts</FieldLabel>
-              <TermInput type="datetime-local" value={startsAt} onChange={(event) => setStartsAt(event.target.value)} />
+              <FieldLabel>start date</FieldLabel>
+              <TermInput type="date" min={accountToday} value={startsOn} onChange={(event) => setStartsOn(event.target.value)} />
             </label>
             <label className="block">
-              <FieldLabel>ends</FieldLabel>
-              <TermInput type="datetime-local" value={endsAt} onChange={(event) => setEndsAt(event.target.value)} />
+              <FieldLabel>end date</FieldLabel>
+              <TermInput type="date" min={startsOn || accountToday} value={endsOn} onChange={(event) => setEndsOn(event.target.value)} />
             </label>
           </div>
+          <div className="-mt-2 font-mono text-[11px] text-fg-4">Full-day schedule · Google Ads account timezone: {accountTimeZone}</div>
 
-          <div className="block">
-            <div className="mb-1 flex items-center justify-between gap-2">
-              <FieldLabel>keywords</FieldLabel>
-              <Button
-                icon={<Sparkles className="h-3.5 w-3.5" />}
-                onClick={onGenerateKeywords}
-                disabled={keywordRunStatus === 'loading'}
-              >
-                {keywordRunStatus === 'loading'
-                  ? 'generating'
-                  : keywordRunStatus === 'success'
-                    ? 'queued'
-                    : 'generate keywords'}
-              </Button>
-            </div>
-            <TermTextarea rows={7} value={keywordText} onChange={(event) => setKeywordText(event.target.value)} />
+          <div className="grid items-start gap-3 lg:grid-cols-3">
+            <GoogleAdTextListEditor
+              label="keywords"
+              help="Search phrases that can trigger the ad."
+              values={keywordText.split('\n')}
+              onChange={(values) => setKeywordText(values.join('\n'))}
+              minItems={1}
+              maxItems={25}
+              characterLimit={80}
+              addLabel="add keyword"
+              action={(
+                <Button
+                  className="px-2 py-1 text-[10px]"
+                  icon={<Sparkles className="h-3 w-3" />}
+                  onClick={onGenerateKeywords}
+                  disabled={keywordRunStatus === 'loading'}
+                >
+                  {keywordRunStatus === 'loading' ? 'generating' : keywordRunStatus === 'success' ? 'queued' : 'generate'}
+                </Button>
+              )}
+            />
+            <GoogleAdTextListEditor
+              label="headlines"
+              help="Short titles Google combines above the ad."
+              values={headlineText.split('\n')}
+              onChange={(values) => setHeadlineText(values.join('\n'))}
+              minItems={3}
+              maxItems={15}
+              characterLimit={30}
+              addLabel="add headline"
+            />
+            <GoogleAdTextListEditor
+              label="descriptions"
+              help="Supporting copy shown beneath headlines."
+              values={descriptionText.split('\n')}
+              onChange={(values) => setDescriptionText(values.join('\n'))}
+              minItems={2}
+              maxItems={4}
+              characterLimit={90}
+              addLabel="add description"
+              multiline
+            />
           </div>
 
-          <label className="block">
-            <FieldLabel>headlines</FieldLabel>
-            <TermTextarea rows={6} value={headlineText} onChange={(event) => setHeadlineText(event.target.value)} />
-          </label>
-
-          <label className="block">
-            <FieldLabel>descriptions</FieldLabel>
-            <TermTextarea rows={5} value={descriptionText} onChange={(event) => setDescriptionText(event.target.value)} />
-          </label>
-
-          <div className="grid gap-3 md:grid-cols-3">
-            <div className="border border-edge/12 bg-rim px-3 py-2 font-mono text-xs text-fg-2">
-              <div className="text-[10px] uppercase tracking-label text-fg-4">keywords</div>
-              <div className="mt-1 text-fg-1">{keywords.length}</div>
-            </div>
-            <div className="border border-edge/12 bg-rim px-3 py-2 font-mono text-xs text-fg-2">
-              <div className="text-[10px] uppercase tracking-label text-fg-4">headlines</div>
-              <div className="mt-1 text-fg-1">{headlines.length}</div>
-            </div>
-            <div className="border border-edge/12 bg-rim px-3 py-2 font-mono text-xs text-fg-2">
-              <div className="text-[10px] uppercase tracking-label text-fg-4">descriptions</div>
-              <div className="mt-1 text-fg-1">{descriptions.length}</div>
-            </div>
-          </div>
-
-          {invalidBudget || invalidDates || !keywords.length || !headlines.length || !descriptions.length ? (
+          {invalidBudget || invalidDates || draftErrors.length ? (
             <div className="border border-fail/25 bg-fail/5 px-3 py-2 font-mono text-xs text-fail">
-              {invalidBudget ? 'budget must be a positive amount' : invalidDates ? 'end date must be after start date' : 'keywords, headlines, and descriptions are required'}
+              {invalidBudget ? (
+                'Budget must be a positive amount.'
+              ) : invalidDates ? (
+                dateError
+              ) : (
+                <ul className="space-y-1">
+                  {draftErrors.map((error) => <li key={error}>{error}</li>)}
+                </ul>
+              )}
             </div>
           ) : null}
         </div>
@@ -2480,12 +2735,13 @@ function GoogleSearchPromotionDrawer({
             onClick={() => onSubmit({
               adAccountExternalId: adAccountExternalId.trim(),
               objective,
+              containsEuPoliticalAdvertising: containsEuPoliticalAdvertising as GoogleAdsEuPoliticalAdvertisingDeclaration,
               geo: geo.trim() || 'MX',
               language: language.trim() || 'es',
               budgetMinor,
               currencyCode,
-              startsAt: startsAtMs,
-              endsAt: endsAtMs,
+              startDate: startsOn,
+              endDate: endsOn,
               keywords,
               headlines,
               descriptions,
@@ -2493,6 +2749,411 @@ function GoogleSearchPromotionDrawer({
             disabled={!canSubmit}
           >
             save draft
+          </Button>
+        </div>
+      </div>
+    </div>,
+    document.body,
+  )
+}
+
+function GoogleAdTextListEditor({
+  label,
+  help,
+  values,
+  onChange,
+  minItems,
+  maxItems,
+  characterLimit,
+  addLabel,
+  action,
+  multiline = false,
+}: {
+  label: string
+  help: string
+  values: string[]
+  onChange: (values: string[]) => void
+  minItems: number
+  maxItems: number
+  characterLimit: number
+  addLabel: string
+  action?: ReactNode
+  multiline?: boolean
+}) {
+  const normalizedValues = values.length ? values : ['']
+  const singularLabel = label.replace(/s$/, '')
+
+  function updateValue(index: number, value: string) {
+    onChange(normalizedValues.map((entry, entryIndex) => entryIndex === index ? value : entry))
+  }
+
+  function removeValue(index: number) {
+    const next = normalizedValues.filter((_, entryIndex) => entryIndex !== index)
+    onChange(next.length ? next : [''])
+  }
+
+  return (
+    <section className="border border-edge/14 bg-rim p-3">
+      <div className="mb-3 min-h-[58px]">
+        <div className="flex items-center justify-between gap-2">
+          <FieldLabel>{label} · {normalizedValues.filter((value) => value.trim()).length}/{maxItems}</FieldLabel>
+          {action}
+        </div>
+        <div className="mt-1 font-mono text-[11px] text-fg-4">{help} Minimum {minItems}.</div>
+      </div>
+      <div className="space-y-2">
+        {normalizedValues.map((value, index) => {
+          const overLimit = value.length > characterLimit
+          return (
+            <div key={index} className={`border p-2 ${overLimit ? 'border-fail/40 bg-fail/5' : 'border-edge/12 bg-pit-2'}`}>
+              <div className="mb-1 flex items-center justify-between gap-2 font-mono text-[10px] uppercase tracking-label">
+                <span className="text-fg-4">{singularLabel} {index + 1}</span>
+                <span className={overLimit ? 'text-fail' : 'text-fg-4'}>{value.length}/{characterLimit}</span>
+              </div>
+              <div className="flex items-start gap-1.5">
+                {multiline ? (
+                  <TermTextarea
+                    rows={2}
+                    value={value}
+                    maxLength={characterLimit + 40}
+                    onChange={(event) => updateValue(index, event.target.value.replace(/\n/g, ' '))}
+                    className={overLimit ? 'border-fail/50' : ''}
+                    aria-invalid={overLimit}
+                  />
+                ) : (
+                  <TermInput
+                    value={value}
+                    maxLength={characterLimit + 40}
+                    onChange={(event) => updateValue(index, event.target.value)}
+                    className={overLimit ? 'border-fail/50' : ''}
+                    aria-invalid={overLimit}
+                  />
+                )}
+                <button
+                  type="button"
+                  aria-label={`remove ${singularLabel} ${index + 1}`}
+                  onClick={() => removeValue(index)}
+                  className="flex h-9 w-9 shrink-0 items-center justify-center border border-edge/15 text-fg-4 transition hover:border-fail/40 hover:text-fail"
+                >
+                  <Trash2 className="h-3.5 w-3.5" />
+                </button>
+              </div>
+            </div>
+          )
+        })}
+      </div>
+      <button
+        type="button"
+        onClick={() => onChange([...normalizedValues, ''])}
+        disabled={normalizedValues.length >= maxItems}
+        className="mt-2 flex w-full items-center justify-center gap-1.5 border border-dashed border-edge/20 px-2 py-2 font-mono text-[10px] uppercase tracking-label text-fg-4 transition hover:border-accent/40 hover:text-accent disabled:cursor-not-allowed disabled:opacity-35"
+      >
+        <Plus className="h-3 w-3" /> {addLabel}
+      </button>
+    </section>
+  )
+}
+
+function GoogleAdsPublishConfirmation({
+  promotion,
+  account,
+  publishing,
+  error,
+  onClose,
+  onConfirm,
+}: {
+  promotion: AdPromotionRow
+  account: GoogleAdsAccountRow | null
+  publishing: boolean
+  error: string | null
+  onClose: () => void
+  onConfirm: () => void
+}) {
+  const targeting = readRecord(promotion.targeting)
+  const euPoliticalAdvertising = readString(targeting.containsEuPoliticalAdvertising)
+  const euPoliticalAdvertisingLabel = euPoliticalAdvertising === 'DOES_NOT_CONTAIN_EU_POLITICAL_ADVERTISING'
+    ? 'does not contain'
+    : euPoliticalAdvertising === 'CONTAINS_EU_POLITICAL_ADVERTISING'
+      ? 'contains'
+      : 'missing declaration'
+  return createPortal(
+    <div className="fixed inset-0 z-[60] flex items-start justify-center bg-overlay/75 px-4 pt-[12vh] backdrop-blur-sm" onClick={onClose}>
+      <div className="w-full max-w-xl border border-edge/25 bg-pit-2 shadow-terminal-overlay" onClick={(event) => event.stopPropagation()}>
+        <div className="border-b border-edge/12 px-5 py-4">
+          <div className="font-mono text-[10px] uppercase tracking-label text-fg-4">google ads · explicit approval</div>
+          <h2 className="mt-1 font-mono text-xl font-bold lowercase text-fg-1">publish paused campaign?</h2>
+        </div>
+        <div className="space-y-3 px-5 py-5 font-mono text-xs">
+          <div className="border border-accent/25 bg-accent-fill/5 px-3 py-3 text-fg-2">
+            Pach will create the budget, Search campaign, ad group, keywords, and responsive search ad in Google. Every serving entity is created as <span className="font-bold text-accent">PAUSED</span>.
+          </div>
+          <div className="grid gap-2 md:grid-cols-2">
+            <RowMeta label="advertiser">{account ? `${account.descriptiveName} · ${formatGoogleAdsCustomerId(account.customerId)}` : 'no selected account'}</RowMeta>
+            <RowMeta label="daily budget">{promotion.budgetMinor ? formatMoneyMinor(promotion.budgetMinor, account?.currencyCode ?? promotion.currencyCode) : 'missing'}</RowMeta>
+            <RowMeta label="campaign">{adPromotionHeadline(promotion) || 'google search campaign'}</RowMeta>
+            <RowMeta label="landing page">{promotion.landingUrl ?? 'missing'}</RowMeta>
+            <RowMeta label="EU political ads">{euPoliticalAdvertisingLabel}</RowMeta>
+          </div>
+          {!account ? <div className="border border-fail/25 bg-fail/5 px-3 py-2 text-fail">Select a synchronized Google Ads advertiser in Settings → Search first.</div> : null}
+          {!euPoliticalAdvertising ? <div className="border border-fail/25 bg-fail/5 px-3 py-2 text-fail">Edit this draft and complete the required EU political advertising declaration.</div> : null}
+          {error ? (
+            <div role="alert" className="border border-fail/30 bg-fail/5 px-3 py-3 text-fail">
+              <div className="mb-1 text-[10px] uppercase tracking-label">Google Ads rejected this draft</div>
+              <div>{error}</div>
+              <div className="mt-2 text-fg-3">Cancel, edit the draft, and try again.</div>
+            </div>
+          ) : null}
+          {promotion.publishError && promotion.publishError !== error ? <div className="border border-warn/25 bg-warn/5 px-3 py-2 text-warn">Previous attempt: {promotion.publishError}</div> : null}
+        </div>
+        <div className="flex items-center justify-end gap-2 border-t border-edge/12 px-5 py-3">
+          <Button onClick={onClose} disabled={publishing}>cancel</Button>
+          <Button kind="primary" icon={<Send className="h-3.5 w-3.5" />} onClick={onConfirm} disabled={publishing || !account || !promotion.budgetMinor || !euPoliticalAdvertising}>
+            {publishing ? 'publishing paused' : 'approve & publish paused'}
+          </Button>
+        </div>
+      </div>
+    </div>,
+    document.body,
+  )
+}
+
+function GoogleAdsCampaignDetailDrawer({
+  promotion,
+  page,
+  account,
+  metrics,
+  onClose,
+  onLifecycle,
+  onSyncMetrics,
+  syncingMetrics = false,
+  metricsSyncError = null,
+}: {
+  promotion: AdPromotionRow
+  page: PromotablePageRow | null
+  account: GoogleAdsAccountRow | null
+  metrics: AdMetricSnapshotRow[]
+  onClose: () => void
+  onLifecycle: (nextStatus: GoogleAdsLifecycleStatus) => void
+  onSyncMetrics?: () => void
+  syncingMetrics?: boolean
+  metricsSyncError?: string | null
+}) {
+  const totals = sumAdMetricSnapshots(metrics)
+  const ctr = totals.impressions > 0 ? totals.clicks / totals.impressions : 0
+  const averageCpcMinor = totals.clicks > 0 ? Math.round(totals.spendMinor / totals.clicks) : 0
+  const targeting = readRecord(promotion.targeting)
+  const creative = readRecord(promotion.creative)
+  const keywords = readStringList(targeting.keywords)
+  const headlines = readStringList(creative.headlines)
+  const descriptions = readStringList(creative.descriptions)
+  const metricsMetadata = readRecord(readRecord(promotion.metadata).googleAdsMetrics)
+  const metadataSyncedAt = Date.parse(readString(metricsMetadata.lastSyncedAt) || '')
+  const latestMetricsAt = Math.max(
+    Number.isFinite(metadataSyncedAt) ? metadataSyncedAt : 0,
+    metrics.reduce((latest, snapshot) => Math.max(latest, snapshot.fetchedAt ?? 0), 0),
+  )
+  const canActivate = Boolean(promotion.campaignExternalId && promotion.status === 'paused')
+  const canPause = Boolean(promotion.campaignExternalId && ['active', 'scheduled'].includes(promotion.status))
+  const euPoliticalAdvertising = readString(targeting.containsEuPoliticalAdvertising)
+  const euPoliticalAdvertisingLabel = euPoliticalAdvertising === 'CONTAINS_EU_POLITICAL_ADVERTISING'
+    ? 'contains'
+    : euPoliticalAdvertising === 'DOES_NOT_CONTAIN_EU_POLITICAL_ADVERTISING'
+      ? 'does not contain'
+      : 'not declared'
+
+  return createPortal(
+    <div className="fixed inset-0 z-50 flex justify-end bg-overlay/70 backdrop-blur-sm" onClick={onClose}>
+      <aside
+        className="h-screen min-h-screen w-[820px] max-w-[calc(100vw-1rem)] overflow-y-auto border-l border-edge/25 bg-pit-2 shadow-terminal-overlay"
+        onClick={(event) => event.stopPropagation()}
+      >
+        <div className="sticky top-0 z-10 flex items-start justify-between gap-4 border-b border-edge/12 bg-pit-2 px-5 py-4">
+          <div className="min-w-0">
+            <div className="font-mono text-[10px] uppercase tracking-label text-fg-4">promotions · google search · campaign</div>
+            <h2 className="mt-1 truncate font-mono text-xl font-bold text-fg-1">{adPromotionHeadline(promotion) || page?.title || 'Google Search campaign'}</h2>
+            <div className="mt-2 flex flex-wrap items-center gap-2">
+              <StatusPill kind={statusKind(promotion.status)}>{promotion.status}</StatusPill>
+              {account?.isTestAccount ? <StatusPill kind="info">test · no delivery</StatusPill> : null}
+            </div>
+          </div>
+          <button onClick={onClose} className="font-mono text-xs uppercase tracking-label text-fg-4 transition hover:text-fg-1">[esc]</button>
+        </div>
+
+        <div className="space-y-5 px-5 py-5">
+          <section className="flex flex-wrap items-center justify-between gap-3 border border-edge/14 bg-rim px-3 py-3">
+            <div className="font-mono text-xs text-fg-3">
+              {account?.isTestAccount
+                ? 'Status changes are real in Google, but this test account cannot deliver ads or incur charges.'
+                : 'Serving controls affect the campaign and its ad group, keywords, and ad together.'}
+            </div>
+            <div className="flex gap-2">
+              {canActivate ? <Button kind="primary" icon={<Play className="h-3.5 w-3.5" />} onClick={() => onLifecycle('active')}>{account?.isTestAccount ? 'enable test campaign' : 'activate'}</Button> : null}
+              {canPause ? <Button kind="danger" icon={<Pause className="h-3.5 w-3.5" />} onClick={() => onLifecycle('paused')}>pause</Button> : null}
+            </div>
+          </section>
+
+          <section>
+            <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+              <div className="font-mono text-[10px] uppercase tracking-label text-fg-4">results</div>
+              {onSyncMetrics ? (
+                <Button
+                  icon={<RefreshCw className={`h-3.5 w-3.5 ${syncingMetrics ? 'animate-spin' : ''}`} />}
+                  onClick={onSyncMetrics}
+                  disabled={syncingMetrics || !promotion.campaignExternalId}
+                >
+                  {syncingMetrics ? 'syncing metrics' : 'sync metrics'}
+                </Button>
+              ) : null}
+            </div>
+            <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+              <Metric label="impressions" value={formatCompactNumber(totals.impressions)} />
+              <Metric label="clicks" value={formatCompactNumber(totals.clicks)} />
+              <Metric label="ctr" value={formatPercent(ctr)} />
+              <Metric label="avg cpc" value={formatMoneyMinor(averageCpcMinor, promotion.currencyCode)} />
+              <Metric label="spend" value={formatMoneyMinor(totals.spendMinor, promotion.currencyCode)} />
+              <Metric label="conversions" value={formatCompactNumber(totals.conversions)} />
+            </div>
+            <div className="mt-2 font-mono text-[10px] text-fg-4">
+              {latestMetricsAt ? `Last metrics sync ${formatDate(latestMetricsAt)} · background refresh about every 3 hours` : account?.isTestAccount ? 'Test accounts do not produce serving metrics.' : 'No synchronized metrics yet · background refresh about every 3 hours.'}
+            </div>
+            {metricsSyncError ? <div className="mt-2 border border-fail/25 bg-fail/5 px-3 py-2 font-mono text-xs text-fail">{metricsSyncError}</div> : null}
+          </section>
+
+          <section className="border border-edge/14 bg-rim p-3">
+            <div className="mb-3 font-mono text-[10px] uppercase tracking-label text-fg-4">campaign setup</div>
+            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+              <RowMeta label="advertiser">{account ? `${account.descriptiveName} · ${formatGoogleAdsCustomerId(account.customerId)}` : promotion.adAccountExternalId ? formatGoogleAdsCustomerId(promotion.adAccountExternalId) : 'not selected'}</RowMeta>
+              <RowMeta label="daily budget">{promotion.budgetMinor ? formatMoneyMinor(promotion.budgetMinor, promotion.currencyCode) : 'not set'}</RowMeta>
+              <RowMeta label="schedule">{promotionDateRange(promotion)}</RowMeta>
+              <RowMeta label="goal">{promotion.objective.replaceAll('_', ' ')}</RowMeta>
+              <RowMeta label="location">{readString(targeting.geo) || 'not set'}</RowMeta>
+              <RowMeta label="language">{readString(targeting.language) || 'not set'}</RowMeta>
+              <RowMeta label="keyword match">{readString(targeting.matchType) || 'not set'}</RowMeta>
+              <RowMeta label="EU political ads">{euPoliticalAdvertisingLabel}</RowMeta>
+              <RowMeta label="landing page">
+                {promotion.landingUrl ? <a href={promotion.landingUrl} target="_blank" rel="noreferrer" className="inline-flex max-w-full items-center gap-1 text-accent hover:underline"><span className="truncate">{promotion.landingUrl}</span><ExternalLink className="h-3 w-3 shrink-0" /></a> : 'not set'}
+              </RowMeta>
+            </div>
+          </section>
+
+          <div className="grid items-start gap-3 lg:grid-cols-2">
+            <GoogleAdsCampaignAssetSection title={`headlines · ${headlines.length}`} values={headlines} empty="no headlines" />
+            <GoogleAdsCampaignAssetSection title={`descriptions · ${descriptions.length}`} values={descriptions} empty="no descriptions" />
+          </div>
+
+          <section className="border border-edge/14 bg-rim p-3">
+            <div className="mb-3 font-mono text-[10px] uppercase tracking-label text-fg-4">keywords · {keywords.length}</div>
+            {keywords.length ? (
+              <div className="flex flex-wrap gap-1.5">
+                {keywords.map((keyword, index) => <span key={`${keyword}-${index}`} className="border border-edge/14 bg-pit-2 px-2 py-1 font-mono text-[11px] text-fg-2">{keyword}</span>)}
+              </div>
+            ) : <div className="font-mono text-xs text-fg-4">no keywords</div>}
+          </section>
+
+          {promotion.publishError ? <div className="border border-fail/25 bg-fail/5 px-3 py-3 font-mono text-xs text-fail">Latest Google Ads error: {promotion.publishError}</div> : null}
+
+          <details className="border border-edge/14 bg-rim font-mono text-xs">
+            <summary className="cursor-pointer px-3 py-3 text-[10px] uppercase tracking-label text-fg-4 hover:text-fg-1">technical details</summary>
+            <div className="space-y-3 border-t border-edge/12 px-3 py-3">
+              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                <RowMeta label="promotion id">{promotion.id}</RowMeta>
+                <RowMeta label="campaign id">{promotion.campaignExternalId ?? '-'}</RowMeta>
+                <RowMeta label="budget id">{promotion.campaignBudgetExternalId ?? '-'}</RowMeta>
+                <RowMeta label="ad group id">{promotion.adGroupExternalId ?? '-'}</RowMeta>
+                <RowMeta label="ad id">{promotion.creativeExternalId ?? '-'}</RowMeta>
+                <RowMeta label="published">{formatDate(promotion.publishedAt)}</RowMeta>
+              </div>
+              {promotion.providerResponse ? <pre className="max-h-48 overflow-auto whitespace-pre-wrap border border-edge/10 bg-pit-2 p-2 text-[10px] text-fg-4">{JSON.stringify(promotion.providerResponse, null, 2)}</pre> : null}
+            </div>
+          </details>
+        </div>
+      </aside>
+    </div>,
+    document.body,
+  )
+}
+
+function GoogleAdsCampaignAssetSection({ title, values, empty }: { title: string; values: string[]; empty: string }) {
+  return (
+    <section className="border border-edge/14 bg-rim p-3">
+      <div className="mb-3 font-mono text-[10px] uppercase tracking-label text-fg-4">{title}</div>
+      {values.length ? (
+        <div className="space-y-1.5">
+          {values.map((value, index) => <div key={`${value}-${index}`} className="border border-edge/12 bg-pit-2 px-2 py-2 font-mono text-[11px] text-fg-2">{value}</div>)}
+        </div>
+      ) : <div className="font-mono text-xs text-fg-4">{empty}</div>}
+    </section>
+  )
+}
+
+function GoogleAdsLifecycleConfirmation({
+  promotion,
+  account,
+  nextStatus,
+  updating,
+  error,
+  onClose,
+  onConfirm,
+}: {
+  promotion: AdPromotionRow
+  account: GoogleAdsAccountRow | null
+  nextStatus: GoogleAdsLifecycleStatus
+  updating: boolean
+  error: string | null
+  onClose: () => void
+  onConfirm: () => void
+}) {
+  const activating = nextStatus === 'active'
+  const isTestAccount = account?.isTestAccount === true
+  const actionLabel = activating ? 'activate' : 'pause'
+  return createPortal(
+    <div className="fixed inset-0 z-[60] flex items-start justify-center bg-overlay/75 px-4 pt-[12vh] backdrop-blur-sm" onClick={updating ? undefined : onClose}>
+      <div className="w-full max-w-xl border border-edge/25 bg-pit-2 shadow-terminal-overlay" onClick={(event) => event.stopPropagation()}>
+        <div className="border-b border-edge/12 px-5 py-4">
+          <div className="font-mono text-[10px] uppercase tracking-label text-fg-4">google ads · serving status</div>
+          <h2 className="mt-1 font-mono text-xl font-bold lowercase text-fg-1">{actionLabel} campaign?</h2>
+        </div>
+        <div className="space-y-3 px-5 py-5 font-mono text-xs">
+          {activating ? (
+            isTestAccount ? (
+              <div className="border border-info/30 bg-info/5 px-3 py-3 text-info">
+                Test activation: Google will mark the campaign, ad group, keywords, and ad as ENABLED, but this test account cannot deliver ads or incur charges.
+              </div>
+            ) : (
+              <div className="border border-warn/30 bg-warn/5 px-3 py-3 text-warn">
+                This makes every serving entity eligible to run. Once the schedule and Google review allow delivery, this campaign can spend up to its daily budget.
+              </div>
+            )
+          ) : (
+            <div className="border border-warn/30 bg-warn/5 px-3 py-3 text-warn">
+              Pach will pause the campaign, ad group, keywords, and ad together to stop delivery.
+            </div>
+          )}
+          <div className="grid gap-2 md:grid-cols-2">
+            <RowMeta label="advertiser">{account ? `${account.descriptiveName} · ${formatGoogleAdsCustomerId(account.customerId)}` : 'account unavailable'}</RowMeta>
+            <RowMeta label="account type">{isTestAccount ? 'test · no delivery' : 'production'}</RowMeta>
+            <RowMeta label="campaign">{adPromotionHeadline(promotion) || promotion.campaignExternalId || 'google search campaign'}</RowMeta>
+            <RowMeta label="daily budget">{promotion.budgetMinor ? formatMoneyMinor(promotion.budgetMinor, account?.currencyCode ?? promotion.currencyCode) : 'missing'}</RowMeta>
+            <RowMeta label="schedule">{promotionDateRange(promotion)}</RowMeta>
+            <RowMeta label="next status">{activating ? 'ENABLED' : 'PAUSED'}</RowMeta>
+          </div>
+          {!account ? <div className="border border-fail/25 bg-fail/5 px-3 py-2 text-fail">The original Google Ads advertiser is unavailable. Sync accounts in Settings → Search and try again.</div> : null}
+          {error ? (
+            <div role="alert" className="border border-fail/30 bg-fail/5 px-3 py-3 text-fail">
+              <div className="mb-1 text-[10px] uppercase tracking-label">Google Ads rejected the status change</div>
+              <div>{error}</div>
+            </div>
+          ) : null}
+        </div>
+        <div className="flex items-center justify-end gap-2 border-t border-edge/12 px-5 py-3">
+          <Button onClick={onClose} disabled={updating}>cancel</Button>
+          <Button
+            kind={activating ? 'primary' : 'danger'}
+            icon={activating ? <Play className="h-3.5 w-3.5" /> : <Pause className="h-3.5 w-3.5" />}
+            onClick={onConfirm}
+            disabled={updating || !account}
+          >
+            {updating ? `${actionLabel} in progress` : isTestAccount && activating ? 'enable test campaign' : `${actionLabel} campaign`}
           </Button>
         </div>
       </div>
@@ -5071,6 +5732,9 @@ function MarketingCalendarSection({
   socialPosts,
   socialPostTargets,
   adPromotions,
+  adMetricSnapshots,
+  googleAdsAccounts,
+  onFlash,
 }: {
   contentItems: ContentItemRow[]
   runs: DistributionRunRow[]
@@ -5078,6 +5742,9 @@ function MarketingCalendarSection({
   socialPosts: SocialPostRow[]
   socialPostTargets: SocialPostTargetRow[]
   adPromotions: AdPromotionRow[]
+  adMetricSnapshots: AdMetricSnapshotRow[]
+  googleAdsAccounts: GoogleAdsAccountRow[]
+  onFlash: (message: string) => void
 }) {
   const navigate = useNavigate()
   const calendarRef = useRef<FullCalendar | null>(null)
@@ -5096,6 +5763,18 @@ function MarketingCalendarSection({
   const [currentDate, setCurrentDate] = useState<number | null>(initialCalendarState.currentDate)
   const [searchQuery, setSearchQuery] = useState(initialCalendarState.searchQuery)
   const [activeFilters, setActiveFilters] = useState<ActiveFilters>(initialCalendarState.filters)
+  const [detailPromotionId, setDetailPromotionId] = useState<string | null>(null)
+  const [lifecycleTarget, setLifecycleTarget] = useState<{ promotion: AdPromotionRow; nextStatus: GoogleAdsLifecycleStatus } | null>(null)
+  const [updatingLifecycle, setUpdatingLifecycle] = useState(false)
+  const [lifecycleError, setLifecycleError] = useState<string | null>(null)
+  const [syncingMetricsPromotionId, setSyncingMetricsPromotionId] = useState<string | null>(null)
+  const [metricsSyncError, setMetricsSyncError] = useState<string | null>(null)
+  const detailPromotion = detailPromotionId
+    ? adPromotions.find((promotion) => promotion.id === detailPromotionId && promotion.provider === 'google') ?? null
+    : null
+  const detailAccount = detailPromotion
+    ? googleAdsAccounts.find((account) => account.customerId === detailPromotion.adAccountExternalId) ?? null
+    : null
 
   const calendarEvents = useMemo(
     () => buildMarketingCalendarEvents({
@@ -5219,10 +5898,69 @@ function MarketingCalendarSection({
   }
 
   function handleEventClick(arg: EventClickArg) {
+    const promotionId = typeof arg.event.extendedProps.promotionId === 'string' ? arg.event.extendedProps.promotionId : ''
+    if (promotionId) {
+      arg.jsEvent.preventDefault()
+      setMetricsSyncError(null)
+      setDetailPromotionId(promotionId)
+      return
+    }
     const href = String(arg.event.extendedProps.href ?? '')
     if (!href) return
     arg.jsEvent.preventDefault()
     navigate(href)
+  }
+
+  function openUpcomingEvent(event: MarketingCalendarEvent) {
+    if (event.promotionId) {
+      setMetricsSyncError(null)
+      setDetailPromotionId(event.promotionId)
+      return
+    }
+    navigate(event.href)
+  }
+
+  async function updateGoogleCampaignStatus(promotion: AdPromotionRow, nextStatus: GoogleAdsLifecycleStatus) {
+    if (updatingLifecycle) return
+    setUpdatingLifecycle(true)
+    try {
+      const response = await authFetch(`${config.apiUrl}/google/ads/promotions/${promotion.id}/status`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: nextStatus }),
+      })
+      await readJson(response)
+      setLifecycleError(null)
+      onFlash(nextStatus === 'active'
+        ? detailAccount?.isTestAccount
+          ? 'test campaign enabled · no delivery or charges'
+          : 'google campaign activated'
+        : 'google campaign paused')
+      setLifecycleTarget(null)
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Google campaign status could not be updated.'
+      setLifecycleError(message)
+      onFlash(message)
+    } finally {
+      setUpdatingLifecycle(false)
+    }
+  }
+
+  async function syncGoogleCampaignMetrics(promotion: AdPromotionRow) {
+    if (syncingMetricsPromotionId) return
+    setSyncingMetricsPromotionId(promotion.id)
+    setMetricsSyncError(null)
+    try {
+      const response = await authFetch(`${config.apiUrl}/google/ads/promotions/${promotion.id}/metrics/sync`, { method: 'POST' })
+      const payload = await readJson(response) as { writes?: number }
+      onFlash(`google ads metrics synced · ${payload.writes ?? 0} daily row${payload.writes === 1 ? '' : 's'}`)
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Google Ads metrics could not be synchronized.'
+      setMetricsSyncError(message)
+      onFlash(message)
+    } finally {
+      setSyncingMetricsPromotionId(null)
+    }
   }
 
   return (
@@ -5367,7 +6105,7 @@ function MarketingCalendarSection({
                 <button
                   key={event.id}
                   type="button"
-                  onClick={() => navigate(event.href)}
+                  onClick={() => openUpcomingEvent(event)}
                   className="w-full border border-edge/12 bg-pit px-3 py-2 text-left transition hover:border-accent hover:bg-accent-fill/5"
                 >
                   <div className="flex items-center justify-between gap-3">
@@ -5388,6 +6126,36 @@ function MarketingCalendarSection({
           </div>
         </aside>
       </main>
+      {detailPromotion ? (
+        <GoogleAdsCampaignDetailDrawer
+          promotion={detailPromotion}
+          page={null}
+          account={detailAccount}
+          metrics={adMetricSnapshotsForPromotions([detailPromotion], adMetricSnapshots)}
+          onClose={() => setDetailPromotionId(null)}
+          onSyncMetrics={() => void syncGoogleCampaignMetrics(detailPromotion)}
+          syncingMetrics={syncingMetricsPromotionId === detailPromotion.id}
+          metricsSyncError={metricsSyncError}
+          onLifecycle={(nextStatus) => {
+            setLifecycleError(null)
+            setLifecycleTarget({ promotion: detailPromotion, nextStatus })
+          }}
+        />
+      ) : null}
+      {lifecycleTarget ? (
+        <GoogleAdsLifecycleConfirmation
+          promotion={lifecycleTarget.promotion}
+          account={googleAdsAccounts.find((account) => account.customerId === lifecycleTarget.promotion.adAccountExternalId) ?? null}
+          nextStatus={lifecycleTarget.nextStatus}
+          updating={updatingLifecycle}
+          error={lifecycleError}
+          onClose={() => {
+            setLifecycleError(null)
+            setLifecycleTarget(null)
+          }}
+          onConfirm={() => void updateGoogleCampaignStatus(lifecycleTarget.promotion, lifecycleTarget.nextStatus)}
+        />
+      ) : null}
     </div>
   )
 }
@@ -7058,20 +7826,28 @@ function defaultGoogleHeadlines(page: PromotablePageRow) {
   const title = page.title.trim()
   const path = urlPathLabel(page.url)
   return uniqueStrings([
-    title,
-    title.length > 26 ? title.slice(0, 27).trim() : title,
-    page.topQuery ? `Mejora ${page.topQuery}` : '',
-    path && path !== '-' ? path.replace(/[-/]/g, ' ').trim() : '',
+    fitGoogleAdText(title, 30),
+    fitGoogleAdText(`Conoce ${title}`, 30),
+    page.topQuery ? fitGoogleAdText(`Mejora ${page.topQuery}`, 30) : '',
+    path && path !== '-' ? fitGoogleAdText(path.replace(/[-/]/g, ' ').trim(), 30) : '',
   ].filter(Boolean)).slice(0, 6)
 }
 
 function defaultGoogleDescriptions(page: PromotablePageRow) {
   const excerpt = page.item?.excerpt || (page.item ? firstParagraphText(page.item.body) : '')
   return uniqueStrings([
-    excerpt,
-    page.topQuery ? `Contenido para entender ${page.topQuery} y decidir el siguiente paso.` : '',
-    `Conoce ${page.title} y encuentra el recurso correcto para avanzar.`,
+    fitGoogleAdText(excerpt, 90),
+    page.topQuery ? fitGoogleAdText(`Contenido para entender ${page.topQuery} y decidir el siguiente paso.`, 90) : '',
+    fitGoogleAdText(`Conoce ${page.title} y encuentra el recurso correcto para avanzar.`, 90),
   ].filter(Boolean)).slice(0, 4)
+}
+
+function fitGoogleAdText(value: string, limit: number) {
+  const normalized = value.trim().replace(/\s+/g, ' ')
+  if (normalized.length <= limit) return normalized
+  const candidate = normalized.slice(0, limit + 1)
+  const lastSpace = candidate.lastIndexOf(' ')
+  return (lastSpace >= Math.floor(limit * 0.6) ? candidate.slice(0, lastSpace) : normalized.slice(0, limit)).trim()
 }
 
 function keywordCandidates(value: string | null | undefined) {
@@ -7240,6 +8016,7 @@ function buildMarketingCalendarEvents({
       contentTitle: content?.title ?? '',
       timezone: DEFAULT_MARKETING_TIMEZONE,
       href: promotion.socialPostId ? '/marketing/social' : `/marketing/newsletters/content?content=${promotion.contentItemId}`,
+      promotionId: promotion.provider === 'google' ? promotion.id : undefined,
       tone: marketingCalendarStatusTone(promotion.status),
     })
   }
@@ -7524,6 +8301,28 @@ function toDatetimeLocalValue(date: Date) {
   ].join('')
 }
 
+function toDateInputValue(date: Date) {
+  const pad = (value: number) => String(value).padStart(2, '0')
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`
+}
+
+function dateInputValueInTimeZone(date: Date, timeZone: string) {
+  const formatter = new Intl.DateTimeFormat('en-CA', {
+    timeZone,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  })
+  const parts = Object.fromEntries(formatter.formatToParts(date).map((part) => [part.type, part.value]))
+  return `${parts.year}-${parts.month}-${parts.day}`
+}
+
+function isDateInputValue(value: string) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false
+  const parsed = new Date(`${value}T00:00:00.000Z`)
+  return !Number.isNaN(parsed.getTime()) && parsed.toISOString().slice(0, 10) === value
+}
+
 function byOrganization<T extends { organizationId: string }>(rows: T[], organizationId: string) {
   return rows.filter((row) => row.organizationId === organizationId)
 }
@@ -7789,6 +8588,11 @@ function formatMoneyMinor(value: number, currencyCode: string) {
   }).format(value / 100)
 }
 
+function formatGoogleAdsCustomerId(value: string) {
+  const digits = value.replace(/\D/g, '')
+  return digits.length === 10 ? `${digits.slice(0, 3)}-${digits.slice(3, 6)}-${digits.slice(6)}` : value
+}
+
 function timezoneLabel(value: string | null | undefined) {
   return MARKETING_TIMEZONES.find((timezone) => timezone.value === value)?.label ?? value ?? 'timezone'
 }
@@ -7925,7 +8729,7 @@ function slugify(value: string) {
 async function readJson(response: Response) {
   const payload = await response.json().catch(() => ({}))
   if (!response.ok) {
-    throw new Error(payload.error || payload.message || `Request failed: ${response.status}`)
+    throw new Error(payload.message || payload.error || `Request failed: ${response.status}`)
   }
   return payload
 }

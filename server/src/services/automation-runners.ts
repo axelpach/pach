@@ -24,12 +24,14 @@ export const automationRunners: AutomationRunnerDefinition[] = [
   },
   {
     id: 'integration-sync',
-    description: 'Refreshes external integration data such as Google Search Console analytics.',
+    description: 'Refreshes external integration data such as Google Search Console and Google Ads analytics.',
     env: [
       'INTEGRATION_SYNC_RUNNER_DISABLED',
       'INTEGRATION_SYNC_RUNNER_INTERVAL_MS',
       'GOOGLE_SEARCH_CONSOLE_SYNC_DISABLED',
       'GOOGLE_SEARCH_CONSOLE_SYNC_STALE_MS',
+      'GOOGLE_ADS_METRICS_SYNC_DISABLED',
+      'GOOGLE_ADS_METRICS_SYNC_STALE_MS',
     ],
     start: startIntegrationSyncRunner,
   },
