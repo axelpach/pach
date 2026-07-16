@@ -5,7 +5,7 @@ import { createContext, useContext, useEffect, useMemo, useState, type Component
 import { schema, type Schema } from './zero-schema'
 import { mutators, type Mutators } from './mutators'
 import { config } from './config'
-import { CLIENT_RELEASE_ID, CLIENT_ZERO_SCHEMA_VERSION } from './release'
+import { CLIENT_ZERO_SCHEMA_VERSION } from './release'
 import { AuthProvider, useAuth } from './lib/auth'
 import Design from './pages/design/Design'
 import CRM from './pages/crm/CRM'
@@ -76,7 +76,7 @@ const OUTER_NAV_ITEMS: readonly OuterNavItem[] = [
 type ThemeMode = 'dark' | 'light'
 
 const THEME_STORAGE_KEY = 'pach.theme'
-const RELEASE_CHECK_INTERVAL_MS = 60_000
+const ZERO_SCHEMA_CHECK_INTERVAL_MS = 60_000
 
 const ThemeContext = createContext<{
   theme: ThemeMode
@@ -123,19 +123,17 @@ function useTheme() {
   return value
 }
 
-type ReleaseMetadata = {
-  releaseId: string
+type ZeroSchemaMetadata = {
   zeroSchemaVersion: number
   checkedAt: number
 }
 
-type ReleaseMismatch = {
-  server: ReleaseMetadata
-  reason: 'release' | 'zero-schema'
+type ZeroSchemaMismatch = {
+  server: ZeroSchemaMetadata
 }
 
-function useReleaseMismatch(enabled: boolean) {
-  const [mismatch, setMismatch] = useState<ReleaseMismatch | null>(null)
+function useZeroSchemaMismatch(enabled: boolean) {
+  const [mismatch, setMismatch] = useState<ZeroSchemaMismatch | null>(null)
 
   useEffect(() => {
     if (!enabled || mismatch) return
@@ -143,7 +141,7 @@ function useReleaseMismatch(enabled: boolean) {
     let intervalId: number | undefined
     let abortController: AbortController | undefined
 
-    async function checkRelease() {
+    async function checkZeroSchema() {
       abortController?.abort()
       abortController = new AbortController()
 
@@ -154,13 +152,9 @@ function useReleaseMismatch(enabled: boolean) {
         })
         if (!res.ok) return
 
-        const server = await res.json() as ReleaseMetadata
+        const server = await res.json() as ZeroSchemaMetadata
         if (server.zeroSchemaVersion !== CLIENT_ZERO_SCHEMA_VERSION) {
-          setMismatch({ server, reason: 'zero-schema' })
-          return
-        }
-        if (server.releaseId && server.releaseId !== CLIENT_RELEASE_ID) {
-          setMismatch({ server, reason: 'release' })
+          setMismatch({ server })
         }
       } catch (error) {
         if (error instanceof DOMException && error.name === 'AbortError') return
@@ -169,11 +163,11 @@ function useReleaseMismatch(enabled: boolean) {
     }
 
     function checkWhenVisible() {
-      if (document.visibilityState === 'visible') void checkRelease()
+      if (document.visibilityState === 'visible') void checkZeroSchema()
     }
 
-    void checkRelease()
-    intervalId = window.setInterval(checkRelease, RELEASE_CHECK_INTERVAL_MS)
+    void checkZeroSchema()
+    intervalId = window.setInterval(checkZeroSchema, ZERO_SCHEMA_CHECK_INTERVAL_MS)
     document.addEventListener('visibilitychange', checkWhenVisible)
 
     return () => {
@@ -186,9 +180,7 @@ function useReleaseMismatch(enabled: boolean) {
   return mismatch
 }
 
-function ReloadRequiredScreen({ mismatch }: { mismatch: ReleaseMismatch }) {
-  const reasonLabel = mismatch.reason === 'zero-schema' ? 'Zero schema changed' : 'New release available'
-
+function ReloadRequiredScreen({ mismatch }: { mismatch: ZeroSchemaMismatch }) {
   return (
     <div className="min-h-screen bg-void text-fg-1 flex items-center justify-center px-4">
       <div className="w-full max-w-md border border-edge/25 bg-pit-2 shadow-terminal-popover">
@@ -198,7 +190,7 @@ function ReloadRequiredScreen({ mismatch }: { mismatch: ReleaseMismatch }) {
           </span>
           <div>
             <div className="text-sm font-medium text-fg-1">Refresh required</div>
-            <div className="text-[10px] uppercase tracking-label text-fg-4">{reasonLabel}</div>
+            <div className="text-[10px] uppercase tracking-label text-fg-4">Zero schema changed</div>
           </div>
         </div>
         <div className="space-y-4 px-4 py-4 text-sm leading-6 text-fg-2">
@@ -206,10 +198,6 @@ function ReloadRequiredScreen({ mismatch }: { mismatch: ReleaseMismatch }) {
             Pach has been updated while this browser tab was open. Refresh before continuing so the portal and Zero use the same schema.
           </p>
           <div className="grid grid-cols-2 gap-2 border border-edge/15 bg-void/45 p-3 font-mono text-[11px] text-fg-4">
-            <span>browser</span>
-            <span className="min-w-0 truncate text-right text-fg-2">{CLIENT_RELEASE_ID}</span>
-            <span>api</span>
-            <span className="min-w-0 truncate text-right text-fg-2">{mismatch.server.releaseId}</span>
             <span>zero schema</span>
             <span className="min-w-0 truncate text-right text-fg-2">
               {CLIENT_ZERO_SCHEMA_VERSION} -&gt; {mismatch.server.zeroSchemaVersion}
@@ -655,7 +643,7 @@ function useVisibleMobileNavItems() {
 function GatedApp() {
   const { user, token } = useAuth()
   const location = useLocation()
-  const releaseMismatch = useReleaseMismatch(Boolean(token && user))
+  const zeroSchemaMismatch = useZeroSchemaMismatch(Boolean(token && user))
 
   if (!token || !user) {
     if (location.pathname === '/login') return <Login />
@@ -664,7 +652,7 @@ function GatedApp() {
 
   if (location.pathname === '/login') return <Navigate to={HOME_PATH} replace />
 
-  if (releaseMismatch) return <ReloadRequiredScreen mismatch={releaseMismatch} />
+  if (zeroSchemaMismatch) return <ReloadRequiredScreen mismatch={zeroSchemaMismatch} />
 
   return (
     <ZeroProvider

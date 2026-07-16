@@ -24,7 +24,7 @@ import socialRoute, { publicSocialRouter } from './routes/social.js'
 import googleRoute, { publicGoogleRouter } from './routes/google.js'
 import { requireAuth, requireUnscopedAccess } from './middleware/auth.js'
 import { startAutomationRunners } from './services/automation-runners.js'
-import { getReleaseId, ZERO_SCHEMA_VERSION } from './release.js'
+import { ZERO_SCHEMA_VERSION } from './release.js'
 
 const app = express()
 const PORT = process.env.PORT || 3001
@@ -38,7 +38,6 @@ app.get('/health', (_req, res) => res.json({ ok: true }))
 app.get('/meta/release', (_req, res) => {
   res.setHeader('Cache-Control', 'no-store')
   res.json({
-    releaseId: getReleaseId(),
     zeroSchemaVersion: ZERO_SCHEMA_VERSION,
     checkedAt: Date.now(),
   })
