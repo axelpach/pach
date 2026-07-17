@@ -302,7 +302,13 @@ publicRouter.get('/search-console/oauth/callback', async (req, res) => {
 
     const code = readRequiredString(req.query.code, 'code')
     const connection = await completeGoogleOAuth(code, state, req)
-    redirectWithGoogleResult(res, returnTo, 'connected', `Google connected: ${connection.providerAccountEmail ?? connection.providerAccountName ?? 'Google account'}`)
+    redirectWithGoogleResult(
+      res,
+      returnTo,
+      'connected',
+      `Google connected: ${connection.providerAccountEmail ?? connection.providerAccountName ?? 'Google account'}`,
+      connection.id,
+    )
   } catch (error) {
     console.error('GOOGLE_SEARCH_OAUTH_CALLBACK_FAILED', error)
     redirectWithGoogleResult(res, returnTo, 'failed', error instanceof Error ? error.message : 'Google Search Console OAuth failed.')
@@ -2041,7 +2047,11 @@ async function requireGoogleConnection({
     ? await db
       .select()
       .from(googleConnections)
-      .where(and(eq(googleConnections.id, connectionId), eq(googleConnections.organizationId, organizationId)))
+      .where(and(
+        eq(googleConnections.id, connectionId),
+        eq(googleConnections.organizationId, organizationId),
+        eq(googleConnections.status, 'active'),
+      ))
       .limit(1)
     : await db
       .select()
@@ -2250,10 +2260,12 @@ function redirectWithGoogleResult(
   returnTo: string,
   status: 'connected' | 'failed',
   message: string,
+  connectionId?: string,
 ) {
   const url = new URL(returnTo)
   url.searchParams.set('google_search_console', status)
   url.searchParams.set('message', message)
+  if (connectionId) url.searchParams.set('google_connection_id', connectionId)
   res.redirect(url.toString())
 }
 

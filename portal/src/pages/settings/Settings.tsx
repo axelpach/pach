@@ -109,6 +109,7 @@ type GoogleAdsAccountRow = Schema['tables']['google_ads_accounts']['row']
 type SearchConsolePropertyRow = {
   id: string
   organizationId: string
+  connectionId?: string | null
   siteUrl: string
   displayName: string
   permissionLevel?: string | null
@@ -262,6 +263,8 @@ export default function SettingsPage() {
   const [socialSettingsDefaults, setSocialSettingsDefaults] = useState<SocialSettingsDefaults | null>(null)
   const [googleSearchDefaults, setGoogleSearchDefaults] = useState<GoogleSearchSettingsDefaults | null>(null)
   const [googleAdsDefaults, setGoogleAdsDefaults] = useState<GoogleAdsSettingsDefaults | null>(null)
+  const [searchConsoleConnectionId, setSearchConsoleConnectionId] = useState('')
+  const [googleAdsConnectionId, setGoogleAdsConnectionId] = useState('')
   const [loadingKeys, setLoadingKeys] = useState(false)
   const [loadingGithub, setLoadingGithub] = useState(false)
   const [loadingSocial, setLoadingSocial] = useState(false)
@@ -324,6 +327,29 @@ export default function SettingsPage() {
   )
 
   useEffect(() => {
+    const activeConnectionIds = new Set(
+      organizationGoogleConnections
+        .filter((connection) => connection.status === 'active')
+        .map((connection) => connection.id),
+    )
+    const propertyConnectionId = organizationSearchConsoleProperties.find((property) => property.selected)?.connectionId
+      ?? distinctConnectionId(organizationSearchConsoleProperties)
+    const adsConnectionId = organizationGoogleAdsAccounts.find((account) => account.selected)?.connectionId
+      ?? distinctConnectionId(organizationGoogleAdsAccounts)
+
+    setSearchConsoleConnectionId((current) => {
+      if (activeConnectionIds.has(current)) return current
+      if (propertyConnectionId && activeConnectionIds.has(propertyConnectionId)) return propertyConnectionId
+      return activeConnectionIds.size === 1 ? [...activeConnectionIds][0] : ''
+    })
+    setGoogleAdsConnectionId((current) => {
+      if (activeConnectionIds.has(current)) return current
+      if (adsConnectionId && activeConnectionIds.has(adsConnectionId)) return adsConnectionId
+      return activeConnectionIds.size === 1 ? [...activeConnectionIds][0] : ''
+    })
+  }, [organizationGoogleAdsAccounts, organizationGoogleConnections, organizationSearchConsoleProperties])
+
+  useEffect(() => {
     if (section) return
     navigate('/settings/repositories', { replace: true })
   }, [navigate, section])
@@ -375,9 +401,11 @@ export default function SettingsPage() {
 
     if (googleStatus === 'connected') {
       flash(params.get('message') || 'google search console connected')
+      const connectedConnectionId = params.get('google_connection_id') ?? ''
+      if (connectedConnectionId) setSearchConsoleConnectionId(connectedConnectionId)
       if (organizationId) {
         void loadGoogleSearchSettings(organizationId)
-        void syncSearchConsoleProperties()
+        void syncSearchConsoleProperties(connectedConnectionId)
       }
     } else if (googleStatus === 'failed') {
       flash(params.get('message') || 'google search console connection failed')
@@ -674,13 +702,17 @@ export default function SettingsPage() {
     }
   }
 
-  async function syncSearchConsoleProperties() {
+  async function syncSearchConsoleProperties(explicitConnectionId = searchConsoleConnectionId) {
     if (!organizationId) return
+    if (!explicitConnectionId) {
+      flash('choose a Google account for Search Console')
+      return
+    }
     await runSearchAction('sync-properties', async () => {
       const response = await authFetch(`${config.apiUrl}/google/search-console/properties/sync`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ organizationId }),
+        body: JSON.stringify({ organizationId, connectionId: explicitConnectionId }),
       })
       const payload = await readJson(response)
       const count = Array.isArray(payload.properties) ? payload.properties.length : 0
@@ -690,11 +722,15 @@ export default function SettingsPage() {
 
   async function syncGoogleAdsAccounts() {
     if (!organizationId) return
+    if (!googleAdsConnectionId) {
+      flash('choose a Google account for Google Ads')
+      return
+    }
     await runSearchAction('sync-ads-accounts', async () => {
       const response = await authFetch(`${config.apiUrl}/google/ads/accounts/sync`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ organizationId }),
+        body: JSON.stringify({ organizationId, connectionId: googleAdsConnectionId }),
       })
       const payload = await readJson(response)
       const count = Array.isArray(payload.accounts) ? payload.accounts.length : 0
@@ -706,6 +742,7 @@ export default function SettingsPage() {
     await runSearchAction(`select-ads:${account.id}`, async () => {
       const response = await authFetch(`${config.apiUrl}/google/ads/accounts/${account.id}/select`, { method: 'POST' })
       await readJson(response)
+      setGoogleAdsConnectionId(account.connectionId)
       return 'google ads account selected'
     })
   }
@@ -716,6 +753,7 @@ export default function SettingsPage() {
         method: 'POST',
       })
       await readJson(response)
+      if (property.connectionId) setSearchConsoleConnectionId(property.connectionId)
       return 'search property selected'
     })
   }
@@ -893,9 +931,13 @@ export default function SettingsPage() {
             metrics={organizationSearchConsoleDailySnapshots}
             inspections={organizationSearchConsoleInspections}
             actionState={searchAction}
+            searchConsoleConnectionId={searchConsoleConnectionId}
+            googleAdsConnectionId={googleAdsConnectionId}
             onConnect={() => void connectGoogleSearch()}
             onSyncProperties={() => void syncSearchConsoleProperties()}
             onSyncAdsAccounts={() => void syncGoogleAdsAccounts()}
+            onSearchConsoleConnectionChange={setSearchConsoleConnectionId}
+            onGoogleAdsConnectionChange={setGoogleAdsConnectionId}
             onSelectAdsAccount={(account) => void selectGoogleAdsAccount(account)}
             onSelectProperty={(property) => void selectSearchConsoleProperty(property)}
             onSubmitSitemap={(property) => void submitSearchConsoleSitemap(property)}
@@ -1561,9 +1603,13 @@ function SearchSection({
   metrics,
   inspections,
   actionState,
+  searchConsoleConnectionId,
+  googleAdsConnectionId,
   onConnect,
   onSyncProperties,
   onSyncAdsAccounts,
+  onSearchConsoleConnectionChange,
+  onGoogleAdsConnectionChange,
   onSelectAdsAccount,
   onSelectProperty,
   onSubmitSitemap,
@@ -1580,15 +1626,26 @@ function SearchSection({
   metrics: SearchConsoleDailySnapshotRow[]
   inspections: SearchConsoleUrlInspectionRow[]
   actionState: SearchActionState
+  searchConsoleConnectionId: string
+  googleAdsConnectionId: string
   onConnect: () => void
   onSyncProperties: () => void
   onSyncAdsAccounts: () => void
+  onSearchConsoleConnectionChange: (connectionId: string) => void
+  onGoogleAdsConnectionChange: (connectionId: string) => void
   onSelectAdsAccount: (account: GoogleAdsAccountRow) => void
   onSelectProperty: (property: SearchConsolePropertyRow) => void
   onSubmitSitemap: (property: SearchConsolePropertyRow) => void
   onSyncAnalytics: (property: SearchConsolePropertyRow) => void
 }) {
   const activeConnections = connections.filter((connection) => connection.status === 'active')
+  const connectionOptions = activeConnections.map((connection) => ({
+    value: connection.id,
+    label: connection.providerAccountEmail ?? connection.providerAccountName ?? 'Google account',
+  }))
+  const searchConsoleConnection = activeConnections.find((connection) => connection.id === searchConsoleConnectionId) ?? null
+  const googleAdsConnection = activeConnections.find((connection) => connection.id === googleAdsConnectionId) ?? null
+  const googleAdsScopeGranted = Boolean(googleAdsConnection?.scopes.includes('https://www.googleapis.com/auth/adwords'))
   const selectedProperty = properties.find((property) => property.selected) ?? properties[0] ?? null
   const selectedSitemaps = selectedProperty ? sitemaps.filter((sitemap) => sitemap.propertyId === selectedProperty.id) : []
   const selectedMetrics = selectedProperty ? metrics.filter((metric) => metric.propertyId === selectedProperty.id) : metrics
@@ -1643,6 +1700,13 @@ function SearchSection({
                 help="The selected Search Console property is the source for query, page, sitemap, and indexing data."
               />
             </div>
+            <GoogleConnectionSelector
+              label="Search Console identity"
+              connection={searchConsoleConnection}
+              value={searchConsoleConnectionId}
+              options={connectionOptions}
+              onChange={onSearchConsoleConnectionChange}
+            />
           </div>
 
           <div className="flex shrink-0 flex-wrap gap-2 lg:justify-end">
@@ -1657,7 +1721,7 @@ function SearchSection({
             <Button
               icon={searchActionIcon(actionState, 'sync-properties', <RefreshCw className="h-3.5 w-3.5" />)}
               onClick={onSyncProperties}
-              disabled={actionLoading || !organization || activeConnections.length === 0}
+              disabled={actionLoading || !organization || !searchConsoleConnectionId}
             >
               {searchActionLabel(actionState, 'sync-properties', 'sync properties', 'syncing', 'synced')}
             </Button>
@@ -1698,6 +1762,12 @@ function SearchSection({
                   <div className="font-mono text-[11px] text-fg-4">refreshed {formatDate(connection.lastRefreshedAt)}</div>
                   <div className="font-mono text-[11px] text-fg-4">expires {formatDate(connection.tokenExpiresAt)}</div>
                 </div>
+                {connection.id === searchConsoleConnectionId || connection.id === googleAdsConnectionId ? (
+                  <div className="mt-3 flex flex-wrap gap-1.5">
+                    {connection.id === searchConsoleConnectionId ? <StatusPill kind="info">search console</StatusPill> : null}
+                    {connection.id === googleAdsConnectionId ? <StatusPill kind="info">google ads</StatusPill> : null}
+                  </div>
+                ) : null}
               </div>
             ))}
           </div>
@@ -1715,19 +1785,26 @@ function SearchSection({
             className="px-2 py-1 text-[10px]"
             icon={searchActionIcon(actionState, 'sync-ads-accounts', <RefreshCw className="h-3 w-3" />)}
             onClick={onSyncAdsAccounts}
-            disabled={actionLoading || activeConnections.length === 0 || !adsDefaults?.developerTokenConfigured}
+            disabled={actionLoading || !googleAdsConnectionId || !googleAdsScopeGranted || !adsDefaults?.developerTokenConfigured}
           >
             {searchActionLabel(actionState, 'sync-ads-accounts', 'sync accounts', 'syncing', 'synced')}
           </Button>
         }
       >
+        <GoogleConnectionSelector
+          label="Google Ads identity"
+          connection={googleAdsConnection}
+          value={googleAdsConnectionId}
+          options={connectionOptions}
+          onChange={onGoogleAdsConnectionChange}
+        />
         <div className="mb-4 grid gap-2 md:grid-cols-3">
           <SearchSetupStep
             label="oauth scope"
-            value={activeConnections.some((connection) => connection.scopes.includes('https://www.googleapis.com/auth/adwords')) ? 'granted' : 'reconnect required'}
-            done={activeConnections.some((connection) => connection.scopes.includes('https://www.googleapis.com/auth/adwords'))}
-            warning={activeConnections.length > 0}
-            help="The shared Google connection needs the Google Ads OAuth scope. Reconnect Google once if this account predates Ads support."
+            value={googleAdsScopeGranted ? 'granted' : googleAdsConnection ? 'reconnect required' : 'choose identity'}
+            done={googleAdsScopeGranted}
+            warning={Boolean(googleAdsConnection)}
+            help="The Google identity selected for Ads must have the Google Ads OAuth scope and direct access to the manager account."
           />
           <SearchSetupStep
             label="developer token"
@@ -1974,6 +2051,41 @@ function SearchMetricCard({ label, value }: { label: string; value: string }) {
     <div className="border border-edge/12 bg-rim px-3 py-3">
       <div className="font-mono text-[10px] uppercase tracking-label text-fg-4">{label}</div>
       <div className="mt-2 font-mono text-2xl font-bold text-fg-1">{value}</div>
+    </div>
+  )
+}
+
+function GoogleConnectionSelector({
+  label,
+  connection,
+  value,
+  options,
+  onChange,
+}: {
+  label: string
+  connection: GoogleConnectionRow | null
+  value: string
+  options: PachSelectOption[]
+  onChange: (connectionId: string) => void
+}) {
+  return (
+    <div className="my-3 flex flex-col gap-2 border border-edge/12 bg-rim px-3 py-2.5 md:flex-row md:items-center md:justify-between">
+      <div>
+        <div className="font-mono text-[10px] uppercase tracking-label text-fg-4">{label}</div>
+        <div className="mt-1 font-mono text-[11px] text-fg-3">
+          This identity supplies OAuth access only for this integration.
+        </div>
+      </div>
+      <div className="w-full md:w-[320px]">
+        <PachSelect
+          variant="field"
+          value={value}
+          onChange={onChange}
+          options={options}
+          display={connection?.providerAccountEmail ?? connection?.providerAccountName ?? (options.length ? 'choose Google account' : 'connect Google first')}
+          popupWidth="320"
+        />
+      </div>
     </div>
   )
 }
@@ -2868,6 +2980,11 @@ function parseScopesDraft(value: string) {
 
 function optionLabel(options: PachSelectOption[], value: string) {
   return options.find((option) => option.value === value)?.label ?? value.replace(/_/g, ' ')
+}
+
+function distinctConnectionId(rows: Array<{ connectionId?: string | null }>) {
+  const connectionIds = new Set(rows.map((row) => row.connectionId).filter((value): value is string => Boolean(value)))
+  return connectionIds.size === 1 ? [...connectionIds][0] : null
 }
 
 function pickLinkedInOAuthProviderApp(providerApps: SocialProviderApp[]) {
