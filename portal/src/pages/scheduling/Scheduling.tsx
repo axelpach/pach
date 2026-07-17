@@ -1,6 +1,7 @@
 import { useQuery, useZero } from '@rocicorp/zero/react'
-import { CalendarClock, Check, Clipboard, Clock, ExternalLink, Link as LinkIcon, Loader2, Plus, Trash2, UserRound, X } from 'lucide-react'
+import { Building2, CalendarClock, Check, Clipboard, Clock, ExternalLink, Link as LinkIcon, Loader2, Plus, Trash2, UserRound, Video, X } from 'lucide-react'
 import { useEffect, useMemo, useState, type ComponentType, type ReactNode } from 'react'
+import { PachSelect, type PachSelectOption } from '../../components/PachSelect'
 import { config } from '../../config'
 import { useAuth } from '../../lib/auth'
 import type { Mutators } from '../../mutators'
@@ -10,6 +11,13 @@ import { CalendarSectionNav } from '../calendar/CalendarSectionNav'
 type CalEventType = Schema['tables']['cal_event_types']['row']
 type CalAvailabilityRule = Schema['tables']['cal_availability_rules']['row']
 type CalBooking = Schema['tables']['cal_bookings']['row']
+type GoogleConnection = Schema['tables']['google_connections']['row']
+
+const GOOGLE_CALENDAR_EVENTS_SCOPE = 'https://www.googleapis.com/auth/calendar.events'
+const TIMEZONE_OPTIONS: PachSelectOption[] = [
+  { value: 'America/Mexico_City', label: 'Mexico City' },
+  { value: 'Europe/Madrid', label: 'Madrid' },
+]
 
 const WEEKDAYS = [
   { value: 1, label: 'Mon' },
@@ -31,6 +39,7 @@ type EventDraft = {
   description: string
   durationMinutes: string
   timezone: string
+  meetingLocation: string
   locationDetails: string
   minimumNoticeMinutes: string
   bookingWindowDays: string
@@ -42,7 +51,8 @@ const EMPTY_EVENT_DRAFT: EventDraft = {
   title: '',
   description: '',
   durationMinutes: '30',
-  timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC',
+  timezone: 'America/Mexico_City',
+  meetingLocation: 'manual',
   locationDetails: '',
   minimumNoticeMinutes: '120',
   bookingWindowDays: '30',
@@ -57,8 +67,24 @@ export default function Scheduling() {
   const [eventTypes] = useQuery(z.query.cal_event_types.orderBy('createdAt', 'desc'))
   const [availabilityRules] = useQuery(z.query.cal_availability_rules)
   const [bookings] = useQuery(z.query.cal_bookings.orderBy('startAt', 'asc'))
+  const [googleConnections] = useQuery(z.query.google_connections.orderBy('updatedAt', 'desc'))
   const accessibleOrganizationIds = useMemo(() => new Set(user?.organizationIds ?? []), [user?.organizationIds])
   const availableOrganizations = organizations.filter((organization) => accessibleOrganizationIds.has(organization.id))
+  const organizationOptions = availableOrganizations.map((organization) => ({ value: organization.id, label: organization.name }))
+  const selectedOrganization = availableOrganizations.find((organization) => organization.id === selectedOrganizationId) ?? null
+  const availableGoogleConnections = googleConnections.filter((connection) => (
+    connection.connectedByUserId === user?.id &&
+    connection.status === 'active' &&
+    connection.scopes.includes(GOOGLE_CALENDAR_EVENTS_SCOPE)
+  ))
+  const meetingLocationOptions: PachSelectOption[] = [
+    ...availableGoogleConnections.map((connection) => ({
+      value: googleMeetingLocationValue(connection.id),
+      label: `Google Meet · ${googleConnectionLabel(connection)}`,
+      icon: <Video className="h-3.5 w-3.5" />,
+    })),
+    { value: 'manual', label: 'Custom link or location', icon: <LinkIcon className="h-3.5 w-3.5" /> },
+  ]
   const [selectedOrganizationId, setSelectedOrganizationId] = useState<string>('')
   const [selectedEventTypeId, setSelectedEventTypeId] = useState<string>('')
   const [draft, setDraft] = useState<EventDraft>(EMPTY_EVENT_DRAFT)
@@ -99,7 +125,8 @@ export default function Scheduling() {
       title: selectedEventType.title,
       description: selectedEventType.description ?? '',
       durationMinutes: String(selectedEventType.durationMinutes),
-      timezone: selectedEventType.timezone,
+      timezone: normalizeSchedulingTimezone(selectedEventType.timezone),
+      meetingLocation: meetingLocationFromEventType(selectedEventType),
       locationDetails: selectedEventType.locationDetails ?? '',
       minimumNoticeMinutes: String(selectedEventType.minimumNoticeMinutes),
       bookingWindowDays: String(selectedEventType.bookingWindowDays),
@@ -115,6 +142,7 @@ export default function Scheduling() {
     const id = crypto.randomUUID()
     const slug = uniqueSlug(title, eventTypes)
     const timezone = draft.timezone.trim() || EMPTY_EVENT_DRAFT.timezone
+    const googleConnectionId = googleConnectionIdFromLocation(draft.meetingLocation)
 
     await z.mutate.cal_event_types.create({
       id,
@@ -126,8 +154,9 @@ export default function Scheduling() {
       durationMinutes: parsePositiveInt(draft.durationMinutes, 30),
       timezone,
       locationMode: 'video',
-      locationDetails: draft.locationDetails.trim() || undefined,
-      meetingProvider: 'manual',
+      locationDetails: googleConnectionId ? undefined : draft.locationDetails.trim() || undefined,
+      meetingProvider: googleConnectionId ? 'google_meet' : 'manual',
+      metadata: googleConnectionId ? { googleConnectionId } : undefined,
       minimumNoticeMinutes: parsePositiveInt(draft.minimumNoticeMinutes, 120),
       bookingWindowDays: parsePositiveInt(draft.bookingWindowDays, 30),
       bufferBeforeMinutes: parseNonNegativeInt(draft.bufferBeforeMinutes, 0),
@@ -153,13 +182,16 @@ export default function Scheduling() {
   async function saveSelectedEventType() {
     if (!selectedEventType) return
     const timezone = draft.timezone.trim() || selectedEventType.timezone
+    const googleConnectionId = googleConnectionIdFromLocation(draft.meetingLocation)
     await z.mutate.cal_event_types.update({
       id: selectedEventType.id,
       title: draft.title.trim() || selectedEventType.title,
       description: draft.description.trim() || null,
       durationMinutes: parsePositiveInt(draft.durationMinutes, selectedEventType.durationMinutes),
       timezone,
-      locationDetails: draft.locationDetails.trim() || null,
+      locationDetails: googleConnectionId ? null : draft.locationDetails.trim() || null,
+      meetingProvider: googleConnectionId ? 'google_meet' : 'manual',
+      metadata: eventTypeMetadata(selectedEventType.metadata, googleConnectionId),
       minimumNoticeMinutes: parsePositiveInt(draft.minimumNoticeMinutes, selectedEventType.minimumNoticeMinutes),
       bookingWindowDays: parsePositiveInt(draft.bookingWindowDays, selectedEventType.bookingWindowDays),
       bufferBeforeMinutes: parseNonNegativeInt(draft.bufferBeforeMinutes, selectedEventType.bufferBeforeMinutes),
@@ -232,15 +264,17 @@ export default function Scheduling() {
               <h1 className="mt-1 text-xl font-semibold tracking-normal text-fg-1">Booking links</h1>
             </div>
             <div className="flex items-center gap-2">
-              <select
-                value={selectedOrganizationId}
-                onChange={(event) => setSelectedOrganizationId(event.target.value)}
-                className="h-9 border border-edge/20 bg-pit-2 px-3 font-mono text-xs text-fg-2 outline-none focus:border-accent/60"
-              >
-                {availableOrganizations.map((organization) => (
-                  <option key={organization.id} value={organization.id}>{organization.name}</option>
-                ))}
-              </select>
+              <div className="relative w-[220px] max-w-[55vw]">
+                <Building2 className="pointer-events-none absolute left-3 top-1/2 z-10 h-3.5 w-3.5 -translate-y-1/2 text-fg-4" />
+                <PachSelect
+                  value={selectedOrganizationId}
+                  onChange={setSelectedOrganizationId}
+                  options={organizationOptions}
+                  display={selectedOrganization?.name ?? 'organization'}
+                  popupWidth="220"
+                  triggerClassName="flex h-9 w-full items-center justify-between border border-edge/18 bg-rim pl-9 pr-2 text-left font-mono text-xs text-fg-1 outline-none transition hover:border-edge/32 hover:bg-accent-fill/4 focus-visible:border-accent focus-visible:shadow-glow-xs"
+                />
+              </div>
               <button
                 type="button"
                 onClick={createEventType}
@@ -299,10 +333,28 @@ export default function Scheduling() {
               <div className="grid gap-3 md:grid-cols-2">
                 <Field label="Title" value={draft.title} onChange={(value) => setDraft({ ...draft, title: value })} placeholder="Intro call" />
                 <Field label="Duration" value={draft.durationMinutes} onChange={(value) => setDraft({ ...draft, durationMinutes: value })} suffix="min" />
-                <Field label="Timezone" value={draft.timezone} onChange={(value) => setDraft({ ...draft, timezone: value })} />
+                <SelectField
+                  label="Timezone"
+                  value={draft.timezone}
+                  onChange={(value) => setDraft({ ...draft, timezone: value })}
+                  options={TIMEZONE_OPTIONS}
+                />
                 <Field label="Minimum notice" value={draft.minimumNoticeMinutes} onChange={(value) => setDraft({ ...draft, minimumNoticeMinutes: value })} suffix="min" />
                 <Field label="Booking window" value={draft.bookingWindowDays} onChange={(value) => setDraft({ ...draft, bookingWindowDays: value })} suffix="days" />
-                <Field label="Meeting link/location" value={draft.locationDetails} onChange={(value) => setDraft({ ...draft, locationDetails: value })} placeholder="Google Meet, Zoom, office..." />
+                <SelectField
+                  label="Meeting location"
+                  value={draft.meetingLocation}
+                  onChange={(value) => setDraft({ ...draft, meetingLocation: value })}
+                  options={meetingLocationOptions}
+                />
+                {availableGoogleConnections.length === 0 && (
+                  <div className="flex items-end pb-1 font-mono text-[10px] leading-relaxed text-fg-4">
+                    Reconnect Google in <a href="/settings/search" className="ml-1 text-accent hover:underline">Settings → Search</a> to enable Google Meet.
+                  </div>
+                )}
+                {draft.meetingLocation === 'manual' && (
+                  <Field label="Custom link/location" value={draft.locationDetails} onChange={(value) => setDraft({ ...draft, locationDetails: value })} placeholder="Zoom, office, phone..." />
+                )}
               </div>
               <label className="block">
                 <span className="font-mono text-[10px] uppercase tracking-label text-fg-4">Description</span>
@@ -484,6 +536,25 @@ function Field({ label, value, onChange, placeholder, suffix }: { label: string;
   )
 }
 
+function SelectField({ label, value, onChange, options }: { label: string; value: string; onChange: (value: string) => void; options: PachSelectOption[] }) {
+  const selected = options.find((option) => option.value === value)
+  return (
+    <div className="block">
+      <span className="font-mono text-[10px] uppercase tracking-label text-fg-4">{label}</span>
+      <div className="mt-1">
+        <PachSelect
+          variant="field"
+          value={value}
+          onChange={onChange}
+          options={options}
+          display={selected?.label ?? options[0]?.label ?? label}
+          triggerClassName="flex h-10 w-full items-center justify-between border border-edge/15 bg-pit-2 px-3 text-left font-mono text-sm text-fg-1 outline-none transition hover:border-edge/35 hover:bg-accent-fill/4 focus-visible:border-accent focus-visible:shadow-glow-xs"
+        />
+      </div>
+    </div>
+  )
+}
+
 function IconButton({ title, onClick, children }: { title: string; onClick: () => void; children: ReactNode }) {
   return (
     <button
@@ -525,6 +596,44 @@ function uniqueSlug(title: string, eventTypes: CalEventType[]) {
     if (!existing.has(candidate)) return candidate
   }
   return `${base}-${crypto.randomUUID().slice(0, 8)}`
+}
+
+function googleMeetingLocationValue(connectionId: string) {
+  return `google_meet:${connectionId}`
+}
+
+function googleConnectionIdFromLocation(value: string) {
+  return value.startsWith('google_meet:') ? value.slice('google_meet:'.length) || null : null
+}
+
+function googleConnectionLabel(connection: GoogleConnection) {
+  return connection.providerAccountEmail ?? connection.providerAccountName ?? 'Google account'
+}
+
+function meetingLocationFromEventType(eventType: CalEventType) {
+  if (eventType.meetingProvider !== 'google_meet') return 'manual'
+  const connectionId = readStringMetadata(eventType.metadata, 'googleConnectionId')
+  return connectionId ? googleMeetingLocationValue(connectionId) : 'manual'
+}
+
+function eventTypeMetadata(metadata: unknown, googleConnectionId: string | null) {
+  const next = isRecord(metadata) ? { ...metadata } : {}
+  if (googleConnectionId) next.googleConnectionId = googleConnectionId
+  else delete next.googleConnectionId
+  return next
+}
+
+function readStringMetadata(metadata: unknown, key: string) {
+  if (!isRecord(metadata)) return null
+  return typeof metadata[key] === 'string' ? metadata[key] : null
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value)
+}
+
+function normalizeSchedulingTimezone(value: string) {
+  return TIMEZONE_OPTIONS.some((option) => option.value === value) ? value : EMPTY_EVENT_DRAFT.timezone
 }
 
 function slugify(value: string) {

@@ -977,7 +977,7 @@ export function createServerMutators(authData?: JWTPayload) {
           updatedAt: now,
         } as any)
       },
-      async update(tx: Tx, args: { id: string; date?: string; startMinute?: number | null; endMinute?: number | null; isAvailable?: boolean; reason?: string | null }) {
+      async update(tx: Tx, args: { id: string; date?: number; startMinute?: number | null; endMinute?: number | null; isAvailable?: boolean; reason?: string | null }) {
         await requireExistingOrganizationAccess(tx, 'cal_availability_overrides', args.id)
         const { id, ...updates } = args
         await tx.mutate.cal_availability_overrides.update({ id, ...updates, updatedAt: Date.now() } as any)

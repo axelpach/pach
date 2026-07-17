@@ -1,21 +1,25 @@
 import { randomBytes } from 'node:crypto'
 import { Router } from 'express'
-import { and, eq, gte, lte } from 'drizzle-orm'
+import { and, eq, gte, inArray, lte } from 'drizzle-orm'
 import {
   calAvailabilityOverrides,
   calAvailabilityRules,
   calBookings,
   calEventTypes,
+  googleConnections,
   organizations,
   users,
 } from '../../../db/schema.js'
 import { getDb } from '../db.js'
+import { accessTokenForConnection } from './google.js'
 
 const router = Router()
 export const publicSchedulingRouter = Router()
 
 const DEFAULT_SLOT_STEP_MINUTES = 15
 const MAX_PUBLIC_DAYS = 60
+const GOOGLE_CALENDAR_EVENTS_SCOPE = 'https://www.googleapis.com/auth/calendar.events'
+const GOOGLE_CALENDAR_API_BASE = 'https://www.googleapis.com/calendar/v3'
 
 type EventTypeRow = typeof calEventTypes.$inferSelect
 type AvailabilityRuleRow = typeof calAvailabilityRules.$inferSelect
@@ -53,6 +57,8 @@ router.post('/bookings/:id/cancel', async (req, res) => {
     res.status(403).json({ error: 'NOT_AUTHORIZED', message: 'Not authorized for this organization.' })
     return
   }
+
+  await cancelProviderEvent(booking)
 
   const [updated] = await db
     .update(calBookings)
@@ -118,13 +124,13 @@ publicSchedulingRouter.post('/event-types/:slug/bookings', async (req, res) => {
   const db = getDb()
 
   try {
-    const booking = await db.transaction(async (tx) => {
+    let booking = await db.transaction(async (tx) => {
       const existing = await tx
         .select()
         .from(calBookings)
         .where(and(
           eq(calBookings.hostUserId, context.eventType.ownerUserId),
-          eq(calBookings.status, 'confirmed'),
+          inArray(calBookings.status, ['confirmed', 'pending']),
           gte(calBookings.endAt, new Date(startAt.getTime() - context.eventType.bufferBeforeMinutes * 60_000)),
           lte(calBookings.startAt, new Date(endAt.getTime() + context.eventType.bufferAfterMinutes * 60_000)),
         ))
@@ -144,8 +150,8 @@ publicSchedulingRouter.post('/event-types/:slug/bookings', async (req, res) => {
           guestNotes,
           startAt,
           endAt,
-          status: 'confirmed',
-          meetingUrl: context.eventType.locationDetails,
+          status: context.eventType.meetingProvider === 'google_meet' ? 'pending' : 'confirmed',
+          meetingUrl: context.eventType.meetingProvider === 'google_meet' ? null : context.eventType.locationDetails,
           cancelToken: randomBytes(24).toString('hex'),
           metadata: { source: 'public_booking_page' },
         })
@@ -153,6 +159,36 @@ publicSchedulingRouter.post('/event-types/:slug/bookings', async (req, res) => {
 
       return created
     })
+
+    if (context.eventType.meetingProvider === 'google_meet') {
+      try {
+        const providerEvent = await createGoogleMeeting({
+          eventType: context.eventType,
+          organizationName: context.organization.name,
+          booking,
+        })
+        const [confirmed] = await db
+          .update(calBookings)
+          .set({
+            status: 'confirmed',
+            meetingUrl: providerEvent.meetingUrl,
+            providerEventId: providerEvent.eventId,
+            metadata: { ...readRecord(booking.metadata), googleCalendarHtmlLink: providerEvent.htmlLink },
+            updatedAt: new Date(),
+          })
+          .where(eq(calBookings.id, booking.id))
+          .returning()
+        booking = confirmed
+      } catch (error) {
+        await db.delete(calBookings).where(eq(calBookings.id, booking.id))
+        console.error('GOOGLE_MEET_BOOKING_FAILED', error)
+        res.status(502).json({
+          error: 'MEETING_CREATION_FAILED',
+          message: error instanceof Error ? error.message : 'Could not create the Google Meet invitation.',
+        })
+        return
+      }
+    }
 
     res.status(201).json({ booking: serializeBooking(booking), eventType: serializePublicEventContext(context).eventType })
   } catch (error) {
@@ -174,6 +210,8 @@ publicSchedulingRouter.post('/bookings/:id/cancel', async (req, res) => {
     return
   }
 
+  await cancelProviderEvent(booking)
+
   const [updated] = await db
     .update(calBookings)
     .set({ status: 'canceled', canceledAt: new Date(), updatedAt: new Date() })
@@ -182,6 +220,141 @@ publicSchedulingRouter.post('/bookings/:id/cancel', async (req, res) => {
 
   res.json({ booking: serializeBooking(updated) })
 })
+
+async function createGoogleMeeting({
+  eventType,
+  organizationName,
+  booking,
+}: {
+  eventType: EventTypeRow
+  organizationName: string
+  booking: BookingRow
+}) {
+  const connection = await googleConnectionForEventType(eventType)
+  const accessToken = await accessTokenForConnection(connection)
+  const url = new URL(`${GOOGLE_CALENDAR_API_BASE}/calendars/primary/events`)
+  url.searchParams.set('conferenceDataVersion', '1')
+  url.searchParams.set('sendUpdates', 'all')
+
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      Accept: 'application/json',
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      summary: eventType.title,
+      description: [
+        eventType.description,
+        `Booked through ${organizationName}.`,
+        booking.guestNotes ? `Guest notes: ${booking.guestNotes}` : null,
+      ].filter(Boolean).join('\n\n'),
+      start: { dateTime: booking.startAt.toISOString(), timeZone: eventType.timezone },
+      end: { dateTime: booking.endAt.toISOString(), timeZone: eventType.timezone },
+      attendees: [{ email: booking.guestEmail, displayName: booking.guestName }],
+      guestsCanInviteOthers: false,
+      conferenceData: {
+        createRequest: {
+          requestId: booking.id,
+          conferenceSolutionKey: { type: 'hangoutsMeet' },
+        },
+      },
+    }),
+  })
+
+  const payload = readRecord(await response.json().catch(() => ({})))
+  if (!response.ok) {
+    throw new Error(readGoogleCalendarError(payload, `Google Calendar returned ${response.status}.`))
+  }
+
+  const eventId = readString(payload.id)
+  if (!eventId) throw new Error('Google Calendar created the event without returning an event id.')
+
+  let eventPayload = payload
+  let meetingUrl = readString(eventPayload.hangoutLink) ?? readGoogleMeetEntryPoint(eventPayload.conferenceData)
+  for (let attempt = 0; !meetingUrl && attempt < 6; attempt += 1) {
+    await wait(250 * (attempt + 1))
+    eventPayload = await readGoogleCalendarEvent({ accessToken, eventId })
+    meetingUrl = readString(eventPayload.hangoutLink) ?? readGoogleMeetEntryPoint(eventPayload.conferenceData)
+  }
+  if (!meetingUrl) throw new Error('Google Calendar created the event without a Google Meet link.')
+  return { eventId, meetingUrl, htmlLink: readString(eventPayload.htmlLink) }
+}
+
+async function readGoogleCalendarEvent({ accessToken, eventId }: { accessToken: string; eventId: string }) {
+  const response = await fetch(`${GOOGLE_CALENDAR_API_BASE}/calendars/primary/events/${encodeURIComponent(eventId)}`, {
+    headers: { Authorization: `Bearer ${accessToken}`, Accept: 'application/json' },
+  })
+  const payload = readRecord(await response.json().catch(() => ({})))
+  if (!response.ok) throw new Error(readGoogleCalendarError(payload, `Google Calendar returned ${response.status}.`))
+  return payload
+}
+
+async function cancelProviderEvent(booking: BookingRow) {
+  if (!booking.providerEventId) return
+  const [eventType] = await getDb().select().from(calEventTypes).where(eq(calEventTypes.id, booking.eventTypeId)).limit(1)
+  if (!eventType || eventType.meetingProvider !== 'google_meet') return
+
+  const connection = await googleConnectionForEventType(eventType)
+  const accessToken = await accessTokenForConnection(connection)
+  const url = new URL(`${GOOGLE_CALENDAR_API_BASE}/calendars/primary/events/${encodeURIComponent(booking.providerEventId)}`)
+  url.searchParams.set('sendUpdates', 'all')
+  const response = await fetch(url, {
+    method: 'DELETE',
+    headers: { Authorization: `Bearer ${accessToken}`, Accept: 'application/json' },
+  })
+  if (response.ok || response.status === 404 || response.status === 410) return
+  const payload = readRecord(await response.json().catch(() => ({})))
+  throw new Error(readGoogleCalendarError(payload, `Google Calendar cancellation returned ${response.status}.`))
+}
+
+async function googleConnectionForEventType(eventType: EventTypeRow) {
+  const connectionId = readString(readRecord(eventType.metadata).googleConnectionId)
+  if (!connectionId) throw new Error('Reconnect Google and select a Google Meet account for this booking link.')
+
+  const [connection] = await getDb()
+    .select()
+    .from(googleConnections)
+    .where(and(
+      eq(googleConnections.id, connectionId),
+      eq(googleConnections.connectedByUserId, eventType.ownerUserId),
+      eq(googleConnections.status, 'active'),
+    ))
+    .limit(1)
+  if (!connection) throw new Error('The selected Google account is no longer connected.')
+  if (!connection.scopes.includes(GOOGLE_CALENDAR_EVENTS_SCOPE)) {
+    throw new Error('Reconnect the selected Google account to grant Calendar event access.')
+  }
+  return connection
+}
+
+function readGoogleMeetEntryPoint(value: unknown) {
+  const entryPoints = readRecord(value).entryPoints
+  if (!Array.isArray(entryPoints)) return null
+  for (const entry of entryPoints) {
+    const record = readRecord(entry)
+    if (record.entryPointType === 'video') return readString(record.uri)
+  }
+  return null
+}
+
+function readGoogleCalendarError(payload: Record<string, unknown>, fallback: string) {
+  const error = readRecord(payload.error)
+  return readString(error.message) ?? fallback
+}
+
+function readRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {}
+}
+
+function readString(value: unknown) {
+  return typeof value === 'string' && value.trim() ? value.trim() : null
+}
+
+function wait(ms: number) {
+  return new Promise<void>((resolve) => setTimeout(resolve, ms))
+}
 
 async function readPublicEventContext(slug: string) {
   const db = getDb()
@@ -227,7 +400,7 @@ async function buildAvailabilityPayload(eventType: EventTypeRow, query: { from: 
       .from(calBookings)
       .where(and(
         eq(calBookings.hostUserId, eventType.ownerUserId),
-        eq(calBookings.status, 'confirmed'),
+        inArray(calBookings.status, ['confirmed', 'pending']),
         gte(calBookings.startAt, fromDate),
         lte(calBookings.startAt, addDays(untilDate, 1)),
       )),
