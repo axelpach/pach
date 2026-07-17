@@ -5,6 +5,7 @@ import { config } from '../../config'
 import { useAuth } from '../../lib/auth'
 import type { Mutators } from '../../mutators'
 import type { Schema } from '../../zero-schema'
+import { CalendarSectionNav } from '../calendar/CalendarSectionNav'
 
 type CalEventType = Schema['tables']['cal_event_types']['row']
 type CalAvailabilityRule = Schema['tables']['cal_availability_rules']['row']
@@ -222,29 +223,34 @@ export default function Scheduling() {
 
   return (
     <div className="flex h-full min-h-0 flex-col bg-pit text-fg-1">
-      <header className="flex flex-wrap items-center justify-between gap-3 border-b border-edge/15 px-5 py-4">
-        <div>
-          <div className="font-mono text-[10px] uppercase tracking-label text-accent">calendar</div>
-          <h1 className="mt-1 text-xl font-semibold tracking-normal text-fg-1">Scheduling</h1>
-        </div>
-        <div className="flex items-center gap-2">
-          <select
-            value={selectedOrganizationId}
-            onChange={(event) => setSelectedOrganizationId(event.target.value)}
-            className="h-9 border border-edge/20 bg-pit-2 px-3 font-mono text-xs text-fg-2 outline-none focus:border-accent/60"
-          >
-            {availableOrganizations.map((organization) => (
-              <option key={organization.id} value={organization.id}>{organization.name}</option>
-            ))}
-          </select>
-          <button
-            type="button"
-            onClick={createEventType}
-            className="inline-flex h-9 items-center gap-2 border border-accent-fill/40 bg-accent-fill/12 px-3 font-mono text-xs uppercase tracking-label text-accent transition hover:bg-accent-fill/18"
-          >
-            <Plus className="h-4 w-4" />
-            New link
-          </button>
+      <header className="border-b border-edge/15 px-5 py-4">
+        <div className="flex flex-col gap-3">
+          <CalendarSectionNav />
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <div className="font-mono text-[10px] uppercase tracking-label text-accent">calendar</div>
+              <h1 className="mt-1 text-xl font-semibold tracking-normal text-fg-1">Booking links</h1>
+            </div>
+            <div className="flex items-center gap-2">
+              <select
+                value={selectedOrganizationId}
+                onChange={(event) => setSelectedOrganizationId(event.target.value)}
+                className="h-9 border border-edge/20 bg-pit-2 px-3 font-mono text-xs text-fg-2 outline-none focus:border-accent/60"
+              >
+                {availableOrganizations.map((organization) => (
+                  <option key={organization.id} value={organization.id}>{organization.name}</option>
+                ))}
+              </select>
+              <button
+                type="button"
+                onClick={createEventType}
+                className="inline-flex h-9 items-center gap-2 border border-accent-fill/40 bg-accent-fill/12 px-3 font-mono text-xs uppercase tracking-label text-accent transition hover:bg-accent-fill/18"
+              >
+                <Plus className="h-4 w-4" />
+                New link
+              </button>
+            </div>
+          </div>
         </div>
       </header>
 

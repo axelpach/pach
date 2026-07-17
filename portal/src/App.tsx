@@ -1,6 +1,6 @@
 import { Routes, Route, NavLink, Navigate, useLocation, useNavigate, useParams } from 'react-router-dom'
 import { useQuery, useZero, ZeroProvider } from '@rocicorp/zero/react'
-import { Activity as ActivityIcon, AlertTriangle, CalendarClock, CalendarDays, CircleDollarSign, FileText, FolderKanban, LogOut, Megaphone, Menu, Moon, Palette, RefreshCw, Rows3, Settings2, Sun, X } from 'lucide-react'
+import { Activity as ActivityIcon, AlertTriangle, CalendarDays, CircleDollarSign, FileText, FolderKanban, LogOut, Megaphone, Menu, Moon, Palette, RefreshCw, Rows3, Settings2, Sun, X } from 'lucide-react'
 import { createContext, useContext, useEffect, useMemo, useState, type ComponentType, type ReactNode } from 'react'
 import { schema, type Schema } from './zero-schema'
 import { mutators, type Mutators } from './mutators'
@@ -45,10 +45,15 @@ type VisibleNavItem = Omit<OuterNavItem, 'children'> & {
 const OUTER_NAV_ITEMS: readonly OuterNavItem[] = [
   { label: 'Issues', path: '/issues' },
   { label: 'Activity', path: '/activity' },
-  { label: 'Calendar', path: '/calendar' },
+  {
+    label: 'Calendar',
+    path: '/calendar',
+    children: [
+      { label: 'Booking links', path: '/calendar/booking-links' },
+    ],
+  },
   { label: 'Docs', path: '/docs' },
   { label: 'CRM', path: '/crm' },
-  { label: 'Scheduling', path: '/scheduling' },
   {
     label: 'Marketing',
     path: '/marketing/newsletters/content',
@@ -349,7 +354,6 @@ const MOBILE_NAV_ITEMS: Array<{
   { to: '/calendar', label: 'calendar', icon: CalendarDays },
   { to: '/docs', label: 'docs', icon: FileText },
   { to: '/crm', label: 'crm', icon: FolderKanban },
-  { to: '/scheduling', label: 'scheduling', icon: CalendarClock },
   { to: '/marketing/newsletters/content', label: 'marketing', icon: Megaphone },
   { to: '/finance/dashboard', label: 'finance', icon: CircleDollarSign },
   { to: '/design', label: 'design', icon: Palette },
@@ -504,7 +508,6 @@ function AppShell() {
 
       const currentIndex = visibleOuterNavItems.findIndex((item) => {
         if (item.path === '/crm') return location.pathname.startsWith('/crm')
-        if (item.path === '/scheduling') return location.pathname.startsWith('/scheduling')
         if (item.path === '/docs') return location.pathname.startsWith('/docs')
         if (item.path.startsWith('/marketing')) return location.pathname.startsWith('/marketing')
         if (item.path.startsWith('/finance')) return location.pathname.startsWith('/finance')
@@ -553,10 +556,11 @@ function AppShell() {
             <Routes>
               <Route path="/" element={<Navigate to={HOME_PATH} replace />} />
               <Route path="/crm/*" element={<CRM />} />
-              <Route path="/scheduling" element={<Scheduling />} />
+              <Route path="/scheduling" element={<Navigate to="/calendar/booking-links" replace />} />
               <Route path="/activity" element={<Activity />} />
               <Route path="/activity/:activityEventId" element={<Activity />} />
               <Route path="/calendar" element={<CalendarPage />} />
+              <Route path="/calendar/booking-links" element={<Scheduling />} />
               <Route path="/marketing/*" element={<Marketing canAccessWhatsApp={canAccessWhatsApp} />} />
               <Route path="/docs" element={<Docs />} />
               <Route path="/docs/:documentId" element={<Docs />} />
@@ -620,7 +624,6 @@ function withVisibleNavMetadata(item: OuterNavItem, canAccessWhatsApp: boolean):
       item.path === '/calendar' ? CalendarDays :
       item.path === '/docs' ? FileText :
       item.path === '/crm' ? FolderKanban :
-      item.path === '/scheduling' ? CalendarClock :
       item.path.startsWith('/marketing') ? Megaphone :
       item.path.startsWith('/finance') ? CircleDollarSign :
       item.path.startsWith('/settings') ? Settings2 :

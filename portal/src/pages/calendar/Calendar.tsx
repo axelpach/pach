@@ -19,6 +19,7 @@ import { Building2, CalendarDays, ChevronLeft, ChevronRight, Newspaper, Radio, S
 import type { Schema } from '../../zero-schema'
 import type { Mutators } from '../../mutators'
 import { FilterButton, type ActiveFilters, type FilterFieldConfig } from '../issues/IssueFilters'
+import { CalendarSectionNav } from './CalendarSectionNav'
 import './Calendar.css'
 
 type DistributionRunRow = Schema['tables']['mkt_distribution_runs']['row']
@@ -307,6 +308,7 @@ export default function CalendarPage() {
     <div className="flex h-full min-h-0 flex-col overflow-hidden bg-pit text-fg-1">
       <header className="relative z-20 shrink-0 border-b border-edge/12 bg-pit/80 px-4 py-3 backdrop-blur-sm md:px-6">
         <div className="flex flex-col gap-3">
+          <CalendarSectionNav />
           <div className="flex flex-wrap items-center gap-3">
             <div className="min-w-0">
               <div className="font-mono text-[10px] uppercase tracking-label text-fg-4">calendar</div>
