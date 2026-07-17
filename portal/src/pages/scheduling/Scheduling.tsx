@@ -68,6 +68,13 @@ export default function Scheduling() {
   const [availabilityRules] = useQuery(z.query.cal_availability_rules)
   const [bookings] = useQuery(z.query.cal_bookings.orderBy('startAt', 'asc'))
   const [googleConnections] = useQuery(z.query.google_connections.orderBy('updatedAt', 'desc'))
+  const [selectedOrganizationId, setSelectedOrganizationId] = useState<string>('')
+  const [selectedEventTypeId, setSelectedEventTypeId] = useState<string>('')
+  const [draft, setDraft] = useState<EventDraft>(EMPTY_EVENT_DRAFT)
+  const [availabilityDraft, setAvailabilityDraft] = useState<AvailabilityDraft>(() => defaultAvailabilityDraft())
+  const [statusMessage, setStatusMessage] = useState<string | null>(null)
+  const [loadingSlots, setLoadingSlots] = useState(false)
+  const [previewSlots, setPreviewSlots] = useState<Array<{ startAt: string; label: string }>>([])
   const accessibleOrganizationIds = useMemo(() => new Set(user?.organizationIds ?? []), [user?.organizationIds])
   const availableOrganizations = organizations.filter((organization) => accessibleOrganizationIds.has(organization.id))
   const organizationOptions = availableOrganizations.map((organization) => ({ value: organization.id, label: organization.name }))
@@ -85,14 +92,6 @@ export default function Scheduling() {
     })),
     { value: 'manual', label: 'Custom link or location', icon: <LinkIcon className="h-3.5 w-3.5" /> },
   ]
-  const [selectedOrganizationId, setSelectedOrganizationId] = useState<string>('')
-  const [selectedEventTypeId, setSelectedEventTypeId] = useState<string>('')
-  const [draft, setDraft] = useState<EventDraft>(EMPTY_EVENT_DRAFT)
-  const [availabilityDraft, setAvailabilityDraft] = useState<AvailabilityDraft>(() => defaultAvailabilityDraft())
-  const [statusMessage, setStatusMessage] = useState<string | null>(null)
-  const [loadingSlots, setLoadingSlots] = useState(false)
-  const [previewSlots, setPreviewSlots] = useState<Array<{ startAt: string; label: string }>>([])
-
   useEffect(() => {
     if (!selectedOrganizationId && availableOrganizations[0]) {
       setSelectedOrganizationId(availableOrganizations[0].id)
