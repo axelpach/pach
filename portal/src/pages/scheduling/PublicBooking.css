@@ -1,0 +1,10 @@
+.public-booking,
+.public-booking h1,
+.public-booking h2,
+.public-booking h3,
+.public-booking h4,
+.public-booking button,
+.public-booking input,
+.public-booking textarea {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, Helvetica, Arial, sans-serif;
+}
