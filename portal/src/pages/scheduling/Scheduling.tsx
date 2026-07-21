@@ -70,6 +70,7 @@ export default function Scheduling() {
   const [googleConnections] = useQuery(z.query.google_connections.orderBy('updatedAt', 'desc'))
   const [selectedOrganizationId, setSelectedOrganizationId] = useState<string>('')
   const [selectedEventTypeId, setSelectedEventTypeId] = useState<string>('')
+  const [creatingNew, setCreatingNew] = useState(false)
   const [draft, setDraft] = useState<EventDraft>(EMPTY_EVENT_DRAFT)
   const [availabilityDraft, setAvailabilityDraft] = useState<AvailabilityDraft>(() => defaultAvailabilityDraft())
   const [statusMessage, setStatusMessage] = useState<string | null>(null)
@@ -99,7 +100,9 @@ export default function Scheduling() {
   }, [availableOrganizations, selectedOrganizationId])
 
   const scopedEventTypes = eventTypes.filter((eventType) => eventType.organizationId === selectedOrganizationId)
-  const selectedEventType = scopedEventTypes.find((eventType) => eventType.id === selectedEventTypeId) ?? scopedEventTypes[0] ?? null
+  const selectedEventType = creatingNew
+    ? null
+    : scopedEventTypes.find((eventType) => eventType.id === selectedEventTypeId) ?? scopedEventTypes[0] ?? null
   const selectedRules = selectedEventType
     ? availabilityRules.filter((rule) => rule.eventTypeId === selectedEventType.id)
     : []
@@ -108,10 +111,10 @@ export default function Scheduling() {
     : []
 
   useEffect(() => {
-    if (selectedEventType && selectedEventType.id !== selectedEventTypeId) {
+    if (!creatingNew && selectedEventType && selectedEventType.id !== selectedEventTypeId) {
       setSelectedEventTypeId(selectedEventType.id)
     }
-  }, [selectedEventType, selectedEventTypeId])
+  }, [creatingNew, selectedEventType, selectedEventTypeId])
 
   useEffect(() => {
     if (!selectedEventType) {
@@ -162,24 +165,30 @@ export default function Scheduling() {
       bufferAfterMinutes: parseNonNegativeInt(draft.bufferAfterMinutes, 0),
     })
 
-    for (const weekday of [1, 2, 3, 4, 5]) {
+    for (const weekday of WEEKDAYS) {
+      const entry = availabilityDraft[weekday.value]
+      if (!entry.enabled) continue
       await z.mutate.cal_availability_rules.create({
         id: crypto.randomUUID(),
         organizationId: selectedOrganizationId,
         eventTypeId: id,
-        weekday,
-        startMinute: DEFAULT_START,
-        endMinute: DEFAULT_END,
+        weekday: weekday.value,
+        startMinute: entry.startMinute,
+        endMinute: Math.max(entry.endMinute, entry.startMinute + parsePositiveInt(draft.durationMinutes, 30)),
         timezone,
       })
     }
 
+    setCreatingNew(false)
     setSelectedEventTypeId(id)
     setStatusMessage('Booking link created.')
   }
 
   async function saveSelectedEventType() {
-    if (!selectedEventType) return
+    if (!selectedEventType) {
+      await createEventType()
+      return
+    }
     const timezone = draft.timezone.trim() || selectedEventType.timezone
     const googleConnectionId = googleConnectionIdFromLocation(draft.meetingLocation)
     await z.mutate.cal_event_types.update({
@@ -216,6 +225,15 @@ export default function Scheduling() {
     }
 
     setStatusMessage('Booking link saved.')
+  }
+
+  function startNewEventType() {
+    setCreatingNew(true)
+    setSelectedEventTypeId('')
+    setDraft(EMPTY_EVENT_DRAFT)
+    setAvailabilityDraft(defaultAvailabilityDraft())
+    setPreviewSlots([])
+    setStatusMessage(null)
   }
 
   async function deleteSelectedEventType() {
@@ -267,7 +285,11 @@ export default function Scheduling() {
                 <Building2 className="pointer-events-none absolute left-3 top-1/2 z-10 h-3.5 w-3.5 -translate-y-1/2 text-fg-4" />
                 <PachSelect
                   value={selectedOrganizationId}
-                  onChange={setSelectedOrganizationId}
+                  onChange={(organizationId) => {
+                    setSelectedOrganizationId(organizationId)
+                    setSelectedEventTypeId('')
+                    setCreatingNew(false)
+                  }}
                   options={organizationOptions}
                   display={selectedOrganization?.name ?? 'organization'}
                   popupWidth="220"
@@ -276,7 +298,7 @@ export default function Scheduling() {
               </div>
               <button
                 type="button"
-                onClick={createEventType}
+                onClick={startNewEventType}
                 className="inline-flex h-9 items-center gap-2 border border-accent-fill/40 bg-accent-fill/12 px-3 font-mono text-xs uppercase tracking-label text-accent transition hover:bg-accent-fill/18"
               >
                 <Plus className="h-4 w-4" />
@@ -294,7 +316,10 @@ export default function Scheduling() {
               <button
                 key={eventType.id}
                 type="button"
-                onClick={() => setSelectedEventTypeId(eventType.id)}
+                onClick={() => {
+                  setCreatingNew(false)
+                  setSelectedEventTypeId(eventType.id)
+                }}
                 className={`w-full border p-3 text-left transition ${
                   selectedEventType?.id === eventType.id
                     ? 'border-accent-fill/45 bg-accent-fill/10'
@@ -332,12 +357,6 @@ export default function Scheduling() {
               <div className="grid gap-3 md:grid-cols-2">
                 <Field label="Title" value={draft.title} onChange={(value) => setDraft({ ...draft, title: value })} placeholder="Intro call" />
                 <Field label="Duration" value={draft.durationMinutes} onChange={(value) => setDraft({ ...draft, durationMinutes: value })} suffix="min" />
-                <SelectField
-                  label="Timezone"
-                  value={draft.timezone}
-                  onChange={(value) => setDraft({ ...draft, timezone: value })}
-                  options={TIMEZONE_OPTIONS}
-                />
                 <Field label="Minimum notice" value={draft.minimumNoticeMinutes} onChange={(value) => setDraft({ ...draft, minimumNoticeMinutes: value })} suffix="min" />
                 <Field label="Booking window" value={draft.bookingWindowDays} onChange={(value) => setDraft({ ...draft, bookingWindowDays: value })} suffix="days" />
                 <SelectField
@@ -367,7 +386,17 @@ export default function Scheduling() {
             </section>
 
             <section className="space-y-4">
-              <SectionTitle icon={Clock} label="Availability" />
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+                <SectionTitle icon={Clock} label="Availability" />
+                <div className="w-full sm:w-[260px]">
+                  <SelectField
+                    label="Availability timezone"
+                    value={draft.timezone}
+                    onChange={(value) => setDraft({ ...draft, timezone: value })}
+                    options={TIMEZONE_OPTIONS}
+                  />
+                </div>
+              </div>
               <div className="space-y-2">
                 {WEEKDAYS.map((weekday) => {
                   const entry = availabilityDraft[weekday.value]
@@ -413,12 +442,12 @@ export default function Scheduling() {
             <div className="flex flex-wrap items-center gap-2">
               <button
                 type="button"
-                disabled={!selectedEventType}
+                disabled={!selectedOrganizationId}
                 onClick={saveSelectedEventType}
                 className="inline-flex h-10 items-center gap-2 border border-accent-fill/40 bg-accent-fill/12 px-4 font-mono text-xs uppercase tracking-label text-accent transition hover:bg-accent-fill/18 disabled:opacity-40"
               >
                 <Check className="h-4 w-4" />
-                Save
+                {selectedEventType ? 'Save' : 'Create link'}
               </button>
               <button
                 type="button"
