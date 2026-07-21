@@ -11,6 +11,8 @@ import Design from './pages/design/Design'
 import CRM from './pages/crm/CRM'
 import Docs from './pages/docs/Docs'
 import Finance from './pages/finance/Finance'
+import Scheduling from './pages/scheduling/Scheduling'
+import PublicBooking from './pages/scheduling/PublicBooking'
 import Activity from './pages/activity/Activity'
 import CalendarPage from './pages/calendar/Calendar'
 import Marketing from './pages/marketing/Marketing'
@@ -43,7 +45,13 @@ type VisibleNavItem = Omit<OuterNavItem, 'children'> & {
 const OUTER_NAV_ITEMS: readonly OuterNavItem[] = [
   { label: 'Issues', path: '/issues' },
   { label: 'Activity', path: '/activity' },
-  { label: 'Calendar', path: '/calendar' },
+  {
+    label: 'Calendar',
+    path: '/calendar',
+    children: [
+      { label: 'Booking links', path: '/calendar/booking-links' },
+    ],
+  },
   { label: 'Docs', path: '/docs' },
   { label: 'CRM', path: '/crm' },
   {
@@ -548,9 +556,11 @@ function AppShell() {
             <Routes>
               <Route path="/" element={<Navigate to={HOME_PATH} replace />} />
               <Route path="/crm/*" element={<CRM />} />
+              <Route path="/scheduling" element={<Navigate to="/calendar/booking-links" replace />} />
               <Route path="/activity" element={<Activity />} />
               <Route path="/activity/:activityEventId" element={<Activity />} />
               <Route path="/calendar" element={<CalendarPage />} />
+              <Route path="/calendar/booking-links" element={<Scheduling />} />
               <Route path="/marketing/*" element={<Marketing canAccessWhatsApp={canAccessWhatsApp} />} />
               <Route path="/docs" element={<Docs />} />
               <Route path="/docs/:documentId" element={<Docs />} />
@@ -674,6 +684,7 @@ export default function App() {
       <ThemeProvider>
         <Routes>
           <Route path="/login" element={<Login />} />
+          <Route path="/book/:slug" element={<PublicBooking />} />
           <Route path="*" element={<GatedApp />} />
         </Routes>
       </ThemeProvider>

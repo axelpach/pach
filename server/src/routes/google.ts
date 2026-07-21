@@ -37,6 +37,7 @@ const DEFAULT_SEARCH_CONSOLE_SCOPES = [
   'https://www.googleapis.com/auth/webmasters.readonly',
   'https://www.googleapis.com/auth/webmasters',
   'https://www.googleapis.com/auth/adwords',
+  'https://www.googleapis.com/auth/calendar.events',
 ]
 const DEFAULT_SEARCH_ANALYTICS_LOOKBACK_DAYS = 92
 const SEARCH_ANALYTICS_FINAL_DATA_LAG_DAYS = 2
@@ -1468,7 +1469,7 @@ async function refreshGoogleAccessToken(connection: typeof googleConnections.$in
   return { connection: updated, accessToken }
 }
 
-async function accessTokenForConnection(connection: typeof googleConnections.$inferSelect, req?: Request) {
+export async function accessTokenForConnection(connection: typeof googleConnections.$inferSelect, req?: Request) {
   const expiresAt = connection.tokenExpiresAt?.getTime() ?? 0
   if (connection.encryptedAccessToken && expiresAt > Date.now() + 60_000) {
     await getDb().update(googleConnections).set({ lastUsedAt: new Date() }).where(eq(googleConnections.id, connection.id))

@@ -279,6 +279,115 @@ const crmBoardColumns = table('crm_board_columns')
   })
   .primaryKey('id')
 
+const calCalendarConnections = table('cal_calendar_connections')
+  .columns({
+    id: string(),
+    organizationId: string().from('organization_id'),
+    userId: string().from('user_id'),
+    provider: string(),
+    accountEmail: string().optional().from('account_email'),
+    status: string(),
+    accessTokenRef: string().optional().from('access_token_ref'),
+    refreshTokenRef: string().optional().from('refresh_token_ref'),
+    scopes: json<string[]>(),
+    metadata: json<Record<string, unknown>>(),
+    lastSyncedAt: number().optional().from('last_synced_at'),
+    createdAt: number().from('created_at'),
+    updatedAt: number().from('updated_at'),
+  })
+  .primaryKey('id')
+
+const calExternalCalendars = table('cal_external_calendars')
+  .columns({
+    id: string(),
+    organizationId: string().from('organization_id'),
+    connectionId: string().from('connection_id'),
+    providerCalendarId: string().from('provider_calendar_id'),
+    name: string(),
+    timezone: string().optional(),
+    primary: boolean(),
+    includeForAvailability: boolean().from('include_for_availability'),
+    metadata: json<Record<string, unknown>>(),
+    createdAt: number().from('created_at'),
+    updatedAt: number().from('updated_at'),
+  })
+  .primaryKey('id')
+
+const calEventTypes = table('cal_event_types')
+  .columns({
+    id: string(),
+    organizationId: string().from('organization_id'),
+    ownerUserId: string().from('owner_user_id'),
+    title: string(),
+    slug: string(),
+    description: string().optional(),
+    durationMinutes: number().from('duration_minutes'),
+    timezone: string(),
+    locationMode: string().from('location_mode'),
+    locationDetails: string().optional().from('location_details'),
+    meetingProvider: string().from('meeting_provider'),
+    bufferBeforeMinutes: number().from('buffer_before_minutes'),
+    bufferAfterMinutes: number().from('buffer_after_minutes'),
+    minimumNoticeMinutes: number().from('minimum_notice_minutes'),
+    bookingWindowDays: number().from('booking_window_days'),
+    status: string(),
+    metadata: json<Record<string, unknown>>(),
+    createdAt: number().from('created_at'),
+    updatedAt: number().from('updated_at'),
+  })
+  .primaryKey('id')
+
+const calAvailabilityRules = table('cal_availability_rules')
+  .columns({
+    id: string(),
+    organizationId: string().from('organization_id'),
+    eventTypeId: string().from('event_type_id'),
+    weekday: number(),
+    startMinute: number().from('start_minute'),
+    endMinute: number().from('end_minute'),
+    timezone: string(),
+    createdAt: number().from('created_at'),
+    updatedAt: number().from('updated_at'),
+  })
+  .primaryKey('id')
+
+const calAvailabilityOverrides = table('cal_availability_overrides')
+  .columns({
+    id: string(),
+    organizationId: string().from('organization_id'),
+    eventTypeId: string().from('event_type_id'),
+    date: number(),
+    startMinute: number().optional().from('start_minute'),
+    endMinute: number().optional().from('end_minute'),
+    isAvailable: boolean().from('is_available'),
+    reason: string().optional(),
+    createdAt: number().from('created_at'),
+    updatedAt: number().from('updated_at'),
+  })
+  .primaryKey('id')
+
+const calBookings = table('cal_bookings')
+  .columns({
+    id: string(),
+    organizationId: string().from('organization_id'),
+    eventTypeId: string().from('event_type_id'),
+    hostUserId: string().from('host_user_id'),
+    guestName: string().from('guest_name'),
+    guestEmail: string().from('guest_email'),
+    guestNotes: string().optional().from('guest_notes'),
+    startAt: number().from('start_at'),
+    endAt: number().from('end_at'),
+    status: string(),
+    meetingUrl: string().optional().from('meeting_url'),
+    providerEventId: string().optional().from('provider_event_id'),
+    cancelToken: string().from('cancel_token'),
+    metadata: json<Record<string, unknown>>(),
+    canceledAt: number().optional().from('canceled_at'),
+    createdAt: number().from('created_at'),
+    updatedAt: number().from('updated_at'),
+  })
+  .primaryKey('id')
+
 const finAccounts = table('fin_accounts')
   .columns({
     id: string(),
@@ -1583,6 +1692,12 @@ export const schema = createSchema({
     crmNotes,
     crmBoards,
     crmBoardColumns,
+    calCalendarConnections,
+    calExternalCalendars,
+    calEventTypes,
+    calAvailabilityRules,
+    calAvailabilityOverrides,
+    calBookings,
     finAccounts,
     finCategories,
     finImports,

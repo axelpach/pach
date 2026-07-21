@@ -262,6 +262,122 @@ export const mutators = {
     },
   },
 
+  cal_calendar_connections: {
+    async create(tx: Tx, args: { id: string; organizationId: string; userId: string; provider?: string; accountEmail?: string; status?: string; scopes?: string[]; metadata?: Record<string, unknown> }) {
+      const now = Date.now()
+      await tx.mutate.cal_calendar_connections.insert({
+        provider: 'manual',
+        status: 'active',
+        scopes: [],
+        metadata: {},
+        ...args,
+        createdAt: now,
+        updatedAt: now,
+      } as any)
+    },
+    async update(tx: Tx, args: { id: string; accountEmail?: string | null; status?: string; scopes?: string[]; metadata?: Record<string, unknown>; lastSyncedAt?: number | null }) {
+      const { id, ...updates } = args
+      await tx.mutate.cal_calendar_connections.update({ id, ...updates, updatedAt: Date.now() } as any)
+    },
+    async delete(tx: Tx, args: { id: string }) {
+      await tx.mutate.cal_calendar_connections.delete({ id: args.id })
+    },
+  },
+
+  cal_external_calendars: {
+    async create(tx: Tx, args: { id: string; organizationId: string; connectionId: string; providerCalendarId: string; name: string; timezone?: string; primary?: boolean; includeForAvailability?: boolean; metadata?: Record<string, unknown> }) {
+      const now = Date.now()
+      await tx.mutate.cal_external_calendars.insert({
+        primary: false,
+        includeForAvailability: true,
+        metadata: {},
+        ...args,
+        createdAt: now,
+        updatedAt: now,
+      } as any)
+    },
+    async update(tx: Tx, args: { id: string; name?: string; timezone?: string | null; primary?: boolean; includeForAvailability?: boolean; metadata?: Record<string, unknown> }) {
+      const { id, ...updates } = args
+      await tx.mutate.cal_external_calendars.update({ id, ...updates, updatedAt: Date.now() } as any)
+    },
+    async delete(tx: Tx, args: { id: string }) {
+      await tx.mutate.cal_external_calendars.delete({ id: args.id })
+    },
+  },
+
+  cal_event_types: {
+    async create(tx: Tx, args: { id: string; organizationId: string; ownerUserId: string; title: string; slug: string; description?: string; durationMinutes?: number; timezone?: string; locationMode?: string; locationDetails?: string; meetingProvider?: string; bufferBeforeMinutes?: number; bufferAfterMinutes?: number; minimumNoticeMinutes?: number; bookingWindowDays?: number; status?: string; metadata?: Record<string, unknown> }) {
+      const now = Date.now()
+      await tx.mutate.cal_event_types.insert({
+        durationMinutes: 30,
+        timezone: 'UTC',
+        locationMode: 'video',
+        meetingProvider: 'manual',
+        bufferBeforeMinutes: 0,
+        bufferAfterMinutes: 0,
+        minimumNoticeMinutes: 120,
+        bookingWindowDays: 30,
+        status: 'active',
+        metadata: {},
+        ...args,
+        createdAt: now,
+        updatedAt: now,
+      } as any)
+    },
+    async update(tx: Tx, args: { id: string; title?: string; slug?: string; description?: string | null; durationMinutes?: number; timezone?: string; locationMode?: string; locationDetails?: string | null; meetingProvider?: string; bufferBeforeMinutes?: number; bufferAfterMinutes?: number; minimumNoticeMinutes?: number; bookingWindowDays?: number; status?: string; metadata?: Record<string, unknown> }) {
+      const { id, ...updates } = args
+      await tx.mutate.cal_event_types.update({ id, ...updates, updatedAt: Date.now() } as any)
+    },
+    async delete(tx: Tx, args: { id: string }) {
+      await tx.mutate.cal_event_types.delete({ id: args.id })
+    },
+  },
+
+  cal_availability_rules: {
+    async create(tx: Tx, args: { id: string; organizationId: string; eventTypeId: string; weekday: number; startMinute: number; endMinute: number; timezone?: string }) {
+      const now = Date.now()
+      await tx.mutate.cal_availability_rules.insert({
+        timezone: 'UTC',
+        ...args,
+        createdAt: now,
+        updatedAt: now,
+      } as any)
+    },
+    async update(tx: Tx, args: { id: string; weekday?: number; startMinute?: number; endMinute?: number; timezone?: string }) {
+      const { id, ...updates } = args
+      await tx.mutate.cal_availability_rules.update({ id, ...updates, updatedAt: Date.now() } as any)
+    },
+    async delete(tx: Tx, args: { id: string }) {
+      await tx.mutate.cal_availability_rules.delete({ id: args.id })
+    },
+  },
+
+  cal_availability_overrides: {
+    async create(tx: Tx, args: { id: string; organizationId: string; eventTypeId: string; date: number; startMinute?: number; endMinute?: number; isAvailable?: boolean; reason?: string }) {
+      const now = Date.now()
+      await tx.mutate.cal_availability_overrides.insert({
+        isAvailable: false,
+        ...args,
+        createdAt: now,
+        updatedAt: now,
+      } as any)
+    },
+    async update(tx: Tx, args: { id: string; date?: number; startMinute?: number | null; endMinute?: number | null; isAvailable?: boolean; reason?: string | null }) {
+      const { id, ...updates } = args
+      await tx.mutate.cal_availability_overrides.update({ id, ...updates, updatedAt: Date.now() } as any)
+    },
+    async delete(tx: Tx, args: { id: string }) {
+      await tx.mutate.cal_availability_overrides.delete({ id: args.id })
+    },
+  },
+
+  cal_bookings: {
+    async update(tx: Tx, args: { id: string; status?: string; meetingUrl?: string | null; providerEventId?: string | null; canceledAt?: number | null; metadata?: Record<string, unknown> }) {
+      const { id, ...updates } = args
+      await tx.mutate.cal_bookings.update({ id, ...updates, updatedAt: Date.now() } as any)
+    },
+  },
+
   fin_accounts: {
     async create(tx: Tx, args: { id: string; organizationId: string; name: string; institutionName?: string; holderUserId?: string; type?: string; currencyCode?: string; status?: string; lastBalanceMinor?: number; lastBalanceAt?: number; metadata?: Record<string, unknown> }) {
       const now = Date.now()
