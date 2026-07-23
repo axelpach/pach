@@ -68,6 +68,31 @@ export default function PublicBooking() {
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
+    const previousTitle = document.title
+    const existingIcon = document.querySelector<HTMLLinkElement>('link[rel~="icon"]')
+    const previousIconHref = existingIcon?.getAttribute('href') ?? null
+    const previousIconType = existingIcon?.getAttribute('type') ?? null
+    const icon = existingIcon ?? document.head.appendChild(document.createElement('link'))
+
+    document.title = 'Schedule a meeting · Calendar'
+    icon.rel = 'icon'
+    icon.type = 'image/svg+xml'
+    icon.href = '/calendar-favicon.svg'
+
+    return () => {
+      document.title = previousTitle
+      if (!existingIcon) {
+        icon.remove()
+        return
+      }
+      if (previousIconHref == null) existingIcon.removeAttribute('href')
+      else existingIcon.setAttribute('href', previousIconHref)
+      if (previousIconType == null) existingIcon.removeAttribute('type')
+      else existingIcon.setAttribute('type', previousIconType)
+    }
+  }, [])
+
+  useEffect(() => {
     let canceled = false
     async function load() {
       setLoading(true)
