@@ -26,10 +26,12 @@ type DistributionRunRow = Schema['tables']['mkt_distribution_runs']['row']
 type OrganizationRow = Schema['tables']['organizations']['row']
 type ContentItemRow = Schema['tables']['mkt_content_items']['row']
 type PublicationRow = Schema['tables']['mkt_publications']['row']
+type CalBookingRow = Schema['tables']['cal_bookings']['row']
+type CalEventTypeRow = Schema['tables']['cal_event_types']['row']
 
 type CalendarView = 'dayGridMonth' | 'timeGridWeek' | 'timeGridDay' | 'listWeek'
 type CalendarViewSlug = 'month' | 'week' | 'day' | 'agenda'
-type CalendarEventType = 'marketing'
+type CalendarEventType = 'marketing' | 'booking'
 type EventTone = 'ok' | 'warn' | 'fail' | 'info' | 'idle'
 
 type UnifiedCalendarEvent = {
@@ -70,7 +72,7 @@ const URL_SLUG_TO_VIEW: Record<CalendarViewSlug, CalendarView> = {
   day: 'timeGridDay',
   agenda: 'listWeek',
 }
-const STATUS_ORDER = ['scheduled', 'sending', 'sent', 'failed', 'draft', 'paused', 'canceled']
+const STATUS_ORDER = ['confirmed', 'pending', 'scheduled', 'sending', 'sent', 'failed', 'draft', 'paused', 'canceled']
 const EMPTY_FILTERS: ActiveFilters = {
   eventType: [],
   organization: [],
@@ -120,10 +122,15 @@ export default function CalendarPage() {
   const [distributionRuns] = useQuery(z.query.mkt_distribution_runs.orderBy('scheduledAt', 'asc'))
   const [contentItems] = useQuery(z.query.mkt_content_items.orderBy('title', 'asc'))
   const [publications] = useQuery(z.query.mkt_publications.orderBy('name', 'asc'))
+  const [bookings] = useQuery(z.query.cal_bookings.orderBy('startAt', 'asc'))
+  const [bookingEventTypes] = useQuery(z.query.cal_event_types.orderBy('title', 'asc'))
 
   const calendarEvents = useMemo(
-    () => buildMarketingBroadcastEvents(distributionRuns, organizations, contentItems, publications),
-    [distributionRuns, organizations, contentItems, publications],
+    () => [
+      ...buildMarketingBroadcastEvents(distributionRuns, organizations, contentItems, publications),
+      ...buildBookingEvents(bookings, bookingEventTypes, organizations),
+    ].sort((left, right) => left.startsAt - right.startsAt),
+    [bookingEventTypes, bookings, distributionRuns, organizations, contentItems, publications],
   )
   const filterConfigs = useMemo(
     () => buildFilterConfigs(calendarEvents, organizations, publications),
@@ -428,7 +435,7 @@ export default function CalendarPage() {
             <div className="pointer-events-none absolute inset-x-4 top-20 border border-edge/16 bg-pit-2/95 px-4 py-6 text-center shadow-terminal-overlay md:left-1/2 md:w-[420px] md:-translate-x-1/2">
               <div className="font-mono text-xs uppercase tracking-label text-fg-3">// no scheduled events</div>
               <div className="mt-2 text-sm text-fg-4">
-                {calendarEvents.length === 0 ? 'scheduled marketing runs will appear here' : 'no events match the current filters'}
+                {calendarEvents.length === 0 ? 'scheduled events and meetings will appear here' : 'no events match the current filters'}
               </div>
             </div>
           ) : null}
@@ -441,7 +448,7 @@ export default function CalendarPage() {
           </div>
           <div className="mt-4 space-y-2">
             {upcomingEvents.length === 0 ? (
-              <div className="font-mono text-xs text-fg-4">// no upcoming marketing runs</div>
+              <div className="font-mono text-xs text-fg-4">// no upcoming events</div>
             ) : (
               upcomingEvents.map((event) => (
                 <button
@@ -509,6 +516,38 @@ function buildMarketingBroadcastEvents(
     .sort((a, b) => a.startsAt - b.startsAt)
 }
 
+function buildBookingEvents(
+  bookings: CalBookingRow[],
+  eventTypes: CalEventTypeRow[],
+  organizations: OrganizationRow[],
+): UnifiedCalendarEvent[] {
+  const eventTypeById = new Map(eventTypes.map((entry) => [entry.id, entry]))
+  const organizationById = new Map(organizations.map((entry) => [entry.id, entry]))
+
+  return bookings
+    .filter((booking) => ['confirmed', 'pending'].includes(booking.status))
+    .map((booking) => {
+      const eventType = eventTypeById.get(booking.eventTypeId)
+      const organization = organizationById.get(booking.organizationId)
+      return {
+        id: `booking:${booking.id}`,
+        type: 'booking',
+        title: eventType?.title ? `${eventType.title} · ${booking.guestName}` : `meeting · ${booking.guestName}`,
+        startsAt: Number(booking.startAt),
+        endsAt: Number(booking.endAt),
+        status: booking.status,
+        organizationId: booking.organizationId,
+        organizationName: organization?.name ?? 'unknown organization',
+        publicationId: null,
+        publicationName: 'booking',
+        contentTitle: `${booking.guestName} ${booking.guestEmail}`,
+        timezone: eventType?.timezone ?? Intl.DateTimeFormat().resolvedOptions().timeZone,
+        href: '/calendar/booking-links',
+        tone: statusTone(booking.status),
+      } satisfies UnifiedCalendarEvent
+    })
+}
+
 function buildFilterConfigs(
   events: UnifiedCalendarEvent[],
   organizations: OrganizationRow[],
@@ -527,7 +566,10 @@ function buildFilterConfigs(
       field: 'eventType',
       label: 'event type',
       icon: CalendarDays,
-      options: [{ value: 'marketing', label: 'marketing' }],
+      options: [
+        { value: 'marketing', label: 'marketing' },
+        { value: 'booking', label: 'booking' },
+      ].filter((option) => events.some((event) => event.type === option.value)),
     },
     {
       field: 'organization',
@@ -751,7 +793,7 @@ function readStringArray(value: unknown) {
 }
 
 function statusTone(status: string): EventTone {
-  if (['sent', 'published', 'ready'].includes(status)) return 'ok'
+  if (['confirmed', 'sent', 'published', 'ready'].includes(status)) return 'ok'
   if (['scheduled', 'sending', 'draft', 'paused'].includes(status)) return 'warn'
   if (['failed', 'canceled', 'archived'].includes(status)) return 'fail'
   return 'info'

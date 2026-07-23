@@ -52,6 +52,7 @@ type BookingPayload = {
 
 export default function PublicBooking() {
   const { slug = '' } = useParams<{ slug: string }>()
+  const visitorTimezone = useMemo(() => Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC', [])
   const [eventPayload, setEventPayload] = useState<PublicEventPayload | null>(null)
   const [slots, setSlots] = useState<SlotPayload['slots']>([])
   const [selectedDate, setSelectedDate] = useState('')
@@ -81,8 +82,9 @@ export default function PublicBooking() {
         if (!canceled) {
           setEventPayload(eventJson)
           setSlots(slotsJson.slots ?? [])
-          setSelectedDate(slotsJson.slots?.[0]?.date ?? '')
-          setVisibleMonth(slotsJson.slots?.[0]?.date.slice(0, 7) ?? '')
+          const firstVisitorDate = slotsJson.slots?.[0] ? dateKeyInTimezone(slotsJson.slots[0].startAt, visitorTimezone) : ''
+          setSelectedDate(firstVisitorDate)
+          setVisibleMonth(firstVisitorDate.slice(0, 7))
           setSelectedStartAt('')
         }
       } catch (loadError) {
@@ -95,17 +97,18 @@ export default function PublicBooking() {
     return () => {
       canceled = true
     }
-  }, [slug])
+  }, [slug, visitorTimezone])
 
   const groupedSlots = useMemo(() => {
     const groups = new Map<string, SlotPayload['slots']>()
     for (const slot of slots) {
-      const entries = groups.get(slot.date) ?? []
+      const visitorDate = dateKeyInTimezone(slot.startAt, visitorTimezone)
+      const entries = groups.get(visitorDate) ?? []
       entries.push(slot)
-      groups.set(slot.date, entries)
+      groups.set(visitorDate, entries)
     }
     return Array.from(groups.entries())
-  }, [slots])
+  }, [slots, visitorTimezone])
 
   const availableDates = useMemo(() => new Set(groupedSlots.map(([date]) => date)), [groupedSlots])
   const monthKeys = useMemo(() => Array.from(new Set(groupedSlots.map(([date]) => date.slice(0, 7)))), [groupedSlots])
@@ -172,7 +175,7 @@ export default function PublicBooking() {
             </div>
             <h1 className="mt-5 text-2xl font-semibold tracking-tight text-slate-900">You’re scheduled</h1>
             <p className="mt-2 max-w-sm text-sm leading-6 text-slate-500">
-              You are scheduled for {formatFullDate(booking.startAt, eventPayload.eventType.timezone)}.
+              You are scheduled for {formatFullDate(booking.startAt, visitorTimezone)}.
             </p>
             {booking.meetingUrl && (
               <a
@@ -195,7 +198,7 @@ export default function PublicBooking() {
         {showDetails ? (
           <AttendeeDetails
             selectedStartAt={selectedStartAt}
-            timezone={eventPayload.eventType.timezone}
+            timezone={visitorTimezone}
             guestName={guestName}
             guestEmail={guestEmail}
             guestNotes={guestNotes}
@@ -228,13 +231,16 @@ export default function PublicBooking() {
                     <div className="text-xs font-medium text-slate-500">Time zone</div>
                     <div className="mt-2 flex items-center gap-2 text-sm text-slate-700">
                       <Globe2 className="h-4 w-4 text-slate-500" />
-                      {formatTimezone(eventPayload.eventType.timezone)}
+                      {formatTimezone(visitorTimezone)}
                     </div>
+                    <p className="mt-2 text-xs leading-5 text-slate-400">
+                      Times are shown in your local timezone. This host requires {formatNotice(eventPayload.eventType.minimumNoticeMinutes)} notice.
+                    </p>
                   </div>
                 </div>
                 <div>
                   <div className="mb-3 text-sm font-medium text-slate-700">
-                    {selectedDate ? formatShortDate(selectedDate, eventPayload.eventType.timezone) : 'Choose a date'}
+                    {selectedDate ? formatShortDate(selectedDate) : 'Choose a date'}
                   </div>
                   <div className="max-h-[460px] space-y-2 overflow-auto pr-1">
                     {selectedDateSlots.map((slot) => {
@@ -246,7 +252,7 @@ export default function PublicBooking() {
                             onClick={() => setSelectedStartAt(slot.startAt)}
                             className={`h-12 w-full rounded-md border text-sm font-semibold transition ${selected ? 'border-slate-700 bg-slate-700 text-white' : 'border-blue-600 bg-white text-blue-600 hover:border-blue-700 hover:bg-blue-50'}`}
                           >
-                            {formatTime(slot.startAt, eventPayload.eventType.timezone)}
+                            {formatTime(slot.startAt, visitorTimezone)}
                           </button>
                           {selected && (
                             <button type="button" onClick={() => setShowDetails(true)} className="h-12 rounded-md bg-blue-600 text-sm font-semibold text-white transition hover:bg-blue-700">
@@ -404,12 +410,33 @@ function formatMonth(monthKey: string) {
   return new Intl.DateTimeFormat(undefined, { month: 'long', year: 'numeric', timeZone: 'UTC' }).format(new Date(`${monthKey}-01T12:00:00.000Z`))
 }
 
-function formatShortDate(dateKey: string, timeZone: string) {
-  return new Intl.DateTimeFormat(undefined, { timeZone, weekday: 'short', month: 'short', day: 'numeric' }).format(new Date(`${dateKey}T12:00:00.000Z`))
+function formatShortDate(dateKey: string) {
+  return new Intl.DateTimeFormat(undefined, { timeZone: 'UTC', weekday: 'short', month: 'short', day: 'numeric' }).format(new Date(`${dateKey}T12:00:00.000Z`))
 }
 
 function formatTimezone(timezone: string) {
-  return timezone === 'Europe/Madrid' ? 'Central European Time – Madrid' : timezone === 'America/Mexico_City' ? 'Central Time – Mexico City' : timezone.replaceAll('_', ' ')
+  const city = timezone.split('/').at(-1)?.replaceAll('_', ' ') ?? timezone
+  const name = new Intl.DateTimeFormat(undefined, { timeZone: timezone, timeZoneName: 'long' })
+    .formatToParts(new Date())
+    .find((part) => part.type === 'timeZoneName')?.value
+  return name ? `${name} – ${city}` : timezone.replaceAll('_', ' ')
+}
+
+function formatNotice(minutes: number) {
+  if (minutes % (24 * 60) === 0) return `${minutes / (24 * 60)} ${minutes === 24 * 60 ? 'day' : 'days'}`
+  if (minutes % 60 === 0) return `${minutes / 60} ${minutes === 60 ? 'hour' : 'hours'}`
+  return `${minutes} minutes`
+}
+
+function dateKeyInTimezone(value: string, timeZone: string) {
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(new Date(value))
+  const values = Object.fromEntries(parts.map((part) => [part.type, part.value]))
+  return `${values.year}-${values.month}-${values.day}`
 }
 
 function meetingLocationLabel(eventType: PublicEventPayload['eventType']) {

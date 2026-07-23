@@ -377,12 +377,14 @@ async function readPublicEventContext(slug: string) {
   return row ?? null
 }
 
-async function buildAvailabilityPayload(eventType: EventTypeRow, query: { from: string; days: number }) {
+export async function buildAvailabilityPayload(eventType: EventTypeRow, query: { from: string; days: number }) {
   const db = getDb()
   const now = new Date()
   const fromDate = parseDateKey(query.from) ?? startOfDateKey(isoDateKey(now, eventType.timezone))
   const days = Math.min(Math.max(query.days, 1), Math.min(eventType.bookingWindowDays, MAX_PUBLIC_DAYS))
   const untilDate = addDays(fromDate, days)
+  const bookingRangeStart = zonedDateTimeToUtc(formatDateKey(fromDate), 0, eventType.timezone)
+  const bookingRangeEnd = zonedDateTimeToUtc(formatDateKey(addDays(untilDate, 1)), 0, eventType.timezone)
   const minimumStartAt = new Date(now.getTime() + eventType.minimumNoticeMinutes * 60_000)
 
   const [rules, overrides, bookings] = await Promise.all([
@@ -401,8 +403,8 @@ async function buildAvailabilityPayload(eventType: EventTypeRow, query: { from: 
       .where(and(
         eq(calBookings.hostUserId, eventType.ownerUserId),
         inArray(calBookings.status, ['confirmed', 'pending']),
-        gte(calBookings.startAt, fromDate),
-        lte(calBookings.startAt, addDays(untilDate, 1)),
+        gte(calBookings.startAt, bookingRangeStart),
+        lte(calBookings.startAt, bookingRangeEnd),
       )),
   ])
 
@@ -494,7 +496,7 @@ function rangesOverlap(aStart: Date, aEnd: Date, bStart: Date, bEnd: Date) {
 function readAvailabilityQuery(query: Record<string, unknown>) {
   const from = typeof query.from === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(query.from)
     ? query.from
-    : formatDateKey(new Date())
+    : ''
   const parsedDays = typeof query.days === 'string' ? Number.parseInt(query.days, 10) : 14
   const days = Number.isFinite(parsedDays) ? parsedDays : 14
   return { from, days }
@@ -578,36 +580,42 @@ function isoDateKey(date: Date, timeZone: string) {
   return `${valueByType.year}-${valueByType.month}-${valueByType.day}`
 }
 
-function zonedDateTimeToUtc(dateKey: string, minuteOfDay: number, timeZone: string) {
+export function zonedDateTimeToUtc(dateKey: string, minuteOfDay: number, timeZone: string) {
   const [year, month, day] = dateKey.split('-').map(Number)
   const hour = Math.floor(minuteOfDay / 60)
   const minute = minuteOfDay % 60
-  const utcGuess = new Date(Date.UTC(year, month - 1, day, hour, minute, 0, 0))
-  const offset = timezoneOffsetMinutes(utcGuess, timeZone)
-  return new Date(utcGuess.getTime() - offset * 60_000)
-}
+  const desiredWallTime = Date.UTC(year, month - 1, day, hour, minute, 0, 0)
+  let instant = desiredWallTime
 
-function timezoneOffsetMinutes(date: Date, timeZone: string) {
-  const parts = new Intl.DateTimeFormat('en-US', {
-    timeZone,
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit',
-    hourCycle: 'h23',
-  }).formatToParts(date)
-  const values = Object.fromEntries(parts.map((part) => [part.type, part.value]))
-  const asUtc = Date.UTC(
-    Number(values.year),
-    Number(values.month) - 1,
-    Number(values.day),
-    Number(values.hour),
-    Number(values.minute),
-    Number(values.second),
-  )
-  return (asUtc - date.getTime()) / 60_000
+  // Resolve the wall-clock time iteratively. Rechecking after the first offset
+  // correction keeps this correct across daylight-saving transitions as well.
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    const current = new Date(instant)
+    const parts = new Intl.DateTimeFormat('en-US', {
+      timeZone,
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+      hourCycle: 'h23',
+    }).formatToParts(current)
+    const values = Object.fromEntries(parts.map((part) => [part.type, part.value]))
+    const actualWallTime = Date.UTC(
+      Number(values.year),
+      Number(values.month) - 1,
+      Number(values.day),
+      Number(values.hour),
+      Number(values.minute),
+      Number(values.second),
+    )
+    const correction = desiredWallTime - actualWallTime
+    if (correction === 0) return current
+    instant += correction
+  }
+
+  return new Date(instant)
 }
 
 function formatSlotLabel(date: Date, timeZone: string) {

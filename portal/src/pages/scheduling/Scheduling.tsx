@@ -1,5 +1,5 @@
 import { useQuery, useZero } from '@rocicorp/zero/react'
-import { Building2, CalendarClock, Check, Clipboard, Clock, ExternalLink, Link as LinkIcon, Loader2, Plus, Trash2, UserRound, Video, X } from 'lucide-react'
+import { AlertTriangle, Building2, CalendarClock, Check, Clipboard, Clock, ExternalLink, Link as LinkIcon, Loader2, Plus, Trash2, UserRound, Video, X } from 'lucide-react'
 import { useEffect, useMemo, useState, type ComponentType, type ReactNode } from 'react'
 import { PachSelect, type PachSelectOption } from '../../components/PachSelect'
 import { config } from '../../config'
@@ -76,6 +76,8 @@ export default function Scheduling() {
   const [statusMessage, setStatusMessage] = useState<string | null>(null)
   const [loadingSlots, setLoadingSlots] = useState(false)
   const [previewSlots, setPreviewSlots] = useState<Array<{ startAt: string; label: string }>>([])
+  const [bookingToCancel, setBookingToCancel] = useState<CalBooking | null>(null)
+  const [cancelingBookingId, setCancelingBookingId] = useState<string | null>(null)
   const accessibleOrganizationIds = useMemo(() => new Set(user?.organizationIds ?? []), [user?.organizationIds])
   const availableOrganizations = organizations.filter((organization) => accessibleOrganizationIds.has(organization.id))
   const organizationOptions = availableOrganizations.map((organization) => ({ value: organization.id, label: organization.name }))
@@ -248,10 +250,23 @@ export default function Scheduling() {
 
   async function cancelBooking(booking: CalBooking) {
     if (!token) return
-    await fetch(`${config.apiUrl}/scheduling/bookings/${booking.id}/cancel`, {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${token}` },
-    })
+    setCancelingBookingId(booking.id)
+    try {
+      const response = await fetch(`${config.apiUrl}/scheduling/bookings/${booking.id}/cancel`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}` },
+      })
+      if (!response.ok) {
+        const payload = await response.json().catch(() => ({}))
+        throw new Error(typeof payload.message === 'string' ? payload.message : 'Could not cancel the meeting.')
+      }
+      setBookingToCancel(null)
+      setStatusMessage('Meeting canceled.')
+    } catch (cancelError) {
+      setStatusMessage(cancelError instanceof Error ? cancelError.message : 'Could not cancel the meeting.')
+    } finally {
+      setCancelingBookingId(null)
+    }
   }
 
   async function loadPreviewSlots(eventType: CalEventType) {
@@ -429,7 +444,7 @@ export default function Scheduling() {
                         value={minutesToTimeInput(entry.endMinute)}
                         onChange={(event) => setAvailabilityDraft({
                           ...availabilityDraft,
-                          [weekday.value]: { ...entry, endMinute: timeInputToMinutes(event.target.value, entry.endMinute) },
+                          [weekday.value]: { ...entry, endMinute: endTimeInputToMinutes(event.target.value, entry.startMinute, entry.endMinute) },
                         })}
                         className="h-9 min-w-0 border border-edge/15 bg-pit px-2 font-mono text-xs text-fg-1 outline-none disabled:opacity-40"
                       />
@@ -523,7 +538,7 @@ export default function Scheduling() {
                     <div key={booking.id} className="border border-edge/12 bg-pit-2 p-3">
                       <div className="text-sm font-medium text-fg-1">{booking.guestName}</div>
                       <div className="mt-1 font-mono text-[10px] text-fg-4">{formatDateTime(booking.startAt)} · {booking.guestEmail}</div>
-                      <button type="button" onClick={() => cancelBooking(booking)} className="mt-2 font-mono text-[10px] uppercase tracking-label text-fail">cancel</button>
+                      <button type="button" onClick={() => setBookingToCancel(booking)} className="mt-2 font-mono text-[10px] uppercase tracking-label text-fail">cancel</button>
                     </div>
                   ))}
                 </div>
@@ -533,6 +548,54 @@ export default function Scheduling() {
             </section>
           </div>
         </aside>
+      </div>
+      {bookingToCancel && (
+        <CancelBookingModal
+          booking={bookingToCancel}
+          canceling={cancelingBookingId === bookingToCancel.id}
+          onClose={() => setBookingToCancel(null)}
+          onConfirm={() => void cancelBooking(bookingToCancel)}
+        />
+      )}
+    </div>
+  )
+}
+
+function CancelBookingModal({ booking, canceling, onClose, onConfirm }: {
+  booking: CalBooking
+  canceling: boolean
+  onClose: () => void
+  onConfirm: () => void
+}) {
+  useEffect(() => {
+    function handleEscape(event: KeyboardEvent) {
+      if (event.key === 'Escape' && !canceling) onClose()
+    }
+    window.addEventListener('keydown', handleEscape)
+    return () => window.removeEventListener('keydown', handleEscape)
+  }, [canceling, onClose])
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-overlay/70 px-4 backdrop-blur-sm" onClick={() => !canceling && onClose()}>
+      <div className="w-full max-w-lg border border-edge/20 bg-pit-2 shadow-terminal-overlay" onClick={(event) => event.stopPropagation()}>
+        <div className="border-b border-edge/12 px-6 py-5">
+          <div className="font-mono text-[10px] uppercase tracking-label text-fail">calendar — cancel meeting</div>
+          <h2 className="mt-1.5 font-mono text-xl lowercase text-fg-1">cancel meeting with {booking.guestName}?</h2>
+        </div>
+        <div className="space-y-3 px-6 py-5">
+          <div className="flex items-start gap-3 border border-warn/25 bg-warn/8 p-3 text-sm text-fg-2">
+            <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-warn" />
+            <span>This removes the meeting from availability and cancels the connected Google Calendar event, if present.</span>
+          </div>
+          <div className="font-mono text-xs text-fg-3">{formatDateTime(booking.startAt)} · {booking.guestEmail}</div>
+        </div>
+        <div className="flex items-center justify-between border-t border-edge/12 px-6 py-4">
+          <button type="button" disabled={canceling} onClick={onClose} className="px-3 py-2 font-mono text-xs uppercase tracking-label text-fg-3 transition hover:text-fg-1 disabled:opacity-40">[keep meeting]</button>
+          <button type="button" disabled={canceling} onClick={onConfirm} className="inline-flex items-center gap-2 border border-fail/34 bg-fail/8 px-4 py-2 font-mono text-xs uppercase tracking-label text-fail transition hover:bg-fail/14 disabled:opacity-40">
+            {canceling ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}
+            {canceling ? 'canceling...' : 'cancel meeting'}
+          </button>
+        </div>
       </div>
     </div>
   )
@@ -683,7 +746,7 @@ function parseNonNegativeInt(value: string, fallback: number) {
 }
 
 function minutesToTimeInput(minutes: number) {
-  const hour = Math.floor(minutes / 60)
+  const hour = Math.floor(minutes / 60) % 24
   const minute = minutes % 60
   return `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`
 }
@@ -692,6 +755,11 @@ function timeInputToMinutes(value: string, fallback: number) {
   const [hour, minute] = value.split(':').map(Number)
   if (!Number.isFinite(hour) || !Number.isFinite(minute)) return fallback
   return hour * 60 + minute
+}
+
+function endTimeInputToMinutes(value: string, startMinute: number, fallback: number) {
+  const minute = timeInputToMinutes(value, fallback)
+  return minute === 0 && startMinute > 0 ? 24 * 60 : minute
 }
 
 function formatDateTime(ms: number) {
