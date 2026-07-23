@@ -76,7 +76,7 @@ export default function PublicBooking() {
         const eventRes = await fetch(`${config.apiUrl}/scheduling/public/event-types/${encodeURIComponent(slug)}`)
         if (!eventRes.ok) throw new Error('Booking link not found.')
         const eventJson = await eventRes.json() as PublicEventPayload
-        const slotsRes = await fetch(`${config.apiUrl}/scheduling/public/event-types/${encodeURIComponent(slug)}/slots?days=14`)
+        const slotsRes = await fetch(`${config.apiUrl}/scheduling/public/event-types/${encodeURIComponent(slug)}/slots?days=${eventJson.eventType.bookingWindowDays}`)
         if (!slotsRes.ok) throw new Error('Could not load available times.')
         const slotsJson = await slotsRes.json() as SlotPayload
         if (!canceled) {
@@ -221,7 +221,11 @@ export default function PublicBooking() {
                     monthKeys={monthKeys}
                     availableDates={availableDates}
                     selectedDate={selectedDate}
-                    onMonthChange={setVisibleMonth}
+                    onMonthChange={(month) => {
+                      setVisibleMonth(month)
+                      setSelectedDate(groupedSlots.find(([date]) => date.startsWith(month))?.[0] ?? '')
+                      setSelectedStartAt('')
+                    }}
                     onDateChange={(date) => {
                       setSelectedDate(date)
                       setSelectedStartAt('')
