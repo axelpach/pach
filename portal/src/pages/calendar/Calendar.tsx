@@ -19,6 +19,7 @@ import { Building2, CalendarDays, ChevronLeft, ChevronRight, Newspaper, Radio, S
 import type { Schema } from '../../zero-schema'
 import type { Mutators } from '../../mutators'
 import { FilterButton, type ActiveFilters, type FilterFieldConfig } from '../issues/IssueFilters'
+import { BookingDetailDrawer } from './BookingDetailDrawer'
 import { CalendarSectionNav } from './CalendarSectionNav'
 import './Calendar.css'
 
@@ -28,6 +29,7 @@ type ContentItemRow = Schema['tables']['mkt_content_items']['row']
 type PublicationRow = Schema['tables']['mkt_publications']['row']
 type CalBookingRow = Schema['tables']['cal_bookings']['row']
 type CalEventTypeRow = Schema['tables']['cal_event_types']['row']
+type UserRow = Schema['tables']['users']['row']
 
 type CalendarView = 'dayGridMonth' | 'timeGridWeek' | 'timeGridDay' | 'listWeek'
 type CalendarViewSlug = 'month' | 'week' | 'day' | 'agenda'
@@ -49,6 +51,7 @@ type UnifiedCalendarEvent = {
   timezone: string
   href: string
   tone: EventTone
+  bookingId: string | null
 }
 
 const CALENDAR_STATE_STORAGE_KEY = 'pach.calendar.state'
@@ -117,6 +120,7 @@ export default function CalendarPage() {
   const [searchQuery, setSearchQuery] = useState(initialCalendarState.searchQuery)
   const [activeFilters, setActiveFilters] = useState<ActiveFilters>(initialCalendarState.filters)
   const [urlSyncRevision, setUrlSyncRevision] = useState(0)
+  const [selectedBookingId, setSelectedBookingId] = useState<string | null>(null)
 
   const [organizations] = useQuery(z.query.organizations.orderBy('name', 'asc'))
   const [distributionRuns] = useQuery(z.query.mkt_distribution_runs.orderBy('scheduledAt', 'asc'))
@@ -124,6 +128,7 @@ export default function CalendarPage() {
   const [publications] = useQuery(z.query.mkt_publications.orderBy('name', 'asc'))
   const [bookings] = useQuery(z.query.cal_bookings.orderBy('startAt', 'asc'))
   const [bookingEventTypes] = useQuery(z.query.cal_event_types.orderBy('title', 'asc'))
+  const [users] = useQuery(z.query.users.orderBy('email', 'asc'))
 
   const calendarEvents = useMemo(
     () => [
@@ -154,6 +159,10 @@ export default function CalendarPage() {
     () => filteredEvents.filter((event) => event.startsAt >= Date.now()).slice(0, 5),
     [filteredEvents],
   )
+  const selectedBooking = selectedBookingId ? bookings.find((booking) => booking.id === selectedBookingId) ?? null : null
+  const selectedBookingEventType = selectedBooking ? bookingEventTypes.find((eventType) => eventType.id === selectedBooking.eventTypeId) ?? null : null
+  const selectedBookingOrganization = selectedBooking ? organizations.find((organization) => organization.id === selectedBooking.organizationId) ?? null : null
+  const selectedBookingHost: UserRow | null = selectedBooking ? users.find((entry) => entry.id === selectedBooking.hostUserId) ?? null : null
 
   useEffect(() => {
     writeStoredCalendarState({ view, currentDate, filters: activeFilters, searchQuery })
@@ -290,7 +299,13 @@ export default function CalendarPage() {
   }
 
   function handleEventClick(arg: EventClickArg) {
-    const href = String(arg.event.extendedProps.href ?? '')
+    const event = arg.event.extendedProps as UnifiedCalendarEvent
+    if (event.bookingId) {
+      arg.jsEvent.preventDefault()
+      setSelectedBookingId(event.bookingId)
+      return
+    }
+    const href = event.href
     if (!href) return
     arg.jsEvent.preventDefault()
     navigate(href)
@@ -454,7 +469,7 @@ export default function CalendarPage() {
                 <button
                   key={event.id}
                   type="button"
-                  onClick={() => navigate(event.href)}
+                  onClick={() => event.bookingId ? setSelectedBookingId(event.bookingId) : navigate(event.href)}
                   className="w-full border border-edge/12 bg-pit px-3 py-2 text-left transition hover:border-accent hover:bg-accent-fill/5"
                 >
                   <div className="flex items-center justify-between gap-3">
@@ -475,6 +490,15 @@ export default function CalendarPage() {
           </div>
         </aside>
       </main>
+      {selectedBooking ? (
+        <BookingDetailDrawer
+          booking={selectedBooking}
+          eventType={selectedBookingEventType}
+          organization={selectedBookingOrganization}
+          host={selectedBookingHost}
+          onClose={() => setSelectedBookingId(null)}
+        />
+      ) : null}
     </div>
   )
 }
@@ -511,6 +535,7 @@ function buildMarketingBroadcastEvents(
         timezone: run.scheduledTimezone || 'America/Mexico_City',
         href: run.channel === 'blog' && run.contentItemId ? `/marketing/content?content=${run.contentItemId}` : `/marketing/broadcasts/${run.id}`,
         tone: statusTone(run.status),
+        bookingId: null,
       } satisfies UnifiedCalendarEvent
     })
     .sort((a, b) => a.startsAt - b.startsAt)
@@ -544,6 +569,7 @@ function buildBookingEvents(
         timezone: eventType?.timezone ?? Intl.DateTimeFormat().resolvedOptions().timeZone,
         href: '/calendar/booking-links',
         tone: statusTone(booking.status),
+        bookingId: booking.id,
       } satisfies UnifiedCalendarEvent
     })
 }

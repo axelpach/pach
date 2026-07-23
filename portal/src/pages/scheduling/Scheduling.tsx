@@ -1,16 +1,16 @@
 import { useQuery, useZero } from '@rocicorp/zero/react'
-import { AlertTriangle, Building2, CalendarClock, Check, Clipboard, Clock, ExternalLink, Link as LinkIcon, Loader2, Plus, Trash2, UserRound, Video, X } from 'lucide-react'
+import { Building2, CalendarClock, Check, Clipboard, Clock, ExternalLink, Link as LinkIcon, Loader2, Plus, Trash2, UserRound, Video, X } from 'lucide-react'
 import { useEffect, useMemo, useState, type ComponentType, type ReactNode } from 'react'
 import { PachSelect, type PachSelectOption } from '../../components/PachSelect'
 import { config } from '../../config'
 import { useAuth } from '../../lib/auth'
 import type { Mutators } from '../../mutators'
 import type { Schema } from '../../zero-schema'
+import { BookingDetailDrawer } from '../calendar/BookingDetailDrawer'
 import { CalendarSectionNav } from '../calendar/CalendarSectionNav'
 
 type CalEventType = Schema['tables']['cal_event_types']['row']
 type CalAvailabilityRule = Schema['tables']['cal_availability_rules']['row']
-type CalBooking = Schema['tables']['cal_bookings']['row']
 type GoogleConnection = Schema['tables']['google_connections']['row']
 
 const GOOGLE_CALENDAR_EVENTS_SCOPE = 'https://www.googleapis.com/auth/calendar.events'
@@ -67,6 +67,7 @@ export default function Scheduling() {
   const [eventTypes] = useQuery(z.query.cal_event_types.orderBy('createdAt', 'desc'))
   const [availabilityRules] = useQuery(z.query.cal_availability_rules)
   const [bookings] = useQuery(z.query.cal_bookings.orderBy('startAt', 'asc'))
+  const [users] = useQuery(z.query.users.orderBy('email', 'asc'))
   const [googleConnections] = useQuery(z.query.google_connections.orderBy('updatedAt', 'desc'))
   const [selectedOrganizationId, setSelectedOrganizationId] = useState<string>('')
   const [selectedEventTypeId, setSelectedEventTypeId] = useState<string>('')
@@ -76,8 +77,7 @@ export default function Scheduling() {
   const [statusMessage, setStatusMessage] = useState<string | null>(null)
   const [loadingSlots, setLoadingSlots] = useState(false)
   const [previewSlots, setPreviewSlots] = useState<Array<{ startAt: string; label: string }>>([])
-  const [bookingToCancel, setBookingToCancel] = useState<CalBooking | null>(null)
-  const [cancelingBookingId, setCancelingBookingId] = useState<string | null>(null)
+  const [selectedBookingId, setSelectedBookingId] = useState<string | null>(null)
   const accessibleOrganizationIds = useMemo(() => new Set(user?.organizationIds ?? []), [user?.organizationIds])
   const availableOrganizations = organizations.filter((organization) => accessibleOrganizationIds.has(organization.id))
   const organizationOptions = availableOrganizations.map((organization) => ({ value: organization.id, label: organization.name }))
@@ -111,6 +111,10 @@ export default function Scheduling() {
   const selectedBookings = selectedEventType
     ? bookings.filter((booking) => booking.eventTypeId === selectedEventType.id && booking.status === 'confirmed')
     : []
+  const selectedBooking = selectedBookingId ? bookings.find((booking) => booking.id === selectedBookingId) ?? null : null
+  const selectedBookingEventType = selectedBooking ? eventTypes.find((eventType) => eventType.id === selectedBooking.eventTypeId) ?? null : null
+  const selectedBookingOrganization = selectedBooking ? organizations.find((organization) => organization.id === selectedBooking.organizationId) ?? null : null
+  const selectedBookingHost = selectedBooking ? users.find((entry) => entry.id === selectedBooking.hostUserId) ?? null : null
 
   useEffect(() => {
     if (!creatingNew && selectedEventType && selectedEventType.id !== selectedEventTypeId) {
@@ -246,27 +250,6 @@ export default function Scheduling() {
     await z.mutate.cal_event_types.delete({ id: selectedEventType.id })
     setSelectedEventTypeId('')
     setStatusMessage('Booking link deleted.')
-  }
-
-  async function cancelBooking(booking: CalBooking) {
-    if (!token) return
-    setCancelingBookingId(booking.id)
-    try {
-      const response = await fetch(`${config.apiUrl}/scheduling/bookings/${booking.id}/cancel`, {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${token}` },
-      })
-      if (!response.ok) {
-        const payload = await response.json().catch(() => ({}))
-        throw new Error(typeof payload.message === 'string' ? payload.message : 'Could not cancel the meeting.')
-      }
-      setBookingToCancel(null)
-      setStatusMessage('Meeting canceled.')
-    } catch (cancelError) {
-      setStatusMessage(cancelError instanceof Error ? cancelError.message : 'Could not cancel the meeting.')
-    } finally {
-      setCancelingBookingId(null)
-    }
   }
 
   async function loadPreviewSlots(eventType: CalEventType) {
@@ -535,11 +518,11 @@ export default function Scheduling() {
               {selectedBookings.length > 0 ? (
                 <div className="space-y-2">
                   {selectedBookings.slice(0, 8).map((booking) => (
-                    <div key={booking.id} className="border border-edge/12 bg-pit-2 p-3">
+                    <button key={booking.id} type="button" onClick={() => setSelectedBookingId(booking.id)} className="w-full border border-edge/12 bg-pit-2 p-3 text-left transition hover:border-accent/35 hover:bg-accent-fill/4">
                       <div className="text-sm font-medium text-fg-1">{booking.guestName}</div>
                       <div className="mt-1 font-mono text-[10px] text-fg-4">{formatDateTime(booking.startAt)} · {booking.guestEmail}</div>
-                      <button type="button" onClick={() => setBookingToCancel(booking)} className="mt-2 font-mono text-[10px] uppercase tracking-label text-fail">cancel</button>
-                    </div>
+                      <div className="mt-2 font-mono text-[10px] uppercase tracking-label text-accent">view details →</div>
+                    </button>
                   ))}
                 </div>
               ) : (
@@ -549,54 +532,16 @@ export default function Scheduling() {
           </div>
         </aside>
       </div>
-      {bookingToCancel && (
-        <CancelBookingModal
-          booking={bookingToCancel}
-          canceling={cancelingBookingId === bookingToCancel.id}
-          onClose={() => setBookingToCancel(null)}
-          onConfirm={() => void cancelBooking(bookingToCancel)}
+      {selectedBooking ? (
+        <BookingDetailDrawer
+          booking={selectedBooking}
+          eventType={selectedBookingEventType}
+          organization={selectedBookingOrganization}
+          host={selectedBookingHost}
+          onClose={() => setSelectedBookingId(null)}
+          onCanceled={() => setStatusMessage('Meeting canceled.')}
         />
-      )}
-    </div>
-  )
-}
-
-function CancelBookingModal({ booking, canceling, onClose, onConfirm }: {
-  booking: CalBooking
-  canceling: boolean
-  onClose: () => void
-  onConfirm: () => void
-}) {
-  useEffect(() => {
-    function handleEscape(event: KeyboardEvent) {
-      if (event.key === 'Escape' && !canceling) onClose()
-    }
-    window.addEventListener('keydown', handleEscape)
-    return () => window.removeEventListener('keydown', handleEscape)
-  }, [canceling, onClose])
-
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-overlay/70 px-4 backdrop-blur-sm" onClick={() => !canceling && onClose()}>
-      <div className="w-full max-w-lg border border-edge/20 bg-pit-2 shadow-terminal-overlay" onClick={(event) => event.stopPropagation()}>
-        <div className="border-b border-edge/12 px-6 py-5">
-          <div className="font-mono text-[10px] uppercase tracking-label text-fail">calendar — cancel meeting</div>
-          <h2 className="mt-1.5 font-mono text-xl lowercase text-fg-1">cancel meeting with {booking.guestName}?</h2>
-        </div>
-        <div className="space-y-3 px-6 py-5">
-          <div className="flex items-start gap-3 border border-warn/25 bg-warn/8 p-3 text-sm text-fg-2">
-            <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-warn" />
-            <span>This removes the meeting from availability and cancels the connected Google Calendar event, if present.</span>
-          </div>
-          <div className="font-mono text-xs text-fg-3">{formatDateTime(booking.startAt)} · {booking.guestEmail}</div>
-        </div>
-        <div className="flex items-center justify-between border-t border-edge/12 px-6 py-4">
-          <button type="button" disabled={canceling} onClick={onClose} className="px-3 py-2 font-mono text-xs uppercase tracking-label text-fg-3 transition hover:text-fg-1 disabled:opacity-40">[keep meeting]</button>
-          <button type="button" disabled={canceling} onClick={onConfirm} className="inline-flex items-center gap-2 border border-fail/34 bg-fail/8 px-4 py-2 font-mono text-xs uppercase tracking-label text-fail transition hover:bg-fail/14 disabled:opacity-40">
-            {canceling ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}
-            {canceling ? 'canceling...' : 'cancel meeting'}
-          </button>
-        </div>
-      </div>
+      ) : null}
     </div>
   )
 }
