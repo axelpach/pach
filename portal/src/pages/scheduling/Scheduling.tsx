@@ -1,6 +1,6 @@
 import { useQuery, useZero } from '@rocicorp/zero/react'
 import { Building2, CalendarClock, Check, Clipboard, Clock, ExternalLink, Link as LinkIcon, Loader2, Plus, Trash2, UserRound, Video, X } from 'lucide-react'
-import { useEffect, useMemo, useState, type ComponentType, type ReactNode } from 'react'
+import { useEffect, useMemo, useRef, useState, type ComponentType, type ReactNode } from 'react'
 import { PachSelect, type PachSelectOption } from '../../components/PachSelect'
 import { config } from '../../config'
 import { useAuth } from '../../lib/auth'
@@ -74,6 +74,8 @@ export default function Scheduling() {
   const [creatingNew, setCreatingNew] = useState(false)
   const [draft, setDraft] = useState<EventDraft>(EMPTY_EVENT_DRAFT)
   const [availabilityDraft, setAvailabilityDraft] = useState<AvailabilityDraft>(() => defaultAvailabilityDraft())
+  const [availabilityDirty, setAvailabilityDirty] = useState(false)
+  const hydratedAvailabilityEventIdRef = useRef<string | null>(null)
   const [statusMessage, setStatusMessage] = useState<string | null>(null)
   const [loadingSlots, setLoadingSlots] = useState(false)
   const [previewSlots, setPreviewSlots] = useState<Array<{ startAt: string; label: string }>>([])
@@ -108,6 +110,10 @@ export default function Scheduling() {
   const selectedRules = selectedEventType
     ? availabilityRules.filter((rule) => rule.eventTypeId === selectedEventType.id)
     : []
+  const selectedRulesSignature = selectedRules
+    .map((rule) => `${rule.id}:${rule.weekday}:${rule.startMinute}:${rule.endMinute}:${rule.timezone}`)
+    .sort()
+    .join('|')
   const selectedBookings = selectedEventType
     ? bookings.filter((booking) => booking.eventTypeId === selectedEventType.id && booking.status === 'confirmed')
     : []
@@ -125,7 +131,6 @@ export default function Scheduling() {
   useEffect(() => {
     if (!selectedEventType) {
       setDraft(EMPTY_EVENT_DRAFT)
-      setAvailabilityDraft(defaultAvailabilityDraft())
       return
     }
 
@@ -141,8 +146,22 @@ export default function Scheduling() {
       bufferBeforeMinutes: String(selectedEventType.bufferBeforeMinutes),
       bufferAfterMinutes: String(selectedEventType.bufferAfterMinutes),
     })
+  }, [selectedEventType?.id, selectedEventType?.updatedAt])
+
+  useEffect(() => {
+    if (!selectedEventType) {
+      hydratedAvailabilityEventIdRef.current = null
+      if (!availabilityDirty) setAvailabilityDraft(defaultAvailabilityDraft())
+      return
+    }
+
+    const changedEventType = hydratedAvailabilityEventIdRef.current !== selectedEventType.id
+    if (!changedEventType && availabilityDirty) return
+
+    hydratedAvailabilityEventIdRef.current = selectedEventType.id
     setAvailabilityDraft(draftFromRules(selectedRules, selectedEventType.timezone))
-  }, [selectedEventType?.id, selectedRules.length])
+    setAvailabilityDirty(false)
+  }, [availabilityDirty, selectedEventType?.id, selectedEventType?.timezone, selectedRulesSignature])
 
   async function createEventType() {
     if (!selectedOrganizationId || !user) return
@@ -187,6 +206,7 @@ export default function Scheduling() {
 
     setCreatingNew(false)
     setSelectedEventTypeId(id)
+    setAvailabilityDirty(false)
     setStatusMessage('Booking link created.')
   }
 
@@ -212,24 +232,41 @@ export default function Scheduling() {
       bufferAfterMinutes: parseNonNegativeInt(draft.bufferAfterMinutes, selectedEventType.bufferAfterMinutes),
     })
 
+    const rulesByWeekday = new Map<number, CalAvailabilityRule[]>()
     for (const rule of selectedRules) {
-      await z.mutate.cal_availability_rules.delete({ id: rule.id })
+      rulesByWeekday.set(rule.weekday, [...(rulesByWeekday.get(rule.weekday) ?? []), rule])
     }
-
     for (const weekday of WEEKDAYS) {
       const entry = availabilityDraft[weekday.value]
-      if (!entry.enabled) continue
-      await z.mutate.cal_availability_rules.create({
-        id: crypto.randomUUID(),
-        organizationId: selectedEventType.organizationId,
-        eventTypeId: selectedEventType.id,
+      const [existingRule, ...duplicateRules] = rulesByWeekday.get(weekday.value) ?? []
+      for (const duplicateRule of duplicateRules) {
+        await z.mutate.cal_availability_rules.delete({ id: duplicateRule.id })
+      }
+
+      if (!entry.enabled) {
+        if (existingRule) await z.mutate.cal_availability_rules.delete({ id: existingRule.id })
+        continue
+      }
+
+      const ruleValues = {
         weekday: weekday.value,
         startMinute: entry.startMinute,
         endMinute: Math.max(entry.endMinute, entry.startMinute + parsePositiveInt(draft.durationMinutes, 30)),
         timezone,
-      })
+      }
+      if (existingRule) {
+        await z.mutate.cal_availability_rules.update({ id: existingRule.id, ...ruleValues })
+      } else {
+        await z.mutate.cal_availability_rules.create({
+          id: crypto.randomUUID(),
+          organizationId: selectedEventType.organizationId,
+          eventTypeId: selectedEventType.id,
+          ...ruleValues,
+        })
+      }
     }
 
+    setAvailabilityDirty(false)
     setStatusMessage('Booking link saved.')
   }
 
@@ -238,6 +275,7 @@ export default function Scheduling() {
     setSelectedEventTypeId('')
     setDraft(EMPTY_EVENT_DRAFT)
     setAvailabilityDraft(defaultAvailabilityDraft())
+    setAvailabilityDirty(false)
     setPreviewSlots([])
     setStatusMessage(null)
   }
@@ -404,10 +442,7 @@ export default function Scheduling() {
                         <input
                           type="checkbox"
                           checked={entry.enabled}
-                          onChange={(event) => setAvailabilityDraft({
-                            ...availabilityDraft,
-                            [weekday.value]: { ...entry, enabled: event.target.checked },
-                          })}
+                          onChange={(event) => updateAvailabilityDay(setAvailabilityDraft, setAvailabilityDirty, weekday.value, { enabled: event.target.checked })}
                         />
                         {weekday.label}
                       </label>
@@ -415,20 +450,14 @@ export default function Scheduling() {
                         type="time"
                         disabled={!entry.enabled}
                         value={minutesToTimeInput(entry.startMinute)}
-                        onChange={(event) => setAvailabilityDraft({
-                          ...availabilityDraft,
-                          [weekday.value]: { ...entry, startMinute: timeInputToMinutes(event.target.value, entry.startMinute) },
-                        })}
+                        onChange={(event) => updateAvailabilityDay(setAvailabilityDraft, setAvailabilityDirty, weekday.value, { startMinute: timeInputToMinutes(event.target.value, entry.startMinute) })}
                         className="h-9 min-w-0 border border-edge/15 bg-pit px-2 font-mono text-xs text-fg-1 outline-none disabled:opacity-40"
                       />
                       <input
                         type="time"
                         disabled={!entry.enabled}
                         value={minutesToTimeInput(entry.endMinute)}
-                        onChange={(event) => setAvailabilityDraft({
-                          ...availabilityDraft,
-                          [weekday.value]: { ...entry, endMinute: endTimeInputToMinutes(event.target.value, entry.startMinute, entry.endMinute) },
-                        })}
+                        onChange={(event) => updateAvailabilityDay(setAvailabilityDraft, setAvailabilityDirty, weekday.value, { endMinute: endTimeInputToMinutes(event.target.value, entry.startMinute, entry.endMinute) })}
                         className="h-9 min-w-0 border border-edge/15 bg-pit px-2 font-mono text-xs text-fg-1 outline-none disabled:opacity-40"
                       />
                     </div>
@@ -609,6 +638,19 @@ function defaultAvailabilityDraft(): AvailabilityDraft {
     weekday.value,
     { enabled: weekday.value >= 1 && weekday.value <= 5, startMinute: DEFAULT_START, endMinute: DEFAULT_END },
   ]))
+}
+
+function updateAvailabilityDay(
+  setAvailability: (updater: (current: AvailabilityDraft) => AvailabilityDraft) => void,
+  setDirty: (dirty: boolean) => void,
+  weekday: number,
+  updates: Partial<AvailabilityDraft[number]>,
+) {
+  setDirty(true)
+  setAvailability((current) => ({
+    ...current,
+    [weekday]: { ...current[weekday], ...updates },
+  }))
 }
 
 function draftFromRules(rules: CalAvailabilityRule[], timezone: string): AvailabilityDraft {
