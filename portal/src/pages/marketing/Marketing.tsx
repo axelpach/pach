@@ -2876,6 +2876,7 @@ function GoogleAdsPublishConfirmation({
     : euPoliticalAdvertising === 'CONTAINS_EU_POLITICAL_ADVERTISING'
       ? 'contains'
       : 'missing declaration'
+  const currencyMismatch = Boolean(account && promotion.currencyCode !== account.currencyCode)
   return createPortal(
     <div className="fixed inset-0 z-[60] flex items-start justify-center bg-overlay/75 px-4 pt-[12vh] backdrop-blur-sm" onClick={onClose}>
       <div className="w-full max-w-xl border border-edge/25 bg-pit-2 shadow-terminal-overlay" onClick={(event) => event.stopPropagation()}>
@@ -2895,6 +2896,16 @@ function GoogleAdsPublishConfirmation({
             <RowMeta label="EU political ads">{euPoliticalAdvertisingLabel}</RowMeta>
           </div>
           {!account ? <div className="border border-fail/25 bg-fail/5 px-3 py-2 text-fail">Select a synchronized Google Ads advertiser in Settings → Search first.</div> : null}
+          {currencyMismatch && account ? (
+            <div className="border border-warn/30 bg-warn/5 px-3 py-3 text-warn">
+              <div className="mb-1 text-[10px] uppercase tracking-label">account currency changed</div>
+              <div>
+                This draft was saved as {promotion.currencyCode}. Google will use the advertiser account currency {account.currencyCode};
+                {' '}{promotion.budgetMinor ? formatMoneyMinor(promotion.budgetMinor, account.currencyCode) : 'the budget'} will be the daily budget.
+                No exchange-rate conversion is applied.
+              </div>
+            </div>
+          ) : null}
           {!euPoliticalAdvertising ? <div className="border border-fail/25 bg-fail/5 px-3 py-2 text-fail">Edit this draft and complete the required EU political advertising declaration.</div> : null}
           {error ? (
             <div role="alert" className="border border-fail/30 bg-fail/5 px-3 py-3 text-fail">

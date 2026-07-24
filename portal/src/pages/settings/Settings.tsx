@@ -741,9 +741,12 @@ export default function SettingsPage() {
   async function selectGoogleAdsAccount(account: GoogleAdsAccountRow) {
     await runSearchAction(`select-ads:${account.id}`, async () => {
       const response = await authFetch(`${config.apiUrl}/google/ads/accounts/${account.id}/select`, { method: 'POST' })
-      await readJson(response)
+      const payload = await readJson(response)
       setGoogleAdsConnectionId(account.connectionId)
-      return 'google ads account selected'
+      const updatedDraftCount = typeof payload.updatedDraftCount === 'number' ? payload.updatedDraftCount : 0
+      return updatedDraftCount
+        ? `google ads account selected · ${updatedDraftCount} draft${updatedDraftCount === 1 ? '' : 's'} updated to ${account.currencyCode}`
+        : 'google ads account selected'
     })
   }
 

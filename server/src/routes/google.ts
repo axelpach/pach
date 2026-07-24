@@ -182,7 +182,23 @@ router.post('/ads/accounts/:accountId/select', async (req, res) => {
       .set({ selected: true, updatedAt: now })
       .where(eq(googleAdsAccounts.id, account.id))
       .returning()
-    res.json({ ok: true, account: serializeDates(selected) })
+    const updatedDrafts = await getDb()
+      .update(mktAdPromotions)
+      .set({
+        adAccountExternalId: account.customerId,
+        currencyCode: account.currencyCode,
+        publishOperationKey: null,
+        publishError: null,
+        providerResponse: null,
+        updatedAt: now,
+      })
+      .where(and(
+        eq(mktAdPromotions.organizationId, account.organizationId),
+        eq(mktAdPromotions.provider, 'google'),
+        inArray(mktAdPromotions.status, ['draft', 'ready', 'failed']),
+      ))
+      .returning({ id: mktAdPromotions.id })
+    res.json({ ok: true, account: serializeDates(selected), updatedDraftCount: updatedDrafts.length })
   } catch (error) {
     handleRouteError(res, error, 'GOOGLE_ADS_ACCOUNT_SELECT_FAILED', 'Could not select Google Ads account.')
   }
@@ -667,11 +683,21 @@ async function publishGoogleAdsPromotion({ promotionId, user, req }: { promotion
   const connection = await requireGoogleConnection({ organizationId: promotion.organizationId, connectionId: account.connectionId, user })
   requireGoogleAdsScope(connection)
   const config = requireGoogleAdsConfig()
-  const draft = validateGoogleAdsPromotionDraft(promotion, account)
+  const normalizedPromotion = promotion.currencyCode === account.currencyCode
+    ? promotion
+    : { ...promotion, currencyCode: account.currencyCode }
+  const draft = validateGoogleAdsPromotionDraft(normalizedPromotion, account)
   const operationKey = promotion.publishOperationKey ?? randomUUID()
   const now = new Date()
   const [claimed] = await db.update(mktAdPromotions)
-    .set({ status: 'publishing', publishOperationKey: operationKey, publishError: null, updatedAt: now })
+    .set({
+      adAccountExternalId: account.customerId,
+      currencyCode: account.currencyCode,
+      status: 'publishing',
+      publishOperationKey: operationKey,
+      publishError: null,
+      updatedAt: now,
+    })
     .where(and(eq(mktAdPromotions.id, promotion.id), inArray(mktAdPromotions.status, ['draft', 'ready', 'failed'])))
     .returning()
   if (!claimed) {
@@ -1041,7 +1067,6 @@ function validateGoogleAdsPromotionDraft(
   const endDate = readOptionalString(targeting.endDate) ?? (promotion.endsAt ? formatGoogleAdsDate(promotion.endsAt, account.timeZone) : null)
   const containsEuPoliticalAdvertising = readOptionalString(targeting.containsEuPoliticalAdvertising)
   if (!promotion.budgetMinor || promotion.budgetMinor <= 0) throw new ValidationError('A positive daily budget is required before publishing.')
-  if (promotion.currencyCode !== account.currencyCode) throw new ValidationError(`Draft currency ${promotion.currencyCode} does not match the selected account currency ${account.currencyCode}.`)
   if (!finalUrl || !/^https:\/\//i.test(finalUrl)) throw new ValidationError('A public HTTPS landing URL is required before publishing.')
   if (!keywords.length) throw new ValidationError('At least one keyword is required before publishing.')
   if (keywords.some((keyword) => keyword.length > 80)) throw new ValidationError('Google Ads keywords must be 80 characters or fewer.')
